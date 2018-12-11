@@ -1,0 +1,2 @@
+:lib-dirs '("_build/default/lib" "_checkouts" "_build/test/lib" "../rebar3/_build/prod/lib")
+:app-include-dirs '("include")

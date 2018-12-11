@@ -1,0 +1,4 @@
+-ifndef(ASTRANAUT_QUOTE).
+-define(ASTRANAUT_QUOTE, true).
+-compile({parse_transform, astranaut_quote}).
+-endif.

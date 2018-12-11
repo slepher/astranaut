@@ -1,0 +1,4 @@
+-ifndef(ASTRANAUT_MACRO).
+-define(ASTRANAUT_MACRO, true).
+-compile({parse_transform, astranaut_macro}).
+-endif.
