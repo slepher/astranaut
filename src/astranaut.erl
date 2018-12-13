@@ -3,7 +3,7 @@
 %% API exports
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
 -export([file/1]).
--export([exports/1, exports/2, exported_function/2, function/2, merge_clauses/1]).
+-export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, to_string/1]).
 -export([reorder_exports/1]).
 %%====================================================================
@@ -79,14 +79,17 @@ replace_line(Ast, Line) ->
               Node
          end, Ast, pre).
 
-exported_function(Name, {'fun', Line, {clauses, Clauses}} = Fun) ->
-    Arity = clause_arity(Clauses),
-    [exports([{Name, Arity}], Line), 
-     function(Name, Fun)].
+exported_function(Name, {'fun', Line, {clauses, _Clauses}} = Fun) ->
+    Function = function(Name, Fun),
+    FunctionFa = function_fa(Function),
+    [exports([FunctionFa], Line), Function].
 
 function(Name, {'fun', Line, {clauses, Clauses}}) ->
     Arity = clause_arity(Clauses),
     {function, Line, Name, Arity, Clauses}.
+
+function_fa({function, _Line, Name, Arity, _Clauses}) ->
+    {Name, Arity}.
 
 exports(Exports) ->
     exports(Exports, 0).
