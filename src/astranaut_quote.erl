@@ -31,6 +31,8 @@ quote(Value) ->
 quote(Value, Line) ->
     quote(Value, Line, expr).
 
+quote({unquote, Unquote}, _Line, _Type) ->
+    Unquote;
 quote({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Line, _Type) ->
     Unquote;
 quote([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Line, Type) ->
@@ -39,13 +41,13 @@ quote({match, _Line1, Pattern, Value}, Line, pattern) ->
     {match, Line, quote(Pattern, Line, pattern), Value};
 quote([{atom, _, unquote_catch}, Unquotes, {var, _, '_'}], Line, _Type) ->
     unquote_catch_clause(Unquotes, Line);
-quote([{var, __Line1, _} = VarForm|T], Line, Type) ->
+quote([{var, __Line1, Var} = VarForm|T], Line, Type) when is_atom(Var) ->
     metavariable_list(VarForm, T, Line, Type);
-quote([{atom, _Line1, _} = VarForm|T], Line, Type) ->
+quote([{atom, _Line1, Atom} = VarForm|T], Line, Type) when is_atom(Atom) ->
     metavariable_list(VarForm, T, Line, Type);
-quote({var, _Line1, _} = VarForm, Line, Type) ->
+quote({var, _Line1, Var} = VarForm, Line, Type) when is_atom(Var) ->
     metavariable(VarForm, Line, Type);
-quote({atom, _Line1, _} = VarForm, Line, Type) ->
+quote({atom, _Line1, Atom} = VarForm, Line, Type)  when is_atom(Atom) ->
     metavariable(VarForm, Line, Type);
 quote({match, _, {atom, _, unquote}, Unquote}, _Line, _Type) ->
     Unquote;
@@ -87,13 +89,13 @@ quote_tuple(Tuple, Line, pattern) ->
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
 
-uncons(List) when is_list(List) ->
-
-    List;
 uncons({cons, _Line, Head, Tail}) ->
     [Head|uncons(Tail)];
 uncons({nil, _Line}) ->
-    [].
+    [];
+uncons(Value) ->
+    Value.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -104,6 +106,37 @@ uncons({nil, _Line}) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+extract_fields(Fields) ->
+    lists:map(
+      fun({record_field, _Line, {atom, _, Key}, Value}) ->
+              {Key, Value}
+      end, Fields).
+
+quote_function_ast(Opts, Line) ->
+    MFAAst = 
+        case proplists:get_value(module, Opts) of
+            undefined ->
+                quote_function_name_ast(Opts);
+            Module ->
+                {remote, Line, Module, quote_function_name_ast(Opts)}
+        end,
+    ArgsAst = 
+        case proplists:get_value(arguments, Opts) of
+            undefined ->
+                '_';
+            Arguments ->
+                uncons(Arguments)
+        end,
+    {call, Line, MFAAst, ArgsAst}.
+
+quote_function_name_ast(Opts) ->
+    case proplists:get_value(function, Opts) of
+        undefined ->
+            '_';
+        FunctionName ->
+            {atom, '_', {unquote, FunctionName}}
+    end.
+
 walk({clause, Line1, Clauses, Guards, Exprs}) ->
     NClauses = 
         lists:map(
@@ -114,15 +147,16 @@ walk({clause, Line1, Clauses, Guards, Exprs}) ->
                   {match, Line2, Quoted, Val};
              ({match, Line2, {atom, _Line3, quote}, Form}) ->
                   quote(Form, Line2, pattern);
+             ({record, Line, quote_call, Fields}) ->
+                  OPts = extract_fields(Fields),
+                  Ast = quote_function_ast(OPts, Line),
+                  quote(Ast, Line, pattern);
              (Clause) ->
                   Clause
           end, Clauses),
     {clause, Line1, NClauses, Guards, Exprs};
 walk({match, Line1, {call, Line2, {atom, _Line3, quote}, [Form]}, Val}) ->
-    %io:format("form is ~p~n", [Form]),
     Quoted = quote(Form, Line2, pattern),
-    %io:format("quoted is ~p~n", [Quoted]),
-    %io:format("quoted is ~s~n", [astranaut:to_string(Quoted)]),
     {match, Line1, Quoted, Val};
 walk({call, _Line1, {atom, Line2, quote}, [Form]}) ->
     quote(Form, Line2);

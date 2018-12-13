@@ -61,7 +61,7 @@
     
   bind a list of ast and join quoted ast, X = S, xxx = splicing.
   
-    unquote_splicing(Vs) | _S@Vs 
+    unquote_splicing(Vs) | _L@Vs 
    
     Vs = [{var, 2, 'Var'}, {atom, 2, atom}],
     quote({A, unquote_splicing(Vs), B}) => 
@@ -151,14 +151,35 @@
 
    quote macro could also be used in pattern match such as 
    
+   for limit of erlang ast format in pattern, some special forms is used
+   
    left side of match
    
      quote(_A@Atom) = {atom, 1, A}
+     
+     =>
+     
+     {atom, _, Atom} = {atom, 1, A}
     
-   function pattern(function call is not supported in function pattern, use quote = unquote(V) instead of quote(V)
+   function pattern
    
-     macro0(quote = _A@Module:_A@Function(_S@Arguments)}) ->
-       {Module, Function, Atom}.
+     macro_clause(quote = {hello, _A@World = World2} = C) ->
+       quote({hello2, _A@World, _@World2,_@C});
+     
+     => 
+     
+     macro_clause({tuple, _, [{atom, _, hello}, {atom, _, World} = World2]} = C) ->
+       {tuple, 2, {atom, 2, hello2}, {atom, 2, World}, World2, C}
+       
+   function call in function pattern
+   
+     macro_quote_call(#quote_call{module = _A@Module, function = hello, arguments = _@Arguments}) ->
+       quote(_A@Module:hello2(_L@Arguments)). 
+     
+     =>
+     
+     macro_quote_call({call, _, {remote, _, {atom, _, Module}, {atom, _, hello}, Arguments}}) ->
+       {call, 2, {remote, 2, {atom, 2, Module}, {atom, 2, hello2}}, Arguments}.
        
    case clause pattern:
    
@@ -167,6 +188,15 @@
          Atom;
        _ ->
          other
+     end.
+     
+     =>
+     
+     case ast of
+         {atom, _, Atom} ->
+             Atom;
+         _ ->
+             other
      end.
  
 

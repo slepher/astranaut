@@ -18,6 +18,7 @@
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
+-export([macro_quote_call/1]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
 -use_macro({function_macro/0, ?DEBUG_OPT}).
@@ -100,6 +101,9 @@ macro_clause(quote = {hello, _A@World = World2} = C) ->
     quote({hello2, _A@World, _@World2,_@C});
 macro_clause(_) ->
     quote(fail).
+
+macro_quote_call(#quoted_call{module = _A@Module, function = hello, arguments = _@Arguments}) ->
+    quote(_A@Module:hello2(_@Arguments)).
 
 one_plus() ->
     1 + 1.
