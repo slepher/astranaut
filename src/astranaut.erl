@@ -3,8 +3,9 @@
 %% API exports
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
 -export([file/1]).
--export([function/2, merge_clauses/1]).
+-export([exports/1, exports/2, exported_function/2, function/2, merge_clauses/1]).
 -export([replace_line/2, to_string/1]).
+-export([reorder_exports/1]).
 %%====================================================================
 %% API functions
 %%====================================================================
@@ -78,9 +79,34 @@ replace_line(Ast, Line) ->
               Node
          end, Ast, pre).
 
+exported_function(Name, {'fun', Line, {clauses, Clauses}} = Fun) ->
+    Arity = clause_arity(Clauses),
+    [exports([{Name, Arity}], Line), 
+     function(Name, Fun)].
+
 function(Name, {'fun', Line, {clauses, Clauses}}) ->
     Arity = clause_arity(Clauses),
     {function, Line, Name, Arity, Clauses}.
+
+exports(Exports) ->
+    exports(Exports, 0).
+
+exports(Exports, Line) ->
+    {attribute, Line, export, Exports}.
+
+reorder_exports(Forms) ->
+    Length = length(Forms),
+    {Exports, NForms, _, Offset} = 
+        lists:foldl(
+          fun({attribute, _Line, export, _ExportAttrs} = Export, {ExportsAcc, FormsAcc, Offset, _}) ->
+                  {[Export|ExportsAcc], FormsAcc, Offset - 1, Offset - 1};
+             ({attribute, _Line, module, _} = Module, {ExportsAcc, FormsAcc, Offset, 0}) ->
+                  {ExportsAcc, [Module|FormsAcc], Offset - 1, Offset - 1};
+             (Node, {ExportsAcc, FormsAcc, Offset, Location}) ->
+                  {ExportsAcc, [Node|FormsAcc], Offset - 1, Location}
+          end, {[], [], Length, 0}, lists:reverse(Forms)),
+    {Head, Tail} = lists:split(Offset, NForms),
+    Head ++ Exports ++ Tail.
 
 to_string(Forms) when is_list(Forms) ->
     erl_prettypr:format(erl_syntax:form_list(Forms));

@@ -13,7 +13,7 @@
 -include("astranaut.hrl").
 
 %% API
--export([test/0, test_local/0, test_in_function/0]).
+-export([test/0, test_in_function/0]).
 -export([function_macro/0, in_function_macro/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
@@ -55,7 +55,7 @@ test_clause() ->
     macro_clause({hello, world}).
 
 function_macro() ->
-    astranaut:function(
+    astranaut:exported_function(
       test_local,
       quote(
         fun() ->
@@ -100,7 +100,7 @@ macro_clause(quote = {hello, _A@World = World2} = C) ->
     quote({hello2, _A@World, _@World2,_@C});
 macro_clause(_) ->
     quote(fail).
-    
+
 one_plus() ->
     1 + 1.
 %%--------------------------------------------------------------------

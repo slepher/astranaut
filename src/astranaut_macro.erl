@@ -22,7 +22,8 @@ parse_transform(Forms, Options) ->
         ok ->
             Macros = maps:merge(LocalMacros, RemoteMacros),
             NForms = exec_macros(Forms, Macros, Module, File),
-            astranaut_traverse:map(fun(Node) -> walk_macros(Node, Macros, Module, File) end, NForms, pre);
+            NNForms = astranaut_traverse:map(fun(Node) -> walk_macros(Node, Macros, Module, File) end, NForms, pre),
+            astranaut:reorder_exports(NNForms);
         {error, Errors, Warnings} ->
             {error, Errors, Warnings}
     end.
