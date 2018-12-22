@@ -17,7 +17,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    astranaut_traverse:map(fun walk/1, Forms, pre).
+    astranaut_traverse:map_with_state(fun walk/2, form, Forms, pre).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -103,39 +103,41 @@ uncons(Value) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk({clause, Line1, Clauses, Guards, Exprs}) ->
-    NClauses = 
-        lists:map(
-          fun({call, Line2, {atom, _Line3, quote}, [Form]}) ->
-                  quote(Form, Line2, pattern);
-             ({match, Line2, {call, _Line3, {atom, _Line4, quote}, [Form]}, Val}) ->
-                  Quoted = quote(Form, Line2, pattern),
-                  {match, Line2, Quoted, Val};
-             ({match, Line2, {atom, _Line3, quote}, Form}) ->
-                  quote(Form, Line2, pattern);
-             ({match, Line2, {call, _Line3, {atom, _Line4, quote_code}, Codes}, Val}) ->
-                  Forms = astranaut_code:quote_codes(Codes),
-                  Quoted = quote(Form, Line2, pattern),
-                  {match, Line2, Quoted, Val};
-             ({match, Line2, {atom, _Line3, quote_code}, Form}) ->
-                  Forms = astranaut_code:quote_codes(Codes),
-                  quote(Form, Line2, pattern);
-             (Clause) ->
-                  Clause
-          end, Clauses),
-    {clause, Line1, NClauses, Guards, Exprs};
-walk({match, Line1, {call, Line2, {atom, _Line3, quote}, [Form]}, Val}) ->
-    Quoted = quote(Form, Line2, pattern),
-    {match, Line1, Quoted, Val};
-walk({call, _Line1, {atom, Line2, quote}, [Form]}) ->
-    quote(Form, Line2);
-walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}) ->
-    call_remote(astranaut, replace_line, [quote(Form), Line], Line1);
-walk({call, _Line1, {atom, _Line2, quote_code}, Codes}) ->
-    Forms = astranaut_code:quote_codes(Codes),
-    quote(Forms);
-walk(Node) ->
-    Node.
+walk({call, Line2, {atom, _Line3, quote}, [Form]}, NodeType) ->
+    %% transform quote(Form)
+    QuoteType = quote_type(NodeType),
+    {quote(Form, Line2, QuoteType), NodeType};
+walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, NodeType) ->
+    %% transform quote(Form, Line)
+    QuoteType = quote_type(NodeType),
+    {call_remote(astranaut, replace_line, [quote(Form, Line1, QuoteType), Line], Line1), NodeType};
+walk({call, Line2, {atom, _Line3, quote_code}, Codes}, NodeType) ->
+    %% transform quote_code(Codes)
+    Form = astranaut_code:quote_codes(Codes),
+    QuoteType = quote_type(NodeType),
+    {quote(Form, Line2, QuoteType), NodeType};
+walk({match, Line2, {atom, _Line3, quote}, Form}, pattern) ->
+    %% transform quote = Form in pattern match
+    {quote(Form, Line2, pattern), pattern};
+walk({match, Line2, {atom, _Line3, quote_code}, Code}, pattern) ->
+    %% transform quote_code = Code in pattern match
+    Form = astranaut_code:quote_codes([Code]),
+    {quote(Form, Line2, pattern), pattern};
+walk({clause, Line, Patterns, Guards, Exprs}, _NodeType) ->
+    %% make pattern node type is pattern on clauses
+    NPatterns = astranaut_traverse:map_with_state(fun walk/2, pattern, Patterns, pre),
+    {{clause, Line, NPatterns, Guards, Exprs}, expression};
+walk({match, Line, Left, Right}, NodeType) ->
+    %% make pattern node type is pattern on match left
+    NLeft = astranaut_traverse:map_with_state(fun walk/2, pattern, Left, pre),
+    {{match, Line, NLeft, Right}, NodeType};
+walk(Node, NodeType) ->
+    {Node, NodeType}.
+
+quote_type(pattern) ->
+    pattern;
+quote_type(_) ->
+    expr.
 
 unquote_splicing_form(Unquotes, Rest, Line, expr) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote(Rest, Line)};
