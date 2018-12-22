@@ -10,7 +10,7 @@
 
 %% API
 -export([parse_transform/2, format_error/1]).
--export([quote/1, quote/2]).
+-export([quote/1, quote/2, quote/3]).
 -export([uncons/1]).
 
 %%%===================================================================
@@ -24,7 +24,6 @@ format_error(Message) ->
         true -> Message;
         _    -> io_lib:write(Message)
     end.
-
 
 quote(Value) ->
     quote(Value, 0).
