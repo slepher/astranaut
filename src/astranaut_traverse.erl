@@ -143,6 +143,8 @@ map_m_subtrees(F, Nodes, Monad, _NodeType, #{node := pattern} = Attrs) ->
     map_m_1(F, Nodes, Monad, Attrs);
 map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, Attrs) 
   when (NodeType == match_expr) or (NodeType == clause) ->
+    %% if node type is match_expr or clause 
+    %% make first subtree pattern, make rest expression
     astranaut_monad:bind(
       map_m_1(F, Pattern, Monad, Attrs#{node => pattern}),
       fun(NHead) ->
@@ -154,7 +156,6 @@ map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, Attrs)
       end, Monad);
 map_m_subtrees(F, Nodes, Monad, _NodeType, Attrs) ->
     map_m_1(F, Nodes, Monad, Attrs).
-
 
 %%====================================================================
 %% Internal functions
