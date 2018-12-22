@@ -134,21 +134,24 @@ map_m_1(F, XNode, Monad, Attrs) ->
                         map_m_subtrees(F, Subtrees, Monad, NodeType, Attrs),
                         fun(NSubTrees) ->
                                 ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
-                                F(ZNode, Attrs#{step => PreType})
+                                F(ZNode, Attrs#{step => post})
                         end, Monad)
               end
       end, Monad).
 
-map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, #{node := pattern} = Attrs) when NodeType == match_expr; NodeType == clause ->
+map_m_subtrees(F, Nodes, Monad, _NodeType, #{node := pattern} = Attrs) ->
+    map_m_1(F, Nodes, Monad, Attrs);
+map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, Attrs) 
+  when (NodeType == match_expr) or (NodeType == clause) ->
     astranaut_monad:bind(
       map_m_1(F, Pattern, Monad, Attrs#{node => pattern}),
       fun(NHead) ->
               astranaut_monad:bind(
                 map_m_1(F, Rest, Monad, Attrs#{node => expression}),
                 fun(NRest) ->
-                        astranaut_monad:return([NHead|NRest])
-                end)
-      end);
+                        astranaut_monad:return([NHead|NRest], Monad)
+                end, Monad)
+      end, Monad);
 map_m_subtrees(F, Nodes, Monad, _NodeType, Attrs) ->
     map_m_1(F, Nodes, Monad, Attrs).
 
