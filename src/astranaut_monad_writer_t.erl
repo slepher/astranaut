@@ -4,60 +4,59 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created :  7 Dec 2018 by Chen Slepher <slepheric@gmail.com>
+%%% Created : 22 Dec 2018 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_monad_error_t).
+-module(astranaut_monad_writer_t).
 
 %% API
--export([error_t/1]).
+-export([writer_t/1]).
 -export([run/1]).
 -export([bind/3, return/2]).
 -export([fail/2]).
 -export([lift/2]).
--export([get/1, put/2, state/2]).
 -export([tell/2]).
-
+-export([get/1, put/2, state/2]).
 %%%===================================================================
 %%% API
 %%%===================================================================
-error_t(Inner) ->
+writer_t(Inner) ->
     {?MODULE, Inner}.
 
 run({?MODULE, Inner}) ->
     Inner.
 
-bind({?MODULE, ETA}, {?MODULE, KETB}, {?MODULE, IM}) ->
-    error_t(
+bind({?MODULE, WTA}, KWTB, {?MODULE, IM}) ->
+    writer_t(
       astranaut_monad:bind(
-        ETA,
-        fun(EA) ->
-                case EA of
-                    {error, _Err}    -> astranaut_monad:return(EA, IM);
-                    {ok,  A}         -> KETB(A)
-                end
+        WTA,
+        fun({A, LogsA}) ->
+                astranaut_monad:bind(
+                  run(KWTB(A)),
+                  fun({B, LogsB}) when is_list(LogsB) ->
+                          astranaut_monad:return({B, LogsA ++ LogsB}, IM)
+                  end, IM)
         end, IM)).
 
 return(A, {?MODULE, IM}) ->
-    error_t(astranaut_monad:return({ok, A}, IM)).
-
-fail(E, {?MODULE, IM}) ->
-    error_t(astranaut_monad:return({error, E}, IM)).
+    writer_t(astranaut_monad:return({A, []}, IM)).
 
 lift(MA, {?MODULE, IM}) ->
-    error_t(astranaut_monad:lift_m(fun(A) -> {ok, A} end, MA, IM)).
+    writer_t(astranaut_monad:lift_m(fun(A) -> {A, []} end, MA, IM)).
 
-get(ET) ->
-    astranaut_monad:lift_get(ET).
+tell(Logs, {?MODULE, IM}) ->
+    writer_t(astranaut_monad:return({ok, Logs}, IM)).
 
-put(S, ET) ->
-    astranaut_monad:lift_put(S, ET).
+fail(E, WT) ->
+    astranaut_monad:lift_fail(E, WT).
 
-state(F, ET) ->
-    astranaut_monad:lift_state(F, ET).
+get(WT) ->
+    astranaut_monad:lift_get(WT).
 
-tell(Ms, ET) ->
-    astranaut_monad:lift_tell(Ms, ET).
+put(S, WT) ->
+    astranaut_monad:lift_put(S, WT).
 
+state(F, WT) ->
+    astranaut_monad:lift_state(F, WT).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

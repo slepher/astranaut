@@ -17,6 +17,10 @@
 -export([lift/2]).
 -export([fail/2]).
 -export([get/1, put/2, state/2]).
+-export([tell/2]).
+-export([lift_fail/2]).
+-export([lift_get/1, lift_put/2, lift_state/2]).
+-export([lift_tell/2]).
 
 -type monad()         :: module() | {module(), monad()}.
 -type monadic(_M, _A) :: any().
@@ -79,6 +83,23 @@ put(S, {T, _IM} = M) ->
 state(F, {T, _IM} = M) ->
     T:state(F, M).
 
+tell(Logs, {T, _IM} = M) ->
+    T:tell(Logs, M).
+
+lift_get({?MODULE, IM} = WT) ->
+    lift(astranaut_monad:get(IM), WT).
+
+lift_put(S, {?MODULE, IM} = WT) ->
+    lift(astranaut_monad:put(S, IM), WT).
+
+lift_state(F, {?MODULE, IM} = WT) ->
+    lift(astranaut_monad:state(F, IM), WT).
+
+lift_fail(E, {?MODULE, IM} = MT) ->
+    lift(fail(E, IM), MT).
+
+lift_tell(Ms, {?MODULE, IM} = MT) ->
+    lift(tell(Ms, IM), MT).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

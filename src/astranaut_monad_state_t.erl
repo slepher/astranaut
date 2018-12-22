@@ -14,6 +14,7 @@
 -export([fail/2]).
 -export([lift/2]).
 -export([get/1, put/2, state/2]).
+-export([tell/2]).
 
 state_t(Inner) ->
     {?MODULE, Inner}.
@@ -49,5 +50,8 @@ put(S, {?MODULE, _IM} = ST) ->
 state(F, {?MODULE, IM}) ->
     state_t(fun (S) -> astranaut_monad:return(F(S), IM) end).
 
-fail(E, {?MODULE, IM} = ST) ->
-    lift(astranaut_monad:fail(E, IM), ST).
+fail(E, ST) ->
+    astranaut_monad:lift_fail(E, ST).
+
+tell(Ms, ST) ->
+    astranaut_monad:lift_tell(Ms, ST).
