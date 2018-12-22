@@ -67,7 +67,7 @@ attributes_with_line(Attribute, Forms) ->
 
 replace_line(Ast, Line) ->
     astranaut_traverse:map(
-      fun(Tuple) when is_tuple(Tuple) ->
+      fun(Tuple, _Attr) when is_tuple(Tuple) ->
               TupleList = tuple_to_list(Tuple),
               case TupleList of
                   [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
@@ -75,9 +75,9 @@ replace_line(Ast, Line) ->
                   _ ->
                       Tuple
               end;
-         (Node) ->
+         (Node, _Attr) ->
               Node
-         end, Ast, pre).
+         end, Ast, #{traverse => pre}).
 
 exported_function(Name, {'fun', Line, {clauses, _Clauses}} = Fun) ->
     Function = function(Name, Fun),

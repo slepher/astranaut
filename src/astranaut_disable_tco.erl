@@ -28,24 +28,24 @@ parse_transform(Ast, _Opt) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk(pre,  {function, _Line, _Name, _Arity, _Clauses} = Function, _Variables) ->
-    Variables = astranaut_traverse:reduce(fun walk_variables/2, sets:new(), Function, leaf),
+walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
+    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, #{traverse => leaf}),
     {Function, Variables};
-walk(post, {function, Line, Name, Arity, Clauses}, Variables) ->
+walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{function, Line, Name, Arity, NClauses}, NVariables};
-walk(post, {'fun', Line, {clauses, Clauses}}, Variables) ->  
+walk({'fun', Line, {clauses, Clauses}}, Variables, #{step := post}) ->  
     {NClauses, NVariables} = walk_clauses(Clauses, undefined, Variables),
     {{'fun', Line, {clauses, NClauses}}, NVariables};
-walk(post, {named_fun, Line, Name, Clauses}, Variables) ->
+walk({named_fun, Line, Name, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{named_fun, Line, Name, NClauses}, NVariables};
-walk(_Type, Node, Variables) ->
+walk(Node, Variables, _Attr) ->
     {Node, Variables}.
 
-walk_variables({var, _Line, Name}, Variables) ->
+walk_variables({var, _Line, Name}, Variables, _Attr) ->
     sets:add_element(Name, Variables);
-walk_variables(_Node, Variables) ->
+walk_variables(_Node, Variables, _Attr) ->
     Variables.
 
 walk_clauses(Clauses, Name, Variables) ->

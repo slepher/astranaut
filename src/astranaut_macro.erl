@@ -22,7 +22,8 @@ parse_transform(Forms, Options) ->
         ok ->
             Macros = maps:merge(LocalMacros, RemoteMacros),
             NForms = exec_macros(Forms, Macros, Module, File),
-            NNForms = astranaut_traverse:map(fun(Node) -> walk_macros(Node, Macros, Module, File) end, NForms, pre),
+            NNForms = astranaut_traverse:map(
+                        fun(Node, _Attr) -> walk_macros(Node, Macros, Module, File) end, NForms, #{traverse => pre}),
             astranaut:reorder_exports(NNForms);
         {error, Errors, Warnings} ->
             {error, Errors, Warnings}
@@ -271,9 +272,9 @@ functions_deps(Functions, ClauseMap, Deps) ->
 
 function_deps({clause, _Line1, _Patterns, _Guards, Exprs}) ->
     astranaut_traverse:reduce(
-      fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc) ->
+      fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc, _Attr) ->
               Arity = length(Arguments),
               ordsets:add_element({Function, Arity}, Acc);
-         (_, Acc) ->
+         (_, Acc, _Attr) ->
               Acc
-      end, ordsets:new(), Exprs, pre).
+      end, ordsets:new(), Exprs, #{traverse => pre}).
