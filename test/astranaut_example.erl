@@ -17,8 +17,10 @@
 -export([function_macro/0, in_function_macro/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
+-export([test_quote_string/0]).
+
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
--export([macro_quote_call/1]).
+-export([macro_quote_string/0]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
 -use_macro({function_macro/0, ?DEBUG_OPT}).
@@ -28,6 +30,7 @@
 -use_macro({macro_function/2, ?DEBUG_OPT}).
 -use_macro({macro_pattern/1, ?DEBUG_OPT}).
 -use_macro({macro_clause/1, ?DEBUG_OPT}).
+-use_macro({macro_quote_string/0, ?DEBUG_OPT}).
 
 -exec_macro({astranaut_example_macros, test_macro, []}).
 -exec_macro({function_macro, []}).
@@ -55,6 +58,9 @@ test_pattern() ->
 test_clause() ->
     macro_clause({hello, world}).
 
+test_quote_string() ->
+    macro_quote_string().
+
 function_macro() ->
     astranaut:exported_function(
       test_local,
@@ -79,6 +85,9 @@ macro_try_catch() ->
               erlang:raise(_L@Expr)
       end).
 
+macro_quote_string() ->
+    quote_code("test_case()").
+
 macro_case(Body, TrueClause, FalseClause) ->
     quote(
       case unquote(Body) of
@@ -101,9 +110,6 @@ macro_clause(quote = {hello, _A@World = World2} = C) ->
     quote({hello2, _A@World, _@World2,_@C});
 macro_clause(_) ->
     quote(fail).
-
-macro_quote_call(#quoted_call{module = _A@Module, function = hello, arguments = _@Arguments}) ->
-    quote(_A@Module:hello2(_@Arguments)).
 
 one_plus() ->
     1 + 1.

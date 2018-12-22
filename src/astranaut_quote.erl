@@ -25,6 +25,7 @@ format_error(Message) ->
         _    -> io_lib:write(Message)
     end.
 
+
 quote(Value) ->
     quote(Value, 0).
 
@@ -39,8 +40,6 @@ quote([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Line, Ty
     unquote_splicing_form(Unquotes, T, Line, Type);
 quote({match, _Line1, Pattern, Value}, Line, pattern) ->
     {match, Line, quote(Pattern, Line, pattern), Value};
-quote([{atom, _, unquote_catch}, Unquotes, {var, _, '_'}], Line, _Type) ->
-    unquote_catch_clause(Unquotes, Line);
 quote([{var, __Line1, Var} = VarForm|T], Line, Type) when is_atom(Var) ->
     metavariable_list(VarForm, T, Line, Type);
 quote([{atom, _Line1, Atom} = VarForm|T], Line, Type) when is_atom(Atom) ->
@@ -95,8 +94,6 @@ uncons({nil, _Line}) ->
     [];
 uncons(Value) ->
     Value.
-
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -106,37 +103,6 @@ uncons(Value) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-extract_fields(Fields) ->
-    lists:map(
-      fun({record_field, _Line, {atom, _, Key}, Value}) ->
-              {Key, Value}
-      end, Fields).
-
-quote_function_ast(Opts, Line) ->
-    MFAAst = 
-        case proplists:get_value(module, Opts) of
-            undefined ->
-                quote_function_name_ast(Opts);
-            Module ->
-                {remote, Line, Module, quote_function_name_ast(Opts)}
-        end,
-    ArgsAst = 
-        case proplists:get_value(arguments, Opts) of
-            undefined ->
-                '_';
-            Arguments ->
-                uncons(Arguments)
-        end,
-    {call, Line, MFAAst, ArgsAst}.
-
-quote_function_name_ast(Opts) ->
-    case proplists:get_value(function, Opts) of
-        undefined ->
-            '_';
-        FunctionName ->
-            {atom, '_', {unquote, FunctionName}}
-    end.
-
 walk({clause, Line1, Clauses, Guards, Exprs}) ->
     NClauses = 
         lists:map(
@@ -147,10 +113,13 @@ walk({clause, Line1, Clauses, Guards, Exprs}) ->
                   {match, Line2, Quoted, Val};
              ({match, Line2, {atom, _Line3, quote}, Form}) ->
                   quote(Form, Line2, pattern);
-             ({record, Line, quote_call, Fields}) ->
-                  OPts = extract_fields(Fields),
-                  Ast = quote_function_ast(OPts, Line),
-                  quote(Ast, Line, pattern);
+             ({match, Line2, {call, _Line3, {atom, _Line4, quote_code}, Codes}, Val}) ->
+                  Forms = astranaut_code:quote_codes(Codes),
+                  Quoted = quote(Form, Line2, pattern),
+                  {match, Line2, Quoted, Val};
+             ({match, Line2, {atom, _Line3, quote_code}, Form}) ->
+                  Forms = astranaut_code:quote_codes(Codes),
+                  quote(Form, Line2, pattern);
              (Clause) ->
                   Clause
           end, Clauses),
@@ -162,6 +131,9 @@ walk({call, _Line1, {atom, Line2, quote}, [Form]}) ->
     quote(Form, Line2);
 walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}) ->
     call_remote(astranaut, replace_line, [quote(Form), Line], Line1);
+walk({call, _Line1, {atom, _Line2, quote_code}, Codes}) ->
+    Forms = astranaut_code:quote_codes(Codes),
+    quote(Forms);
 walk(Node) ->
     Node.
 
@@ -169,20 +141,6 @@ unquote_splicing_form(Unquotes, Rest, Line, expr) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote(Rest, Line)};
 unquote_splicing_form(Unquotes, _Rest, _Line, pattern) ->
     Unquotes.
-
-unquote_catch_clause({cons, InnerLine, _Head, _Tail} = CatchClause, Line) ->
-    Throw = quote({atom, InnerLine, throw}, Line),
-    Any = quote({var, InnerLine, '_'}, Line),
-    Result = 
-        case uncons(CatchClause) of
-            [Exception] ->
-                [Throw, Exception, Any];
-            [Class, Exception] ->
-                [class_in_catch(Class), Exception, Any];
-            [Class, Exception, Stacktrace] ->
-                [class_in_catch(Class), Exception, Stacktrace]
-        end,
-    list_to_cons(Result, Line).
 
 metavariable_list({FType, _, Atom} = Form, T, Line, Type) ->
     case parse_metavariable(Atom, FType, Line) of
@@ -192,7 +150,7 @@ metavariable_list({FType, _, Atom} = Form, T, Line, Type) ->
             {cons, Line, metavariable(Form, Line, Type), quote(T, Line, Type)}
     end.
 
-metavariable({FType, _, Atom} =Form, Line, Type) ->
+metavariable({FType, _, Atom} = Form, Line, Type) ->
     case parse_metavariable(Atom, FType, Line) of
         {atom, Var} ->
             {tuple, Line, [quote(atom, Line), line_variable(Line, Line, Type), Var]};
@@ -203,7 +161,6 @@ metavariable({FType, _, Atom} =Form, Line, Type) ->
         default ->
             quote_tuple(Form, Line, Type)
     end.
-
 
 line_variable(Line0, Line, expr) ->
     {integer, Line, Line0};
@@ -234,13 +191,3 @@ parse_metavariable([$@|T], Line) ->
     {value, {var, Line, list_to_atom(T)}};
 parse_metavariable(_, _Line) ->
     default.
-
-list_to_cons([H|T], Line) ->
-    {cons, Line, H, list_to_cons(T, Line)};
-list_to_cons([], Line) ->
-    {nil, Line}.
-
-class_in_catch({atom, Line, _AtomValue} = Class) ->
-    quote(Class, Line);
-class_in_catch(Class) ->
-    Class.
