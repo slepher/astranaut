@@ -13,7 +13,7 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4, reduce_e/3, reduce_e/4]).
 -export([mapfold/3, mapfold/4, mapfolde/3, mapfolde/4]).
--export([map_m/4]).
+-export([map_m/4, map_m/5]).
 
 -type traverse_opts() :: #{traverse := traverse_style()}.
 -type traverse_style() :: pre | post | all.
@@ -91,7 +91,7 @@ mapfolde(F, Init, Node, Opts) ->
     astranaut_monad:run_state_error(NodeM, Init).
 
 map_m(F, Nodes, Monad, Opts) ->
-    map_m(F, Nodes, Monad, Opts, #{}).
+    map_m(F, Nodes, Monad, Opts, #{node => form}).
 
 -spec map_m(traverse_fun(Node, astranaut_monad:monadic(M, Node)), Node, M, traverse_opts(), #{}) -> 
                    astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
@@ -125,19 +125,33 @@ map_m_1(F, XNode, Monad, Attrs) ->
     astranaut_monad:bind(
       F(XNode, Attrs#{step => PreType}),
       fun(YNode) ->
-              %NodeType = erl_syntax:type(XNode),
               case erl_syntax:subtrees(YNode) of
                   [] ->
                       astranaut_monad:return(YNode, Monad);
                   Subtrees ->
+                      NodeType = erl_syntax:type(YNode),
                       astranaut_monad:bind(
-                        map_m_1(F, Subtrees, Monad, Attrs),
+                        map_m_subtrees(F, Subtrees, Monad, NodeType, Attrs),
                         fun(NSubTrees) ->
                                 ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
                                 F(ZNode, Attrs#{step => PreType})
                         end, Monad)
               end
       end, Monad).
+
+map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, #{node := pattern} = Attrs) when NodeType == match_expr; NodeType == clause ->
+    astranaut_monad:bind(
+      map_m_1(F, Pattern, Monad, Attrs#{node => pattern}),
+      fun(NHead) ->
+              astranaut_monad:bind(
+                map_m_1(F, Rest, Monad, Attrs#{node => expression}),
+                fun(NRest) ->
+                        astranaut_monad:return([NHead|NRest])
+                end)
+      end);
+map_m_subtrees(F, Nodes, Monad, _NodeType, Attrs) ->
+    map_m_1(F, Nodes, Monad, Attrs).
+
 
 %%====================================================================
 %% Internal functions
