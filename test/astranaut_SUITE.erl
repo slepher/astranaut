@@ -132,6 +132,7 @@ my_test_case(_Config) ->
     ?assertEqual(ok, astranaut_example:test_in_function()),
     ?assertEqual({hello, foo, bar, world}, astranaut_example:test_pattern()),
     ?assertEqual({hello2, world, world, {hello, world}}, astranaut_example:test_clause()),
+    ?assertEqual(ok, astranaut_example:test_quote_string()),
 
     ok.
 

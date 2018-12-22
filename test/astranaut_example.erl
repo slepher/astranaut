@@ -61,6 +61,9 @@ test_clause() ->
 test_quote_string() ->
     macro_quote_string().
 
+test_quote_string_fun() ->
+    ok.
+
 function_macro() ->
     astranaut:exported_function(
       test_local,
@@ -86,7 +89,7 @@ macro_try_catch() ->
       end).
 
 macro_quote_string() ->
-    quote_code("test_case()").
+    quote_code("test_quote_string_fun()").
 
 macro_case(Body, TrueClause, FalseClause) ->
     quote(
