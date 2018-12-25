@@ -11,7 +11,7 @@
 %% API
 -export([new/0]).
 -export([run/2]).
--export([bind/2, return/1]).
+-export([bind/2, then/2, return/1]).
 -export([fail/1]).
 -export([get/0, put/1, state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
@@ -35,20 +35,23 @@ new_3() ->
 new_4() ->
     astranaut_monad_identity.
 
-run(MonadM, State) ->
-    M1 = astranaut_monad_state_t:run(MonadM, State),
+run(M0, State) ->
+    M1 = astranaut_monad_state_t:run(M0, State),
     M2 = astranaut_monad_error_t:run(M1),
     M3 = astranaut_monad_writer_t:run(M2),
     M4 = astranaut_monad_writer_t:run(M3),
     case astranaut_monad_identity:run(M4) of
         {{{ok, {A, NState}}, Warnings}, Errors} ->
-            {ok, {A, Warnings, Errors, NState}};
+            {ok, {A, NState}, Errors, Warnings};
         {{{error, Reason}, Warnings}, Errors} ->
-            {error, Warnings, [Reason|Errors]}
+            {error, [Reason|Errors], Warnings}
     end.
 
 bind(MA, KMB) ->
     astranaut_monad:bind(MA, KMB, new()).
+
+then(MA, MB) ->
+    astranaut_monad:then(MA, MB, new()).
 
 return(A) ->
     astranaut_monad:return(A, new()).

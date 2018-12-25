@@ -26,14 +26,14 @@ error_t(Inner) ->
 run({?MODULE, Inner}) ->
     Inner.
 
-bind({?MODULE, ETA}, {?MODULE, KETB}, {?MODULE, IM}) ->
+bind({?MODULE, ETA}, KETB, {?MODULE, IM}) ->
     error_t(
       astranaut_monad:bind(
         ETA,
         fun(EA) ->
                 case EA of
                     {error, _Err}    -> astranaut_monad:return(EA, IM);
-                    {ok,  A}         -> KETB(A)
+                    {ok,  A}         -> run(KETB(A))
                 end
         end, IM)).
 
