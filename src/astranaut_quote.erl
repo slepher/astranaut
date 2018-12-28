@@ -33,63 +33,6 @@ quote(Value, Line) when is_integer(Line) ->
 quote(Value, Opts) when is_map(Opts) ->
     quote_1(Value, Opts).
 
-quote_1({unquote, Unquote}, _Opts) ->
-    Unquote;
-quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Opts) ->
-    Unquote;
-quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
-    unquote_splicing_form(Unquotes, T, Opts);
-quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
-    Unquote;
-quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    unquote_splicing_form(Unquotes, T, Opts);
-quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
-    {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
-
-quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
-    metavariable_list(VarForm, T, Opts);
-quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
-    metavariable(VarForm, Opts);
-quote_1({atom, _Line1, Atom} = VarForm, Opts)  when is_atom(Atom) ->
-    metavariable(VarForm, Opts);
-
-quote_1(Tuple, Opts) when is_tuple(Tuple) ->
-    quote_tuple(Tuple, Opts);
-quote_1([H|T], #{line := Line} = Opts) ->
-    {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
-quote_1([], #{line := Line}) ->
-    {nil, Line};
-quote_1(Float, #{line := Line}) when is_float(Float) ->
-    {float, Line, Float};
-quote_1(Integer, #{line := Line}) when is_integer(Integer) ->
-    {integer, Line, Integer};
-quote_1(Atom, #{line := Line}) when is_atom(Atom) ->
-    {atom, Line, Atom}.
-
-quote_tuple(Tuple, #{line := Line} = Opts) ->
-    TupleList = tuple_to_list(Tuple),
-    case TupleList of
-        [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-            {tuple, TupleLine, quote_tuple_list(TupleList, Opts)};
-        _ ->
-            {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
-    end.
-
-quote_tuple_list([Action, TupleLine|Rest], #{quote_type := expr, replaced_line := true} = Opts) ->
-    NOpts = Opts#{line => TupleLine},
-    quote_tuple_list_1([Action, 0, Rest], NOpts);
-quote_tuple_list([_Action, TupleLine|_Rest] = TupleList, #{quote_type := expr} = Opts) ->
-    NOpts = Opts#{line => TupleLine},
-    quote_tuple_list_1(TupleList, NOpts);
-quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
-    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, Opts)].
-
-quote_tuple_list_1(List, Opts) ->
-    lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
-
-call_remote(Module, Function, Arguments, Line) ->
-    {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
-
 uncons({cons, _Line, Head, Tail}) ->
     [Head|uncons(Tail)];
 uncons({nil, _Line}) ->
@@ -132,6 +75,62 @@ walk({match, Line2, {atom, _Line3, quote_code}, Code}, #{node := pattern}) ->
     quote(Form, Opts);
 walk(Node, _Attr) ->
     Node.
+
+quote_1({unquote, Unquote}, _Opts) ->
+    Unquote;
+quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Opts) ->
+    Unquote;
+quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
+    unquote_splicing_form(Unquotes, T, Opts);
+quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
+    Unquote;
+quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    unquote_splicing_form(Unquotes, T, Opts);
+quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
+    {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
+
+quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
+    metavariable_list(VarForm, T, Opts);
+quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
+    metavariable(VarForm, Opts);
+quote_1({atom, _Line1, Atom} = VarForm, Opts) when is_atom(Atom) ->
+    metavariable(VarForm, Opts);
+
+quote_1(Tuple, Opts) when is_tuple(Tuple) ->
+    quote_tuple(Tuple, Opts);
+quote_1([H|T], #{line := Line} = Opts) ->
+    {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
+quote_1([], #{line := Line}) ->
+    {nil, Line};
+quote_1(Float, #{line := Line}) when is_float(Float) ->
+    {float, Line, Float};
+quote_1(Integer, #{line := Line}) when is_integer(Integer) ->
+    {integer, Line, Integer};
+quote_1(Atom, #{line := Line}) when is_atom(Atom) ->
+    {atom, Line, Atom}.
+
+quote_tuple(Tuple, #{line := Line} = Opts) ->
+    TupleList = tuple_to_list(Tuple),
+    case TupleList of
+        [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
+            NOpts = Opts#{line => TupleLine},
+            {tuple, TupleLine, quote_tuple_list(TupleList, NOpts)};
+        _ ->
+            {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
+    end.
+
+quote_tuple_list([Action, _TupleLine|Rest], #{quote_type := expr, replaced_line := true} = Opts) ->
+    quote_tuple_list_1([Action, 0, Rest], Opts);
+quote_tuple_list(TupleList, #{quote_type := expr} = Opts) ->
+    quote_tuple_list_1(TupleList, Opts);
+quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
+    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, Opts)].
+
+quote_tuple_list_1(List, Opts) ->
+    lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
+
+call_remote(Module, Function, Arguments, Line) ->
+    {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
 
 quote_type(#{node := pattern}) ->
     pattern;
