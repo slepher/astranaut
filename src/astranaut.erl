@@ -4,7 +4,7 @@
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
 -export([file/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
--export([replace_line/2, to_string/1]).
+-export([replace_line/2, replace_line_zero/2, to_string/1]).
 -export([reorder_exports/1]).
 %%====================================================================
 %% API functions
@@ -66,12 +66,25 @@ attributes_with_line(Attribute, Forms) ->
         end, [], Forms)).
 
 replace_line(Ast, Line) ->
+    replace_line_cond(fun(_) -> true end, Ast, Line).
+
+replace_line_zero(Ast, Line) ->
+    replace_line_cond(
+      fun(0) -> true;
+         (_) -> false
+      end, Ast, Line).
+
+replace_line_cond(Cond, Ast, Line) ->
     astranaut_traverse:map(
       fun(Tuple, _Attr) when is_tuple(Tuple) ->
-              TupleList = tuple_to_list(Tuple),
-              case TupleList of
-                  [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-                      setelement(2, Tuple, Line);
+              case tuple_to_list(Tuple) of
+                  [_Action, Line|_Rest] when is_integer(Line) ->
+                      case Cond(Line) of
+                          true ->
+                              setelement(2, Tuple, Line);
+                          false ->
+                              Tuple
+                      end;
                   _ ->
                       Tuple
               end;

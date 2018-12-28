@@ -15,28 +15,50 @@
 -export([mapfold/3, mapfold/4]).
 -export([map_m/4, map_m/5]).
 
--type traverse_opts() :: #{traverse := traverse_style()}.
--type traverse_style() :: pre | post | all.
--type traverse_fun(Node, Return) :: fun((_Type, Node) -> Return) | fun((Node) -> Return).
--type traverse_state_fun(Node, State, Return) :: fun((_Type, State, Node) -> Return) | fun((Node, State) -> Return).
+-type traverse_node() :: tuple().
+-type traverse_error() :: term().
+-type traverse_state() :: term().
+-type traverse_opts() :: #{traverse := traverse_style(), final := boolean()}.
+-type traverse_style() :: pre | post | leaf | all.
+-type traverse_attr() :: #{step := pre | post | lef, node := form | pattern | expression}.
+-type traverse_fun_return() :: #{node := traverse_node(), state := traverse_state(), 
+                                 continue := boolean(), 
+                                 error := traverse_error(), warning := traverse_error(),
+                                 errors := [traverse_error()], warings := [traverse_error()]} |
+                               {error, traverse_error()} | continue |
+                               {traverse_node(), traverse_state()}| traverse_node().
+
+-type traverse_return(ReturnType) :: ReturnType |  {warning, ReturnType, [traverse_return_error()]} |
+                                     {error, [traverse_return_error()], [traverse_return_error()]}.
+
+-type traverse_fun() :: fun((traverse_node(), traverse_attr()) -> traverse_fun_return()).
+-type traverse_state_fun() :: fun((traverse_node(), traverse_state(), traverse_attr()) -> traverse_fun_return()).
+-type parse_transform_module() :: module().
+-type compile_file() :: string().
+-type line() :: integer().
+-type traverse_return_error() :: [{compile_file(), [{line(), parse_transform_module(), traverse_error()}]}].
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+-spec map(traverse_fun(), Node) -> traverse_return(Node).
 map(F, TopNode) ->
     map(F, TopNode, #{final => true}).
 
+-spec reduce(traverse_state_fun(), State, _Node) -> traverse_return(State).
 reduce(F, Init, TopNode) ->
     reduce(F, Init, TopNode, #{final => true}).
 
+-spec map_with_state(traverse_state_fun(), State, Node) -> traverse_return({Node, State}).
 map_with_state(F, Init, Form) ->
     map_with_state(F, Init, Form, #{final => true}).
 
--spec mapfold(traverse_state_fun(Node, State, {Node, State}), State, Node) -> {Node, State}.
+-spec mapfold(traverse_state_fun(), State, Node) -> traverse_return({Node, State}).
 mapfold(F, Init, Node) ->
     mapfold(F, Init, Node, #{final => true}).
 
--spec map(fun((_Type, Node) -> Node), Node) -> Node.
+-spec map(traverse_fun(), Node, traverse_opts()) -> traverse_return(Node).
 map(F, TopNode, Opts) ->
     NF = fun(Node, State, Attr) ->
                  case F(Node, Attr) of
@@ -50,7 +72,7 @@ map(F, TopNode, Opts) ->
          end,
     map_with_state(NF, ok, TopNode, Opts).
 
--spec map_with_state(fun((_Type, Node, State) -> {Node, State}), State, Node) -> Node.
+-spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 map_with_state(F, Init, Node, Opts) ->
     Reply = 
         case mapfold(F, Init, Node, Opts#{final => false}) of
@@ -61,7 +83,7 @@ map_with_state(F, Init, Node, Opts) ->
         end,
     transform_final_reply(Reply, Opts).
 
--spec reduce(fun((_Type, Node, State) -> State), State, Node, traverse_opts()) -> State.
+-spec reduce(traverse_state_fun(), State, _Node, traverse_opts()) -> traverse_return(State).
 reduce(F, Init, TopNode, Opts) ->
     NF = 
         fun(Node, State, Attr) ->
@@ -83,7 +105,7 @@ reduce(F, Init, TopNode, Opts) ->
         end,
     transform_final_reply(NReply, Opts).
 
--spec mapfold(traverse_state_fun(Node, State, {Node, State}), State, Node, traverse_opts()) -> {Node, State}.
+-spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
     Monad = astranaut_traverse_monad:new(),
     NF = transform_mapfold_f(F),
@@ -103,18 +125,15 @@ transform_final_reply({ok, _Reply, Errors, Warnings}, true) ->
 transform_final_reply(Reply, _IsFinal) ->
     Reply.
 
+-spec map_m(traverse_fun(), Node, M, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Monad, Opts) ->
     map_m(F, Nodes, Monad, Opts, #{node => form}).
 
--spec map_m(traverse_fun(Node, astranaut_monad:monadic(M, Node)), Node, M, traverse_opts(), #{}) -> 
-                   astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Monad, Opts, Attrs) ->
     TraverseStyle = maps:get(traverse, Opts, all),
     NF = transform_f(F, Monad, TraverseStyle),
     map_m_1(NF, Nodes, Monad, Attrs).
-    
--spec map_m_1(traverse_fun(Node, astranaut_monad:monadic(M, Node)), Node, M, #{}) -> 
-                   astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
+
 map_m_1(F, Nodes, Monad, Attrs) when is_list(Nodes) ->
     astranaut_monad:map_m(
       fun(Subtree) ->
@@ -131,6 +150,7 @@ map_m_1(F, XNode, Monad, Attrs) ->
     %% do form
     %% do([Monad ||
     %%           YNode <- F(pre, XNode),
+    %%         
     %%           NSubtrees <- map_m(F, Subtrees, Monad),
     %%           ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
     %%           F(post, ZNode)
@@ -183,44 +203,45 @@ transform_mapfold_f(F) ->
               astranaut_traverse_monad:get(),
               fun(State) ->
                       Reply = F(Node, State, Attr),
-                      reply_to_monad(Reply, astranaut_traverse_monad:return(Node))
+                      Line = erl_syntax:get_pos(Node),
+                      reply_to_monad(Reply, astranaut_traverse_monad:return(Node), #{line => Line})
               end)
     end.
 
 %% transform user sytle traverse return to astranaut_traverse_monad
-reply_to_monad(#{error := Error} = Reply, MA) ->
+reply_to_monad(#{error := Error} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:error(Error)),
     NReply = maps:remove(error, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{errors := Errors} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{errors := Errors} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:errors(Errors)),
     NReply = maps:remove(errors, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{warning := Warning} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{warning := Warning} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warning(Warning)),
     NReply = maps:remove(warning, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{warnings := Warnings} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warnings(Warnings)),
     NReply = maps:remove(warnings, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{state := State} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{state := State} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:put(State)),
     NReply = maps:remove(state, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{continue := true, node := Node} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return({continue, Node})),
     NReply = maps:remove(continue, maps:remove(node, Reply)),
-    reply_to_monad(NReply, MB);
-reply_to_monad(#{node := Node} = Reply, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{node := Node} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(Node)),
     NReply = maps:remove(node, Reply),
-    reply_to_monad(NReply, MB);
-reply_to_monad(continue, MA) ->
+    reply_to_monad(NReply, MB, Opts);
+reply_to_monad(continue, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue));
-reply_to_monad({error, Reason}, MA) ->
+reply_to_monad({error, Reason}, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:fail(Reason));
-reply_to_monad({Node, State}, MA) ->
+reply_to_monad({Node, State}, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:state(fun(_) -> {Node, State} end)).
 
 transform_f(F, Monad, pre) ->

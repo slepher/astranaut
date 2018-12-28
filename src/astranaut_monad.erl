@@ -11,7 +11,6 @@
 -export_type([monad/0, monadic/2]).
 
 %% API
--export([new_state/0, new_state_error/0, run_state/2, run_state_error/2]).
 -export([lift_m/3, map_m/3]).
 -export([bind/3, then/3, return/2]).
 -export([lift/2]).
@@ -28,18 +27,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-new_state() ->
-    astranaut_monad_state_t:state_t(astranaut_monad_identity).
-
-new_state_error() ->
-    astranaut_monad_state_t:state_t(astranaut_monad_error_t:error_t(astranaut_monad_identity)).
-
-run_state(MonadM, State) ->
-    astranaut_monad_identity:run(astranaut_monad_state_t:run(MonadM, State)).
-
-run_state_error(MonadM, State) ->
-    astranaut_monad_identity:run(astranaut_monad_error_t:run(astranaut_monad_state_t:run(MonadM, State))).
-
 lift_m(F, X, Monad) ->
     bind(X,
          fun(A) ->

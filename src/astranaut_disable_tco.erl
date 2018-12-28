@@ -11,7 +11,7 @@
 -compile({parse_transform, astranaut_quote}).
 
 %% API
--export([parse_transform/2]).
+-export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
@@ -19,6 +19,11 @@
 parse_transform(Ast, _Opt) ->
     astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast).
 
+format_error(Message) ->
+    case io_lib:deep_char_list(Message) of
+        true -> Message;
+        _    -> io_lib:write(Message)
+    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

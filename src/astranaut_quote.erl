@@ -10,7 +10,7 @@
 
 %% API
 -export([parse_transform/2, format_error/1]).
--export([quote/1, quote/2, quote/3]).
+-export([quote/1, quote/2]).
 -export([uncons/1]).
 
 %%%===================================================================
@@ -26,63 +26,66 @@ format_error(Message) ->
     end.
 
 quote(Value) ->
-    quote(Value, 0).
+    quote(Value, #{line => 0, quote_type => expr}).
 
-quote(Value, Line) ->
-    quote(Value, Line, expr).
+quote(Value, Line) when is_integer(Line) ->
+    quote_1(Value, #{line => Line, quote_type => expr});
+quote(Value, Opts) when is_map(Opts) ->
+    quote_1(Value, Opts).
 
-quote({unquote, Unquote}, _Line, _Type) ->
+quote_1({unquote, Unquote}, _Opts) ->
     Unquote;
-quote({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Line, _Type) ->
+quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Opts) ->
     Unquote;
-quote([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Line, Type) ->
-    unquote_splicing_form(Unquotes, T, Line, Type);
-quote({match, _Line1, Pattern, Value}, Line, pattern) ->
-    {match, Line, quote(Pattern, Line, pattern), Value};
-quote([{var, __Line1, Var} = VarForm|T], Line, Type) when is_atom(Var) ->
-    metavariable_list(VarForm, T, Line, Type);
-quote([{atom, _Line1, Atom} = VarForm|T], Line, Type) when is_atom(Atom) ->
-    metavariable_list(VarForm, T, Line, Type);
-quote({var, _Line1, Var} = VarForm, Line, Type) when is_atom(Var) ->
-    metavariable(VarForm, Line, Type);
-quote({atom, _Line1, Atom} = VarForm, Line, Type)  when is_atom(Atom) ->
-    metavariable(VarForm, Line, Type);
-quote({match, _, {atom, _, unquote}, Unquote}, _Line, _Type) ->
+quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
+    unquote_splicing_form(Unquotes, T, Opts);
+quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
     Unquote;
-quote([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Line, Type) ->
-    unquote_splicing_form(Unquotes, T, Line, Type);
-quote(Tuple, Line, Type) when is_tuple(Tuple) ->
-    quote_tuple(Tuple, Line, Type);
-quote([H|T], Line, Type) ->
-    {cons, Line, quote(H, Line, Type), quote(T, Line, Type)};
-quote([], Line, _Type) ->
+quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    unquote_splicing_form(Unquotes, T, Opts);
+quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
+    {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
+
+quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
+    metavariable_list(VarForm, T, Opts);
+quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
+    metavariable(VarForm, Opts);
+quote_1({atom, _Line1, Atom} = VarForm, Opts)  when is_atom(Atom) ->
+    metavariable(VarForm, Opts);
+
+quote_1(Tuple, Opts) when is_tuple(Tuple) ->
+    quote_tuple(Tuple, Opts);
+quote_1([H|T], #{line := Line} = Opts) ->
+    {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
+quote_1([], #{line := Line}) ->
     {nil, Line};
-quote(Float, Line, _Type) when is_float(Float) ->
+quote_1(Float, #{line := Line}) when is_float(Float) ->
     {float, Line, Float};
-quote(Integer, Line, _Type) when is_integer(Integer) ->
+quote_1(Integer, #{line := Line}) when is_integer(Integer) ->
     {integer, Line, Integer};
-quote(Atom, Line, _Type) when is_atom(Atom) ->
+quote_1(Atom, #{line := Line}) when is_atom(Atom) ->
     {atom, Line, Atom}.
 
-quote_tuple(Tuple, Line, expr) when is_integer(Line) ->
-    TupleList = tuple_to_list(Tuple),
-    QuotedLine = 
-        case TupleList of
-            [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-                TupleLine;
-            _ ->
-                Line
-        end,
-    {tuple, QuotedLine, lists:map(fun(Item) -> quote(Item, QuotedLine) end, TupleList)};
-quote_tuple(Tuple, Line, pattern) ->
+quote_tuple(Tuple, #{line := Line} = Opts) ->
     TupleList = tuple_to_list(Tuple),
     case TupleList of
-        [Action, TupleLine|Rest] when is_integer(TupleLine) ->
-            {tuple, TupleLine, [quote(Action, TupleLine, expr), {var, TupleLine, '_'}|
-                                lists:map(fun(Item) -> quote(Item, TupleLine, pattern) end, Rest)]};
+        [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
+            {tuple, TupleLine, quote_tuple_list(TupleList, Opts)};
         _ ->
-            {tuple, Line, lists:map(fun(Item) -> quote(Item, Line, pattern) end, TupleList)}
+            {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
     end.
+
+quote_tuple_list([Action, TupleLine|Rest], #{quote_type := expr, replaced_line := true} = Opts) ->
+    NOpts = Opts#{line => TupleLine},
+    quote_tuple_list_1([Action, 0, Rest], NOpts);
+quote_tuple_list([_Action, TupleLine|_Rest] = TupleList, #{quote_type := expr} = Opts) ->
+    NOpts = Opts#{line => TupleLine},
+    quote_tuple_list_1(TupleList, NOpts);
+quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
+    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, Opts)].
+
+quote_tuple_list_1(List, Opts) ->
+    lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
 
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
@@ -105,23 +108,28 @@ uncons(Value) ->
 walk({call, Line2, {atom, _Line3, quote}, [Form]}, Attr) ->
     %% transform quote(Form)
     QuoteType = quote_type(Attr),
-    quote(Form, Line2, QuoteType);
+    Opts = #{line => Line2, quote_type => QuoteType},
+    quote(Form, Opts);
 walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, Attr) ->
     %% transform quote(Form, Line)
     QuoteType = quote_type(Attr),
-    call_remote(astranaut, replace_line, [quote(Form, Line1, QuoteType), Line], Line1);
+    Opts = #{line => Line1, quote_type => QuoteType, replaced_line => true},
+    call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1);
 walk({call, Line2, {atom, _Line3, quote_code}, Codes}, Attr) ->
     %% transform quote_code(Codes)
     Form = astranaut_code:quote_codes(Codes),
     QuoteType = quote_type(Attr),
-    quote(Form, Line2, QuoteType);
+    Opts = #{line => Line2, quote_type => QuoteType},
+    quote(Form, Opts);
 walk({match, Line2, {atom, _Line3, quote}, Form}, #{node := pattern}) ->
     %% transform quote = Form in pattern match
-    quote(Form, Line2, pattern);
+    Opts = #{line => Line2, quote_type => pattern},
+    quote(Form, Opts);
 walk({match, Line2, {atom, _Line3, quote_code}, Code}, #{node := pattern}) ->
     %% transform quote_code = Code in pattern match
     Form = astranaut_code:quote_codes([Code]),
-    quote(Form, Line2, pattern);
+    Opts = #{line => Line2, quote_type => pattern},
+    quote(Form, Opts);
 walk(Node, _Attr) ->
     Node.
 
@@ -130,27 +138,27 @@ quote_type(#{node := pattern}) ->
 quote_type(_) ->
     expr.
 
-unquote_splicing_form(Unquotes, Rest, Line, expr) ->
-    {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote(Rest, Line)};
-unquote_splicing_form(Unquotes, _Rest, _Line, pattern) ->
+unquote_splicing_form(Unquotes, Rest, #{line := Line, quote_type := expr} = Opts) ->
+    {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
+unquote_splicing_form(Unquotes, _Rest, #{quote_type := pattern}) ->
     Unquotes.
 
-metavariable_list({FType, _, Atom} = Form, T, Line, Type) ->
+metavariable_list({FType, _, Atom} = Form, T, #{line := Line} = Opts) ->
     case parse_metavariable(Atom, FType, Line) of
         {value_list, VarList} ->
-            unquote_splicing_form(VarList, T, Line, Type);
+            unquote_splicing_form(VarList, T, Opts);
         _ ->
-            {cons, Line, metavariable(Form, Line, Type), quote(T, Line, Type)}
+            {cons, Line, metavariable(Form, Opts), quote_1(T, Opts)}
     end.
 
-metavariable({FType, _, Atom} = Form, Line, Type) ->
+metavariable({FType, _, Atom} = Form, #{line := Line, quote_type := Type} = Opts) ->
     case parse_metavariable(Atom, FType, Line) of
         {value, Var} ->
             Var;
         {VarType, Var} ->
-            {tuple, Line, [quote(VarType, Line), line_variable(Line, Line, Type), Var]};
+            {tuple, Line, [quote_1(VarType, Opts), line_variable(Line, Line, Type), Var]};
         default ->
-            quote_tuple(Form, Line, Type)
+            quote_tuple(Form, Opts)
     end.
 
 line_variable(Line0, Line, expr) ->
