@@ -120,7 +120,7 @@ quote_tuple(Tuple, #{line := Line} = Opts) ->
     end.
 
 quote_tuple_list([Action, _TupleLine|Rest], #{quote_type := expr, replaced_line := true} = Opts) ->
-    quote_tuple_list_1([Action, 0, Rest], Opts);
+    quote_tuple_list_1([Action, 0|Rest], Opts);
 quote_tuple_list(TupleList, #{quote_type := expr} = Opts) ->
     quote_tuple_list_1(TupleList, Opts);
 quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
