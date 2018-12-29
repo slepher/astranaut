@@ -76,19 +76,19 @@ state(F, {T, _IM} = M) ->
 tell(Logs, {T, _IM} = M) ->
     T:tell(Logs, M).
 
-lift_get({?MODULE, IM} = WT) ->
+lift_get({_, IM} = WT) ->
     lift(astranaut_monad:get(IM), WT).
 
-lift_put(S, {?MODULE, IM} = WT) ->
+lift_put(S, {_, IM} = WT) ->
     lift(astranaut_monad:put(S, IM), WT).
 
-lift_state(F, {?MODULE, IM} = WT) ->
+lift_state(F, {_, IM} = WT) ->
     lift(astranaut_monad:state(F, IM), WT).
 
-lift_fail(E, {?MODULE, IM} = MT) ->
+lift_fail(E, {_, IM} = MT) ->
     lift(fail(E, IM), MT).
 
-lift_tell(Ms, {?MODULE, IM} = MT) ->
+lift_tell(Ms, {_, IM} = MT) ->
     lift(tell(Ms, IM), MT).
 %%--------------------------------------------------------------------
 %% @doc

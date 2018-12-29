@@ -91,6 +91,9 @@ macro_try_catch() ->
 macro_quote_string() ->
     quote_code("test_quote_string_fun()").
 
+macro_quote_fail_string() ->
+    quote_code("test_quote_string_fun()", 1).
+
 macro_case(Body, TrueClause, FalseClause) ->
     quote(
       case unquote(Body) of

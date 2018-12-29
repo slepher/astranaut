@@ -17,7 +17,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Ast, _Opt) ->
-    astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast).
+    astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast, #{module => ?MODULE, traverse => pre}).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -34,7 +34,7 @@ format_error(Message) ->
 %%% Internal functions
 %%%===================================================================
 walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
-    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, #{traverse => leaf}),
+    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, #{traverse => leaf, module => ?MODULE}),
     {Function, Variables};
 walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),

@@ -17,7 +17,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    astranaut_traverse:map(fun walk/2, Forms, #{traverse => pre}).
+    astranaut_traverse:map(fun walk/2, Forms, #{traverse => pre, module => ?MODULE}).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -26,10 +26,10 @@ format_error(Message) ->
     end.
 
 quote(Value) ->
-    quote(Value, #{line => 0, quote_type => expr}).
+    quote(Value, #{line => 0, quote_type => expression}).
 
 quote(Value, Line) when is_integer(Line) ->
-    quote_1(Value, #{line => Line, quote_type => expr});
+    quote_1(Value, #{line => Line, quote_type => expression});
 quote(Value, Opts) when is_map(Opts) ->
     quote_1(Value, Opts).
 
@@ -48,30 +48,38 @@ uncons(Value) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk({call, Line2, {atom, _Line3, quote}, [Form]}, Attr) ->
+walk({call, Line1, {atom, _Line2, quote}, [Form]}, Attr) ->
     %% transform quote(Form)
     QuoteType = quote_type(Attr),
-    Opts = #{line => Line2, quote_type => QuoteType},
+    Opts = #{line => Line1, quote_type => QuoteType},
     quote(Form, Opts);
-walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, Attr) ->
-    %% transform quote(Form, Line)
-    QuoteType = quote_type(Attr),
-    Opts = #{line => Line1, quote_type => QuoteType, replaced_line => true},
+walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, #{node := expression}) ->
+    %% transform quote(Form, Line) in expression
+    Opts = #{line => Line1, quote_type => expression, replaced_line => true},
     call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1);
-walk({call, Line2, {atom, _Line3, quote_code}, Codes}, Attr) ->
+walk({call, Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr) ->
     %% transform quote_code(Codes)
-    Form = astranaut_code:quote_codes(Codes),
-    QuoteType = quote_type(Attr),
-    Opts = #{line => Line2, quote_type => QuoteType},
-    quote(Form, Opts);
-walk({match, Line2, {atom, _Line3, quote}, Form}, #{node := pattern}) ->
+    case split_codes(Codes, NodeType) of
+        {ok, NCodes, Line} ->
+            Form = astranaut_code:quote_codes(NCodes),
+            Opts = #{line => Line1, quote_type => expression, replaced_line => true},
+            call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1);
+        {ok, NCodes} ->
+            Form = astranaut_code:quote_codes(NCodes),
+            QuoteType = quote_type(Attr),
+            Opts = #{line => Line1, quote_type => QuoteType},
+            quote(Form, Opts);
+        {error, invalid_quote_code} ->
+            #{error => io_lib:format("invalid quote ~s", [astranaut:to_string(Node)])}
+    end;
+walk({match, Line1, {atom, _Line2, quote}, Form}, #{node := pattern}) ->
     %% transform quote = Form in pattern match
-    Opts = #{line => Line2, quote_type => pattern},
+    Opts = #{line => Line1, quote_type => pattern},
     quote(Form, Opts);
-walk({match, Line2, {atom, _Line3, quote_code}, Code}, #{node := pattern}) ->
+walk({match, Line1, {atom, _Line2, quote_code}, Code}, #{node := pattern}) ->
     %% transform quote_code = Code in pattern match
     Form = astranaut_code:quote_codes([Code]),
-    Opts = #{line => Line2, quote_type => pattern},
+    Opts = #{line => Line1, quote_type => pattern},
     quote(Form, Opts);
 walk(Node, _Attr) ->
     Node.
@@ -119,9 +127,9 @@ quote_tuple(Tuple, #{line := Line} = Opts) ->
             {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
     end.
 
-quote_tuple_list([Action, _TupleLine|Rest], #{quote_type := expr, replaced_line := true} = Opts) ->
+quote_tuple_list([Action, _TupleLine|Rest], #{quote_type := expression, replaced_line := true} = Opts) ->
     quote_tuple_list_1([Action, 0|Rest], Opts);
-quote_tuple_list(TupleList, #{quote_type := expr} = Opts) ->
+quote_tuple_list(TupleList, #{quote_type := expression} = Opts) ->
     quote_tuple_list_1(TupleList, Opts);
 quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
     [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, Opts)].
@@ -135,9 +143,29 @@ call_remote(Module, Function, Arguments, Line) ->
 quote_type(#{node := pattern}) ->
     pattern;
 quote_type(_) ->
-    expr.
+    expression.
 
-unquote_splicing_form(Unquotes, Rest, #{line := Line, quote_type := expr} = Opts) ->
+split_codes(Codes, NodeType) ->
+    case lists:partition(
+           fun({string, _, _}) ->
+                   true;
+              (_) ->
+                   false
+           end, Codes) of
+        {NCodes, [Line]} ->
+            case NodeType of
+                expression ->
+                    {ok, NCodes, Line};
+                _ ->
+                    {error, invalid_quote_code}
+            end;
+        {NCodes, []} ->
+            {ok, NCodes};
+        {_NCodes, _NonCodes} ->
+            {error, invalid_quote_code}
+    end.
+
+unquote_splicing_form(Unquotes, Rest, #{line := Line, quote_type := expression} = Opts) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
 unquote_splicing_form(Unquotes, _Rest, #{quote_type := pattern}) ->
     Unquotes.
@@ -160,7 +188,7 @@ metavariable({FType, _, Atom} = Form, #{line := Line, quote_type := Type} = Opts
             quote_tuple(Form, Opts)
     end.
 
-line_variable(Line0, Line, expr) ->
+line_variable(Line0, Line, expression) ->
     {integer, Line, Line0};
 line_variable(_Line0, Line, pattern) ->
     {var, Line, '_'}.

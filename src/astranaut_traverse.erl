@@ -81,7 +81,7 @@ map_with_state(F, Init, Node, Opts) ->
             {ok, {NNode, _State}, Errors, Warnings} ->
                 {ok, NNode, Errors, Warnings}
         end,
-    transform_final_reply(Reply, Opts).
+    transform_final_reply(Node, Reply, Opts).
 
 -spec reduce(traverse_state_fun(), State, _Node, traverse_opts()) -> traverse_return(State).
 reduce(F, Init, TopNode, Opts) ->
@@ -103,27 +103,31 @@ reduce(F, Init, TopNode, Opts) ->
             {ok, {_NNode, State}, Errors, Warnings} ->
                 {ok, State, Errors, Warnings}
         end,
-    transform_final_reply(NReply, Opts).
+    transform_final_reply(TopNode, NReply, Opts).
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
     Monad = astranaut_traverse_monad:new(),
-    NF = transform_mapfold_f(F),
+    NF = transform_mapfold_f(F, Opts),
     NodeM = map_m(NF, Node, Monad, Opts),
-    transform_final_reply(astranaut_traverse_monad:run(NodeM, Init), Opts).
+    transform_final_reply(Node, astranaut_traverse_monad:run(NodeM, Init), Opts).
 
-transform_final_reply(Reply, Opts) when is_map(Opts) ->
+transform_final_reply(Node, Reply, Opts) when is_map(Opts) ->
     IsFinal = maps:get(final, Opts, true),
-    transform_final_reply(Reply, IsFinal);
+    transform_final_reply(Node, Reply, IsFinal);
 
-transform_final_reply({ok, Reply, [], []}, true) ->
+transform_final_reply(_Node, {ok, Reply, [], []}, true) ->
     Reply;
-transform_final_reply({ok, Reply, [], Warnings}, true) ->
-    {warning, Reply, Warnings};
-transform_final_reply({ok, _Reply, Errors, Warnings}, true) ->
-    {error, Errors, Warnings};
-transform_final_reply(Reply, _IsFinal) ->
+transform_final_reply(Node, {ok, Reply, [], Warnings}, true) ->
+    {warning, Reply, append_file(Node, Warnings)};
+transform_final_reply(Node, {ok, _Reply, Errors, Warnings}, true) ->
+    {error, append_file(Node, Errors), append_file(Node, Warnings)};
+transform_final_reply(_Node, Reply, _IsFinal) ->
     Reply.
+
+append_file(Node, Errors) ->
+    File = astranaut:file(Node),
+    [{File, Errors}].
 
 -spec map_m(traverse_fun(), Node, M, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Monad, Opts) ->
@@ -197,36 +201,40 @@ map_m_subtrees(F, Nodes, Monad, _NodeType, Attrs) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-transform_mapfold_f(F) ->
+transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->
             astranaut_traverse_monad:bind(
               astranaut_traverse_monad:get(),
               fun(State) ->
                       Reply = F(Node, State, Attr),
                       Line = erl_syntax:get_pos(Node),
-                      reply_to_monad(Reply, astranaut_traverse_monad:return(Node), #{line => Line})
+                      reply_to_monad(Reply, astranaut_traverse_monad:return(Node), Opts#{line => Line})
               end)
     end.
 
 %% transform user sytle traverse return to astranaut_traverse_monad
 reply_to_monad(#{error := Error} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:error(Error)),
+    NError = format_error(Error, Opts),
+    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:error(NError), MA),
     NReply = maps:remove(error, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{errors := Errors} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:errors(Errors)),
+    NErrors = format_errors(Errors, Opts),
+    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:errors(NErrors), MA),
     NReply = maps:remove(errors, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{warning := Warning} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warning(Warning)),
+    NWarning = format_error(Warning, Opts),
+    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:warning(NWarning), MA),
     NReply = maps:remove(warning, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warnings(Warnings)),
+    NWarnings = format_errors(Warnings, Opts),
+    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:warnings(NWarnings), MA),
     NReply = maps:remove(warnings, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{state := State} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:put(State)),
+    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:put(State), MA),
     NReply = maps:remove(state, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->
@@ -237,12 +245,26 @@ reply_to_monad(#{node := Node} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(Node)),
     NReply = maps:remove(node, Reply),
     reply_to_monad(NReply, MB, Opts);
+reply_to_monad(#{}, MA, _Opts) ->
+    MA;
 reply_to_monad(continue, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue));
-reply_to_monad({error, Reason}, MA, _Opts) ->
-    astranaut_traverse_monad:then(MA, astranaut_traverse_monad:fail(Reason));
+reply_to_monad({error, Reason}, MA, Opts) ->
+    NReason = format_error(Reason, Opts),
+    astranaut_traverse_monad:then(MA, astranaut_traverse_monad:fail(NReason));
 reply_to_monad({Node, State}, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:state(fun(_) -> {Node, State} end)).
+
+format_errors(Errors, Opts) ->
+    lists:map(fun(Error) -> format_error(Error, Opts) end, Errors).
+
+format_error({Line1, Error}, #{module := Module}) when is_integer(Line1) ->
+    {Line1, Module, Error};
+format_error({Line1, Module1, Error}, #{}) when is_integer(Line1) ->
+    {Line1, Module1, Error}; 
+format_error(Error, #{line := Line, module := Module}) ->
+    {Line, Module, Error}.
+
 
 transform_f(F, Monad, pre) ->
     fun(Node, #{step := pre  } = Attr) -> F(Node, Attr);
