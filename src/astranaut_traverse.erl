@@ -14,6 +14,7 @@
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
 -export([map_m/4, map_m/5]).
+-export([format_error/1]).
 
 -type traverse_node() :: tuple().
 -type traverse_error() :: term().
@@ -44,19 +45,19 @@
 
 -spec map(traverse_fun(), Node) -> traverse_return(Node).
 map(F, TopNode) ->
-    map(F, TopNode, #{final => true}).
+    map(F, TopNode, #{}).
 
 -spec reduce(traverse_state_fun(), State, _Node) -> traverse_return(State).
 reduce(F, Init, TopNode) ->
-    reduce(F, Init, TopNode, #{final => true}).
+    reduce(F, Init, TopNode, #{}).
 
 -spec map_with_state(traverse_state_fun(), State, Node) -> traverse_return({Node, State}).
 map_with_state(F, Init, Form) ->
-    map_with_state(F, Init, Form, #{final => true}).
+    map_with_state(F, Init, Form, #{}).
 
 -spec mapfold(traverse_state_fun(), State, Node) -> traverse_return({Node, State}).
 mapfold(F, Init, Node) ->
-    mapfold(F, Init, Node, #{final => true}).
+    mapfold(F, Init, Node, #{}).
 
 -spec map(traverse_fun(), Node, traverse_opts()) -> traverse_return(Node).
 map(F, TopNode, Opts) ->
@@ -81,7 +82,7 @@ map_with_state(F, Init, Node, Opts) ->
             {ok, {NNode, _State}, Errors, Warnings} ->
                 {ok, NNode, Errors, Warnings}
         end,
-    transform_final_reply(Node, Reply, Opts).
+    transform_final_reply(Reply, Node, Opts).
 
 -spec reduce(traverse_state_fun(), State, _Node, traverse_opts()) -> traverse_return(State).
 reduce(F, Init, TopNode, Opts) ->
@@ -103,38 +104,57 @@ reduce(F, Init, TopNode, Opts) ->
             {ok, {_NNode, State}, Errors, Warnings} ->
                 {ok, State, Errors, Warnings}
         end,
-    transform_final_reply(TopNode, NReply, Opts).
+    transform_final_reply(NReply, TopNode, Opts).
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
+    NOpts = maps:merge(#{module => ?MODULE, traverse => all}, Opts),
     Monad = astranaut_traverse_monad:new(),
-    NF = transform_mapfold_f(F, Opts),
-    NodeM = map_m(NF, Node, Monad, Opts),
-    transform_final_reply(Node, astranaut_traverse_monad:run(NodeM, Init), Opts).
+    NF = transform_mapfold_f(F, NOpts),
+    NodeM = map_m(NF, Node, Monad, NOpts),
+    transform_final_reply(astranaut_traverse_monad:run(NodeM, Init), Node, NOpts).
 
-transform_final_reply(Node, Reply, Opts) when is_map(Opts) ->
-    IsFinal = maps:get(final, Opts, true),
-    transform_final_reply(Node, Reply, IsFinal);
+format_error(Message) ->
+    case io_lib:deep_char_list(Message) of
+        true -> Message;
+        _    -> io_lib:write(Message)
+    end.
 
-transform_final_reply(_Node, {ok, Reply, [], []}, true) ->
+transform_final_reply(Reply, Forms, Opts) ->
+    case maps:find(final, Opts) of
+        {ok, true} ->
+            transform_final_reply_1(Reply, Forms, true);
+        error ->
+            transform_final_reply_1(Reply, Forms, true);
+        {ok, false} ->
+            Reply
+    end.
+
+transform_final_reply_1({ok, Reply, [], []}, _Forms, true) ->
     Reply;
-transform_final_reply(Node, {ok, Reply, [], Warnings}, true) ->
-    {warning, Reply, append_file(Node, Warnings)};
-transform_final_reply(Node, {ok, _Reply, Errors, Warnings}, true) ->
-    {error, append_file(Node, Errors), append_file(Node, Warnings)};
-transform_final_reply(_Node, Reply, _IsFinal) ->
-    Reply.
+transform_final_reply_1({ok, Reply, [], Warnings}, Forms, true) ->
+    File = file(Forms),
+    {warning, Reply, [{File, Warnings}]};
+transform_final_reply_1({ok, _Reply, Errors, Warnings}, Forms, true) ->
+    File = file(Forms),
+    {error, [{File, Errors}], [{File, Warnings}]}.
 
-append_file(Node, Errors) ->
-    File = astranaut:file(Node),
-    [{File, Errors}].
+file(Forms) when is_list(Forms) ->
+    case astranaut:attributes(file, Forms) of
+        [{File, _}|_] ->
+            File;
+        _ ->
+            ""
+    end;
+file(_) ->
+    "".
 
 -spec map_m(traverse_fun(), Node, M, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Monad, Opts) ->
     map_m(F, Nodes, Monad, Opts, #{node => form}).
 
 map_m(F, Nodes, Monad, Opts, Attrs) ->
-    TraverseStyle = maps:get(traverse, Opts, all),
+    TraverseStyle = maps:get(traverse, Opts),
     NF = transform_f(F, Monad, TraverseStyle),
     map_m_1(NF, Nodes, Monad, Attrs).
 
