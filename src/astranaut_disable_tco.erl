@@ -17,7 +17,8 @@
 %%% API
 %%%===================================================================
 parse_transform(Ast, _Opt) ->
-    astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast, #{module => ?MODULE, traverse => pre}).
+    Opts = #{parse_transform => true, formatter => ?MODULE},
+    astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast, Opts).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -34,7 +35,8 @@ format_error(Message) ->
 %%% Internal functions
 %%%===================================================================
 walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
-    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, #{traverse => leaf, module => ?MODULE}),
+    Opts =  #{traverse => leaf, formatter => ?MODULE},
+    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, Opts),
     {Function, Variables};
 walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
@@ -77,6 +79,8 @@ walk_body([{call, _Line, {Type, _Line1, FName}, _Args} = Rep], Name, Variables) 
 walk_body([{call, _Line, {remote, _Line1, _Module, _Function}, _Args} = Rep], _Name, Variables) ->
     {NRep, NVariables} = add_try_catch(Rep, Variables),
     {[NRep], NVariables};
+walk_body([H], _Name, Variables) ->
+    {[H], Variables};
 walk_body([H|T], Name, Variables) ->
     {NT, NVariables} = walk_body(T, Name, Variables),
     {[H|NT], NVariables};

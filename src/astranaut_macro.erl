@@ -22,9 +22,14 @@ parse_transform(Forms, Options) ->
         ok ->
             Macros = maps:merge(LocalMacros, RemoteMacros),
             NForms = exec_macros(Forms, Macros, Module, File),
-            NNForms = astranaut_traverse:map(
-                        fun(Node, _Attr) -> walk_macros(Node, Macros, Module, File) end, NForms, #{traverse => pre}),
-            astranaut:reorder_exports(NNForms);
+            Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
+            TraverseReturn =
+                astranaut_traverse:map(
+                  fun(Node, _Attr) -> walk_macros(Node, Macros, Module, File) end, NForms, Opts),
+            astranaut_traverse:map_traverse_return(
+              fun(FormsAcc) ->
+                      astranaut:reorder_exports(FormsAcc)
+              end, TraverseReturn);
         {error, Errors, Warnings} ->
             {error, Errors, Warnings}
     end.

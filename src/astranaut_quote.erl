@@ -17,7 +17,8 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    astranaut_traverse:map(fun walk/2, Forms, #{traverse => pre, module => ?MODULE}).
+    Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
+    astranaut_traverse:map(fun walk/2, Forms, Opts).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of

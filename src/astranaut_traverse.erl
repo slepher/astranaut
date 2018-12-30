@@ -14,7 +14,7 @@
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
 -export([map_m/4, map_m/5]).
--export([format_error/1]).
+-export([map_traverse_return/2, format_error/1]).
 
 -type traverse_node() :: tuple().
 -type traverse_error() :: term().
@@ -42,7 +42,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
 -spec map(traverse_fun(), Node) -> traverse_return(Node).
 map(F, TopNode) ->
     map(F, TopNode, #{}).
@@ -62,92 +61,56 @@ mapfold(F, Init, Node) ->
 -spec map(traverse_fun(), Node, traverse_opts()) -> traverse_return(Node).
 map(F, TopNode, Opts) ->
     NF = fun(Node, State, Attr) ->
-                 case F(Node, Attr) of
-                     Map when is_map(Map) ->
-                         Map;
-                     {error, Reason} ->
-                         {error, Reason};
-                     NNode ->
-                         {NNode, State}
-                 end
+                 WalkReturn = F(Node, Attr),
+                 map_walk_return(fun(NNode) -> {NNode, State} end, WalkReturn)
          end,
     map_with_state(NF, ok, TopNode, Opts).
 
--spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
-map_with_state(F, Init, Node, Opts) ->
-    Reply = 
-        case mapfold(F, Init, Node, Opts#{final => false}) of
-            {error, Errors, Warnings} ->
-                {error, Errors, Warnings};
-            {ok, {NNode, _State}, Errors, Warnings} ->
-                {ok, NNode, Errors, Warnings}
-        end,
-    transform_final_reply(Reply, Node, Opts).
-
 -spec reduce(traverse_state_fun(), State, _Node, traverse_opts()) -> traverse_return(State).
 reduce(F, Init, TopNode, Opts) ->
-    NF = 
-        fun(Node, State, Attr) ->
-                case F(Node, State, Attr) of
-                    Map when is_map(Map) ->
-                        Map;
-                    {error, Reason} ->
-                        {error, Reason};
-                    NState ->
-                        {Node, NState}
-                end
-        end,
-    NReply = 
-        case mapfold(NF, Init, TopNode, Opts#{final => false}) of
-            {error, Errors, Warnings} ->
-                {error, Errors, Warnings};
-            {ok, {_NNode, State}, Errors, Warnings} ->
-                {ok, State, Errors, Warnings}
-        end,
-    transform_final_reply(NReply, TopNode, Opts).
+    NF = fun(Node, State, Attr) ->
+                 WalkReturn = F(Node, State, Attr),
+                 map_walk_return(fun(NState) -> {Node, NState} end, WalkReturn)
+         end,
+    map_traverse_return(
+      fun({_NNode, State}) ->
+              State
+      end, mapfold(NF, Init, TopNode, Opts)).
+
+-spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
+map_with_state(F, Init, Node, Opts) ->
+    Reply = mapfold(F, Init, Node, Opts),
+    NReply = map_traverse_return(
+               fun({NNode, _State}) ->
+                       NNode
+               end, Reply),
+    parse_transform_return(NReply, Node, Opts).
+
+mapfold(F, Init, Node, Opts) ->
+    SimplifyReturn = maps:get(simplify_return, Opts, true),
+    Return = mapfold_1(F, Init, Node, Opts),
+    simplify_return(Return, SimplifyReturn).
+
+map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
+    {ok, F(Reply), Errors, Warnings};
+map_traverse_return(_F, {error, Errors, Warnings}) ->
+    {error, Errors, Warnings};
+map_traverse_return(F, Reply) ->
+    F(Reply).
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
-mapfold(F, Init, Node, Opts) ->
+mapfold_1(F, Init, Node, Opts) ->
     NOpts = maps:merge(#{module => ?MODULE, traverse => all}, Opts),
     Monad = astranaut_traverse_monad:new(),
     NF = transform_mapfold_f(F, NOpts),
     NodeM = map_m(NF, Node, Monad, NOpts),
-    transform_final_reply(astranaut_traverse_monad:run(NodeM, Init), Node, NOpts).
+    astranaut_traverse_monad:run(NodeM, Init).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
         _    -> io_lib:write(Message)
     end.
-
-transform_final_reply(Reply, Forms, Opts) ->
-    case maps:find(final, Opts) of
-        {ok, true} ->
-            transform_final_reply_1(Reply, Forms, true);
-        error ->
-            transform_final_reply_1(Reply, Forms, true);
-        {ok, false} ->
-            Reply
-    end.
-
-transform_final_reply_1({ok, Reply, [], []}, _Forms, true) ->
-    Reply;
-transform_final_reply_1({ok, Reply, [], Warnings}, Forms, true) ->
-    File = file(Forms),
-    {warning, Reply, [{File, Warnings}]};
-transform_final_reply_1({ok, _Reply, Errors, Warnings}, Forms, true) ->
-    File = file(Forms),
-    {error, [{File, Errors}], [{File, Warnings}]}.
-
-file(Forms) when is_list(Forms) ->
-    case astranaut:attributes(file, Forms) of
-        [{File, _}|_] ->
-            File;
-        _ ->
-            ""
-    end;
-file(_) ->
-    "".
 
 -spec map_m(traverse_fun(), Node, M, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Monad, Opts) ->
@@ -278,13 +241,12 @@ reply_to_monad({Node, State}, MA, _Opts) ->
 format_errors(Errors, Opts) ->
     lists:map(fun(Error) -> format_error(Error, Opts) end, Errors).
 
-format_error({Line1, Error}, #{module := Module}) when is_integer(Line1) ->
+format_error({Line1, Error}, #{formatter := Module}) when is_integer(Line1) ->
     {Line1, Module, Error};
 format_error({Line1, Module1, Error}, #{}) when is_integer(Line1) ->
     {Line1, Module1, Error}; 
-format_error(Error, #{line := Line, module := Module}) ->
+format_error(Error, #{line := Line, formatter := Module}) ->
     {Line, Module, Error}.
-
 
 transform_f(F, Monad, pre) ->
     fun(Node, #{step := pre  } = Attr) -> F(Node, Attr);
@@ -303,3 +265,45 @@ transform_f(F, Monad, leaf) ->
     end;
 transform_f(F, _Monad, _) ->
     F.
+
+map_walk_return(F, WalkReturn) ->
+    case WalkReturn of
+        Map when is_map(Map) ->
+            Map;
+        {error, Reason} ->
+            {error, Reason};
+        WalkReturn ->
+            F(WalkReturn)
+    end.
+
+simplify_return({ok, Reply, [], []}, true) ->
+    Reply;
+simplify_return(Other, _) ->
+    Other.
+
+parse_transform_return(Reply, Forms, Opts) when is_map(Opts) ->
+    ParseTransForm = maps:get(parse_transform, Opts, false),
+    parse_transform_return(Reply, Forms, ParseTransForm);
+parse_transform_return({ok, Reply, [], []}, _Forms, true) ->
+    Reply;
+parse_transform_return({ok, Reply, [], Warnings}, Forms, true) ->
+    File = file(Forms),
+    {warning, Reply, [{File, Warnings}]};
+parse_transform_return({ok, _Reply, Errors, Warnings}, Forms, true) ->
+    File = file(Forms),
+    {error, [{File, Errors}], [{File, Warnings}]};
+parse_transform_return({error, Errors, Warnings}, Forms, true) ->
+    File = file(Forms),
+    {error, [{File, Errors}], [{File, Warnings}]};
+parse_transform_return(Reply, _Forms, _) ->
+    Reply.
+
+file(Forms) when is_list(Forms) ->
+    case astranaut:attributes(file, Forms) of
+        [{File, _}|_] ->
+            File;
+        _ ->
+            ""
+    end;
+file(_) ->
+    "".
