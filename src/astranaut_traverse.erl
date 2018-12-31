@@ -95,6 +95,8 @@ map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
     {ok, F(Reply), Errors, Warnings};
 map_traverse_return(_F, {error, Errors, Warnings}) ->
     {error, Errors, Warnings};
+map_traverse_return(F, {warning, Reply, Warnings}) ->
+    {warning, F(Reply), Warnings};
 map_traverse_return(F, Reply) ->
     F(Reply).
 
