@@ -97,14 +97,12 @@ quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
     unquote_splicing_form(Unquotes, T, Opts);
 quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
     {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
-
 quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
     metavariable_list(VarForm, T, Opts);
 quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
     metavariable(VarForm, Opts);
 quote_1({atom, _Line1, Atom} = VarForm, Opts) when is_atom(Atom) ->
-    metavariable(VarForm, Opts);
-
+    metavariable(VarForm, Opts);    
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
 quote_1([H|T], #{line := Line} = Opts) ->
@@ -128,15 +126,36 @@ quote_tuple(Tuple, #{line := Line} = Opts) ->
             {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
     end.
 
-quote_tuple_list([Action, _TupleLine|Rest], #{quote_type := expression, replaced_line := true} = Opts) ->
-    quote_tuple_list_1([Action, 0|Rest], Opts);
-quote_tuple_list(TupleList, #{quote_type := expression} = Opts) ->
+%% special form of {attribute, Line, spec, {{F, A}, Spec}}.
+%% there is no line in {F, A}.
+quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
+    NOpts = maps:remove(attribute, Opts),
+    [quote_1(MA, Opts#{attribute => attr}), quote_1(Spec, NOpts)];
+%% special form of {attribute, Line, export, [{F, A}...]}.
+%% special form of {attribute, Line, Attribute, T}.
+%% there is no line in {F, A} and T.
+quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     quote_tuple_list_1(TupleList, Opts);
-quote_tuple_list([Action, TupleLine|Rest], #{quote_type := pattern} = Opts) ->
-    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, Opts)].
+quote_tuple_list([Action, _TupleLine|Rest] = TupleList, 
+                 #{quote_type := expression, replaced_line := true} = Opts) ->
+    NOpts = update_attribute_opt(TupleList, Opts),
+    quote_tuple_list_1([Action, 0|Rest], NOpts);
+quote_tuple_list(TupleList, #{quote_type := expression} = Opts) ->
+    NOpts = update_attribute_opt(TupleList, Opts),
+    quote_tuple_list_1(TupleList, NOpts);
+quote_tuple_list([Action, TupleLine|Rest] = TupleList, #{quote_type := pattern} = Opts) ->
+    NOpts = update_attribute_opt(TupleList, Opts),
+    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, NOpts)].
 
 quote_tuple_list_1(List, Opts) ->
     lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
+
+update_attribute_opt([attribute, _Line, spec|_T], Opts) ->
+    Opts#{attribute => spec};
+update_attribute_opt([attribute|_T], Opts) ->
+    Opts#{attribute => attr};
+update_attribute_opt(_, Opts) ->
+    Opts.
 
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
