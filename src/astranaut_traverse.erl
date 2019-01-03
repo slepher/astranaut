@@ -208,8 +208,8 @@ map_m_subtrees(F, [Patterns, Expressions], NodeType, Opts)
                 end, Opts)
       end, Opts);
 map_m_subtrees(F, [Patterns, Guards, Expressions], clause, Opts) ->
-    %% if node type is match_expr or clause 
-    %% make first subtree pattern, make rest expression
+    %% if node type is clause contains guards 
+    %% make first subtree pattern, make second subtree guard, make third subtree expression
     monad_bind(
       map_m_1(F, Patterns, Opts#{node => pattern}),
       fun(NPatterns) ->
@@ -221,19 +221,6 @@ map_m_subtrees(F, [Patterns, Guards, Expressions], clause, Opts) ->
                           fun(NExpressions) ->
                                   monad_return([NPatterns, NGuards, NExpressions], Opts)
                           end, Opts)
-                end, Opts)
-      end, Opts);
-map_m_subtrees(F, [Pattern|Rest], NodeType, Opts) 
-  when (NodeType == match_expr) or (NodeType == clause) ->
-    %% if node type is match_expr or clause 
-    %% make first subtree pattern, make rest expression
-    monad_bind(
-      map_m_1(F, Pattern, Opts#{node => pattern}),
-      fun(NHead) ->
-              monad_bind(
-                map_m_1(F, Rest, Opts#{node => expression}),
-                fun(NRest) ->
-                        monad_return([NHead|NRest], Opts)
                 end, Opts)
       end, Opts);
 map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
@@ -253,8 +240,6 @@ map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
                       monad_return([[NameTree], NBodies], Opts)
               end, Opts)
     end;
-map_m_subtrees(F, Nodes, attribute, Opts) ->
-    map_m_1(F, Nodes, Opts);
 map_m_subtrees(F, Nodes, _NodeType, Opts) ->
     map_m_1(F, Nodes, Opts).
 
