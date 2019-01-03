@@ -191,15 +191,6 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
          (NodeB) ->
               BMC(NodeB)
       end, Opts).
-      
-monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:bind(A, AFB, Monad).
-
-monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:return(A, Monad).
-
-monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:map_m(F, MAs, Monad).
 
 map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
@@ -240,6 +231,13 @@ map_m_subtrees(F, Nodes, _NodeType, Opts) ->
 
 attribute_name({tree, atom, _, Name}) ->
     Name.
+
+monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:bind(A, AFB, Monad).
+monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:return(A, Monad).
+monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:map_m(F, MAs, Monad).
 
 transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->
@@ -329,6 +327,8 @@ map_walk_return(F, WalkReturn) ->
             Map;
         {error, Reason} ->
             {error, Reason};
+        {ok, WalkReturn} ->
+            {ok, F(WalkReturn)};
         WalkReturn ->
             F(WalkReturn)
     end.
