@@ -120,9 +120,11 @@ parse_error({_, M, R}) when is_atom(M) ->
 parse_error(R) ->
     fail("unknown parse error: ~tp", [R]).
 
+-spec(fail(any()) -> no_return()).
 fail(Text) ->
     fail(Text, []).
 
+-spec(fail(any(), any()) -> no_return()).
 fail(Fs, As) ->
     throw({error, lists:flatten(io_lib:format(Fs, As))}).
 

@@ -19,10 +19,16 @@
 -type traverse_node() :: tuple().
 -type traverse_error() :: term().
 -type traverse_state() :: term().
--type traverse_opts() :: #{traverse := traverse_style(), parse_transform := boolean(), node := node_type()}.
--type node_type() :: module | file | export | import | type | spec | pattern | expression.
--type traverse_style() :: pre | post | leaf | all.
--type traverse_attr() :: #{step := pre | post | lef, node := form | pattern | expression}.
+-type traverse_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
+                           node => node_type(), formatter => module() }.
+-type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
+                                 node => node_type(), formatter => module(),
+                                 monad_class := module(), monad := term()
+                                }.
+-type node_type() :: module | file | export | import | type | spec | pattern | expression | form.
+-type traverse_style() :: traverse_step() | all.
+-type traverse_step() :: pre | post | leaf.
+-type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
 -type traverse_fun_return() :: #{node := traverse_node(), state := traverse_state(), 
                                  continue := boolean(), 
                                  error := traverse_error(), warning := traverse_error(),
@@ -30,20 +36,27 @@
                                {error, traverse_error()} | continue |
                                {traverse_node(), traverse_state()}| traverse_node().
 
--type traverse_return(ReturnType) :: ReturnType |  {warning, ReturnType, [traverse_return_error()]} |
-                                     {error, [traverse_return_error()], [traverse_return_error()]}.
+-type traverse_return(ReturnType) :: ReturnType | 
+                                     {ok, ReturnType, traverse_return_error(), traverse_return_error()} |
+                                     {error, traverse_return_error(), traverse_return_error()}.
+
+-type traverse_final_return(ReturnType) :: traverse_return(ReturnType) | parse_transform_return(ReturnType).
+
+-type parse_transform_return(ReturnType) :: ReturnType |  {warning, ReturnType, parse_transform_return_error()} |
+                                            {error, parse_transform_return_error(), parse_transform_return_error()}.
 
 -type traverse_fun() :: fun((traverse_node(), traverse_attr()) -> traverse_fun_return()).
 -type traverse_state_fun() :: fun((traverse_node(), traverse_state(), traverse_attr()) -> traverse_fun_return()).
 -type parse_transform_module() :: module().
 -type compile_file() :: string().
 -type line() :: integer().
--type traverse_return_error() :: [{compile_file(), [{line(), parse_transform_module(), traverse_error()}]}].
+-type traverse_return_error() :: [{line(), parse_transform_module(), traverse_error()}].
+-type parse_transform_return_error() :: [{compile_file(), traverse_return_error()}].
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec map(traverse_fun(), Node) -> traverse_return(Node).
+-spec map(traverse_fun(), Node) -> traverse_final_return(Node).
 map(F, TopNode) ->
     map(F, TopNode, #{}).
 
@@ -51,7 +64,7 @@ map(F, TopNode) ->
 reduce(F, Init, TopNode) ->
     reduce(F, Init, TopNode, #{}).
 
--spec map_with_state(traverse_state_fun(), State, Node) -> traverse_return({Node, State}).
+-spec map_with_state(traverse_state_fun(), State, Node) -> traverse_final_return({Node, State}).
 map_with_state(F, Init, Form) ->
     map_with_state(F, Init, Form, #{}).
 
@@ -59,7 +72,7 @@ map_with_state(F, Init, Form) ->
 mapfold(F, Init, Node) ->
     mapfold(F, Init, Node, #{}).
 
--spec map(traverse_fun(), Node, traverse_opts()) -> traverse_return(Node).
+-spec map(traverse_fun(), Node, traverse_opts()) -> traverse_final_return(Node).
 map(F, TopNode, Opts) ->
     NF = fun(Node, State, Attr) ->
                  WalkReturn = F(Node, Attr),
@@ -78,7 +91,7 @@ reduce(F, Init, TopNode, Opts) ->
               State
       end, mapfold(NF, Init, TopNode, Opts)).
 
--spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
+-spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_final_return({Node, State}).
 map_with_state(F, Init, Node, Opts) ->
     Reply = mapfold(F, Init, Node, Opts),
     NReply = map_traverse_return(
@@ -87,11 +100,13 @@ map_with_state(F, Init, Node, Opts) ->
                end, Reply),
     parse_transform_return(NReply, Node, Opts).
 
+-spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
     SimplifyReturn = maps:get(simplify_return, Opts, true),
     Return = mapfold_1(F, Init, Node, Opts),
     simplify_return(Return, SimplifyReturn).
 
+-spec map_traverse_return(fun((A) -> B), traverse_return(A)) -> parse_transform_return(B).
 map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
     {ok, F(Reply), Errors, Warnings};
 map_traverse_return(_F, {error, Errors, Warnings}) ->
@@ -101,7 +116,20 @@ map_traverse_return(F, {warning, Reply, Warnings}) ->
 map_traverse_return(F, Reply) ->
     F(Reply).
 
--spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
+-spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
+map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
+    NOpts = maps:merge(#{formatter => ?MODULE, traverse => all, node => form}, Opts),
+    NF = transform_f(F, NOpts),
+    map_m_1(NF, Nodes, NOpts).
+
+format_error(Message) ->
+    case io_lib:deep_char_list(Message) of
+        true -> Message;
+        _    -> io_lib:write(Message)
+    end.
+%%====================================================================
+%% Internal functions
+%%====================================================================
 mapfold_1(F, Init, Node, Opts) ->
     Monad = astranaut_traverse_monad:new(),
     NOpts = Opts#{monad => Monad, monad_class => astranaut_monad},
@@ -109,21 +137,6 @@ mapfold_1(F, Init, Node, Opts) ->
     NodeM = map_m(NF, Node, NOpts),
     astranaut_traverse_monad:run(NodeM, Init).
 
-format_error(Message) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _    -> io_lib:write(Message)
-    end.
-
--spec map_m(traverse_fun(), Node, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
-map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
-    NOpts = maps:merge(#{module => ?MODULE, traverse => all, node => form}, Opts),
-    NF = transform_f(F, NOpts),
-    map_m_1(NF, Nodes, NOpts).
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
 map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
     monad_map_m(
       fun(Subtree) ->
@@ -139,10 +152,11 @@ map_m_1(F, NodeA, #{node := NodeType} = Opts) ->
         end,
     %% do form
     %% do([Monad ||
-    %%           YNode <- F(pre, XNode),
-    %%           NSubtrees <- map_m(F, Subtrees, Monad),
-    %%           ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
-    %%           F(post, ZNode)
+    %%           NodeB <- F(NodeA, Attrs),
+    %%           SubTreesB = erl_syntax:subtrees(NodeB),
+    %%           SubtreesC <- map_m(F, SubTreesB, Opts),
+    %%           NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, SubtreesC)),
+    %%           F(NodeD, Attrs)
     %%    ]).
     bind_with_continue(
       NodeA, 
@@ -178,7 +192,6 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
       
-
 monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:bind(A, AFB, Monad).
 
