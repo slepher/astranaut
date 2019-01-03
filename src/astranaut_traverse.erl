@@ -124,8 +124,6 @@ map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-
 map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
     monad_map_m(
       fun(Subtree) ->
@@ -142,7 +140,6 @@ map_m_1(F, NodeA, #{node := NodeType} = Opts) ->
     %% do form
     %% do([Monad ||
     %%           YNode <- F(pre, XNode),
-    %%         
     %%           NSubtrees <- map_m(F, Subtrees, Monad),
     %%           ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
     %%           F(post, ZNode)
@@ -245,26 +242,26 @@ transform_mapfold_f(F, Opts) ->
 %% transform user sytle traverse return to astranaut_traverse_monad
 reply_to_monad(#{error := Error} = Reply, MA, Opts) ->
     NError = format_error(Error, Opts),
-    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:error(NError), MA),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:error(NError)),
     NReply = maps:remove(error, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{errors := Errors} = Reply, MA, Opts) ->
     NErrors = format_errors(Errors, Opts),
-    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:errors(NErrors), MA),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:errors(NErrors)),
     NReply = maps:remove(errors, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{warning := Warning} = Reply, MA, Opts) ->
     NWarning = format_error(Warning, Opts),
-    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:warning(NWarning), MA),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warning(NWarning)),
     NReply = maps:remove(warning, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
     NWarnings = format_errors(Warnings, Opts),
-    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:warnings(NWarnings), MA),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warnings(NWarnings)),
     NReply = maps:remove(warnings, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{state := State} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(astranaut_traverse_monad:put(State), MA),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:put(State)),
     NReply = maps:remove(state, Reply),
     reply_to_monad(NReply, MB, Opts);
 reply_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->

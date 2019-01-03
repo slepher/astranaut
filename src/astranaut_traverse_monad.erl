@@ -11,7 +11,7 @@
 %% API
 -export([new/0]).
 -export([run/2]).
--export([bind/2, then/2, return/1]).
+-export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
 -export([get/0, put/1, state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
@@ -52,6 +52,17 @@ bind(MA, KMB) ->
 
 then(MA, MB) ->
     astranaut_monad:then(MA, MB, new()).
+
+left_then(MA, MB) ->
+    bind(
+      MA, 
+      fun(A) -> 
+              bind(
+                MB,
+                fun(_B) ->
+                        return(A)
+                end)
+      end).
 
 return(A) ->
     astranaut_monad:return(A, new()).
