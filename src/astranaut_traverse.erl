@@ -25,14 +25,14 @@
                                  node => node_type(), formatter => module(),
                                  monad_class := module(), monad := term()
                                 }.
--type node_type() :: module | file | export | import | type | spec | pattern | expression | form.
+-type node_type() :: module | file | export | import | type | spec | pattern | expression | form | custom.
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
--type traverse_fun_return() :: #{node := traverse_node(), state := traverse_state(), 
-                                 continue := boolean(), 
-                                 error := traverse_error(), warning := traverse_error(),
-                                 errors := [traverse_error()], warings := [traverse_error()]} |
+-type traverse_fun_return() :: #{node => traverse_node(), state => traverse_state(),
+                                 continue => boolean(),
+                                 error => traverse_error(), warning => traverse_error(),
+                                 errors => [traverse_error()], warings => [traverse_error()]} |
                                {error, traverse_error()} | continue |
                                {traverse_node(), traverse_state()}| traverse_node().
 
