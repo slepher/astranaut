@@ -25,7 +25,7 @@
                                  node => node_type(), formatter => module(),
                                  monad_class := module(), monad := term()
                                 }.
--type node_type() :: module | file | export | import | type | spec | pattern | expression | form | custom.
+-type node_type() :: module | file | export | import | type | spec | pattern | expression | guard | form | atom().
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
@@ -194,6 +194,35 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
 
 map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
+map_m_subtrees(F, [Patterns, Expressions], NodeType, Opts) 
+  when (NodeType == match_expr) or (NodeType == clause) ->
+    %% if node type is match_expr or clause 
+    %% make first subtree pattern, make second subtree expression
+    monad_bind(
+      map_m_1(F, Patterns, Opts#{node => pattern}),
+      fun(NPatterns) ->
+              monad_bind(
+                map_m_1(F, Expressions, Opts#{node => expression}),
+                fun(NExpressions) ->
+                        monad_return([NPatterns, NExpressions], Opts)
+                end, Opts)
+      end, Opts);
+map_m_subtrees(F, [Patterns, Guards, Expressions], clause, Opts) ->
+    %% if node type is match_expr or clause 
+    %% make first subtree pattern, make rest expression
+    monad_bind(
+      map_m_1(F, Patterns, Opts#{node => pattern}),
+      fun(NPatterns) ->
+              monad_bind(
+                map_m_1(F, Guards, Opts#{node => guard}),
+                fun(NGuards) ->
+                        monad_bind(
+                          map_m_1(F, Expressions, Opts#{node => expression}),
+                          fun(NExpressions) ->
+                                  monad_return([NPatterns, NGuards, NExpressions], Opts)
+                          end, Opts)
+                end, Opts)
+      end, Opts);
 map_m_subtrees(F, [Pattern|Rest], NodeType, Opts) 
   when (NodeType == match_expr) or (NodeType == clause) ->
     %% if node type is match_expr or clause 
