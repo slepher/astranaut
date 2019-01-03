@@ -13,13 +13,14 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
--export([map_m/4, map_m/5]).
+-export([map_m/3]).
 -export([map_traverse_return/2, format_error/1]).
 
 -type traverse_node() :: tuple().
 -type traverse_error() :: term().
 -type traverse_state() :: term().
--type traverse_opts() :: #{traverse := traverse_style(), final := boolean()}.
+-type traverse_opts() :: #{traverse := traverse_style(), parse_transform := boolean(), node := node_type()}.
+-type node_type() :: module | file | export | import | type | spec | pattern | expression.
 -type traverse_style() :: pre | post | leaf | all.
 -type traverse_attr() :: #{step := pre | post | lef, node := form | pattern | expression}.
 -type traverse_fun_return() :: #{node := traverse_node(), state := traverse_state(), 
@@ -102,10 +103,10 @@ map_traverse_return(F, Reply) ->
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold_1(F, Init, Node, Opts) ->
-    NOpts = maps:merge(#{module => ?MODULE, traverse => all}, Opts),
     Monad = astranaut_traverse_monad:new(),
+    NOpts = Opts#{monad => Monad, monad_class => astranaut_monad},
     NF = transform_mapfold_f(F, NOpts),
-    NodeM = map_m(NF, Node, Monad, NOpts),
+    NodeM = map_m(NF, Node, NOpts),
     astranaut_traverse_monad:run(NodeM, Init).
 
 format_error(Message) ->
@@ -114,23 +115,25 @@ format_error(Message) ->
         _    -> io_lib:write(Message)
     end.
 
--spec map_m(traverse_fun(), Node, M, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
-map_m(F, Nodes, Monad, Opts) ->
-    map_m(F, Nodes, Monad, Opts, #{node => form}).
+-spec map_m(traverse_fun(), Node, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
+map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
+    NOpts = maps:merge(#{module => ?MODULE, traverse => all, node => form}, Opts),
+    NF = transform_f(F, NOpts),
+    map_m_1(NF, Nodes, NOpts).
 
-map_m(F, Nodes, Monad, Opts, Attrs) ->
-    TraverseStyle = maps:get(traverse, Opts),
-    NF = transform_f(F, Monad, TraverseStyle),
-    map_m_1(NF, Nodes, Monad, Attrs).
+%%====================================================================
+%% Internal functions
+%%====================================================================
 
-map_m_1(F, Nodes, Monad, Attrs) when is_list(Nodes) ->
-    astranaut_monad:map_m(
+
+map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
+    monad_map_m(
       fun(Subtree) ->
-              map_m_1(F, Subtree, Monad, Attrs)
-      end, Nodes, Monad);
-map_m_1(F, XNode, Monad, Attrs) ->
+              map_m_1(F, Subtree, Opts)
+      end, Nodes, Opts);
+map_m_1(F, NodeA, #{node := NodeType} = Opts) ->
     PreType = 
-        case erl_syntax:subtrees(XNode) of
+        case erl_syntax:subtrees(NodeA) of
             [] ->
                 leaf;
             _Subtrees ->
@@ -144,48 +147,90 @@ map_m_1(F, XNode, Monad, Attrs) ->
     %%           ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
     %%           F(post, ZNode)
     %%    ]).
-    astranaut_monad:bind(
-      F(XNode, Attrs#{step => PreType}),
-      fun(continue) ->
-              astranaut_monad:return(XNode, Monad);
-         ({continue, YNode}) ->
-              astranaut_monad:return(YNode, Monad);
-         (YNode) ->
-              case erl_syntax:subtrees(YNode) of
+    bind_with_continue(
+      NodeA, 
+      F(NodeA, #{step => PreType, node => NodeType}),
+      fun(NodeB) ->
+              case erl_syntax:subtrees(NodeB) of
                   [] ->
-                      astranaut_monad:return(YNode, Monad);
+                      monad_return(NodeB, Opts);
                   Subtrees ->
-                      NodeType = erl_syntax:type(YNode),
-                      astranaut_monad:bind(
-                        map_m_subtrees(F, Subtrees, Monad, NodeType, Attrs),
+                      SyntaxType = erl_syntax:type(NodeB),
+                      monad_bind(
+                        map_m_subtrees(F, Subtrees, SyntaxType, Opts),
                         fun(NSubTrees) ->
-                                ZNode = erl_syntax:revert(erl_syntax:update_tree(YNode, NSubTrees)),
-                                F(ZNode, Attrs#{step => post})
-                        end, Monad)
+                                NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, NSubTrees)),
+                                bind_with_continue(
+                                  NodeC, 
+                                  F(NodeC, #{step => post, node => NodeType}),
+                                  fun(NodeD) ->
+                                          monad_return(NodeD, Opts)
+                                  end, Opts)
+                        end, Opts)
               end
-      end, Monad).
+      end, Opts).
 
-map_m_subtrees(F, Nodes, Monad, _NodeType, #{node := pattern} = Attrs) ->
-    map_m_1(F, Nodes, Monad, Attrs);
-map_m_subtrees(F, [Pattern|Rest], Monad, NodeType, Attrs) 
+bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
+    monad_bind(
+      MNodeB,
+      fun(continue) ->
+              monad_return(NodeA, Opts);
+         ({continue, NodeB}) ->
+              monad_return(NodeB, Opts);
+         (NodeB) ->
+              BMC(NodeB)
+      end, Opts).
+      
+
+monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:bind(A, AFB, Monad).
+
+monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:return(A, Monad).
+
+monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:map_m(F, MAs, Monad).
+
+map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
+    map_m_1(F, Nodes, Opts);
+map_m_subtrees(F, [Pattern|Rest], NodeType, Opts) 
   when (NodeType == match_expr) or (NodeType == clause) ->
     %% if node type is match_expr or clause 
     %% make first subtree pattern, make rest expression
-    astranaut_monad:bind(
-      map_m_1(F, Pattern, Monad, Attrs#{node => pattern}),
+    monad_bind(
+      map_m_1(F, Pattern, Opts#{node => pattern}),
       fun(NHead) ->
-              astranaut_monad:bind(
-                map_m_1(F, Rest, Monad, Attrs#{node => expression}),
+              monad_bind(
+                map_m_1(F, Rest, Opts#{node => expression}),
                 fun(NRest) ->
-                        astranaut_monad:return([NHead|NRest], Monad)
-                end, Monad)
-      end, Monad);
-map_m_subtrees(F, Nodes, Monad, _NodeType, Attrs) ->
-    map_m_1(F, Nodes, Monad, Attrs).
+                        monad_return([NHead|NRest], Opts)
+                end, Opts)
+      end, Opts);
+map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
+    Name = attribute_name(NameTree),
+    case Name of
+        export ->
+            % do not traverse export attribute
+            monad_return([[NameTree], BodyTrees], Opts);
+        import ->
+            % do not traverse import attribute
+            monad_return([[NameTree], BodyTrees], Opts);
+        _ ->
+            Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
+            monad_bind(
+              map_m_1(F, Bodies, Opts#{node => Name}),
+              fun(NBodies) ->
+                      monad_return([[NameTree], NBodies], Opts)
+              end, Opts)
+    end;
+map_m_subtrees(F, Nodes, attribute, Opts) ->
+    map_m_1(F, Nodes, Opts);
+map_m_subtrees(F, Nodes, _NodeType, Opts) ->
+    map_m_1(F, Nodes, Opts).
 
-%%====================================================================
-%% Internal functions
-%%====================================================================
+attribute_name({tree, atom, _, Name}) ->
+    Name.
+
 transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->
             astranaut_traverse_monad:bind(
@@ -250,22 +295,22 @@ format_error({Line1, Module1, Error}, #{}) when is_integer(Line1) ->
 format_error(Error, #{line := Line, formatter := Module}) ->
     {Line, Module, Error}.
 
-transform_f(F, Monad, pre) ->
+transform_f(F, #{traverse := pre} = Opts) ->
     fun(Node, #{step := pre  } = Attr) -> F(Node, Attr);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
-       (Node, #{step := post }) -> astranaut_monad:return(Node, Monad)
+       (Node, #{step := post }) -> monad_return(Node, Opts)
     end;
-transform_f(F, Monad, post) ->
-    fun(Node, #{step := pre  }) -> astranaut_monad:return(Node, Monad);
+transform_f(F, #{traverse := post} = Opts) ->
+    fun(Node, #{step := pre  }) -> monad_return(Node, Opts);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
        (Node, #{step := post } = Attr) -> F(Node, Attr)
     end;
-transform_f(F, Monad, leaf) ->
-    fun(Node, #{step := pre  }) -> astranaut_monad:return(Node, Monad);
+transform_f(F, #{traverse := leaf} = Opts) ->
+    fun(Node, #{step := pre  }) -> monad_return(Node, Opts);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
-       (Node, #{step := post }) -> astranaut_monad:return(Node, Monad)
+       (Node, #{step := post }) -> monad_return(Node, Opts)
     end;
-transform_f(F, _Monad, _) ->
+transform_f(F, _) ->
     F.
 
 map_walk_return(F, WalkReturn) ->

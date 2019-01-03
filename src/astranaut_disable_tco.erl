@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_disable_tco).
 
--compile({parse_transform, astranaut_quote}).
+-include("quote.hrl").
 
 %% API
 -export([parse_transform/2, format_error/1]).

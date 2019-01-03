@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_macro).
 
+-include("quote.hrl").
+
 %% API
 -export([parse_transform/2, format_error/1]).
 
