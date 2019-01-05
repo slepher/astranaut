@@ -118,38 +118,39 @@ quote_tuple(Tuple, #{line := Line} = Opts) ->
     TupleList = tuple_to_list(Tuple),
     case TupleList of
         [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-            NOpts = Opts#{line => TupleLine},
-            {tuple, TupleLine, quote_tuple_list(TupleList, NOpts)};
+            {tuple, TupleLine, quote_tuple_list(TupleList, Opts)};
         _ ->
             {tuple, Line, quote_tuple_list_1(TupleList, Opts)}
     end.
 
-%% special form of {attribute, Line, spec, {{F, A}, Spec}}.
-%% there is no line in {F, A}.
 quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
+    %% special form of {attribute, Line, spec, {{F, A}, Spec}}.
+    %% there is no line in {F, A}.
     NOpts = maps:remove(attribute, Opts),
     [quote_1(MA, Opts#{attribute => attr}), quote_1(Spec, NOpts)];
-%% special form of {attribute, Line, export, [{F, A}...]}.
-%% special form of {attribute, Line, Attribute, T}.
-%% there is no line in {F, A} and T.
 quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
+    %% special form of {attribute, Line, export, [{F, A}...]}.
+    %% special form of {attribute, Line, Attribute, T}.
+    %% there is no line in {F, A} and T.
     quote_tuple_list_1(TupleList, Opts);
-quote_tuple_list([Action, _TupleLine|Rest] = TupleList, 
-                 #{quote_type := expression, replaced_line := true} = Opts) ->
+quote_tuple_list([Action, TupleLine|Rest] = TupleList, Opts) ->
     NOpts = update_attribute_opt(TupleList, Opts),
-    quote_tuple_list_1([Action, 0|Rest], NOpts);
-quote_tuple_list(TupleList, #{quote_type := expression} = Opts) ->
-    NOpts = update_attribute_opt(TupleList, Opts),
-    quote_tuple_list_1(TupleList, NOpts);
-quote_tuple_list([Action, TupleLine|Rest] = TupleList, #{quote_type := pattern} = Opts) ->
-    NOpts = update_attribute_opt(TupleList, Opts),
-    [quote_1(Action, Opts), {var, TupleLine, '_'}|quote_tuple_list_1(Rest, NOpts)].
+    [quote_1(Action, Opts), quote_line(Opts#{line => TupleLine})|quote_tuple_list_1(Rest, NOpts)].
 
 quote_tuple_list_1(List, Opts) ->
     lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
 
+quote_line(#{line := Line, quote_type := pattern}) ->
+    {var, Line, '_'};
+quote_line(#{quote_type := expression, replaced_line := true} = Opts) ->
+    quote_1(0, Opts);
+quote_line(#{line := Line, quote_type := expression} = Opts) ->
+    quote_1(Line, Opts).
+
 update_attribute_opt([attribute, _Line, spec|_T], Opts) ->
     Opts#{attribute => spec};
+update_attribute_opt([attribute, _Line, type|_T], Opts) ->
+    Opts;
 update_attribute_opt([attribute|_T], Opts) ->
     Opts#{attribute => attr};
 update_attribute_opt(_, Opts) ->
@@ -160,6 +161,7 @@ quote_type(#{node := pattern}) ->
 quote_type(_) ->
     expression.
 
+%% check ast in quote_code valid.
 split_codes(Codes, NodeType) ->
     case lists:partition(
            fun({string, _, _}) ->
@@ -196,20 +198,16 @@ metavariable_list({var, Line, Atom} = Form, T, #{} = Opts) ->
             {cons, Line, metavariable(Form, Opts#{line => Line}), quote_1(T, Opts#{line => Line})}
     end.
 
-metavariable({var, Line, Atom} = Form, #{quote_type := Type} = Opts) ->
+metavariable({var, Line, Atom} = Form, Opts) ->
+    NOpts = Opts#{line => Line},
     case parse_metavariable(Atom, Line) of
         {value, Var} ->
             Var;
         {VarType, Var} ->
-            {tuple, Line, [quote_1(VarType, Opts), line_variable(Line, Line, Type), Var]};
+            {tuple, Line, [quote_1(VarType, NOpts), quote_line(NOpts), Var]};
         default ->
             quote_tuple(Form, Opts)
     end.
-
-line_variable(Line0, Line, expression) ->
-    {integer, Line, Line0};
-line_variable(_Line0, Line, pattern) ->
-    {var, Line, '_'}.
 
 parse_metavariable(Atom, Line) ->
     case parse_metavariable_1(atom_to_list(Atom)) of
