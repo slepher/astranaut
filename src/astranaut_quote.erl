@@ -101,8 +101,6 @@ quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
     metavariable_list(VarForm, T, Opts);
 quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
     metavariable(VarForm, Opts);
-quote_1({atom, _Line1, Atom} = VarForm, Opts) when is_atom(Atom) ->
-    metavariable(VarForm, Opts);    
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
 quote_1([H|T], #{line := Line} = Opts) ->
@@ -157,9 +155,6 @@ update_attribute_opt([attribute|_T], Opts) ->
 update_attribute_opt(_, Opts) ->
     Opts.
 
-call_remote(Module, Function, Arguments, Line) ->
-    {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
-
 quote_type(#{node := pattern}) ->
     pattern;
 quote_type(_) ->
@@ -185,21 +180,24 @@ split_codes(Codes, NodeType) ->
             {error, invalid_quote_code}
     end.
 
+call_remote(Module, Function, Arguments, Line) ->
+    {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
+
 unquote_splicing_form(Unquotes, Rest, #{line := Line, quote_type := expression} = Opts) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
 unquote_splicing_form(Unquotes, _Rest, #{quote_type := pattern}) ->
     Unquotes.
 
-metavariable_list({FType, _, Atom} = Form, T, #{line := Line} = Opts) ->
-    case parse_metavariable(Atom, FType, Line) of
+metavariable_list({var, Line, Atom} = Form, T, #{} = Opts) ->
+    case parse_metavariable(Atom, Line) of
         {value_list, VarList} ->
-            unquote_splicing_form(VarList, T, Opts);
+            unquote_splicing_form(VarList, T, Opts#{line => Line});
         _ ->
-            {cons, Line, metavariable(Form, Opts), quote_1(T, Opts)}
+            {cons, Line, metavariable(Form, Opts#{line => Line}), quote_1(T, Opts#{line => Line})}
     end.
 
-metavariable({FType, _, Atom} = Form, #{line := Line, quote_type := Type} = Opts) ->
-    case parse_metavariable(Atom, FType, Line) of
+metavariable({var, Line, Atom} = Form, #{quote_type := Type} = Opts) ->
+    case parse_metavariable(Atom, Line) of
         {value, Var} ->
             Var;
         {VarType, Var} ->
@@ -213,29 +211,27 @@ line_variable(Line0, Line, expression) ->
 line_variable(_Line0, Line, pattern) ->
     {var, Line, '_'}.
 
-parse_metavariable(Atom, var, Line) ->
-    case atom_to_list(Atom) of
-        [$_|T] ->
-            parse_metavariable(T, Line);
-        _ ->
+parse_metavariable(Atom, Line) ->
+    case parse_metavariable_1(atom_to_list(Atom)) of
+        {VarType, VarName} ->
+            {VarType, {var, Line, list_to_atom(VarName)}};
+        default ->
             default
-    end;
-parse_metavariable(Atom, atom, Line) ->
-    parse_metavariable(atom_to_list(Atom), Line).
+    end.
 
-parse_metavariable([$A,$@|T], Line) ->
-    {atom, {var, Line, list_to_atom(T)}};
-parse_metavariable([$V,$@|T], Line) ->
-    {var, {var, Line, list_to_atom(T)}};
-parse_metavariable([$I,$@|T], Line) ->
-    {integer, {var, Line, list_to_atom(T)}};
-parse_metavariable([$F,$@|T], Line) ->
-    {float, {var, Line, list_to_atom(T)}};
-parse_metavariable([$S,$@|T], Line) ->
-    {string, {var, Line, list_to_atom(T)}};
-parse_metavariable([$L,$@|T], Line) ->
-    {value_list, {var, Line, list_to_atom(T)}};
-parse_metavariable([$@|T], Line) ->
-    {value, {var, Line, list_to_atom(T)}};
-parse_metavariable(_, _Line) ->
+parse_metavariable_1([$_,$A,$@|T]) ->
+    {atom, T};
+parse_metavariable_1([$_,$V,$@|T]) ->
+    {var, T};
+parse_metavariable_1([$_,$I,$@|T]) ->
+    {integer, T};
+parse_metavariable_1([$_,$F,$@|T]) ->
+    {float, T};
+parse_metavariable_1([$_,$S,$@|T]) ->
+    {string, T};
+parse_metavariable_1([$_,$L,$@|T]) ->
+    {value_list, T};
+parse_metavariable_1([$_,$@|T]) ->
+    {value, T};
+parse_metavariable_1(_) ->
     default.

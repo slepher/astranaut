@@ -86,8 +86,8 @@ replace_line_cond(Cond, Ast, Line) ->
     astranaut_traverse:map(
       fun(Tuple, _Attr) when is_tuple(Tuple) ->
               case tuple_to_list(Tuple) of
-                  [_Action, Line|_Rest] when is_integer(Line) ->
-                      case Cond(Line) of
+                  [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
+                      case Cond(TupleLine) of
                           true ->
                               setelement(2, Tuple, Line);
                           false ->

@@ -84,15 +84,12 @@ macro_try_catch() ->
       try
           exit(throw)
       catch
-          '@Class':'@Exception':_@Stack ->
+          _@Class:_@Exception:_@Stack ->
               erlang:raise(_L@Expr)
       end).
 
 macro_quote_string() ->
     quote_code("test_quote_string_fun()").
-
-macro_quote_fail_string() ->
-    quote_code("test_quote_string_fun()", 1).
 
 macro_case(Body, TrueClause, FalseClause) ->
     quote(
