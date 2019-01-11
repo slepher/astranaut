@@ -20,6 +20,9 @@ parse_transform(Forms, _Options) ->
     Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
     astranaut_traverse:map(fun walk/2, Forms, Opts).
 
+
+format_error({invalid_quote, Node}) ->
+    io_lib:format("invalid quote ~s", [astranaut:to_string(Node)]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -70,8 +73,8 @@ walk({call, Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType
             QuoteType = quote_type(Attr),
             Opts = #{line => Line1, quote_type => QuoteType},
             quote(Form, Opts);
-        {error, invalid_quote_code} ->
-            #{error => io_lib:format("invalid quote ~s", [astranaut:to_string(Node)])}
+        {error, invalid_quote} ->
+            #{error => {invalid_quote, Node}}
     end;
 walk({match, Line1, {atom, _Line2, quote}, Form}, #{node := pattern}) ->
     %% transform quote = Form in pattern match
@@ -85,22 +88,21 @@ walk({match, Line1, {atom, _Line2, quote_code}, Code}, #{node := pattern}) ->
 walk(Node, _Attr) ->
     Node.
 
-quote_1({unquote, Unquote}, _Opts) ->
-    Unquote;
-quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, _Opts) ->
-    Unquote;
+quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
+    unquote(Unquote, Opts#{type => value});
 quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
-    unquote_splicing_form(Unquotes, T, Opts);
-quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
-    Unquote;
+    unquote_splicing(Unquotes, T, Opts);
+quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
+    unquote(Unquote, Opts#{type => value});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    unquote_splicing_form(Unquotes, T, Opts);
+    unquote_splicing(Unquotes, T, Opts);
 quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
+    % _A@World = World2 => {atom, _, World} = World2
     {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
 quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
-    metavariable_list(VarForm, T, Opts);
+    unquote_if_binding_list(VarForm, T, Opts);
 quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
-    metavariable(VarForm, Opts);
+    unquote_if_binding(VarForm, Opts);
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
 quote_1([H|T], #{line := Line} = Opts) ->
@@ -185,51 +187,55 @@ split_codes(Codes, NodeType) ->
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
 
-unquote_splicing_form(Unquotes, Rest, #{line := Line, quote_type := expression} = Opts) ->
+unquote_splicing(Unquotes, Rest, #{line := Line, quote_type := expression} = Opts) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
-unquote_splicing_form(Unquotes, _Rest, #{quote_type := pattern}) ->
+unquote_splicing(Unquotes, _Rest, #{quote_type := pattern}) ->
     Unquotes.
 
-metavariable_list({var, Line, Atom} = Form, T, #{} = Opts) ->
-    case parse_metavariable(Atom, Line) of
+unquote(Exp, #{type := value}) ->
+    Exp;
+unquote(Exp, #{type := Type, line := Line} = Opts) ->
+    {tuple, Line, [quote_1(Type, Opts), quote_line(Opts), Exp]}.
+
+unquote_if_binding_list({var, Line, Atom} = Form, T, #{} = Opts) ->
+    case parse_binding(Atom, Line) of
         {value_list, VarList} ->
-            unquote_splicing_form(VarList, T, Opts#{line => Line});
+            unquote_splicing(VarList, T, Opts#{line => Line});
         _ ->
-            {cons, Line, metavariable(Form, Opts#{line => Line}), quote_1(T, Opts#{line => Line})}
+            {cons, Line, unquote_if_binding(Form, Opts#{line => Line}), quote_1(T, Opts#{line => Line})}
     end.
 
-metavariable({var, Line, Atom} = Form, Opts) ->
-    NOpts = Opts#{line => Line},
-    case parse_metavariable(Atom, Line) of
+unquote_if_binding({var, Line, Atom} = Form, Opts) ->
+    case parse_binding(Atom, Line) of
         {value, Var} ->
-            Var;
+            unquote(Var, Opts#{type => value});
         {VarType, Var} ->
-            {tuple, Line, [quote_1(VarType, NOpts), quote_line(NOpts), Var]};
+            unquote(Var, Opts#{type => VarType, line => Line});
         default ->
             quote_tuple(Form, Opts)
     end.
 
-parse_metavariable(Atom, Line) ->
-    case parse_metavariable_1(atom_to_list(Atom)) of
+parse_binding(Atom, Line) ->
+    case parse_binding_1(atom_to_list(Atom)) of
         {VarType, VarName} ->
             {VarType, {var, Line, list_to_atom(VarName)}};
         default ->
             default
     end.
 
-parse_metavariable_1([$_,$A,$@|T]) ->
+parse_binding_1([$_,$A,$@|T]) ->
     {atom, T};
-parse_metavariable_1([$_,$V,$@|T]) ->
+parse_binding_1([$_,$V,$@|T]) ->
     {var, T};
-parse_metavariable_1([$_,$I,$@|T]) ->
+parse_binding_1([$_,$I,$@|T]) ->
     {integer, T};
-parse_metavariable_1([$_,$F,$@|T]) ->
+parse_binding_1([$_,$F,$@|T]) ->
     {float, T};
-parse_metavariable_1([$_,$S,$@|T]) ->
+parse_binding_1([$_,$S,$@|T]) ->
     {string, T};
-parse_metavariable_1([$_,$L,$@|T]) ->
+parse_binding_1([$_,$L,$@|T]) ->
     {value_list, T};
-parse_metavariable_1([$_,$@|T]) ->
+parse_binding_1([$_,$@|T]) ->
     {value, T};
-parse_metavariable_1(_) ->
+parse_binding_1(_) ->
     default.
