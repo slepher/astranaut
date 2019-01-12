@@ -20,7 +20,7 @@
 -export([test_quote_string/0]).
 
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
--export([macro_quote_string/0]).
+-export([macro_quote_string/0, test_imported_macro/0]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
 -use_macro({function_macro/0, ?DEBUG_OPT}).
@@ -31,6 +31,7 @@
 -use_macro({macro_pattern/1, ?DEBUG_OPT}).
 -use_macro({macro_clause/1, ?DEBUG_OPT}).
 -use_macro({macro_quote_string/0, ?DEBUG_OPT}).
+-use_macro({astranaut_example_macros, exported_macro/0, [{import_as, imported_macro}]}).
 
 -exec_macro({astranaut_example_macros, test_macro, []}).
 -exec_macro({function_macro, []}).
@@ -63,6 +64,10 @@ test_quote_string() ->
 
 test_quote_string_fun() ->
     ok.
+
+test_imported_macro() ->
+    F = imported_macro(),
+    F().
 
 function_macro() ->
     astranaut:exported_function(

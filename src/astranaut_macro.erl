@@ -76,10 +76,10 @@ walk_node(_Node, _Macros, _Module, _File) ->
     not_match.
 
 format_node(File, Line, Module, Function, Arity, Nodes, Opts) ->
-    case proplists:get_value(debug, Opts, false) of
+    case maps:get(debug, Opts, false) of
         true ->
             io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Module, Function, Arity)]),
-            case proplists:get_value(debug_ast, Opts, false) of
+            case maps:get(debug_ast, Opts, false) of
                 true ->
                     io:format("~p~n", [Nodes]);
                 false ->
@@ -147,6 +147,10 @@ mfa({Function, Arguments}) ->
 do_apply_macro({Function, Arguments}, Macros, LocalModule, File, Line) ->
     Arity = length(Arguments),
     case maps:find({Function, Arity}, Macros) of
+        {ok, #{module := Module, function := EFunction} = Opts} ->
+            Node = astranaut:replace_line(erlang:apply(Module, EFunction, Arguments), Line),
+            format_node(File, Line, Module, EFunction, Arity, Node, Opts),
+            {ok, Node};
         {ok, Opts} ->
             MacroModule = local_macro_module(LocalModule),
             Node = astranaut:replace_line(erlang:apply(MacroModule, Function, Arguments), Line),
@@ -172,16 +176,27 @@ append_node(Nodes, Acc) when is_list(Nodes) ->
 append_node(Node, Acc) ->
     [Node|Acc].
 
+add_macro(MFA, Options, File, Line, Acc) when is_list(Options) ->
+    add_macro(MFA, maps:from_list(Options), File, Line, Acc);
+
 add_macro({Function, Arity}, Options, File, Line, {LocalMacros, RemoteMacros}) ->
-    NLocalMacros = maps:put({Function, Arity}, [{file, File}, {line, Line}|Options], LocalMacros),
+    NOptions = Options#{file => File, line => Line},
+    NLocalMacros = maps:put({Function, Arity}, NOptions, LocalMacros),
     {NLocalMacros, RemoteMacros};
 add_macro({Module, Function, Arity}, Options, File, Line, {LocalMacros, RemoteMacros} = Acc) ->
     case get_exports(Module) of
         {ok, Exports} ->
             case lists:member({Function, Arity}, Exports) of
                 true ->
-                    NRemoteMacros = maps:put({Module, Function, Arity}, Options, RemoteMacros),
-                    {LocalMacros, NRemoteMacros};
+                    case maps:find(import_as, Options) of
+                        {ok, As} ->
+                            NOptions = Options#{module => Module, function => Function},
+                            NRemoteMacros = maps:put({As, Arity}, NOptions, RemoteMacros),
+                            {LocalMacros, NRemoteMacros};
+                        error ->
+                            NRemoteMacros = maps:put({Module, Function, Arity}, Options, RemoteMacros),
+                            {LocalMacros, NRemoteMacros}
+                    end;
                 false ->
                     io:format("~s:~p unexported macro ~p:~p~n", [File, Line, Module, Function]),
                     Acc

@@ -11,7 +11,7 @@
 -include("quote.hrl").
 
 %% API
--export([test_macro/0]).
+-export([test_macro/0, exported_macro/0]).
 
 %%%===================================================================
 %%% API
@@ -23,6 +23,13 @@ test_macro() ->
         fun() ->
                 ok
         end)).
+
+exported_macro() ->
+    quote(
+      fun() ->
+              ok
+      end).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
