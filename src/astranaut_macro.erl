@@ -59,14 +59,14 @@ walk_macros(Node, Macros, Module, File) ->
     end.
 
 walk_node({call, Line, {atom, _Line2, Function}, Arguments}, Macros, LocalModule, File) ->
-    case do_apply_macro({Function, Arguments}, Macros, LocalModule, File, Line) of
+    case apply_macro_1({Function, Arguments}, Macros, LocalModule, File, Line) of
         {ok, Node} ->
             Node;
         error ->
             not_match
     end;
 walk_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments}, Macros, LocalModule, File) ->
-    case do_apply_macro({Module, Function, Arguments}, Macros, LocalModule, File, Line) of
+    case apply_macro_1({Module, Function, Arguments}, Macros, LocalModule, File, Line) of
         {ok, Node} ->
             Node;
         error ->
@@ -131,7 +131,7 @@ apply_macros(UsedMacro, Macros, LocalModule, File, Line) ->
 
 apply_macro(Macro, Macros, LocalModule, File, Line) ->
     {Module, Function, Arity} = mfa(Macro),
-    case do_apply_macro(Macro, Macros, LocalModule, File, Line) of
+    case apply_macro_1(Macro, Macros, LocalModule, File, Line) of
         {ok, Node} ->
             Node;
         error ->
@@ -144,7 +144,7 @@ mfa({Module, Function, Arguments}) ->
 mfa({Function, Arguments}) ->
     {undefined, Function, length(Arguments)}.
 
-do_apply_macro({Function, Arguments}, Macros, LocalModule, File, Line) ->
+apply_macro_1({Function, Arguments}, Macros, LocalModule, File, Line) ->
     Arity = length(Arguments),
     case maps:find({Function, Arity}, Macros) of
         {ok, #{module := Module, function := EFunction} = Opts} ->
@@ -160,7 +160,7 @@ do_apply_macro({Function, Arguments}, Macros, LocalModule, File, Line) ->
             error
 
     end;
-do_apply_macro({Module, Function, Arguments}, Macros, _LocalModule, File, Line) ->
+apply_macro_1({Module, Function, Arguments}, Macros, _LocalModule, File, Line) ->
     Arity = length(Arguments),
     case maps:find({Module, Function, Arity}, Macros) of
         {ok, Opts} ->

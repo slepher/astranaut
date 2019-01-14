@@ -9,6 +9,7 @@
 -module(astranaut_traverse).
 
 %% API
+-export([walk_return/1]).
 -export([map/2, map/3]).
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
@@ -29,7 +30,8 @@
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
--type traverse_fun_return() :: #{node => traverse_node(), state => traverse_state(),
+-type traverse_fun_return() :: #{struct := astranaut_traverse, 
+                                 node => traverse_node(), state => traverse_state(),
                                  continue => boolean(),
                                  error => traverse_error(), warning => traverse_error(),
                                  errors => [traverse_error()], warings => [traverse_error()]} |
@@ -56,6 +58,9 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+walk_return(#{} = Map) ->
+    Map#{'__struct__' => ?MODULE}.
+
 -spec map(traverse_fun(), Node) -> traverse_final_return(Node).
 map(F, TopNode) ->
     map(F, TopNode, #{}).
@@ -265,40 +270,8 @@ transform_mapfold_f(F, Opts) ->
     end.
 
 %% transform user sytle traverse return to astranaut_traverse_monad
-reply_to_monad(#{error := Error} = Reply, MA, Opts) ->
-    NError = format_error(Error, Opts),
-    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:error(NError)),
-    NReply = maps:remove(error, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{errors := Errors} = Reply, MA, Opts) ->
-    NErrors = format_errors(Errors, Opts),
-    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:errors(NErrors)),
-    NReply = maps:remove(errors, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{warning := Warning} = Reply, MA, Opts) ->
-    NWarning = format_error(Warning, Opts),
-    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warning(NWarning)),
-    NReply = maps:remove(warning, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
-    NWarnings = format_errors(Warnings, Opts),
-    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warnings(NWarnings)),
-    NReply = maps:remove(warnings, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{state := State} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:put(State)),
-    NReply = maps:remove(state, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return({continue, Node})),
-    NReply = maps:remove(continue, maps:remove(node, Reply)),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{node := Node} = Reply, MA, Opts) ->
-    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(Node)),
-    NReply = maps:remove(node, Reply),
-    reply_to_monad(NReply, MB, Opts);
-reply_to_monad(#{}, MA, _Opts) ->
-    MA;
+reply_to_monad(#{'__struct__' := ?MODULE} = Struct, MA, Opts) ->
+    struct_to_monad(Struct, MA, Opts);
 reply_to_monad(continue, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue));
 reply_to_monad({error, Reason}, MA, Opts) ->
@@ -306,6 +279,42 @@ reply_to_monad({error, Reason}, MA, Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:fail(NReason));
 reply_to_monad({Node, State}, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:state(fun(_) -> {Node, State} end)).
+
+
+struct_to_monad(#{error := Error} = Reply, MA, Opts) ->
+    NError = format_error(Error, Opts),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:error(NError)),
+    NReply = maps:remove(error, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{errors := Errors} = Reply, MA, Opts) ->
+    NErrors = format_errors(Errors, Opts),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:errors(NErrors)),
+    NReply = maps:remove(errors, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{warning := Warning} = Reply, MA, Opts) ->
+    NWarning = format_error(Warning, Opts),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warning(NWarning)),
+    NReply = maps:remove(warning, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
+    NWarnings = format_errors(Warnings, Opts),
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warnings(NWarnings)),
+    NReply = maps:remove(warnings, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{state := State} = Reply, MA, Opts) ->
+    MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:put(State)),
+    NReply = maps:remove(state, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->
+    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return({continue, Node})),
+    NReply = maps:remove(continue, maps:remove(node, Reply)),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{node := Node} = Reply, MA, Opts) ->
+    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(Node)),
+    NReply = maps:remove(node, Reply),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{}, MA, _Opts) ->
+    MA.
 
 format_errors(Errors, Opts) ->
     lists:map(fun(Error) -> format_error(Error, Opts) end, Errors).
@@ -337,7 +346,7 @@ transform_f(F, _) ->
 
 map_walk_return(F, WalkReturn) ->
     case WalkReturn of
-        Map when is_map(Map) ->
+        #{'__struct__' := astranaut_traverse} = Map ->
             Map;
         {error, Reason} ->
             {error, Reason};
