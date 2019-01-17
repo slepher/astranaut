@@ -1,6 +1,4 @@
-# astranaut
-
-## traverse
+# traverse
 
 ### traverse functions:
 
