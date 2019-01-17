@@ -399,8 +399,8 @@ macro.hrl add two attribute: use_macro, exec_macro
 *Usage*
 
 &emsp;&emsp;define macro as normal erlang functions.  
-&emsp;&emsp;macro will be expand at compile time by parse_transformer astranaut_macro.
-&emsp;&emsp;macro does not kown runtime value of arguments.
+&emsp;&emsp;macro will be expand at compile time by parse_transformer astranaut_macro.  
+&emsp;&emsp;macro does not kown runtime value of arguments.  
 &emsp;&emsp;arguments passed in macro is erlang ast.  
 &emsp;&emsp;arguments passed in -exec_macro is term.  
 &emsp;&emsp;-export will be moved to appropriate location in ast forms.
