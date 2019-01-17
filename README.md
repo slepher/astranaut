@@ -68,7 +68,7 @@
 
 *Node*
 
-  &emsp;&emsp;node transformed to new node in traverse_walk_fun(), default is node() provided in traverse_walk_fun().
+&emsp;&emsp;node transformed to new node in traverse_walk_fun(), default is node() provided in traverse_walk_fun().
 
 *State*
 
@@ -109,7 +109,7 @@
 
 *ParseTransform*
 
-&emsp;&emsp;traverse_return(node()) will be transformed to parse_transform_return()
+&emsp;&emsp;traverse_return(node()) will be transformed to parse_transform_return()  
 &emsp;&emsp;which could directed used as return in parse_transform/2, useful in map/3, map_with_state/3.
 
 *NodeType*
@@ -150,11 +150,13 @@
 
 *Advanced*
 
+&emsp;&emsp;powerful map_m function if you famillar with monad.
+
 ```
-  astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). powerful map_m function if you famillar with monad.
+  astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
 ```
 
-## quote
+## Quote
 
 ### quick start
    
@@ -228,11 +230,11 @@ quote(fun(unquote = Var) -> unquote(Var) end).
     quote({A, unquote_splicing(Vs), B}) => 
     {tuple, 1, [{var, 1, 'A'}, Vs ++ [{var, 1, 'B'}]]} =>
     {tuple, 1, [{var, 1, 'A'}, {var, 2, 'Var'}, {atom, 2, atom}, {var, 1, 'B'}]}
+```
 
 *bind a value*
 
 ```
-  
   Atom = hello,
   Integer = 10,
   Float = 1.3,
@@ -244,13 +246,14 @@ quote(fun(unquote = Var) -> unquote(Var) end).
   _F@Float => {float, 0, Float} => {float, 0, 1.3}
   _S@String => {string, 0, String} => {string, 0, "123"}
   _V@Variable => {var, 0, Variable} => {var, 0, 'Var'}
+```
 
 *why binding*
 
-&emsp;&emsp;_X@V could be used in any part of quoted ast.
+&emsp;&emsp;_X@V could be used in any part of quoted ast.  
+&emsp;&emsp;it's legal:
   
-  it's legal:
-  
+```
     Class = 'Class0',
     Exception = 'Exception0',
     StackTrace = 'StackTrace0',
@@ -261,38 +264,44 @@ quote(fun(unquote = Var) -> unquote(Var) end).
         _V@Class:_V@Exception:_V@StackTrace ->
           erlang:raise(_V@Class, _V@Exception, _V@StackTrace)
       end).
-      
-   it's illegal
-   
-    Class = 'Class0',
-    Exception = 'Exception0',
-    StackTrace = 'StackTrace0',
+```      
+
+&emsp;&emsp;it's illegal
+
+```
+    Class = {var, 0, 'Class0'},
+    Exception = {var, 0, 'Exception0'},
+    StackTrace = {var, 0, 'StackTrace0'},   
+
     quote(
       try
         A
       catch
-        unquote_var(Class):unquote_var(Exception):unquote_var(StackTrace) ->
-          erlang:raise(_V@Class, _V@Exception, _V@StackTrace)
+        unquote(Class):unquote(Exception):unquote(StackTrace) ->
+          erlang:raise(_@Class, _@Exception, _@StackTrace)
       end).
-      
+```
+
    in other hand, V in unquote_xxx(V) could be any expression, it's more powerful than _X@V
    
 ### unquote and variable binding in pattern
 
-   quote macro could also be used in pattern match such as 
-   
-   for limit of erlang ast format in pattern, some special forms is used
+&emsp;&emsp;quote macro could also be used in pattern match such as  
+&emsp;&emsp;for limit of erlang ast format in pattern, some special forms is used
    
    left side of match
-   
+
+```   
      quote(_A@Atom) = {atom, 1, A}
      
      =>
      
      {atom, _, Atom} = {atom, 1, A}
-    
-   function pattern
-   
+```
+
+&emsp;&emsp;function pattern
+
+```   
      macro_clause(quote = {hello, _A@World = World2} = C) ->
        quote({hello2, _A@World, _@World2,_@C});
      
@@ -300,9 +309,11 @@ quote(fun(unquote = Var) -> unquote(Var) end).
      
      macro_clause({tuple, _, [{atom, _, hello}, {atom, _, World} = World2]} = C) ->
        {tuple, 2, {atom, 2, hello2}, {atom, 2, World}, World2, C}
-       
-   case clause pattern:
+```
+
+&emsp;&emsp;case clause pattern:
    
+```
      case Ast of
        quote(_A@Atom) ->
          Atom;
@@ -318,9 +329,9 @@ quote(fun(unquote = Var) -> unquote(Var) end).
          _ ->
              other
      end.
- 
+```
 
-## astranaut_macro
+## Macro
 
 *Usage*
 
