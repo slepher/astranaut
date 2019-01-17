@@ -9,13 +9,16 @@
 -module(astranaut_traverse).
 
 %% API
--export([walk_return/1]).
+-export([traverse_fun_return/1, traverse_error/1]).
 -export([map/2, map/3]).
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
 -export([map_m/3]).
 -export([map_traverse_return/2, format_error/1]).
+
+-define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
+-define(TRAVERSE_ERROR, astranaut_traverse_error).
 
 -type traverse_node() :: tuple().
 -type traverse_error() :: term().
@@ -30,7 +33,7 @@
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
--type traverse_fun_return() :: #{struct := astranaut_traverse, 
+-type traverse_fun_return() :: #{'__struct__' := astranaut_traverse, 
                                  node => traverse_node(), state => traverse_state(),
                                  continue => boolean(),
                                  error => traverse_error(), warning => traverse_error(),
@@ -58,8 +61,11 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-walk_return(#{} = Map) ->
-    Map#{'__struct__' => ?MODULE}.
+traverse_fun_return(#{} = Map) ->
+    Map#{'__struct__' => ?TRAVERSE_FUN_RETURN}.
+
+traverse_error(#{} = Map) ->
+    Map#{'__struct__' => ?TRAVERSE_ERROR}.
 
 -spec map(traverse_fun(), Node) -> traverse_final_return(Node).
 map(F, TopNode) ->
@@ -270,7 +276,7 @@ transform_mapfold_f(F, Opts) ->
     end.
 
 %% transform user sytle traverse return to astranaut_traverse_monad
-reply_to_monad(#{'__struct__' := ?MODULE} = Struct, MA, Opts) ->
+reply_to_monad(#{'__struct__' := ?TRAVERSE_FUN_RETURN} = Struct, MA, Opts) ->
     struct_to_monad(Struct, MA, Opts);
 reply_to_monad(continue, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue));
@@ -319,9 +325,13 @@ struct_to_monad(#{}, MA, _Opts) ->
 format_errors(Errors, Opts) ->
     lists:map(fun(Error) -> format_error(Error, Opts) end, Errors).
 
+format_error(#{'__struct__' := ?TRAVERSE_ERROR, reason := Reason} = Error, #{formatter := Module, line := Line}) ->
+    ErrorLine = maps:get(line, Error, Line),
+    ErrorModule = maps:get(module, Error, Module),
+    {ErrorLine, ErrorModule, Reason};
 format_error({Line1, Error}, #{formatter := Module}) when is_integer(Line1) ->
     {Line1, Module, Error};
-format_error({Line1, Module1, Error}, #{}) when is_integer(Line1) ->
+format_error({Line1, Module1, Error}, #{}) when is_integer(Line1), is_atom(Module1) ->
     {Line1, Module1, Error}; 
 format_error(Error, #{line := Line, formatter := Module}) ->
     {Line, Module, Error}.

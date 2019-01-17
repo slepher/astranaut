@@ -74,7 +74,7 @@ walk({call, Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType
             Opts = #{line => Line1, quote_type => QuoteType},
             quote(Form, Opts);
         {error, invalid_quote_code} ->
-            astranaut_traverse:walk_return(#{error => {invalid_quote, Node}})
+            astranaut_traverse:traverse_fun_return(#{error => {invalid_quote, Node}})
     end;
 walk({match, Line1, {atom, _Line2, quote}, Form}, #{node := pattern}) ->
     %% transform quote = Form in pattern match
