@@ -24,7 +24,7 @@
   state()   :: any().
 ```
 
-*traverse_walk_fun()*
+*traverse_fun()*
 
 ```
   map_fun()       :: (node(), Attr :: attr()) -> TraverseFunReturn :: traverse_fun_return(node()).
