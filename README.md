@@ -143,7 +143,7 @@
 
 ```  
   astranaut_traverse:traverse_fun_return(#{}) -> traverse_fun_return(). 
-  astranaut_traverse:traverses_error(#{}) -> error(). 
+  astranaut_traverse:traverse_error(#{}) -> error(). 
 ```
 
 *Advanced*
