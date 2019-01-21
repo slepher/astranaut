@@ -10,6 +10,7 @@
 
 %% API exports
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
+-export([abstract/1, abstract/2]).
 -export([file/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, replace_line_zero/2, to_string/1]).
@@ -38,6 +39,12 @@ read(File) ->
         {error, enoent} ->
             throw({file_not_found, File})
     end.
+
+abstract(Term) ->
+    erl_syntax:revert(erl_syntax:abstract(Term)).
+
+abstract(Term, Line) ->
+    replace_line(abstract(Term), Line).
 
 -spec attributes(atom(), _Forms) -> [_Attribute].
 
