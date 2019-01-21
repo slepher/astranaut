@@ -24,7 +24,7 @@
   state()   :: any().
 ```
 
-*traverse_walk_fun()*
+*traverse_fun()*
 
 ```
   map_fun()       :: (node(), Attr :: attr()) -> TraverseFunReturn :: traverse_fun_return(node()).
@@ -143,7 +143,7 @@
 
 ```  
   astranaut_traverse:traverse_fun_return(#{}) -> traverse_fun_return(). 
-  astranaut_traverse:traverses_error(#{}) -> error(). 
+  astranaut_traverse:traverse_error(#{}) -> error(). 
 ```
 
 *Advanced*
