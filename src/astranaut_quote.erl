@@ -20,7 +20,6 @@ parse_transform(Forms, _Options) ->
     Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
     astranaut_traverse:map(fun walk/2, Forms, Opts).
 
-
 format_error({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut:to_string(Node)]);
 format_error(Message) ->

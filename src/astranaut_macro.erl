@@ -19,15 +19,10 @@
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
     [Module] = astranaut:attributes(module, Forms),
-    {LocalMacros, RemoteMacros} = macros(Forms, File),
+    {LocalMacros, Macros} = macros(Forms, Module, File),
     case compile_macros(LocalMacros, Forms, Options) of
         ok ->
-            Macros = maps:merge(LocalMacros, RemoteMacros),
-            NForms = exec_macros(Forms, Macros, Module, File),
-            Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
-            TraverseReturn =
-                astranaut_traverse:map(
-                  fun(Node, _Attr) -> walk_macros(Node, Macros, Module, File) end, NForms, Opts),
+            TraverseReturn = fold_walk_macros(Macros, Forms),
             astranaut_traverse:map_traverse_return(
               fun(FormsAcc) ->
                       astranaut:reorder_exports(FormsAcc)
@@ -47,155 +42,147 @@ format_error(Message) ->
 %% @end
 %%--------------------------------------------------------------------
 
+fold_walk_macros([{Macro, Opts}|T], Forms) ->
+    NForms = walk_macro(Macro, Opts, Forms),
+    fold_walk_macros(T, NForms);
+fold_walk_macros([], Forms) ->
+    Forms.
+
+walk_macro(Macro, MacroOpts, Forms) ->
+    Traverse = maps:get(order, MacroOpts, post),
+    Opts = #{traverse => Traverse, formatter => ?MODULE, parse_transform => true},
+    NForms = 
+        lists:foldl(
+          fun(Form, Acc) ->
+                  walk_exec_macro(Form, Macro, MacroOpts, Acc)
+          end, [], Forms),
+    astranaut_traverse:map(
+      fun(Node, _Attr) ->
+              walk_macro_node(Node, Macro, MacroOpts)
+      end, lists:reverse(NForms), Opts).
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_macros(Node, Macros, Module, File) ->
-    case walk_node(Node, Macros, Module, File) of
-        not_match ->
-            Node;
-        NNode ->
-            NNode
+walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = Node, Function, Opts, Acc) ->
+    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
+        {ok, NNode} ->
+            append_node(NNode, Acc);
+        error ->
+            append_node(Node, Acc)
+    end;
+walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = Node, {Module, Function}, Opts, Acc) ->
+    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
+        {ok, NNode} ->
+            append_node(NNode, Acc);
+        error ->
+            append_node(Node, Acc)
+    end;
+walk_exec_macro(Node, _Macro, _MacroOpts, Acc) ->
+    [Node|Acc].
+
+append_node(Nodes, Acc) when is_list(Nodes) ->
+    lists:reverse(Nodes) ++ Acc;
+append_node(Node, Acc) ->
+    [Node|Acc].
+
+walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, Function, Opts) ->
+    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
+        {ok, NNode} ->
+            NNode;
+        error ->
+            Node
+    end;
+walk_macro_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
+                {Module, Function}, Opts) ->
+    case apply_macro(Opts#{arguments => Arguments, Line => Line}) of
+        {ok, NNode} ->
+            NNode;
+        error ->
+            Node
+    end;
+walk_macro_node(Node, _Macro, _MacroOpts) ->
+    Node.
+
+apply_macro(Opts) ->
+    #{arguments := NArguments, arity := Arity} = NOpts = append_attrs(Opts),
+    if
+        length(NArguments) == Arity ->
+            Node = apply_mfa(NOpts),
+            {ok, Node};
+        true ->
+            error
     end.
 
-walk_node({call, Line, {atom, _Line2, Function}, Arguments}, Macros, LocalModule, File) ->
-    case apply_macro_1({Function, Arguments}, Macros, LocalModule, File, Line) of
-        {ok, Node} ->
-            Node;
-        error ->
-            not_match
-    end;
-walk_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments}, Macros, LocalModule, File) ->
-    case apply_macro_1({Module, Function, Arguments}, Macros, LocalModule, File, Line) of
-        {ok, Node} ->
-            Node;
-        error ->
-            not_match
-    end;
-walk_node(_Node, _Macros, _Module, _File) ->
-    not_match.
+append_attrs(#{arguments := Arguments, attrs := Attrs} = Opts) ->
+    Opts#{arguments => Arguments ++ [Attrs]};
+append_attrs(#{} = Opts) ->
+    Opts.
 
-format_node(File, Line, Module, Function, Arity, Nodes, Opts) ->
+apply_mfa(#{module := Module, function := Function, arguments := Arguments, line := Line} = Opts) ->
+    Node = astranaut:replace_line(erlang:apply(Module, Function, Arguments), Line),
+    format_node(Node, Opts),
+    Node.
+
+format_node(Node, #{file := File, line := Line} = Opts) ->
     case maps:get(debug, Opts, false) of
         true ->
-            io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Module, Function, Arity)]),
+            io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Opts)]),
             case maps:get(debug_ast, Opts, false) of
                 true ->
-                    io:format("~p~n", [Nodes]);
+                    io:format("~p~n", [Node]);
                 false ->
                     ok
             end,
-            io:format("~s~n", [astranaut:to_string(Nodes)]);
+            io:format("~s~n", [astranaut:to_string(Node)]);
         false ->
             ok
     end.
 
-format_mfa(undefined, Function, Arity) ->
+format_mfa(#{function := Function, arity := Arity, local := true}) ->
     io_lib:format("~p/~p", [Function, Arity]);
-format_mfa(Module, Function, Arity) ->
+format_mfa(#{module := Module, function := Function, arity := Arity, local := true}) ->
     io_lib:format("~p:~p/~p", [Module, Function, Arity]).
 
-macros(Forms, File) ->
+macros(Forms, LocalModule, File) ->
     Macros = lists:flatten(astranaut:attributes_with_line(use_macro, Forms)),
-    lists:foldl(
-      fun({Line, {Module, {Function, Arity}}}, Acc) ->
-              add_macro({Module, Function, Arity}, [], File, Line, Acc);
-         ({Line, {Module, {Function, Arity}, Opts}}, Acc) when is_list(Opts)->
-              add_macro({Module, Function, Arity}, Opts, File, Line, Acc);
-         ({Line, {{Function, Arity}}}, Acc) ->
-              add_macro({Function, Arity}, [], File, Line, Acc);
-         ({Line, {{Function, Arity}, Opts}}, Acc) when is_list(Opts)->
-              add_macro({Function, Arity}, Opts, File, Line, Acc);
-         ({Line, Other}, Acc) ->
-              io:format("invalid import macro ~p at ~p~n", [Other, Line]),
-              Acc
-      end, {maps:new(), maps:new()}, Macros).
+    {LocalMacros, AllMacros} = 
+        lists:foldl(
+          fun({Line, {Module, {Function, Arity}}}, Acc) ->
+                  add_macro({Module, Function, Arity}, [], LocalModule, File, Line, Acc);
+             ({Line, {Module, {Function, Arity}, Opts}}, Acc) when is_list(Opts) ->
+                  add_macro({Module, Function, Arity}, Opts, LocalModule, File, Line, Acc);
+             ({Line, {{Function, Arity}}}, Acc) ->
+                  add_macro({Function, Arity}, [], LocalModule, File, Line, Acc);
+             ({Line, {{Function, Arity}, Opts}}, Acc) when is_list(Opts)->
+                  add_macro({Function, Arity}, Opts, LocalModule, File, Line, Acc);
+             ({Line, Other}, Acc) ->
+                  io:format("invalid import macro ~p at ~p~n", [Other, Line]),
+                  Acc
+          end, {[], []}, Macros),
+    {lists:reverse(LocalMacros), lists:reverse(AllMacros)}.
 
-exec_macros(Forms, Macros, LocalModule, File) ->
-    lists:foldr(
-      fun({attribute, Line, exec_macro, UsedMacros}, Acc) ->
-              NNode = apply_macros(UsedMacros, Macros, LocalModule, File, Line),
-              append_node(NNode, Acc);
-         (Node, Acc) ->
-              [Node|Acc]
-      end, [], Forms).
+add_macro(MFA, Options, LocalModule, File, Line, Acc) when is_list(Options) ->
+    add_macro(MFA, maps:from_list(Options), LocalModule, File, Line, Acc);
 
-apply_macros(UsedMacros, Macros, LocalModule, File, Line) when is_list(UsedMacros) ->
-    lists:foldr(
-      fun(UsedMacro, Acc) ->
-              Node = apply_macro(UsedMacro, Macros, LocalModule, File, Line),
-              append_node(Node, Acc)
-      end,[], UsedMacros);
-apply_macros(UsedMacro, Macros, LocalModule, File, Line) ->
-    apply_macro(UsedMacro, Macros, LocalModule, File, Line).
-
-apply_macro(Macro, Macros, LocalModule, File, Line) ->
-    {Module, Function, Arity} = mfa(Macro),
-    case apply_macro_1(Macro, Macros, LocalModule, File, Line) of
-        {ok, Node} ->
-            Node;
-        error ->
-            io:format("unimported macro ~s at ~p~n", [format_mfa(Module, Function, Arity), Line]),
-            []
-    end.
-
-mfa({Module, Function, Arguments}) ->
-    {Module, Function, length(Arguments)};
-mfa({Function, Arguments}) ->
-    {undefined, Function, length(Arguments)}.
-
-apply_macro_1({Function, Arguments}, Macros, LocalModule, File, Line) ->
-    Arity = length(Arguments),
-    case maps:find({Function, Arity}, Macros) of
-        {ok, #{module := Module, function := EFunction} = Opts} ->
-            Node = astranaut:replace_line(erlang:apply(Module, EFunction, Arguments), Line),
-            format_node(File, Line, Module, EFunction, Arity, Node, Opts),
-            {ok, Node};
-        {ok, Opts} ->
-            MacroModule = local_macro_module(LocalModule),
-            Node = astranaut:replace_line(erlang:apply(MacroModule, Function, Arguments), Line),
-            format_node(File, Line, undefined, Function, Arity, Node, Opts),
-            {ok, Node};
-        error -> 
-            error
-
-    end;
-apply_macro_1({Module, Function, Arguments}, Macros, _LocalModule, File, Line) ->
-    Arity = length(Arguments),
-    case maps:find({Module, Function, Arity}, Macros) of
-        {ok, Opts} ->
-            Node = astranaut:replace_line(erlang:apply(Module, Function, Arguments), Line),
-            format_node(File, Line, Module, Function, Arity, Node, Opts),
-            {ok, Node};
-        error -> 
-            error
-    end.
-
-append_node(Nodes, Acc) when is_list(Nodes) ->
-    Nodes ++ Acc;
-append_node(Node, Acc) ->
-    [Node|Acc].
-
-add_macro(MFA, Options, File, Line, Acc) when is_list(Options) ->
-    add_macro(MFA, maps:from_list(Options), File, Line, Acc);
-
-add_macro({Function, Arity}, Options, File, Line, {LocalMacros, RemoteMacros}) ->
-    NOptions = Options#{file => File, line => Line},
-    NLocalMacros = maps:put({Function, Arity}, NOptions, LocalMacros),
-    {NLocalMacros, RemoteMacros};
-add_macro({Module, Function, Arity}, Options, File, Line, {LocalMacros, RemoteMacros} = Acc) ->
+add_macro({Function, Arity}, Options, LocalModule, File, Line, {LocalMacros, AllMacros}) ->
+    Module = local_macro_module(LocalModule),
+    NOptions = Options#{module => Module, function => Function, arity => Arity, file => File, line => Line, local => true},
+    NLocalMacros = [{Function, Arity}|LocalMacros],
+    NAllMacros = [{Function, NOptions}|AllMacros],
+    {NLocalMacros, NAllMacros};
+add_macro({Module, Function, Arity}, Options, _LocalModule, File, Line, {LocalMacros, AllMacros} = Acc) ->
     case get_exports(Module) of
         {ok, Exports} ->
             case lists:member({Function, Arity}, Exports) of
                 true ->
+                    NOptions = Options#{module => Module, function => Function, arity => Arity, file => File, line => Line},
                     case maps:find(import_as, Options) of
                         {ok, As} ->
-                            NOptions = Options#{module => Module, function => Function},
-                            NRemoteMacros = maps:put({As, Arity}, NOptions, RemoteMacros),
-                            {LocalMacros, NRemoteMacros};
+                            NAllMacros = [{As, NOptions}|AllMacros],
+                            {LocalMacros, NAllMacros};
                         error ->
-                            NRemoteMacros = maps:put({Module, Function, Arity}, Options, RemoteMacros),
-                            {LocalMacros, NRemoteMacros}
+                            NAllMacros = [{{Module, Function}, NOptions}|AllMacros],
+                            {LocalMacros, NAllMacros}
                     end;
                 false ->
                     io:format("~s:~p unexported macro ~p:~p~n", [File, Line, Module, Function]),
@@ -222,7 +209,7 @@ compile_macros(Macros, Forms, Opts) ->
           lists:foldl(
             fun({attribute, Line, module, Module}, Acc) ->
                     Node = {attribute, Line, module, local_macro_module(Module)},
-                    Exports = {attribute, Line, export, maps:keys(Macros)},
+                    Exports = {attribute, Line, export, Macros},
                     [Exports, Node|Acc];
                ({attribute, _Line, export, _Exports}, Acc) ->
                     Acc;
@@ -263,9 +250,8 @@ local_macro_module(Module) ->
     list_to_atom(atom_to_list(Module) ++ "__local_macro").
 
 macro_deps(Macros, Forms) ->
-    MacroFuns = maps:keys(Macros),
     ClauseMap = function_clauses_map(Forms, maps:new()),
-    functions_deps(MacroFuns, ClauseMap).
+    functions_deps(Macros, ClauseMap).
 
 function_clauses_map([{function, _Line, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
