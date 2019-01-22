@@ -15,8 +15,8 @@
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
 -export([map_m/3]).
--export([map_traverse_return/2, format_error/1]).
--export([parse_transform_return/2]).
+-export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2, traverse_fun_return_struct/1]).
+-export([format_error/1, parse_transform_return/2]).
 
 -define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -26,6 +26,7 @@
 -type traverse_state() :: term().
 -type traverse_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
                            node => node_type(), formatter => module() }.
+
 -type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
                                  node => node_type(), formatter => module(),
                                  monad_class := module(), monad := term()
@@ -34,13 +35,13 @@
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
--type traverse_fun_return() :: #{'__struct__' := astranaut_traverse, 
+-type traverse_fun_return() :: #{'__struct__' := astranaut_traverse_fun_return, 
                                  node => traverse_node(), state => traverse_state(),
                                  continue => boolean(),
                                  error => traverse_error(), warning => traverse_error(),
                                  errors => [traverse_error()], warings => [traverse_error()]} |
-                               {error, traverse_error()} | continue |
-                               {traverse_node(), traverse_state()}| traverse_node().
+                               {error, traverse_error()} | {warning, traverse_node(), traverse_error()} |
+                               continue | {traverse_node(), traverse_state()} | traverse_node().
 
 -type traverse_return(ReturnType) :: ReturnType | 
                                      {ok, ReturnType, traverse_return_error(), traverse_return_error()} |
@@ -128,7 +129,41 @@ map_traverse_return(F, {warning, Reply, Warnings}) ->
 map_traverse_return(F, Reply) ->
     F(Reply).
 
+map_traverse_return_e(F, {ok, Reply, Errors, Warnings}) ->
+    F(Reply, Errors, Warnings);
+map_traverse_return_e(F, {error, Errors, Warnings}) ->
+    F(error, Errors, Warnings);
+map_traverse_return_e(F, {warning, Reply, Warnings}) ->
+    F(Reply, [], Warnings);
+map_traverse_return_e(F, Reply) ->
+    F(Reply, [], []).
 
+
+map_traverse_fun_return(F, {warning, Node, Reason}) ->
+    {warning, F(Node), Reason};
+map_traverse_fun_return(F, {error, Node, Reason}) ->
+    {error, F(Node), Reason};
+map_traverse_fun_return(_F, {error, Reason}) ->
+    {error, Reason};
+map_traverse_fun_return(_F, continue) ->
+    continue;
+map_traverse_fun_return(F, #{'__struct__' := astranaut_traverse_fun_return, node := Node} = Struct) ->
+    Struct#{node => F(Node)};
+map_traverse_fun_return(F, Node) ->
+    F(Node).
+
+traverse_fun_return_struct({warning, Node, Reason}) ->
+    traverse_fun_return(#{warning => Reason, node => Node});
+traverse_fun_return_struct({error, Node, Reason}) ->
+    traverse_fun_return(#{error => Reason, node => Node});
+traverse_fun_return_struct({error, Reason}) ->
+    traverse_fun_return(#{error => Reason});
+traverse_fun_return_struct(continue) ->
+    traverse_fun_return(#{continue => true});
+traverse_fun_return_struct(#{'__struct__' := ?TRAVERSE_FUN_RETURN} = Struct) ->
+    Struct;
+traverse_fun_return_struct(Node) ->
+    traverse_fun_return(#{node => Node}).
 
 -spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
@@ -295,9 +330,21 @@ reply_to_monad(#{'__struct__' := ?TRAVERSE_FUN_RETURN} = Struct, MA, Opts) ->
     struct_to_monad(Struct, MA, Opts);
 reply_to_monad(continue, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue));
+reply_to_monad({continue, Node}, MA, _Opts) ->
+    astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return({continue, Node}));
 reply_to_monad({error, Reason}, MA, Opts) ->
     NReason = format_error(Reason, Opts),
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:fail(NReason));
+reply_to_monad({error, Node, Reason}, MA, Opts) ->
+    NReason = format_error(Reason, Opts),
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:then(MA, astranaut_traverse_monad:error(NReason)),
+      astranaut_traverse_monad:return(Node));
+reply_to_monad({warning, Node, Reason}, MA, Opts) ->
+    NReason = format_error(Reason, Opts),
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warning(NReason)),
+      astranaut_traverse_monad:return(Node));
 reply_to_monad({Node, State}, MA, _Opts) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:state(fun(_) -> {Node, State} end)).
 
@@ -329,6 +376,10 @@ struct_to_monad(#{state := State} = Reply, MA, Opts) ->
 struct_to_monad(#{continue := true, node := Node} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return({continue, Node})),
     NReply = maps:remove(continue, maps:remove(node, Reply)),
+    reply_to_monad(NReply, MB, Opts);
+struct_to_monad(#{continue := true} = Reply, MA, Opts) ->
+    MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(continue)),
+    NReply = maps:remove(continue, Reply),
     reply_to_monad(NReply, MB, Opts);
 struct_to_monad(#{node := Node} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:then(MA, astranaut_traverse_monad:return(Node)),
@@ -371,7 +422,7 @@ transform_f(F, _) ->
 
 map_walk_return(F, WalkReturn) ->
     case WalkReturn of
-        #{'__struct__' := astranaut_traverse} = Map ->
+        #{'__struct__' := ?TRAVERSE_FUN_RETURN} = Map ->
             Map;
         {error, Reason} ->
             {error, Reason};

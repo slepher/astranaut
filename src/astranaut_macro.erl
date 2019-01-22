@@ -66,35 +66,45 @@ fold_walk_macros([], Forms, Errors, Warnings) ->
 
 walk_macro(Macro, MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    Opts = #{traverse => Traverse, formatter => ?MODULE},
-    NForms = 
-        lists:foldl(
-          fun(Form, Acc) ->
-                  walk_exec_macro(Form, Macro, MacroOpts, Acc)
-          end, [], Forms),
-    astranaut_traverse:map(
-      fun(Node, _Attr) ->
-              walk_macro_node(Node, Macro, MacroOpts)
-      end, lists:reverse(NForms), Opts).
+    ExecMReturn = exec_macro(Macro, MacroOpts, Forms),
+    astranaut_traverse:map_traverse_return_e(
+      fun(error, Errors, Warnings) ->
+              {error, Errors, Warnings};
+         (NForms, Errors, Warnings) ->
+              Opts = #{traverse => Traverse, formatter => ?MODULE},
+              WalkMacroReturn = 
+                  astranaut_traverse:map(
+                    fun(Node, _Attr) ->
+                            walk_macro_node(Node, Macro, MacroOpts)
+                    end, lists:reverse(NForms), Opts),
+              astranaut_traverse:map_traverse_return_e(
+                fun(error, NErrors, NWarnings) ->
+                        {error, Errors ++ NErrors, Warnings ++ NWarnings};
+                   (Result, NErrors, NWarnings) ->
+                        {ok, Result, Errors ++ NErrors, Warnings ++ NWarnings}
+                end, WalkMacroReturn)
+      end, ExecMReturn).
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = Node, Function, Opts, Acc) ->
-    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
-        {ok, NNode} ->
-            append_node(NNode, Acc);
-        error ->
-            append_node(Node, Acc)
-    end;
-walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = Node, {Module, Function}, Opts, Acc) ->
-    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
-        {ok, NNode} ->
-            append_node(NNode, Acc);
-        error ->
-            append_node(Node, Acc)
-    end;
+exec_macro(Macro, MacroOpts, Forms) ->
+    Opts = #{traverse => pre, formatter => ?MODULE},
+    astranaut_traverse:reduce(
+      fun(Form, Acc, _Attr) ->
+              walk_exec_macro(Form, Macro, MacroOpts, Acc)
+      end, [], Forms, Opts).
+    
+
+walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts, Acc) ->
+    #{node := NodeB} = MacroReturn = apply_macro(NodeA, Opts#{arguments => Arguments, line => Line}),
+    MacroReturn#{continue => true, state => append_node(NodeB, Acc)};
+
+walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA, {Module, Function}, Opts, Acc) ->
+    #{node := NodeB} = MacroReturn = apply_macro(NodeA, Opts#{arguments => Arguments, line => Line}),
+    MacroReturn#{continue => true, state => append_node(NodeB, Acc)};
+
 walk_exec_macro(Node, _Macro, _MacroOpts, Acc) ->
-    [Node|Acc].
+    astranaut_traverse:traverse_fun_return(#{continue => true, state => append_node(Node, Acc)}).
 
 append_node(Nodes, Acc) when is_list(Nodes) ->
     lists:reverse(Nodes) ++ Acc;
@@ -102,42 +112,42 @@ append_node(Node, Acc) ->
     [Node|Acc].
 
 walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, Function, Opts) ->
-    case apply_macro(Opts#{arguments => Arguments, line => Line}) of
-        {ok, NNode} ->
-            NNode;
-        error ->
-            Node
-    end;
+    apply_macro(Node, Opts#{arguments => Arguments, line => Line});
 walk_macro_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
                 {Module, Function}, Opts) ->
-    case apply_macro(Opts#{arguments => Arguments, Line => Line}) of
-        {ok, NNode} ->
-            NNode;
-        error ->
-            Node
-    end;
+    apply_macro(Node, Opts#{arguments => Arguments, Line => Line});
 walk_macro_node(Node, _Macro, _MacroOpts) ->
     Node.
 
-apply_macro(Opts) ->
-    #{arguments := NArguments, arity := Arity} = NOpts = append_attrs(Opts),
+apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, line := Line} = Opts) ->
+    NArguments = append_attrs(Opts),
     if
         length(NArguments) == Arity ->
-            Node = apply_mfa(NOpts),
-            {ok, Node};
+            MacroReturn = apply_mfa(Module, Function, NArguments),
+            case astranaut_traverse:traverse_fun_return_struct(MacroReturn) of
+                #{node := NodeB} = MacroReturnStruct ->
+                    NodeC = astranaut:replace_line(NodeB, Line),
+                    format_node(NodeC, Opts),
+                    MacroReturnStruct#{node => NodeC};
+                #{} = MacroReturnStruct ->
+                    MacroReturnStruct#{node => NodeA}
+            end;
         true ->
-            error
+            astranaut_traverse:traverse_fun_return(#{node => NodeA})
     end.
 
-append_attrs(#{arguments := Arguments, attrs := Attrs} = Opts) ->
-    Opts#{arguments => Arguments ++ [Attrs]};
-append_attrs(#{} = Opts) ->
-    Opts.
+append_attrs(#{arguments := Arguments, attrs := Attrs}) ->
+    Arguments ++ [Attrs];
+append_attrs(#{arguments := Arguments}) ->
+    Arguments.
 
-apply_mfa(#{module := Module, function := Function, arguments := Arguments, line := Line} = Opts) ->
-    Node = astranaut:replace_line(erlang:apply(Module, Function, Arguments), Line),
-    format_node(Node, Opts),
-    Node.
+apply_mfa(Module, Function, Arguments) ->
+    try
+        erlang:apply(Module, Function, Arguments)
+    catch
+        _:Exception:StackTrace ->
+            {error, {exception, Exception, StackTrace}}
+    end.
 
 format_node(Node, #{file := File, line := Line} = Opts) ->
     case maps:get(debug, Opts, false) of

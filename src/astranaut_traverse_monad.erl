@@ -80,7 +80,7 @@ state(F) ->
     astranaut_monad:state(F, new()).
 
 warning(Warning) ->
-    warning([Warning]).
+    warnings([Warning]).
 
 warnings(Warnings) ->
     astranaut_monad:tell(Warnings, new()).

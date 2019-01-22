@@ -14,7 +14,7 @@
 
 %% API
 -export([test/0, test_in_function/0]).
--export([function_macro/0, in_function_macro/0]).
+-export([function_macro/1, in_function_macro/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
 -export([test_quote_string/0]).
@@ -23,7 +23,7 @@
 -export([macro_quote_string/0, test_imported_macro/0]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
--use_macro({function_macro/0, ?DEBUG_OPT}).
+-use_macro({function_macro/1, ?DEBUG_OPT}).
 -use_macro({in_function_macro/0, ?DEBUG_OPT}).
 -use_macro({macro_try_catch/0, ?DEBUG_OPT}).
 -use_macro({macro_case/3, ?DEBUG_OPT}).
@@ -34,7 +34,8 @@
 -use_macro({astranaut_example_macros, exported_macro/0, [{import_as, imported_macro}]}).
 
 -exec_macro({astranaut_example_macros, test_macro, []}).
--exec_macro({function_macro, []}).
+-exec_macro({function_macro, [a]}).
+-exec_macro({function_macro, [b]}).
 
 %%%===================================================================
 %%% API
@@ -69,13 +70,21 @@ test_imported_macro() ->
     F = imported_macro(),
     F().
 
-function_macro() ->
+function_macro(a) ->
     astranaut:exported_function(
       test_local,
       quote(
         fun() ->
                 ok
-        end)).
+        end));
+function_macro(b) ->
+    Ast = astranaut:exported_function(
+            test_local_b,
+            quote(
+              fun() ->
+                      ok
+              end)),
+    {warning, Ast, noop}.
 
 in_function_macro() ->
     quote(ok).
