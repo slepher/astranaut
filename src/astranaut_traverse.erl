@@ -16,6 +16,7 @@
 -export([mapfold/3, mapfold/4]).
 -export([map_m/3]).
 -export([map_traverse_return/2, format_error/1]).
+-export([parse_transform_return/2]).
 
 -define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -109,7 +110,7 @@ map_with_state(F, Init, Node, Opts) ->
                fun({NNode, _State}) ->
                        NNode
                end, Reply),
-    parse_transform_return(NReply, Node, Opts).
+    to_parse_transform_return(NReply, Node, Opts).
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
@@ -127,6 +128,8 @@ map_traverse_return(F, {warning, Reply, Warnings}) ->
 map_traverse_return(F, Reply) ->
     F(Reply).
 
+
+
 -spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, #{monad_class := _MonadClass, monad := _Monad} = Opts) ->
     NOpts = maps:merge(#{formatter => ?MODULE, traverse => all, node => form}, Opts),
@@ -138,6 +141,18 @@ format_error(Message) ->
         true -> Message;
         _    -> io_lib:write(Message)
     end.
+
+parse_transform_return({ok, Reply, [], []}, _File) ->
+    Reply;
+parse_transform_return({ok, Reply, [], Warnings}, File) ->
+    {warning, Reply, [{File, Warnings}]};
+parse_transform_return({ok, _Reply, Errors, Warnings}, File) ->
+    {error, [{File, Errors}], [{File, Warnings}]};
+parse_transform_return({error, Errors, Warnings}, File) ->
+    {error, [{File, Errors}], [{File, Warnings}]};
+parse_transform_return(Reply, _File) ->
+    Reply.
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
@@ -371,22 +386,15 @@ simplify_return({ok, Reply, [], []}, true) ->
 simplify_return(Other, _) ->
     Other.
 
-parse_transform_return(Reply, Forms, Opts) when is_map(Opts) ->
+to_parse_transform_return(Reply, Forms, Opts) when is_map(Opts) ->
     ParseTransForm = maps:get(parse_transform, Opts, false),
-    parse_transform_return(Reply, Forms, ParseTransForm);
-parse_transform_return({ok, Reply, [], []}, _Forms, true) ->
-    Reply;
-parse_transform_return({ok, Reply, [], Warnings}, Forms, true) ->
-    File = file(Forms),
-    {warning, Reply, [{File, Warnings}]};
-parse_transform_return({ok, _Reply, Errors, Warnings}, Forms, true) ->
-    File = file(Forms),
-    {error, [{File, Errors}], [{File, Warnings}]};
-parse_transform_return({error, Errors, Warnings}, Forms, true) ->
-    File = file(Forms),
-    {error, [{File, Errors}], [{File, Warnings}]};
-parse_transform_return(Reply, _Forms, _) ->
-    Reply.
+    case ParseTransForm of
+        true ->
+            File = file(Forms),
+            parse_transform_return(Reply, File);
+        false ->
+            Reply
+    end.
 
 file(Forms) when is_list(Forms) ->
     case astranaut:attributes(file, Forms) of
