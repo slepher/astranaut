@@ -217,7 +217,6 @@ get_exports(Module) ->
 
 compile_local_macros(Macros, Forms, Opts) ->
     MacroDeps = macro_deps(Macros, Forms),
-    io:format("macro deps is ~p~n", [MacroDeps]),
     Warnings = 
         lists:foldl(
           fun({Function, Arity, Line}, Acc) ->
