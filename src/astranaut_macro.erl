@@ -66,7 +66,7 @@ fold_walk_macros([], Forms, Errors, Warnings) ->
 
 walk_macro(Macro, MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    Opts = #{traverse => Traverse, formatter => ?MODULE, parse_transform => true},
+    Opts = #{traverse => Traverse, formatter => ?MODULE},
     NForms = 
         lists:foldl(
           fun(Form, Acc) ->
