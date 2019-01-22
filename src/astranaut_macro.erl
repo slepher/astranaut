@@ -66,45 +66,49 @@ fold_walk_macros([], Forms, Errors, Warnings) ->
 
 walk_macro(Macro, MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    ExecMReturn = exec_macro(Macro, MacroOpts, Forms),
-    astranaut_traverse:map_traverse_return_e(
-      fun(error, Errors, Warnings) ->
-              {error, Errors, Warnings};
-         (NForms, Errors, Warnings) ->
-              Opts = #{traverse => Traverse, formatter => ?MODULE},
-              WalkMacroReturn = 
-                  astranaut_traverse:map(
+    Monad = 
+        astranaut_traverse_monad:bind(
+          exec_macro(Macro, MacroOpts, Forms),
+          fun(NForms) ->
+                  Opts = #{traverse => Traverse, formatter => ?MODULE},
+                  astranaut_traverse:map_m(
                     fun(Node, _Attr) ->
-                            walk_macro_node(Node, Macro, MacroOpts)
-                    end, lists:reverse(NForms), Opts),
-              astranaut_traverse:map_traverse_return_e(
-                fun(error, NErrors, NWarnings) ->
-                        {error, Errors ++ NErrors, Warnings ++ NWarnings};
-                   (Result, NErrors, NWarnings) ->
-                        {ok, Result, Errors ++ NErrors, Warnings ++ NWarnings}
-                end, WalkMacroReturn)
-      end, ExecMReturn).
+                            Return = walk_macro_node(Node, Macro, MacroOpts),
+                            astranaut_traverse:fun_return_to_monad(Return, Node)
+                    end, lists:reverse(NForms), Opts)
+          end),
+    Reply = astranaut_traverse_monad:run(Monad, []),
+    astranaut_traverse:map_traverse_return(
+      fun({NNode, _State}) ->
+              NNode
+      end, Reply).
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 exec_macro(Macro, MacroOpts, Forms) ->
     Opts = #{traverse => pre, formatter => ?MODULE},
-    astranaut_traverse:reduce(
-      fun(Form, Acc, _Attr) ->
-              walk_exec_macro(Form, Macro, MacroOpts, Acc)
-      end, [], Forms, Opts).
-    
+    astranaut_traverse_monad:then(
+      astranaut_traverse:map_m(
+        fun(Form, _Attr) ->
+                Return = walk_exec_macro(Form, Macro, MacroOpts),
+                astranaut_traverse_monad:bind(
+                  astranaut_traverse:fun_return_to_monad(Return, Form, Opts),
+                  fun(NForm) ->
+                          astranaut_traverse_monad:state(
+                            fun(Acc) ->
+                                    {continue, append_node(NForm, Acc)}
+                            end)
+                  end)
+        end, Forms, Opts),
+      astranaut_traverse_monad:get()).
 
-walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts, Acc) ->
-    #{node := NodeB} = MacroReturn = apply_macro(NodeA, Opts#{arguments => Arguments, line => Line}),
-    MacroReturn#{continue => true, state => append_node(NodeB, Acc)};
-
-walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA, {Module, Function}, Opts, Acc) ->
-    #{node := NodeB} = MacroReturn = apply_macro(NodeA, Opts#{arguments => Arguments, line => Line}),
-    MacroReturn#{continue => true, state => append_node(NodeB, Acc)};
-
-walk_exec_macro(Node, _Macro, _MacroOpts, Acc) ->
-    astranaut_traverse:traverse_fun_return(#{continue => true, state => append_node(Node, Acc)}).
+walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts) ->
+    apply_macro(NodeA, Opts#{arguments => Arguments, line => Line});
+walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA,
+                {Module, Function}, Opts) ->
+    apply_macro(NodeA, Opts#{arguments => Arguments, line => Line});
+walk_exec_macro(Node, _Macro, _MacroOpts) ->
+    Node.
 
 append_node(Nodes, Acc) when is_list(Nodes) ->
     lists:reverse(Nodes) ++ Acc;
