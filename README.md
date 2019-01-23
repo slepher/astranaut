@@ -401,13 +401,13 @@ macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attribut
 *Usage*
 
 &emsp;&emsp;define macro as normal erlang functions.  
-&emsp;&emsp;macro expand order is the order of -use_macro in file.
+&emsp;&emsp;macro expand order is the order of -use_macro in file.  
 &emsp;&emsp;macro will be expand at compile time by parse_transformer astranaut_macro.  
 &emsp;&emsp;macro does not know runtime value of arguments.  
 &emsp;&emsp;arguments passed in macro is erlang ast.  
 &emsp;&emsp;arguments passed in -exec_macro is term.  
-&emsp;&emsp;-export will be moved to appropriate location in ast forms.
-&emsp;&emsp;macro return value is same meaning of traverse_fun_return().
+&emsp;&emsp;-export will be moved to appropriate location in ast forms.  
+&emsp;&emsp;macro return value is same meaning of traverse_fun_return().  
 
 ```
 -use_macro({macro_1/1, []}).
