@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_example).
 
--define(DEBUG_OPT, [{debug, false}, {debug_ast, false}]).
+-define(DEBUG_OPT, [{debug, false}, {debug_ast, false}, {formatter, ?MODULE}]).
 
 -include("astranaut.hrl").
 
@@ -18,9 +18,11 @@
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
 -export([test_quote_string/0]).
+-export([test_attributes/0]).
 
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
--export([macro_quote_string/0, test_imported_macro/0]).
+-export([macro_quote_string/0, test_imported_macro/0, macro_with_attributes/1]).
+-export([format_error/1]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
 -use_macro({function_macro/1, ?DEBUG_OPT}).
@@ -31,6 +33,8 @@
 -use_macro({macro_pattern/1, ?DEBUG_OPT}).
 -use_macro({macro_clause/1, ?DEBUG_OPT}).
 -use_macro({macro_quote_string/0, ?DEBUG_OPT}).
+-use_macro({macro_with_attributes/1, [{attrs, [include]}|?DEBUG_OPT]}).
+
 -use_macro({astranaut_example_macros, exported_macro/0, [{import_as, imported_macro}]}).
 
 -exec_macro({astranaut_example_macros, test_macro, []}).
@@ -65,6 +69,9 @@ test_quote_string() ->
 
 test_quote_string_fun() ->
     ok.
+
+test_attributes() ->
+    macro_with_attributes().
 
 test_imported_macro() ->
     F = imported_macro(),
@@ -128,8 +135,20 @@ macro_clause(quote = {hello, _A@World = World2} = C) ->
 macro_clause(_) ->
     quote(fail).
 
+macro_with_attributes(#{file := File, line := Line, module := Module}) ->
+    {warning, quote(ok), {attributes, File, Line, Module}}.
+
 one_plus() ->
     1 + 1.
+
+format_error({attributes, File, Line, Module}) ->
+    io_lib:format("~p ~s:~p", [Module, File, Line]);
+format_error(noop) ->
+    io_lib:format("oops: noop", []);
+format_error(Error) ->
+    astranaut_traverse:format_error(Error).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
