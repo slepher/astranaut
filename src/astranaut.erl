@@ -48,7 +48,7 @@ abstract(Term, Line) ->
 
 -spec attributes(atom(), _Forms) -> [_Attribute].
 
-module_attributes(Attribute, Module) ->
+module_attributes(Attribute, Module)->
     Attributes = Module:module_info(attributes),
     lists:reverse(
       lists:foldl(

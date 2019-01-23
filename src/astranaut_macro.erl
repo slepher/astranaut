@@ -65,7 +65,7 @@ fold_walk_macros([], Forms, Errors, Warnings) ->
 
 walk_macro(Macro, MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    MOpts = maps:merge(#{formatter => ?MODULE}, maps:with([formatter], MacroOpts)),
+    MOpts = maps:merge(#{formatter => astranaut_traverse}, maps:with([formatter], MacroOpts)),
     Opts = #{traverse => Traverse, formatter => ?MODULE},
     Monad = 
         astranaut_traverse_monad:bind(
