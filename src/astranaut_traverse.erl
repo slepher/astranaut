@@ -31,7 +31,7 @@
 
 -type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
                                  node => node_type(), formatter => module(),
-                                 monad_class := module(), monad := term()
+                                 monad_class => module(), monad => term()
                                 }.
 -type node_type() :: module | file | export | import | type | spec | pattern | expression | guard | form | atom().
 -type traverse_style() :: traverse_step() | all.
