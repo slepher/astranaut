@@ -358,7 +358,7 @@ macro.hrl add two attribute: use_macro, exec_macro
 *opts()*
 
 ```
-  #{debug => Debug, debug_ast => DebugAst, import_as => ImportAs}
+  #{debug => Debug, debug_ast => DebugAst, import_as => ImportAs, formatter => Formatter, attrs => Attrs, order => Order}
 ```
 
 *Debug*
@@ -373,14 +373,41 @@ macro.hrl add two attribute: use_macro, exec_macro
 
 &emsp;&emsp; use ImportAs(Arguments) instead of Module:Macro(Arguments).
 
+*Formatter*
+
+&emsp;&emsp; module include format_error/1 to format macro errors, default is astranaut_traverse
+
+*Attrs*
+
+&emsp;&emsp; module attributes as extra args while calling macro 
+
+```
+-module(a).
+-behaviour(gen_server).
+-use_macro({macro/2, [{attrs, [module, line, behaviour]}]}).
+
+hello() ->
+  macro_a:macro(world).
+
+macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attributes) ->
+    {warning, Ast, {attributes, Module, Line, Behaviours}}.
+```
+
+*Order*
+
+&emsp;&emsp; macro expand order for nested macro , value is pre | post. default is post.
+&emsp;&emsp; pre is expand macro from outside to inside, post is expand macro from inside to outside.
+
 *Usage*
 
 &emsp;&emsp;define macro as normal erlang functions.  
+&emsp;&emsp;macro expand order is the order of -use_macro in file.
 &emsp;&emsp;macro will be expand at compile time by parse_transformer astranaut_macro.  
 &emsp;&emsp;macro does not know runtime value of arguments.  
 &emsp;&emsp;arguments passed in macro is erlang ast.  
 &emsp;&emsp;arguments passed in -exec_macro is term.  
 &emsp;&emsp;-export will be moved to appropriate location in ast forms.
+&emsp;&emsp;macro return value is same meaning of traverse_fun_return().
 
 ```
 -use_macro({macro_1/1, []}).
