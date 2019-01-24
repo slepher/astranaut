@@ -11,36 +11,28 @@
 -include("quote.hrl").
 
 %% API
--export([parse_transform/2, expand_macros/2, format_error/1]).
+-export([expand_macro/5]).
+-export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+expand_macro(M, F, A, Opts, Forms) ->
+    File = astranaut:file(Forms),
+    [Module] = astranaut:attributes(module, Forms),
+    {_LMacros, Macros, Warnings} = add_macro({M, F, A}, Opts, Module, File, 0, Forms, {[], [], []}),
+    exec_macros(Macros, Forms, File, Warnings).
+
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
     [Module] = astranaut:attributes(module, Forms),
     {LocalMacros, Macros, Warnings} = macros(Forms, Module, File),
     case compile_local_macros(LocalMacros, Forms, Options) of
         {ok, LWarnings} ->
-            expand_macros(Macros, Forms, Warnings ++ LWarnings);
+            exec_macros(Macros, Forms, File, Warnings ++ LWarnings);
         {error, Errors, NWarnings} ->
             {error, Errors, Warnings ++ NWarnings}
     end.
-
-expand_macros(Macros, Forms) ->
-    expand_macros(Macros, Forms, []).
-
-expand_macros(Macros, Forms, Warnings) ->
-    io:format("expand macros ~p~n", [Macros]),
-    File = astranaut:file(Forms),
-    TraverseReturn = fold_walk_macros(Macros, Forms, [], Warnings),
-    NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
-    astranaut_traverse:map_traverse_return(
-      fun(FormsAcc) ->
-              NFormsAcc = astranaut:reorder_exports(FormsAcc),
-              format_forms(NFormsAcc),
-              NFormsAcc
-      end, NTraverseReturn).
 
 format_error({unexported_macro, Module, Function, Arity}) ->
     io_lib:format("unexported macro ~p:~p/~p.", [Module, Function, Arity]);
@@ -60,6 +52,19 @@ format_error(Message) ->
 %% @spec
 %% @end
 %%--------------------------------------------------------------------
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+exec_macros(Macros, Forms, File, Warnings) ->
+    TraverseReturn = fold_walk_macros(Macros, Forms, [], Warnings),
+    NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
+    astranaut_traverse:map_traverse_return(
+      fun(FormsAcc) ->
+              NFormsAcc = astranaut:reorder_exports(FormsAcc),
+              format_forms(NFormsAcc),
+              NFormsAcc
+      end, NTraverseReturn).
 fold_walk_macros([{Macro, Opts}|T], Forms, Errors, Warnings) ->
     case walk_macro(Macro, Opts, Forms) of
         {ok, NForms, NErrors, NWarnings} ->
@@ -94,9 +99,7 @@ walk_macro(Macro, MacroOpts, Forms) ->
       fun({NNode, _State}) ->
               NNode
       end, Reply).
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+
 to_list(Arguments) when is_list(Arguments) ->
     Arguments;
 to_list(Arguments) ->
@@ -271,8 +274,6 @@ format_node(Node, #{file := File, line := Line} = Opts) ->
         false ->
             ok
     end.
-
-
     
 format_mfa(#{function := Function, arity := Arity, local := true}) ->
     io_lib:format("~p/~p", [Function, Arity]);
