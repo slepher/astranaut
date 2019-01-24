@@ -19,9 +19,11 @@
 -export([test_pattern/0, test_clause/0]).
 -export([test_quote_string/0]).
 -export([test_attributes/0]).
+-export([test_group_args/0]).
 
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
 -export([macro_quote_string/0, test_imported_macro/0, macro_with_attributes/1]).
+-export([macro_group_args/1]).
 -export([format_error/1]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
@@ -34,6 +36,7 @@
 -use_macro({macro_clause/1, ?DEBUG_OPT}).
 -use_macro({macro_quote_string/0, ?DEBUG_OPT}).
 -use_macro({macro_with_attributes/1, [{attrs, [include]}|?DEBUG_OPT]}).
+-use_macro({macro_group_args/1, [{group_args, true}|?DEBUG_OPT]}).
 
 -use_macro({astranaut_example_macros, exported_macro/0, [{import_as, imported_macro}]}).
 
@@ -73,6 +76,9 @@ test_quote_string_fun() ->
 test_attributes() ->
     macro_with_attributes().
 
+test_group_args() ->
+    macro_group_args(hello, world).
+
 test_imported_macro() ->
     F = imported_macro(),
     F().
@@ -92,6 +98,10 @@ function_macro(b) ->
                       ok
               end)),
     {warning, Ast, noop}.
+
+macro_group_args([Ast1, Ast2]) ->
+    Asts = [Ast1, Ast2],
+    quote({unquote_splicing(Asts)}).
 
 in_function_macro() ->
     quote(ok).

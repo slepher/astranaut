@@ -11,8 +11,6 @@
 %% API
 -export([macro_x/1]).
 
--debug_macro(true).
-
 -include("quote.hrl").
 -include("macro.hrl").
 

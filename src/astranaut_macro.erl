@@ -222,11 +222,12 @@ walk_macro_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2
 walk_macro_node(Node, _Macro, _MacroOpts) ->
     Node.
 
-apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, line := Line} = Opts) ->
-    NArguments = append_attrs(Opts),
+apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arguments := Arguments, line := Line} = Opts) ->
+    NArguments = append_attrs(Arguments, Opts),
+    NNArguments = group_arguments(NArguments, Opts),
     if
-        length(NArguments) == Arity ->
-            MacroReturn = apply_mfa(Module, Function, NArguments),
+        length(NNArguments) == Arity ->
+            MacroReturn = apply_mfa(Module, Function, NNArguments),
             case astranaut_traverse:traverse_fun_return_struct(MacroReturn) of
                 #{node := NodeB} = MacroReturnStruct ->
                     NodeC = astranaut:replace_line(NodeB, Line),
@@ -239,9 +240,14 @@ apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, lin
             astranaut_traverse:traverse_fun_return(#{node => NodeA})
     end.
 
-append_attrs(#{arguments := Arguments, attributes := Attrs}) ->
+append_attrs(Arguments, #{attributes := Attrs}) ->
     Arguments ++ [Attrs];
-append_attrs(#{arguments := Arguments}) ->
+append_attrs(Arguments, #{}) ->
+    Arguments.
+
+group_arguments(Arguments, #{group_args := true}) ->
+    [Arguments];
+group_arguments(Arguments, #{}) ->
     Arguments.
 
 apply_mfa(Module, Function, Arguments) ->
