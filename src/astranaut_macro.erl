@@ -85,6 +85,11 @@ walk_macro(Macro, MacroOpts, Forms) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+to_list(Arguments) when is_list(Arguments) ->
+    Arguments;
+to_list(Arguments) ->
+    [Arguments].
+
 exec_macro(Macro, MacroOpts, Forms, MOpts) ->
     Opts = #{traverse => pre, formatter => ?MODULE},
     astranaut_traverse_monad:then(
@@ -103,10 +108,12 @@ exec_macro(Macro, MacroOpts, Forms, MOpts) ->
       astranaut_traverse_monad:get()).
 
 walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts) ->
-    apply_macro(NodeA, Opts#{arguments => Arguments, line => Line});
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
 walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA,
                 {Module, Function}, Opts) ->
-    apply_macro(NodeA, Opts#{arguments => Arguments, line => Line});
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
+walk_exec_macro({attribute, Line, Attribute, Arguments} = NodeA, _, #{as_attr := Attribute} = Opts) ->
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
 walk_exec_macro(Node, _Macro, _MacroOpts) ->
     Node.
 
@@ -170,7 +177,7 @@ format_node(Node, #{file := File, line := Line} = Opts) ->
 
 format_mfa(#{function := Function, arity := Arity, local := true}) ->
     io_lib:format("~p/~p", [Function, Arity]);
-format_mfa(#{module := Module, function := Function, arity := Arity, local := true}) ->
+format_mfa(#{module := Module, function := Function, arity := Arity}) ->
     io_lib:format("~p:~p/~p", [Module, Function, Arity]).
 
 macros(Forms, LocalModule, File) ->
