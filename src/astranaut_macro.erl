@@ -42,6 +42,12 @@ format_error({unloaded_module, Module}) ->
     io_lib:format("module ~p could not be loaded, add to erl_first_files in rebar.config to make it compile first.", [Module]);
 format_error({invalid_use_macro, Opts}) ->
     io_lib:format("invalid use macro ~p.", [Opts]);
+format_error({invalid_option_value, Key, Value}) ->
+    io_lib:format("invalid option value ~p ~p.", [Key, Value]);
+format_error({invalid_option_value, Value}) ->
+    io_lib:format("invalid option value ~p.", [Value]);
+format_error({invalid_option, Options}) ->
+    io_lib:format("invalid option ~p.", [Options]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -149,6 +155,8 @@ walk_exec_macro(Node, _Macro, _MacroOpts) ->
 update_forms(Nodes, Acc, #{auto_export := true, line := Line} = Opts) ->
     Exports = exports(Nodes, Line),
     update_forms(Exports ++ Nodes, Acc, maps:remove(auto_export, Opts));
+update_forms(Nodes, Acc, #{merge_function := false}) ->
+    {Nodes, Acc};
 update_forms(Nodes, Forms, #{merge_function := MergeFunction}) ->
     {NRests, NForms} = 
         lists:foldl(
@@ -190,7 +198,8 @@ exports(Nodes, Line) ->
             [astranaut:exports(lists:reverse(FAs), Line)]
     end.
 
-insert_function({function, _Line, FName, Arity, Clauses}, [{function, Line, FName, Arity, FClauses}|T], Merge, Heads) ->
+insert_function({function, _Line, FName, Arity, Clauses}, 
+                [{function, Line, FName, Arity, FClauses}|T], Merge, Heads) ->
     {ok, lists:reverse(Heads) ++ [{function, Line, FName, Arity, merge_clauses(Clauses, FClauses, Merge)}|T]};
 insert_function(_Function, [], _Merge, _Heads) ->
     error;
@@ -211,6 +220,8 @@ already_exported(_Name, _Arity, []) ->
 
 merge_clauses(Clauses1, Clauses2, head) ->
     Clauses1 ++ Clauses2;
+merge_clauses(Clauses1, Clauses2, true) ->
+    Clauses1 ++ Clauses2;
 merge_clauses(Clauses1, Clauses2, tail) ->
     Clauses2 ++ Clauses1.
 
@@ -223,11 +234,11 @@ walk_macro_node(Node, _Macro, _MacroOpts) ->
     Node.
 
 apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arguments := Arguments, line := Line} = Opts) ->
-    NArguments = append_attrs(Arguments, Opts),
-    NNArguments = group_arguments(NArguments, Opts),
+    Arguments1 = group_arguments(Arguments, Opts),
+    Arguments2 = append_attrs(Arguments1, Opts),
     if
-        length(NNArguments) == Arity ->
-            MacroReturn = apply_mfa(Module, Function, NNArguments),
+        length(Arguments2) == Arity ->
+            MacroReturn = apply_mfa(Module, Function, Arguments2),
             case astranaut_traverse:traverse_fun_return_struct(MacroReturn) of
                 #{node := NodeB} = MacroReturnStruct ->
                     NodeC = astranaut:replace_line(NodeB, Line),
@@ -303,39 +314,108 @@ macros(Forms, LocalModule, File) ->
           end, {[], [], []}, Macros),
     {lists:reverse(LocalMacros), lists:reverse(AllMacros), lists:reverse(Warnings)}.
 
-add_macro(MFA, Options, LocalModule, File, Line, Forms, Acc) when is_list(Options) ->
-    add_macro(MFA, maps:from_list(Options), LocalModule, File, Line, Forms, Acc);
-
 add_macro({Function, Arity}, Options, LocalModule, File, Line, Forms, {LocalMacros, AllMacros, Warnings}) ->
+    {Options1, NWarnings} = validate_options(Options, Line, Warnings),
     Module = local_macro_module(LocalModule),
-    NOptions = Options#{module => Module, function => Function, arity => Arity, file => File, line => Line, local => true},
-    NNOptions = merge_attrs(NOptions, LocalModule, File, Line, Forms),
+    Options2 = Options1#{module => Module, function => Function, arity => Arity,
+                          file => File, line => Line, local => true},
+    Options3 = merge_attrs(Options2, LocalModule, File, Line, Forms),
     NLocalMacros = [{Function, Arity, Line}|LocalMacros],
-    NAllMacros = [{Function, NNOptions}|AllMacros],
-    {NLocalMacros, NAllMacros, Warnings};
+    NAllMacros = [{Function, Options3}|AllMacros],
+    {NLocalMacros, NAllMacros, NWarnings};
 
-add_macro({Module, Function, Arity}, Options, LocalModule, File, Line, Forms, {LocalMacros, AllMacros, Warnings}) ->
+add_macro({Module, Function, Arity}, Options, LocalModule, File, Line, Forms, 
+          {LocalMacros, AllMacros, Warnings}) ->
+    {Options1, Warnings1} = validate_options(Options, Line, Warnings),
     case get_exports(Module) of
         {ok, Exports} ->
             case lists:member({Function, Arity}, Exports) of
                 true ->
-                    NOptions = Options#{module => Module, function => Function, arity => Arity, file => File, line => Line},
-                    NNOptions = merge_attrs(NOptions, LocalModule, File, Line, Forms),
-                    case maps:find(import_as, Options) of
+                    Options2 = Options1#{module => Module, function => Function, arity => Arity,
+                                        file => File, line => Line},
+                    Options3 = merge_attrs(Options2, LocalModule, File, Line, Forms),
+                    case maps:find(import_as, Options3) of
                         {ok, As} ->
-                            NAllMacros = [{As, NNOptions}|AllMacros],
+                            NAllMacros = [{As, Options3}|AllMacros],
                             {LocalMacros, NAllMacros, Warnings};
                         error ->
-                            NAllMacros = [{{Module, Function}, NNOptions}|AllMacros],
+                            NAllMacros = [{{Module, Function}, Options3}|AllMacros],
                             {LocalMacros, NAllMacros, Warnings}
                     end;
                 false ->
-                    {LocalMacros, AllMacros, [{Line, ?MODULE, {unexported_macro, Module, Function, Arity}}|Warnings]}
+                    Warnings2 = [{Line, ?MODULE, {unexported_macro, Module, Function, Arity}}|Warnings1],
+                    {LocalMacros, AllMacros, Warnings2}
             end;
         {error, undef} ->
-            {LocalMacros, AllMacros, [{Line, ?MODULE, {unloaded_module, Module}}|Warnings]}
+            Warnings2 = [{Line, ?MODULE, {unloaded_module, Module}}|Warnings1],
+            {LocalMacros, AllMacros, Warnings2}
     end.
 
+validate_options(Opts, Line, Warnings) when is_map(Opts) ->
+    maps:fold(
+        fun(Key, Value, {OptsAcc, WarningAcc} = Acc) ->
+                case validate_option_key(Key, Value) of
+                    ok ->
+                        Acc;
+                    error ->
+                        NWarningsAcc =  [{Line, ?MODULE, {invalid_option_value, Key, Value}}|WarningAcc],
+                        NOptsAcc = maps:remove(Key, OptsAcc),
+                        {NOptsAcc, NWarningsAcc}
+                end
+        end, {Opts, Warnings}, Opts);
+validate_options(Opts, Line, Warnings) when is_list(Opts) ->
+    {Opts1, Warnings1} = 
+        lists:foldl(
+          fun({Key, Value}, {OptsAcc, WarningsAcc}) when is_atom(Key) ->
+                  {maps:put(Key, Value, OptsAcc), WarningsAcc};
+             (Key, {OptsAcc, WarningsAcc}) when is_atom(Key) ->
+                  {maps:put(Key, true, OptsAcc), WarningsAcc};
+             (Value, {OptsAcc, WarningsAcc}) ->
+                  {OptsAcc, [{Line, ?MODULE, {invalid_option_value, Value}}|WarningsAcc]}
+          end, {maps:new(), Warnings}, Opts),
+    validate_options(Opts1, Line, Warnings1);
+validate_options(Opts, Line, Warnings) ->
+    {maps:new(), [{Line, ?MODULE, {invalid_option, Opts}}|Warnings]}.
+
+validate_option_key(attrs, Attrs) when is_atom(Attrs) ->
+    ok;
+validate_option_key(attrs, Attrs) when is_list(Attrs) ->
+    case lists:filter(
+           fun(Attr) ->
+                   not is_atom(Attr)
+           end, Attrs) of
+        [] ->
+            ok;
+        _InvalidAttrs ->
+            error
+    end;
+validate_option_key(order, pre) ->
+    ok;
+validate_option_key(order, post) ->
+    ok;
+validate_option_key(formatter, Formatter) when is_atom(Formatter) ->
+    ok;
+validate_option_key(as_attr, AsAttr) when is_atom(AsAttr) ->
+    ok;
+validate_option_key(auto_export, Bool) when is_boolean(Bool) ->
+    ok;
+validate_option_key(group_args, Bool) when is_boolean(Bool) ->
+    ok;
+validate_option_key(merge_function, head) ->
+    ok;
+validate_option_key(merge_function, tail) ->
+    ok;
+validate_option_key(merge_function, Bool) when is_boolean(Bool) ->
+    ok;
+validate_option_key(debug, Value) when is_boolean(Value) ->
+    ok;
+validate_option_key(debug_ast, Value) when is_boolean(Value) ->
+    ok;
+validate_option_key(import_as, Value) when is_atom(Value) ->
+    ok;
+validate_option_key(_Key, _Value) ->
+    error.
+    
 merge_attrs(#{attrs := Attrs} = Opts, LocalModule, File, Line, Forms) when is_list(Attrs) ->
     AttributesMap = 
         lists:foldl(
@@ -352,7 +432,6 @@ merge_attrs(#{attrs := Attrs} = Opts, LocalModule, File, Line, Forms) when is_li
     Opts#{attributes => maps:merge(#{module => LocalModule, file => File, line => Line}, AttributesMap)};
 merge_attrs(#{} = Opts, _LocalModule, _File, _Line, _Forms) ->
     Opts.
-
 
 get_exports(Module) ->
     try

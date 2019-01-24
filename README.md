@@ -2,7 +2,7 @@
 
 ### traverse functions:
 
-```
+```erlang
   astranaut_traverse:map(map_fun(), form(), Opts :: opts()) -> 
     traverse_return(node()) | parse_transform_return(node()).
     
@@ -18,7 +18,7 @@
 
 *arguments*
 
-```
+```erlang
   form()    :: node() | [node()].
   node()    :: erlang ast node.
   state()   :: any().
@@ -26,7 +26,7 @@
 
 *traverse_fun()*
 
-```
+```erlang
   map_fun()       :: (node(), Attr :: attr()) -> TraverseFunReturn :: traverse_fun_return(node()).
   reduce_fun()    :: (node(), state(), Attr :: attr()) -> TraverseFunReturn :: traverse_fun_return(state()).
   map_state_fun() :: (node(), state(), Attr :: attr()) -> TraverseFunReturn :: traverse_fun_return(node()).
@@ -35,7 +35,7 @@
 
 *Attr*
 
-```
+```erlang
   attr() :: #{step => Step :: step(), node :: NodeType :: node_type()}.
 ```
 
@@ -43,7 +43,7 @@
 
   &emsp;&emsp;which traverse step while traversing, very useful while traverse_style() in opts() is all.
 
-```
+```erlang
   step()  :: pre | post | leaf. 
 ```
 
@@ -51,13 +51,13 @@
 
   &emsp;&emsp;ast node type.
 
-```
+```erlang
   node_type() :: module | file | export | import | type | spec | function | pattern | expression | guard. 
 ```
 
 *TraverseFunReturn*
 
-```
+```erlang
   traverse_fun_return(A) :: A | {error, error()} | continue | {continue, A} |
                             #{'__struct__' => astranaut_traverse_fun_return, 
                               node := Node :: node(), state := State :: state(), continue := Continue :: boolean(),
@@ -79,7 +79,7 @@
 
 *error()*
 
-```    
+```erlang
   error()   :: #{'__struct__' => astranaut_traverse_error, 
                  line := Line :: integer(), module := Module :: module(), reason => Reason :: term()} | 
                 {Line, Module, Reason} | {Line, Reason} | Reason.
@@ -95,7 +95,7 @@
 
 *Opts*
 
-```
+```erlang
   opts()    :: {traverse => TraverseStyle :: traverse_style(), parse_transform => ParseTransform :: boolean(),
                 node => FormType :: form_type(), formatter => Formatter}.
 ```
@@ -120,28 +120,28 @@
   
 *traverse_return(Return)*  
 
-```
+```erlang
   traverse_return(Return) :: Return | {ok, Return, Errors :: traverse_return_error(), Warnings :: traverse_return_error()} | 
                              {error, Errors, Warnings}.
 ```
 
 *parse_transform_return(Return)*  
 
-```
+```erlang
   parse_transform_return(Return) :: Return | {warning, Return, Warnings :: prase_transform_error()} |
                                     {error, Errors :: parse_transform_error(), Warnings}.
 ```
 
 *ReturnError*
 
-```
+```erlang
   traverse_return_error() :: [{Line :: line(), Module :: module(), Reason :: term()}].
   parse_transform_error() :: [{File, traverse_retrun_error()}].
 ```
 
 *Structs*
 
-```  
+```erlang  
   astranaut_traverse:traverse_fun_return(#{}) -> traverse_fun_return(). 
   astranaut_traverse:traverse_error(#{}) -> error(). 
 ```
@@ -150,7 +150,7 @@
 
 &emsp;&emsp;powerful map_m function if you famillar with monad.
 
-```
+```erlang
   astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
 ```
 
@@ -190,7 +190,7 @@
 
 ### unquote
 
-```
+```erlang
 unquote(Ast)
 unquote = Ast.
 unquote_splicing(Asts)
@@ -201,7 +201,7 @@ unquote_splicing = Asts.
 
 &emsp;&emsp; unquote(Var) is not a valid ast in function clause pattern.
 
-```
+```erlang
 Var = {var, 0, A}
 quote(fun(unquote = Var) -> unquote(Var) end).
 ```
@@ -212,7 +212,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 &emsp;&emsp;_@V, same as unquote(V)
   
-```
+```erlang
     V = {var, 10, 'Var'},
     quote({hello, World, unquote(V)}) =>
     {tuple, 1, [{atom, 1, hello}, {var, 1, 'World'}, V]} =>
@@ -223,7 +223,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 &emsp;&emsp;_L@Vs,same as unquote_splicing(Vs)
 
-```
+```erlang
     Vs = [{var, 2, 'Var'}, {atom, 2, atom}],
     quote({A, unquote_splicing(Vs), B}) => 
     {tuple, 1, [{var, 1, 'A'}, Vs ++ [{var, 1, 'B'}]]} =>
@@ -232,7 +232,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 *bind a value*
 
-```
+```erlang
   Atom = hello,
   Integer = 10,
   Float = 1.3,
@@ -251,7 +251,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 &emsp;&emsp;_X@V could be used in any part of quoted ast.  
 &emsp;&emsp;it's legal:
   
-```
+```erlang
     Class = 'Class0',
     Exception = 'Exception0',
     StackTrace = 'StackTrace0',
@@ -266,7 +266,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 &emsp;&emsp;it's illegal
 
-```
+```erlang
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
     StackTrace = {var, 0, 'StackTrace0'},   
@@ -289,7 +289,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
    
    left side of match
 
-```   
+```erlang
      quote(_A@Atom) = {atom, 1, A}
      
      =>
@@ -299,7 +299,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 &emsp;&emsp;function pattern
 
-```   
+```erlang
      macro_clause(quote = {hello, _A@World = World2} = C) ->
        quote({hello2, _A@World, _@World2,_@C});
      
@@ -311,7 +311,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 &emsp;&emsp;case clause pattern:
    
-```
+```erlang
      case Ast of
        quote(_A@Atom) ->
          Atom;
@@ -333,7 +333,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 *Usage*
 
-```
+```erlang
 -include_lib("astranaut/include/macro.hrl").
 ```
 
@@ -341,7 +341,7 @@ macro.hrl add two attribute: use_macro, exec_macro
 
 *use_macro*
 
-```
+```erlang
 -use_macro({Macro/A, opts()}).
 -use_macro({Module, Macro/A, opts()}).
 ```
@@ -350,15 +350,19 @@ macro.hrl add two attribute: use_macro, exec_macro
 
 &emsp;&emsp;execute macro and add result to current ast.
 
-```
+```erlang
 -exec_macro({Macro, Arguments}).
 -exec_macro({Module, Macro, Arguments}).
 ```
 
 *opts()*
 
-```
-  #{debug => Debug, debug_ast => DebugAst, import_as => ImportAs, formatter => Formatter, attrs => Attrs, order => Order}
+```erlang
+  #{debug => Debug, debug_ast => DebugAst, import_as => ImportAs, 
+    formatter => Formatter, attrs => Attrs, order => Order,
+    as_attr => AsAttr, merge_function => MergeFunction, auto_export => AutoExport,
+    group_args => GroupArgs}
+  }
 ```
 
 *Debug*
@@ -398,7 +402,31 @@ macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attribut
 &emsp;&emsp; macro expand order for nested macro , value is pre | post. default is post.
 &emsp;&emsp; pre is expand macro from outside to inside, post is expand macro from inside to outside.
 
-*Usage*
+*AsAttr*
+
+&emsp;&emsp; user defined attribute name replace of -exec_macro.
+
+*MergeFunction*
+
+&emsp;&emsp; -exec_macro ast function merge to function with same name and arity if exists.
+
+*AutoExport*
+
+&emsp;&emsp; -exec_macro ast function auto export, merge to current export if exists.
+
+*GroupArgs* 
+
+&emsp;&emsp; treat macro arguments as list 
+
+```erlang
+-use_macro({a, [group_args]}).
+
+test() ->
+    a(hello, world).
+
+a(Asts) ->
+  quote({unquote_splicing(Asts)}).
+```
 
 &emsp;&emsp;define macro as normal erlang functions.  
 &emsp;&emsp;macro expand order is the order of -use_macro in file.  
@@ -409,7 +437,7 @@ macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attribut
 &emsp;&emsp;-export will be moved to appropriate location in ast forms.  
 &emsp;&emsp;macro return value is same meaning of traverse_fun_return().  
 
-```
+```erlang
 -use_macro({macro_1/1, []}).
 -use_macro({macro_2/1, []}).
 
@@ -436,7 +464,7 @@ macro_2(Name) ->
 
 =>
 
-```
+```erlang
 -use_macro({macro_1/1, []}).
 -export([test/0]).
 -export([hello/0]).

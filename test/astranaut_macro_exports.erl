@@ -16,7 +16,7 @@
 
 -export([hello/1]).
 
--use_macro({macro_x/1, [{as_attr, macro_x}, {auto_export, true}, {merge_function, head}]}).
+-use_macro({macro_x/1, [{as_attr, macro_x}, auto_export, merge_function]}).
 
 %%%===================================================================
 %%% API
