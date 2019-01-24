@@ -27,12 +27,7 @@ parse_transform(Forms, Options) ->
             astranaut_traverse:map_traverse_return(
               fun(FormsAcc) ->
                       NFormsAcc = astranaut:reorder_exports(FormsAcc),
-                      case astranaut:attributes(debug_macro, Forms) of
-                          [] ->
-                              ok;
-                          [true] ->
-                              io:format("~s~n", [astranaut:to_string(NFormsAcc)])
-                      end,
+                      format_forms(NFormsAcc),
                       NFormsAcc
               end, NTraverseReturn);
         {error, Errors, NWarnings} ->
@@ -246,6 +241,14 @@ apply_mfa(Module, Function, Arguments) ->
             {error, {exception, Exception, StackTrace}}
     end.
 
+format_forms(Forms) ->
+    case astranaut:attributes(debug_macro, Forms) of
+        [] ->
+            ok;
+        [true] ->
+            io:format("~s~n", [astranaut:to_string(Forms)])
+    end.
+
 format_node(Node, #{file := File, line := Line} = Opts) ->
     case maps:get(debug, Opts, false) of
         true ->
@@ -261,6 +264,8 @@ format_node(Node, #{file := File, line := Line} = Opts) ->
             ok
     end.
 
+
+    
 format_mfa(#{function := Function, arity := Arity, local := true}) ->
     io_lib:format("~p/~p", [Function, Arity]);
 format_mfa(#{module := Module, function := Function, arity := Arity}) ->
