@@ -11,7 +11,7 @@
 -include("quote.hrl").
 
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, expand_macros/2, format_error/1]).
 
 %%%===================================================================
 %%% API
@@ -22,17 +22,25 @@ parse_transform(Forms, Options) ->
     {LocalMacros, Macros, Warnings} = macros(Forms, Module, File),
     case compile_local_macros(LocalMacros, Forms, Options) of
         {ok, LWarnings} ->
-            TraverseReturn = fold_walk_macros(Macros, Forms, [], Warnings ++ LWarnings),
-            NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
-            astranaut_traverse:map_traverse_return(
-              fun(FormsAcc) ->
-                      NFormsAcc = astranaut:reorder_exports(FormsAcc),
-                      format_forms(NFormsAcc),
-                      NFormsAcc
-              end, NTraverseReturn);
+            expand_macros(Macros, Forms, Warnings ++ LWarnings);
         {error, Errors, NWarnings} ->
             {error, Errors, Warnings ++ NWarnings}
     end.
+
+expand_macros(Macros, Forms) ->
+    expand_macros(Macros, Forms, []).
+
+expand_macros(Macros, Forms, Warnings) ->
+    io:format("expand macros ~p~n", [Macros]),
+    File = astranaut:file(Forms),
+    TraverseReturn = fold_walk_macros(Macros, Forms, [], Warnings),
+    NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
+    astranaut_traverse:map_traverse_return(
+      fun(FormsAcc) ->
+              NFormsAcc = astranaut:reorder_exports(FormsAcc),
+              format_forms(NFormsAcc),
+              NFormsAcc
+      end, NTraverseReturn).
 
 format_error({unexported_macro, Module, Function, Arity}) ->
     io_lib:format("unexported macro ~p:~p/~p.", [Module, Function, Arity]);
