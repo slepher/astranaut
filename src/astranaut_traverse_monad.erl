@@ -13,6 +13,7 @@
 -export([run/2]).
 -export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
+-export([lift_m/2]).
 -export([get/0, put/1, state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
 
@@ -46,6 +47,9 @@ run(M0, State) ->
         {{{error, Reason}, Warnings}, Errors} ->
             {error, [Reason|Errors], Warnings}
     end.
+
+lift_m(F, MA) ->
+    astranaut_monad:lift_m(F, MA, new()).
 
 bind(MA, KMB) ->
     astranaut_monad:bind(MA, KMB, new()).

@@ -26,7 +26,15 @@ parse_transform(Forms, Options) ->
             NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
             astranaut_traverse:map_traverse_return(
               fun(FormsAcc) ->
-                      astranaut:reorder_exports(FormsAcc)
+                      NFormsAcc = astranaut:reorder_exports(FormsAcc),
+                      case astranaut:attributes(debug_macro, Forms) of
+                          [] ->
+                              ok;
+                          [true] ->
+                              io:format("~s~n", [astranaut:to_string(NFormsAcc)]),
+                              io:format("~p~n", [NFormsAcc])
+                      end,
+                      NFormsAcc
               end, NTraverseReturn);
         {error, Errors, NWarnings} ->
             {error, Errors, Warnings ++ NWarnings}
@@ -38,6 +46,8 @@ format_error({undefined_macro, Function, Arity}) ->
     io_lib:format("undefined macro ~p/~p.", [Function, Arity]);
 format_error({unloaded_module, Module}) ->
     io_lib:format("module ~p could not be loaded, add to erl_first_files in rebar.config to make it compile first.", [Module]);
+format_error({invalid_use_macro, Opts}) ->
+    io_lib:format("invalid use macro ~p.", [Opts]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -75,9 +85,9 @@ walk_macro(Macro, MacroOpts, Forms) ->
                     fun(Node, _Attr) ->
                             Return = walk_macro_node(Node, Macro, MacroOpts),
                             astranaut_traverse:fun_return_to_monad(Return, Node, MOpts)
-                    end, lists:reverse(NForms), Opts)
+                    end, NForms, Opts)
           end),
-    Reply = astranaut_traverse_monad:run(Monad, []),
+    Reply = astranaut_traverse_monad:run(Monad, ok),
     astranaut_traverse:map_traverse_return(
       fun({NNode, _State}) ->
               NNode
@@ -92,20 +102,34 @@ to_list(Arguments) ->
 
 exec_macro(Macro, MacroOpts, Forms, MOpts) ->
     Opts = #{traverse => pre, formatter => ?MODULE},
-    astranaut_traverse_monad:then(
-      astranaut_traverse:map_m(
-        fun(Form, _Attr) ->
-                Return = walk_exec_macro(Form, Macro, MacroOpts),
-                astranaut_traverse_monad:bind(
-                  astranaut_traverse:fun_return_to_monad(Return, Form, MOpts),
-                  fun(NForm) ->
-                          astranaut_traverse_monad:state(
-                            fun(Acc) ->
-                                    {continue, append_node(NForm, Acc)}
-                            end)
-                  end)
-        end, Forms, Opts),
-      astranaut_traverse_monad:get()).
+    astranaut_traverse_monad:lift_m(
+      fun({_, NForms}) ->
+              NForms
+      end,
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:put({1, Forms}),
+        astranaut_traverse_monad:then(
+          astranaut_traverse:map_m(
+            fun(Form, _Attr) ->
+                    Return = walk_exec_macro(Form, Macro, MacroOpts),
+                    astranaut_traverse_monad:bind(
+                      astranaut_traverse:fun_return_to_monad(Return, Form, MOpts),
+                      fun(NForm) ->
+                              astranaut_traverse_monad:state(
+                                fun({N, Acc}) ->
+                                        if
+                                            Form == NForm ->
+                                                {continue, {N + 1, Acc}};
+                                            true ->
+                                                Line = erl_syntax:get_pos(Form),
+                                                {Nodes, NAcc} = update_forms(to_list(NForm), Acc, MacroOpts#{line => Line}),
+                                                NNAcc = astranaut:replace_from_nth(Nodes, N, NAcc),
+                                                {continue, {N + length(Nodes), NNAcc}}
+                                        end
+                                end)
+                      end)
+            end, Forms, Opts),
+          astranaut_traverse_monad:get()))).
 
 walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
@@ -117,10 +141,73 @@ walk_exec_macro({attribute, Line, Attribute, Arguments} = NodeA, _, #{as_attr :=
 walk_exec_macro(Node, _Macro, _MacroOpts) ->
     Node.
 
-append_node(Nodes, Acc) when is_list(Nodes) ->
-    lists:reverse(Nodes) ++ Acc;
-append_node(Node, Acc) ->
-    [Node|Acc].
+update_forms(Nodes, Acc, #{auto_export := true, line := Line} = Opts) ->
+    Exports = exports(Nodes, Line),
+    update_forms(Exports ++ Nodes, Acc, maps:remove(auto_export, Opts));
+update_forms(Nodes, Forms, #{merge_function := MergeFunction}) ->
+    {NRests, NForms} = 
+        lists:foldl(
+          fun({function, _Line, _FName, _Arity, _Clauses} = Function, {Rests, Acc}) ->
+                  case insert_function(Function, Acc, MergeFunction, []) of
+                      {ok, NAcc} ->
+                          {Rests, NAcc};
+                      error ->
+                          {[Function|Rests], Acc}
+                  end;
+             ({attribute, Line, export, FAs}, {Rests, Acc}) ->
+                  case lists:filter(
+                         fun({Name, Arity}) ->
+                                 not already_exported(Name, Arity, Acc)
+                         end, FAs) of
+                      [] ->
+                          {Rests, Acc};
+                      NFAs ->
+                          NExport = {attribute, Line, export, NFAs},
+                          {[NExport|Rests], Acc}
+                  end;
+             (Form, {Rests, Acc}) ->
+              {[Form|Rests], Acc}
+          end, {[], Forms}, Nodes),
+    {lists:reverse(NRests), NForms};
+update_forms(Nodes, Acc, _MOpts) ->
+    {Nodes, Acc}.
+
+exports(Nodes, Line) ->
+    case lists:foldl(
+           fun({function, _Line, FName, Arity, _Clauses}, Acc) ->
+                   [{FName, Arity}|Acc];
+              (_, Acc) ->
+                   Acc
+           end, [], Nodes) of
+        [] ->
+            [];
+        FAs ->
+            [astranaut:exports(lists:reverse(FAs), Line)]
+    end.
+
+insert_function({function, _Line, FName, Arity, Clauses}, [{function, Line, FName, Arity, FClauses}|T], Merge, Heads) ->
+    {ok, lists:reverse(Heads) ++ [{function, Line, FName, Arity, merge_clauses(Clauses, FClauses, Merge)}|T]};
+insert_function(_Function, [], _Merge, _Heads) ->
+    error;
+insert_function(Function, [H|T], Merge, Heads) ->
+    insert_function(Function, T, Merge, [H|Heads]).
+
+already_exported(Name, Arity, [{attribute, _Line, export, FAs}|T]) ->
+    case lists:member({Name, Arity}, FAs) of
+        true ->
+            true;
+        false ->
+            already_exported(Name, Arity, T)
+    end;
+already_exported(Name, Arity, [_H|T]) ->
+    already_exported(Name, Arity, T);
+already_exported(_Name, _Arity, []) ->
+    false.
+
+merge_clauses(Clauses1, Clauses2, head) ->
+    Clauses1 ++ Clauses2;
+merge_clauses(Clauses1, Clauses2, tail) ->
+    Clauses2 ++ Clauses1.
 
 walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, Function, Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
@@ -192,9 +279,8 @@ macros(Forms, LocalModule, File) ->
                   add_macro({Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
              ({Line, {{Function, Arity}, Opts}}, Acc) when is_list(Opts)->
                   add_macro({Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
-             ({Line, Other}, Acc) ->
-                  io:format("invalid import macro ~p at ~p~n", [Other, Line]),
-                  Acc
+             ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
+                  {LocalMacrosAcc, AllMacrosAcc, [{Line, ?MODULE, {invalid_use_macro, Other}}|WarningsAcc]}
           end, {[], [], []}, Macros),
     {lists:reverse(LocalMacros), lists:reverse(AllMacros), lists:reverse(Warnings)}.
 
@@ -285,10 +371,6 @@ compile_local_macros(Macros, Forms, Opts) ->
                         false ->
                             Acc
                     end;
-               ({attribute, _Line, use_macro, _Attr}, Acc) ->
-                    Acc;
-               ({attribute, _Line, exec_macro, _Attr}, Acc) ->
-                    Acc;
                ({function, _Line, Name, Arity, _Clauses} = Node, Acc) ->
                     case ordsets:is_element({Name, Arity}, MacroDeps) of
                         true ->
@@ -303,6 +385,8 @@ compile_local_macros(Macros, Forms, Opts) ->
                         false ->
                             Acc
                     end;
+               ({attribute, _Line, _AttrName, _Attr}, Acc) ->
+                    Acc;
                (Node, Acc) ->
                     [Node|Acc]
             end, [], Forms)),

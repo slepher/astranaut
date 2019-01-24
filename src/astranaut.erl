@@ -14,6 +14,7 @@
 -export([file/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, replace_line_zero/2, to_string/1]).
+-export([replace_from_nth/3]).
 -export([reorder_exports/1]).
 %%====================================================================
 %% API functions
@@ -126,18 +127,16 @@ exports(Exports, Line) ->
     {attribute, Line, export, Exports}.
 
 reorder_exports(Forms) ->
-    Length = length(Forms),
-    {Exports, NForms, _, Offset} = 
-        lists:foldl(
-          fun({attribute, _Line, export, _ExportAttrs} = Export, {ExportsAcc, FormsAcc, Offset, _}) ->
-                  {[Export|ExportsAcc], FormsAcc, Offset - 1, Offset - 1};
-             ({attribute, _Line, module, _} = Module, {ExportsAcc, FormsAcc, Offset, 0}) ->
-                  {ExportsAcc, [Module|FormsAcc], Offset - 1, Offset - 1};
-             (Node, {ExportsAcc, FormsAcc, Offset, Location}) ->
-                  {ExportsAcc, [Node|FormsAcc], Offset - 1, Location}
-          end, {[], [], Length, 0}, lists:reverse(Forms)),
-    {Head, Tail} = lists:split(Offset, NForms),
-    Head ++ Exports ++ Tail.
+    lists:foldl(
+      fun(N, Acc) ->
+              Form = lists:nth(N, Forms),
+              case Form of
+                  {attribute, _Line, export, _FAs} = Export ->
+                      replace_from_nth(Export, N, Acc);
+                  _ ->
+                      Acc
+              end
+      end, Forms, lists:seq(1, length(Forms))).
 
 to_string(Forms) when is_list(Forms) ->
     erl_prettypr:format(erl_syntax:form_list(Forms));
@@ -152,6 +151,27 @@ merge_clauses([{'fun', Line, {clauses, _}}|_T] = Nodes) ->
                     FClauses
             end, Nodes)),
     {'fun', Line, {clauses, NClauses}}.
+
+replace_from_nth(Nodes, N, Forms) when is_list(Nodes), N > 0 ->
+    replace_from_nth(Nodes, N, Forms, [], true);
+replace_from_nth(Node, N, Forms) when N > 0 ->
+    replace_from_nth([Node], N, Forms).
+
+replace_from_nth(Nodes, 1, [_|Forms], Heads, _WithExports) ->
+    lists:reverse(Heads) ++ Nodes ++ Forms;
+replace_from_nth(Nodes, N, [{function, _Line0, _Name, _Arity, _Clauses} = Fun|Forms], Heads, true) ->
+    {Exports, Rests} = 
+        lists:partition(
+          fun({attribute, _Line1, export, _FAs}) ->
+                  true;
+             (_) ->
+                  false
+          end, Nodes),
+    %io:format("replaced ~p ~p~n~p~n~p~n", [Rests, N - 1, Forms, [Fun|lists:reverse(Exports) ++ Heads]]),
+    replace_from_nth(Rests, N - 1, Forms, [Fun|lists:reverse(Exports) ++ Heads], false);
+    
+replace_from_nth(Nodes, N, [Head|Forms], Heads, WithExports) ->
+    replace_from_nth(Nodes, N - 1, Forms, [Head|Heads], WithExports).
 
 %%====================================================================
 %% Internal functions

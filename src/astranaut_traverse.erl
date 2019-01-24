@@ -381,7 +381,7 @@ struct_to_monad(#{warnings := Warnings} = Reply, MA, Opts) ->
     MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:warnings(NWarnings)),
     NReply = maps:remove(warnings, Reply),
     struct_to_monad(NReply, MB, Opts);
-struct_to_monad(#{state := State} = Reply, MA, Opts) ->
+struct_to_monad(#{state := State} = Reply, MA, #{with_state := true} = Opts) ->
     MB = astranaut_traverse_monad:left_then(MA, astranaut_traverse_monad:put(State)),
     NReply = maps:remove(state, Reply),
     struct_to_monad(NReply, MB, Opts);
