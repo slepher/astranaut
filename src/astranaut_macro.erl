@@ -31,8 +31,7 @@ parse_transform(Forms, Options) ->
                           [] ->
                               ok;
                           [true] ->
-                              io:format("~s~n", [astranaut:to_string(NFormsAcc)]),
-                              io:format("~p~n", [NFormsAcc])
+                              io:format("~s~n", [astranaut:to_string(NFormsAcc)])
                       end,
                       NFormsAcc
               end, NTraverseReturn);
