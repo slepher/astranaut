@@ -11,7 +11,7 @@
 %% API
 -export([parse_transform/2, format_error/1]).
 -export([quote/1, quote/2]).
--export([uncons/1]).
+-export([uncons/1, cons/2]).
 
 %%%===================================================================
 %%% API
@@ -42,6 +42,23 @@ uncons({nil, _Line}) ->
     [];
 uncons(Value) ->
     Value.
+
+cons(Value, Rest) ->
+    X = cons_1(Value, Rest),
+    io:format("cons is ~p~n", [X]),
+    X.
+
+
+cons_1([H|T], Rest) ->
+    Line = erl_syntax:get_pos(H),
+    {cons, Line, H, cons_1(T, Rest)};
+cons_1([], Rest) ->
+    Rest;
+cons_1({cons, Line, H, T}, Rest) ->
+    {cons, Line, H, cons_1(T, Rest)};
+cons_1({nil, _Line}, Rest) ->
+    Rest.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -89,7 +106,11 @@ walk(Node, _Attr) ->
 
 quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
     unquote(Unquote, Opts#{type => value});
+quote_1({cons, Line, {call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}, Rest}, Opts) ->
+    %quote([a, b, unquote_splicing(V), c, d]),
+    call_remote(?MODULE, cons, [Unquotes, quote_1(Rest, Opts)], Line);
 quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
+    %quote({a, b, unquote_splicing(V), c, d}),
     unquote_splicing(Unquotes, T, Opts);
 quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
     unquote(Unquote, Opts#{type => value});
