@@ -19,7 +19,7 @@ parse_transform(Forms, _Options) ->
     Macro2 = {astranaut_example_macros, test_macro, 0},
     Opts = [auto_export, {formatter, ?MODULE}],
     Macros = [{Macro1, []}, {Macro2, Opts}],
-    astranaut_macro:expand_macros(Macros, Forms).
+    astranaut_macro:transform_macros(Macros, Forms).
 
 format_error(Error) ->
     astranaut_traverse:format_error(Error).

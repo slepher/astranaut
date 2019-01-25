@@ -499,3 +499,27 @@ macro_2(Name) ->
           unquote_atom(Name)
       end)).
 ```
+
+*parse_transform*
+
+
+&emsp;&emsp; for old parse_transform module which is used widely, two function is provided.
+
+```erlang
+*astranaut_macro:transform_macro(Module, Function, Arity, Opts, Forms).
+*astranaut_macro:transform_macros([Macro...], Forms).
+Macro = {Module, Function, Arity, Opts}.
+```
+
+&emsp;&emsp; example:
+
+```
+-module(do).
+
+-include_lib("astranaut/include/quote.hrl").
+
+-export([parse_transform/2]).
+
+parse_transform(Forms, _Options) ->
+    astranaut_macro:transform_macro(do_macro, do, 1, [{alias, do}, formatter], Forms).
+```

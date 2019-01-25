@@ -11,16 +11,16 @@
 -include("quote.hrl").
 
 %% API
--export([expand_macro/5, expand_macros/2]).
+-export([transform_macro/5, transform_macros/2]).
 -export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-expand_macro(M, F, A, Opts, Forms) ->
-    expand_macros([{M, F, A, Opts}], Forms).
+transform_macro(M, F, A, Opts, Forms) ->
+    transform_macros([{M, F, A, Opts}], Forms).
 
-expand_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
+transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
     File = astranaut:file(Forms),
     [{Line, Module}] = astranaut:attributes_with_line(module, Forms),
     {Macros, Warnings} =
@@ -580,7 +580,6 @@ compile_local_macros(MacrosOptions, Forms, Opts) ->
                (Node, Acc) ->
                     [Node|Acc]
             end, [], Forms)),
-    io:format("~p ~p ~p ~p ~s~n", [MacrosOptions, LocalMacros, UsedFunctions, MacroDeps, astranaut:to_string(NForms)]),
     case compile:forms(NForms, Opts) of
         {ok, Mod, Binary, _} ->
             case code:load_binary(Mod, [], Binary) of
