@@ -364,6 +364,7 @@ macro.hrl add two attribute: use_macro, exec_macro
     group_args => GroupArgs}
   }
 ```
+&emsp;&emsp; opts() could also be proplists, same usage of map().
 
 *Debug*
 
@@ -379,11 +380,13 @@ macro.hrl add two attribute: use_macro, exec_macro
 
 *Formatter*
 
-&emsp;&emsp; module include format_error/1 to format macro errors, default is astranaut_traverse
+&emsp;&emsp; module include format_error/1 to format macro errors,  
+&emsp;&emsp; if formatter is true, formatter is the module where macro defined,  
+&emsp;&emsp; default is astranaut_traverse.
 
 *Attrs*
 
-&emsp;&emsp; module attributes as extra args while calling macro 
+&emsp;&emsp; module attributes as extra args while calling macro.
 
 ```
 -module(a).
