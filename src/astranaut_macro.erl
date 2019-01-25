@@ -18,15 +18,15 @@
 %%% API
 %%%===================================================================
 expand_macro(M, F, A, Opts, Forms) ->
-    expand_macros([{{M, F, A}, Opts}], Forms).
+    expand_macros([{M, F, A, Opts}], Forms).
 
 expand_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
     File = astranaut:file(Forms),
     [{Line, Module}] = astranaut:attributes_with_line(module, Forms),
     {Macros, Warnings} =
         lists:foldl(
-          fun({MFA, Opts}, Acc) -> 
-                  add_macro(MFA, Opts, Module, File, Line, Forms, Acc)
+          fun({{M, F, A}, Opts}, Acc) -> 
+                  add_macro({M, F, A}, Opts, Module, File, Line, Forms, Acc)
           end, {[], []}, lists:reverse(MFAOpts)),
     exec_macros(Macros, Forms, File, Warnings).
 
@@ -55,6 +55,10 @@ format_error({invalid_option_value, Value}) ->
     io_lib:format("invalid option value ~p.", [Value]);
 format_error({invalid_option, Options}) ->
     io_lib:format("invalid option ~p.", [Options]);
+format_error({non_exported_formatter, Module}) ->
+    io_lib:format("format_error/1 is not exported from module ~p.", [Module]);
+format_error({unloaded_formatter_module, Module}) ->
+    io_lib:format("formatter module ~p could not be loaded.", [Module]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -337,9 +341,9 @@ kmfa_options(Options, {Module, Function, Arity}, _LocalModule) ->
                     {error, {unexported_macro, Module, Function, Arity}}
             end;
         {error, undef} ->
-            {error, {unloaded_module, Module}}
+            {error, {unloaded_macro_module, Module}}
     end.
-    
+
 merge_attrs(#{attrs := Attrs, local_module := Module, file := File, line := Line} = Opts, Forms) ->
     AttributesMap = 
         lists:foldl(
@@ -357,12 +361,37 @@ merge_attrs(#{attrs := Attrs, local_module := Module, file := File, line := Line
 merge_attrs(#{} = Opts, _Forms) ->
     Opts.
 
-formatter_opts(#{formatter := Module, local_module := Module}) ->
-    #{formatter => local_macro_module(Module)};
-formatter_opts(#{formatter := Formatter}) ->
-    #{formatter => Formatter};
-formatter_opts(#{}) ->
-    #{formatter => astranaut_traverse}.
+formatter_opts(#{formatter := Module, local_module := Module} = Options) ->
+    Options#{formatter => local_macro_module(Module), local_formatter => true};
+formatter_opts(#{formatter := true, module := Module, local := true} = Options) ->
+    Options#{formatter => Module, local_formatter => true};
+formatter_opts(#{formatter := true, module := Module} = Options) ->
+    Options#{formatter => Module};
+formatter_opts(#{formatter := Formatter} = Options) ->
+    Options#{formatter => Formatter};
+formatter_opts(#{} = Options) ->
+    Options#{formatter => astranaut_traverse}.
+
+validate_formatter(#{local_formatter := true, local_module := Module}, Forms) ->
+    Exports = astranaut:attributes(export, Forms),
+    case lists:member({format_error, 1}, lists:flatten(Exports)) of
+        true ->
+            ok;
+        false ->
+            {error, {non_exported_formatter, Module}}
+    end;
+validate_formatter(#{formatter := Module}, _Forms) ->
+    case get_exports(Module) of
+        {ok, Exports} ->
+            case lists:member({format_error, 1}, Exports) of
+                true ->
+                    ok;
+                false ->
+                    {error, {non_exported_formatter, Module}}
+            end;
+        {error, undef} ->
+            {error, {unloaded_formatter_module, Module}}
+    end.
 
 update_alias(#{alias := Alias} = Options) ->
     Options#{macro => Alias};
@@ -376,7 +405,14 @@ add_macro(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, Warnings}) -
             Options3 = update_alias(Options2),
             Options4 = Options3#{local_module => LocalModule, file => File, line => Line},
             Options5 = merge_attrs(Options4, Forms),
-            {[Options5|AllMacros], Warnings1};
+            Options6 = formatter_opts(Options5),
+            case validate_formatter(Options6, Forms) of
+                ok ->
+                    {[Options6|AllMacros], Warnings1};
+                {error, Reason} ->
+                    Options7 = Options6#{formatter => ?MODULE},
+                    {[Options7|AllMacros], [{Line, ?MODULE, Reason}|Warnings1]}
+            end;
         {error, Reason} ->
             Warnings2 = [{Line, ?MODULE, Reason}|Warnings1],
             {AllMacros, Warnings2}
@@ -466,7 +502,8 @@ compile_local_macros(MacrosOptions, Forms, Opts) ->
           end, ordsets:new(), MacrosOptions),
     UsedFunctions = 
         lists:foldl(
-          fun(#{formatter := Module, local_module := Module}, Acc) ->
+          fun(#{local_formatter := true} = Optsx, Acc) ->
+                  io:format("options is ~p~n", [Optsx]),
                   ordsets:add_element({format_error, 1}, Acc);
              (#{}, Acc) ->
                   Acc
@@ -501,8 +538,13 @@ compile_local_macros(MacrosOptions, Forms, Opts) ->
                ({attribute, Line, export, Exports}, Acc) ->
                     case lists:member({format_error, 1}, Exports) of
                         true ->
-                            Export = {attribute, Line, export, [{format_error, 1}]},
-                            [Export|Acc];
+                            case ordsets:is_element({format_error, 1}, UsedFunctions) of
+                                true ->
+                                    Export = {attribute, Line, export, [{format_error, 1}]},
+                                    [Export|Acc];
+                                false ->
+                                    Acc
+                            end;
                         false ->
                             Acc
                     end;
@@ -538,6 +580,7 @@ compile_local_macros(MacrosOptions, Forms, Opts) ->
                (Node, Acc) ->
                     [Node|Acc]
             end, [], Forms)),
+    io:format("~p ~p ~p ~p ~s~n", [MacrosOptions, LocalMacros, UsedFunctions, MacroDeps, astranaut:to_string(NForms)]),
     case compile:forms(NForms, Opts) of
         {ok, Mod, Binary, _} ->
             case code:load_binary(Mod, [], Binary) of

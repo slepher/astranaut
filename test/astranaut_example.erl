@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_example).
 
--define(DEBUG_OPT, [{debug, false}, {debug_ast, false}, {formatter, ?MODULE}]).
+-define(DEBUG_OPT, [{debug, false}, {debug_ast, false}, formatter]).
 
 -include("astranaut.hrl").
 
