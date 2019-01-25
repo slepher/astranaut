@@ -25,7 +25,7 @@ transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
     [{Line, Module}] = astranaut:attributes_with_line(module, Forms),
     {Macros, Warnings} =
         lists:foldl(
-          fun({{M, F, A}, Opts}, Acc) -> 
+          fun({M, F, A, Opts}, Acc) -> 
                   add_macro({M, F, A}, Opts, Module, File, Line, Forms, Acc)
           end, {[], []}, lists:reverse(MFAOpts)),
     exec_macros(Macros, Forms, File, Warnings).
