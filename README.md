@@ -399,7 +399,7 @@ macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attribut
 
 *Order*
 
-&emsp;&emsp; macro expand order for nested macro , value is pre | post. default is post.
+&emsp;&emsp; macro expand order for nested macro , value is pre | post. default is post.  
 &emsp;&emsp; pre is expand macro from outside to inside, post is expand macro from inside to outside.
 
 *AsAttr*
