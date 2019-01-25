@@ -43,20 +43,14 @@ uncons({nil, _Line}) ->
 uncons(Value) ->
     Value.
 
-cons(Value, Rest) ->
-    X = cons_1(Value, Rest),
-    io:format("cons is ~p~n", [X]),
-    X.
-
-
-cons_1([H|T], Rest) ->
+cons([H|T], Rest) ->
     Line = erl_syntax:get_pos(H),
-    {cons, Line, H, cons_1(T, Rest)};
-cons_1([], Rest) ->
+    {cons, Line, H, cons(T, Rest)};
+cons([], Rest) ->
     Rest;
-cons_1({cons, Line, H, T}, Rest) ->
-    {cons, Line, H, cons_1(T, Rest)};
-cons_1({nil, _Line}, Rest) ->
+cons({cons, Line, H, T}, Rest) ->
+    {cons, Line, H, cons(T, Rest)};
+cons({nil, _Line}, Rest) ->
     Rest.
 
 %%--------------------------------------------------------------------
