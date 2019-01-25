@@ -337,7 +337,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 -include_lib("astranaut/include/macro.hrl").
 ```
 
-macro.hrl add two attribute: use_macro, exec_macro
+macro.hrl add three attribute: use_macro, exec_macro debug_macro
 
 *use_macro*
 
@@ -354,6 +354,14 @@ macro.hrl add two attribute: use_macro, exec_macro
 -exec_macro({Macro, Arguments}).
 -exec_macro({Module, Macro, Arguments}).
 ```
+
+*debug_macro*
+
+```erlang
+-debug_macro(true).
+```
+
+&emsp;&emsp; module will be printed to console after astranaut_macro transform.
 
 *opts()*
 
