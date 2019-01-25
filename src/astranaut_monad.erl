@@ -15,7 +15,7 @@
 -export([bind/3, then/3, return/2]).
 -export([lift/2]).
 -export([fail/2]).
--export([get/1, put/2, state/2]).
+-export([get/1, put/2, modify/2, state/2]).
 -export([tell/2]).
 -export([lift_fail/2]).
 -export([lift_get/1, lift_put/2, lift_state/2]).
@@ -69,6 +69,12 @@ get({T, _IM} = M) ->
 
 put(S, {T, _IM} = M) ->
     T:put(S, M).
+
+modify(F, M) ->
+    state(
+      fun(S) ->
+              {ok, F(S)}
+      end, M).
 
 state(F, {T, _IM} = M) ->
     T:state(F, M).
