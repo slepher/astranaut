@@ -38,7 +38,7 @@
 -use_macro({macro_with_attributes/1, [{attrs, [include]}|?DEBUG_OPT]}).
 -use_macro({macro_group_args/1, [{group_args, true}|?DEBUG_OPT]}).
 
--use_macro({astranaut_example_macros, exported_macro/0, [{import_as, imported_macro}]}).
+-use_macro({astranaut_example_macros, exported_macro/0, [{alias, imported_macro}]}).
 
 -exec_macro({astranaut_example_macros, test_macro, []}).
 -exec_macro({function_macro, [a]}).

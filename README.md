@@ -358,7 +358,7 @@ macro.hrl add two attribute: use_macro, exec_macro
 *opts()*
 
 ```erlang
-  #{debug => Debug, debug_ast => DebugAst, import_as => ImportAs, 
+  #{debug => Debug, debug_ast => DebugAst, alias => Alias, 
     formatter => Formatter, attrs => Attrs, order => Order,
     as_attr => AsAttr, merge_function => MergeFunction, auto_export => AutoExport,
     group_args => GroupArgs}
@@ -373,9 +373,9 @@ macro.hrl add two attribute: use_macro, exec_macro
 
 &emsp;&emsp;print ast generated when macro called compile time.
 
-*ImportAs*
+*Alias*
 
-&emsp;&emsp; use ImportAs(Arguments) instead of Module:Macro(Arguments).
+&emsp;&emsp; use Alias(Arguments) instead of Module:Macro(Arguments).
 
 *Formatter*
 

@@ -11,23 +11,30 @@
 -include("quote.hrl").
 
 %% API
--export([expand_macro/5]).
+-export([expand_macro/5, expand_macros/2]).
 -export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 expand_macro(M, F, A, Opts, Forms) ->
+    expand_macros([{{M, F, A}, Opts}], Forms).
+
+expand_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
     File = astranaut:file(Forms),
-    [Module] = astranaut:attributes(module, Forms),
-    {_LMacros, Macros, Warnings} = add_macro({M, F, A}, Opts, Module, File, 0, Forms, {[], [], []}),
+    [{Line, Module}] = astranaut:attributes_with_line(module, Forms),
+    {Macros, Warnings} =
+        lists:foldl(
+          fun({MFA, Opts}, Acc) -> 
+                  add_macro(MFA, Opts, Module, File, Line, Forms, Acc)
+          end, {[], []}, lists:reverse(MFAOpts)),
     exec_macros(Macros, Forms, File, Warnings).
 
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
     [Module] = astranaut:attributes(module, Forms),
-    {LocalMacros, Macros, Warnings} = macros(Forms, Module, File),
-    case compile_local_macros(LocalMacros, Forms, Options) of
+    {Macros, Warnings} = macros(Forms, Module, File),
+    case compile_local_macros(Macros, Forms, Options) of
         {ok, LWarnings} ->
             exec_macros(Macros, Forms, File, Warnings ++ LWarnings);
         {error, Errors, NWarnings} ->
@@ -71,8 +78,8 @@ exec_macros(Macros, Forms, File, Warnings) ->
               format_forms(NFormsAcc),
               NFormsAcc
       end, NTraverseReturn).
-fold_walk_macros([{Macro, Opts}|T], Forms, Errors, Warnings) ->
-    case walk_macro(Macro, Opts, Forms) of
+fold_walk_macros([Options|T], Forms, Errors, Warnings) ->
+    case walk_macro(Options, Forms) of
         {ok, NForms, NErrors, NWarnings} ->
             fold_walk_macros(T, NForms, Errors ++ NErrors, Warnings ++ NWarnings);
         {error, NErrors, NWarnings} ->
@@ -86,17 +93,17 @@ fold_walk_macros([], Forms, [], []) ->
 fold_walk_macros([], Forms, Errors, Warnings) ->
     {ok, Forms, Errors, Warnings}.
 
-walk_macro(Macro, MacroOpts, Forms) ->
+walk_macro(MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    MOpts = maps:merge(#{formatter => astranaut_traverse}, maps:with([formatter], MacroOpts)),
+    MOpts = formatter_opts(MacroOpts),
     Opts = #{traverse => Traverse, formatter => ?MODULE},
     Monad = 
         astranaut_traverse_monad:bind(
-          exec_macro(Macro, MacroOpts, Forms, MOpts),
+          exec_macro(MacroOpts, Forms, MOpts),
           fun(NForms) ->
                   astranaut_traverse:map_m(
                     fun(Node, _Attr) ->
-                            Return = walk_macro_node(Node, Macro, MacroOpts),
+                            Return = walk_macro_node(Node, MacroOpts),
                             astranaut_traverse:fun_return_to_monad(Return, Node, MOpts)
                     end, NForms, Opts)
           end),
@@ -111,7 +118,7 @@ to_list(Arguments) when is_list(Arguments) ->
 to_list(Arguments) ->
     [Arguments].
 
-exec_macro(Macro, MacroOpts, Forms, MOpts) ->
+exec_macro(MacroOpts, Forms, MOpts) ->
     astranaut_traverse_monad:lift_m(
       fun({_, NForms}) ->
               NForms
@@ -121,7 +128,7 @@ exec_macro(Macro, MacroOpts, Forms, MOpts) ->
         astranaut_traverse_monad:then(
           astranaut_traverse_monad:map_m(
             fun(Form) ->
-                    Return = walk_exec_macro(Form, Macro, MacroOpts),
+                    Return = walk_exec_macro(Form, MacroOpts),
                     astranaut_traverse_monad:bind(
                       astranaut_traverse:fun_return_to_monad(Return, Form, MOpts),
                       fun(NForm) ->
@@ -141,14 +148,14 @@ exec_macro(Macro, MacroOpts, Forms, MOpts) ->
             end, Forms),
           astranaut_traverse_monad:get()))).
 
-walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, Function, Opts) ->
+walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, #{macro := Function} = Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
 walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA,
-                {Module, Function}, Opts) ->
+                #{macro := {Module, Function}} = Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_exec_macro({attribute, Line, Attribute, Arguments} = NodeA, _, #{as_attr := Attribute} = Opts) ->
+walk_exec_macro({attribute, Line, Attribute, Arguments} = NodeA, #{as_attr := Attribute} = Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_exec_macro(Node, _Macro, _MacroOpts) ->
+walk_exec_macro(Node, _MacroOpts) ->
     Node.
 
 update_forms(Nodes, Acc, #{auto_export := true, line := Line} = Opts) ->
@@ -224,12 +231,12 @@ merge_clauses(Clauses1, Clauses2, true) ->
 merge_clauses(Clauses1, Clauses2, tail) ->
     Clauses2 ++ Clauses1.
 
-walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, Function, Opts) ->
+walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, #{macro := Function} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
 walk_macro_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
-                {Module, Function}, Opts) ->
-    apply_macro(Node, Opts#{arguments => Arguments, Line => Line});
-walk_macro_node(Node, _Macro, _MacroOpts) ->
+                #{macro := {Module, Function}} = Opts) ->
+    apply_macro(Node, Opts#{arguments => Arguments, line => Line});
+walk_macro_node(Node, __MacroOpts) ->
     Node.
 
 apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arguments := Arguments, line := Line} = Opts) ->
@@ -299,7 +306,7 @@ format_mfa(#{module := Module, function := Function, arity := Arity}) ->
 
 macros(Forms, LocalModule, File) ->
     Macros = lists:flatten(astranaut:attributes_with_line(use_macro, Forms)),
-    {LocalMacros, AllMacros, Warnings} = 
+    {AllMacros, Warnings} = 
         lists:foldl(
           fun({Line, {Module, {Function, Arity}}}, Acc) ->
                   add_macro({Module, Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
@@ -312,40 +319,66 @@ macros(Forms, LocalModule, File) ->
              ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
                   {LocalMacrosAcc, AllMacrosAcc, [{Line, ?MODULE, {invalid_use_macro, Other}}|WarningsAcc]}
           end, {[], []}, Macros),
-    {lists:reverse(LocalMacros), lists:reverse(AllMacros), lists:reverse(Warnings)}.
+    {lists:reverse(AllMacros), lists:reverse(Warnings)}.
 
-add_macro({Function, Arity}, Options, LocalModule, File, Line, Forms, {AllMacros, Warnings}) ->
-    {Options1, NWarnings} = validate_options(Options, Line, Warnings),
+kmfa_options(Options, {Function, Arity}, LocalModule) ->
     Module = local_macro_module(LocalModule),
-    Options2 = Options1#{module => Module, function => Function, arity => Arity, file => File, line => Line, local => true},
-    Options3 = merge_attrs(Options2, LocalModule, File, Line, Forms),
-    NAllMacros = [{Function, Options3}|AllMacros],
-    {NAllMacros, NWarnings};
-
-add_macro({Module, Function, Arity}, Options, LocalModule, File, Line, Forms, 
-          {AllMacros, Warnings}) ->
-    {Options1, Warnings1} = validate_options(Options, Line, Warnings),
+    Options1 = Options#{key => Function, module => Module, function => Function, arity => Arity, local => true},
+    {ok, Options1};
+kmfa_options(Options, {Module, Function, Arity}, _LocalModule) ->
+    Options1 = Options#{key => {Module, Function}, module => Module, function => Function,
+                        arity => Arity, local => false},
     case get_exports(Module) of
         {ok, Exports} ->
             case lists:member({Function, Arity}, Exports) of
                 true ->
-                    Options2 = Options1#{module => Module, function => Function, arity => Arity,
-                                        file => File, line => Line},
-                    Options3 = merge_attrs(Options2, LocalModule, File, Line, Forms),
-                    case maps:find(import_as, Options3) of
-                        {ok, As} ->
-                            NAllMacros = [{As, Options3}|AllMacros],
-                            {NAllMacros, Warnings};
-                        error ->
-                            NAllMacros = [{{Module, Function}, Options3}|AllMacros],
-                            {NAllMacros, Warnings}
-                    end;
+                    {ok, Options1};
                 false ->
-                    Warnings2 = [{Line, ?MODULE, {unexported_macro, Module, Function, Arity}}|Warnings1],
-                    {AllMacros, Warnings2}
+                    {error, {unexported_macro, Module, Function, Arity}}
             end;
         {error, undef} ->
-            Warnings2 = [{Line, ?MODULE, {unloaded_module, Module}}|Warnings1],
+            {error, {unloaded_module, Module}}
+    end.
+    
+merge_attrs(#{attrs := Attrs, local_module := Module, file := File, line := Line} = Opts, Forms) ->
+    AttributesMap = 
+        lists:foldl(
+          fun(module, Acc) ->
+                  Acc;
+             (file, Acc) ->
+                  Acc;
+             (line, Acc) ->
+                  Acc;
+             (Attr, Acc) ->
+                  Attributes = astranaut:attributes(Attr, Forms),
+                  maps:put(Attr, Attributes, Acc)
+          end, maps:new(), Attrs),
+    Opts#{attributes => maps:merge(#{module => Module, file => File, line => Line}, AttributesMap)};
+merge_attrs(#{} = Opts, _Forms) ->
+    Opts.
+
+formatter_opts(#{formatter := Module, local_module := Module}) ->
+    #{formatter => local_macro_module(Module)};
+formatter_opts(#{formatter := Formatter}) ->
+    #{formatter => Formatter};
+formatter_opts(#{}) ->
+    #{formatter => astranaut_traverse}.
+
+update_alias(#{alias := Alias} = Options) ->
+    Options#{macro => Alias};
+update_alias(#{key := Key} = Options) ->
+    Options#{macro => Key}.
+
+add_macro(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, Warnings}) ->
+    {Options1, Warnings1} = validate_options(Options, Line, Warnings),
+    case kmfa_options(Options1, MFA, LocalModule) of
+        {ok, Options2} ->
+            Options3 = update_alias(Options2),
+            Options4 = Options3#{local_module => LocalModule, file => File, line => Line},
+            Options5 = merge_attrs(Options4, Forms),
+            {[Options5|AllMacros], Warnings1};
+        {error, Reason} ->
+            Warnings2 = [{Line, ?MODULE, Reason}|Warnings1],
             {AllMacros, Warnings2}
     end.
 
@@ -409,27 +442,11 @@ validate_option_key(debug, Value) when is_boolean(Value) ->
     ok;
 validate_option_key(debug_ast, Value) when is_boolean(Value) ->
     ok;
-validate_option_key(import_as, Value) when is_atom(Value) ->
+validate_option_key(alias, Value) when is_atom(Value) ->
     ok;
 validate_option_key(_Key, _Value) ->
     error.
-    
-merge_attrs(#{attrs := Attrs} = Opts, LocalModule, File, Line, Forms) when is_list(Attrs) ->
-    AttributesMap = 
-        lists:foldl(
-          fun(module, Acc) ->
-                  Acc;
-             (file, Acc) ->
-                  Acc;
-             (line, Acc) ->
-                  Acc;
-             (Attr, Acc) ->
-                  Attributes = astranaut:attributes(Attr, Forms),
-                  maps:put(Attr, Attributes, Acc)
-          end, maps:new(), Attrs),
-    Opts#{attributes => maps:merge(#{module => LocalModule, file => File, line => Line}, AttributesMap)};
-merge_attrs(#{} = Opts, _LocalModule, _File, _Line, _Forms) ->
-    Opts.
+
 
 get_exports(Module) ->
     try
@@ -439,26 +456,56 @@ get_exports(Module) ->
             {error, undef}
     end.
 
-compile_local_macros(Macros, Forms, Opts) ->
-    MacroDeps = macro_deps(Macros, Forms),
+compile_local_macros(MacrosOptions, Forms, Opts) ->
+    LocalMacros = 
+        lists:foldl(
+          fun(#{function := Function, arity := Arity, local := true}, Acc) ->
+                  ordsets:add_element({Function, Arity}, Acc);
+             (#{}, Acc) ->
+                  Acc
+          end, ordsets:new(), MacrosOptions),
+    UsedFunctions = 
+        lists:foldl(
+          fun(#{formatter := Module, local_module := Module}, Acc) ->
+                  ordsets:add_element({format_error, 1}, Acc);
+             (#{}, Acc) ->
+                  Acc
+          end, LocalMacros, MacrosOptions),
+    UsedAttrs = 
+        lists:foldl(
+          fun(#{as_attr := Attr}, Acc) ->
+                  ordsets:add_element(Attr, Acc);
+             (#{}, Acc) ->
+                  Acc
+          end, ordsets:from_list([exec_macro]), MacrosOptions),
+    ClauseMap = function_clauses_map(Forms, maps:new()),
+    MacroDeps = functions_deps(UsedFunctions, ClauseMap),
     Warnings = 
         lists:foldl(
-          fun({Function, Arity, Line}, Acc) ->
-                  case ordsets:is_element({Function, Arity}, MacroDeps) of
+          fun(#{function := Function, arity := Arity, line := Line, local := true}, Acc) ->
+                  case ordsets:is_element({Function, Arity}, LocalMacros) of
                       true ->
                           Acc;
                       false ->
                           [{Line, ?MODULE, {undefined_macro, Function, Arity}}|Acc]
-                  end
-          end, [], Macros),
+                  end;
+             (#{}, Acc) ->
+                  Acc
+          end, [], MacrosOptions),
     NForms = 
         lists:reverse(
           lists:foldl(
             fun({attribute, Line, module, Module}, Acc) ->
                     Node = {attribute, Line, module, local_macro_module(Module)},
                     [Node|Acc];
-               ({attribute, _Line, export, _Exports}, Acc) ->
-                    Acc;
+               ({attribute, Line, export, Exports}, Acc) ->
+                    case lists:member({format_error, 1}, Exports) of
+                        true ->
+                            Export = {attribute, Line, export, [{format_error, 1}]},
+                            [Export|Acc];
+                        false ->
+                            Acc
+                    end;
                ({attribute, Line, use_macro, {{Function, Arity}, _Opts}}, Acc) ->
                     case ordsets:is_element({Function, Arity}, MacroDeps) of
                         true ->
@@ -481,8 +528,13 @@ compile_local_macros(Macros, Forms, Opts) ->
                         false ->
                             Acc
                     end;
-               ({attribute, _Line, _AttrName, _Attr}, Acc) ->
-                    Acc;
+               ({attribute, _Line, AttrName, _AttrValue} = Attr, Acc) ->
+                    case ordsets:is_element(AttrName, UsedAttrs) of
+                        true ->
+                            Acc;
+                        false ->
+                            [Attr|Acc]
+                    end;
                (Node, Acc) ->
                     [Node|Acc]
             end, [], Forms)),
@@ -500,15 +552,6 @@ compile_local_macros(Macros, Forms, Opts) ->
 
 local_macro_module(Module) ->
     list_to_atom(atom_to_list(Module) ++ "__local_macro").
-
-macro_deps(Macros, Forms) ->
-    NMacros = 
-        lists:map(
-          fun({Function, Arity, _Line}) ->
-                  {Function, Arity}
-          end, Macros),
-    ClauseMap = function_clauses_map(Forms, maps:new()),
-    functions_deps(NMacros, ClauseMap).
 
 function_clauses_map([{function, _Line, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
