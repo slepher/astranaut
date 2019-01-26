@@ -44,8 +44,7 @@ uncons(Value) ->
     Value.
 
 cons([H|T], Rest) ->
-    Line = erl_syntax:get_pos(H),
-    {cons, Line, H, cons(T, Rest)};
+    {cons, 0, H, cons(T, Rest)};
 cons([], Rest) ->
     Rest.
 
