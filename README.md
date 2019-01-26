@@ -116,7 +116,9 @@
 
 *NodeType*
 
-&emsp;&emsp;node_type(). if from() is incomplete erlang ast, this should be provided to help generate node_type() in attr().
+&emsp;&emsp;node_type(). if from() is incomplete erlang ast, this should be provided to help generate node_type() in attr().  
+&emsp;&emsp;if top node is function or attribute, default top node_type() in attr() is form.  
+&emsp;&emsp;else, default top node_type() in attr() is expression.
 
 *TraverseStyle*
 

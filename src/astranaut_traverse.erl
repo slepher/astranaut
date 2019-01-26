@@ -170,7 +170,7 @@ traverse_fun_return_struct(Node) ->
 
 -spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Opts) ->
-    NOpts = maps:merge(#{formatter => ?MODULE, traverse => all, node => form,
+    NOpts = maps:merge(#{formatter => ?MODULE, traverse => all,
                          monad_class => astranaut_monad, 
                          monad => astranaut_traverse_monad}, Opts),
     NF = transform_f(F, NOpts),
@@ -208,7 +208,8 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
       fun(Subtree) ->
               map_m_1(F, Subtree, Opts)
       end, Nodes, Opts);
-map_m_1(F, NodeA, #{node := NodeType} = Opts) ->
+map_m_1(F, NodeA, Opts) ->
+    NodeType = node_type(NodeA, Opts),
     PreType = 
         case erl_syntax:subtrees(NodeA) of
             [] ->
@@ -246,6 +247,15 @@ map_m_1(F, NodeA, #{node := NodeType} = Opts) ->
                         end, Opts)
               end
       end, Opts).
+
+node_type(_Node, #{node := NodeType}) ->
+    NodeType;
+node_type({attribute, _, _AttrName, _AttrValue}, #{}) ->
+    form;
+node_type({function, _, _AttrName, _AttrValue}, #{}) ->
+    form;
+node_type(_Node, #{}) ->
+    expression.
 
 bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
     monad_bind(
