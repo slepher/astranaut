@@ -36,7 +36,7 @@
 *Attr*
 
 ```erlang
-  attr() :: #{step => Step :: step(), node :: NodeType :: node_type()}.
+  attr() :: #{step => Step :: step(), node :: NodeType :: node_type(), attribute :: Attribute}.
 ```
 
 *Step*
@@ -52,8 +52,12 @@
   &emsp;&emsp;ast node type.
 
 ```erlang
-  node_type() :: module | file | export | import | type | spec | function | pattern | expression | guard. 
+  node_type() :: form | attribute | pattern | expression | guard. 
 ```
+
+*Attribute*
+
+&emsp;&emsp;if NodeType is attribute, Attribute is name of attribute, or Attribute does not exists.
 
 *TraverseFunReturn*
 
@@ -177,16 +181,24 @@
   
     {'fun', 10, {clauses, [{clause, 10, [{var, 10, '_'}], [], [{atom, 10, ok}]}]}}.
 
-  if it is not presented, current line number of code is used
+  if it is atom code_line, current line number of code is used
   
     10: quote(
     11:   fun(_) ->
     12:     ok
-    13: end).
+    13: end, code_line).
       
   generates ast of function which is
   
     {'fun' 10, {clauses, [{clause, 11, [{var, 11, '_'}], [], [{atom, 12, ok}]}]}}.
+
+  if it is not provided, Line is 0.
+
+  ```erlang
+  astranaut:replace_zero_line(Ast, Line).
+  ```
+
+  could replace linenumber of 0 with Line.
 
 ### unquote
 

@@ -37,6 +37,7 @@
 -use_macro({macro_quote_string/0, ?DEBUG_OPT}).
 -use_macro({macro_with_attributes/1, [{attrs, [include]}|?DEBUG_OPT]}).
 -use_macro({macro_group_args/1, [{group_args, true}|?DEBUG_OPT]}).
+-use_macro({cons_macro/1, ?DEBUG_OPT}).
 
 -use_macro({astranaut_example_macros, exported_macro/0, [{alias, imported_macro}]}).
 
@@ -82,6 +83,13 @@ test_group_args() ->
 test_imported_macro() ->
     F = imported_macro(),
     F().
+
+test_cons(A, B, C) ->
+    cons_macro([
+                A,
+                B,
+                C
+                ]).
 
 function_macro(a) ->
     astranaut:exported_function(
@@ -150,6 +158,9 @@ macro_with_attributes(#{file := File, line := Line, module := Module}) ->
 
 one_plus() ->
     1 + 1.
+
+cons_macro(Ast) ->
+    Ast.
 
 format_error({attributes, File, Line, Module}) ->
     io_lib:format("~p ~s:~p", [Module, File, Line]);

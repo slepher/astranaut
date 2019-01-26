@@ -84,6 +84,8 @@ attributes_with_line(Attribute, Forms) ->
 replace_line(Ast, Line) ->
     replace_line_cond(fun(_) -> true end, Ast, Line).
 
+replace_line_zero(Ast, 0) ->
+    Ast;
 replace_line_zero(Ast, Line) ->
     replace_line_cond(
       fun(0) -> true;
@@ -92,7 +94,9 @@ replace_line_zero(Ast, Line) ->
 
 replace_line_cond(Cond, Ast, Line) ->
     astranaut_traverse:map(
-      fun(Tuple, _Attr) when is_tuple(Tuple) ->
+      fun(Node, #{node := attribute}) ->
+              Node;
+         (Tuple, _Attr) when is_tuple(Tuple) ->
               case tuple_to_list(Tuple) of
                   [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
                       case Cond(TupleLine) of

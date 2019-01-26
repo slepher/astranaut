@@ -15,11 +15,9 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    Macro1 = {astranaut_example_macros, exported_macro, 0},
-    Macro2 = {astranaut_example_macros, test_macro, 0},
-    Opts = [auto_export, {formatter, ?MODULE}],
-    Macros = [{Macro1, []}, {Macro2, Opts}],
-    astranaut_macro:transform_macros(Macros, Forms).
+    Macro1 = {astranaut_example_macros, exported_macro, 0, []},
+    Macro2 = {astranaut_example_macros, test_macro, 0, [auto_export, {formatter, ?MODULE}]},
+    astranaut_macro:transform_macros([Macro1, Macro2], Forms).
 
 format_error(Error) ->
     astranaut_traverse:format_error(Error).

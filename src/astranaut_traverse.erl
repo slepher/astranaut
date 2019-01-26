@@ -30,10 +30,11 @@
                            node => node_type(), formatter => module() }.
 
 -type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
-                                 node => node_type(), formatter => module(),
+                                 node => node_type(), attribute => atom(), 
+                                 formatter => module(),
                                  monad_class => module(), monad => term()
                                 }.
--type node_type() :: module | file | export | import | type | spec | pattern | expression | guard | form | atom().
+-type node_type() :: attribute | pattern | expression | guard | form.
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
@@ -300,7 +301,7 @@ map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
         _ ->
             Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
             monad_bind(
-              map_m_1(F, Bodies, Opts#{node => Name}),
+              map_m_1(F, Bodies, Opts#{node => attribute, attribute => Name}),
               fun(NBodies) ->
                       monad_return([[NameTree], NBodies], Opts)
               end, Opts)

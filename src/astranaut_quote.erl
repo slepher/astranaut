@@ -43,14 +43,17 @@ uncons({nil, _Line}) ->
 uncons(Value) ->
     Value.
 
-cons([H|T], Rest) ->
+cons(Ls, Rest) ->
+    Value = cons_1(Ls, Rest),
+    io:format("value is ~p~n", [Value]),
+    Value.
+
+cons_1([H|T], Rest) ->
     Line = erl_syntax:get_pos(H),
-    {cons, Line, H, cons(T, Rest)};
-cons([], Rest) ->
-    Rest;
-cons({cons, Line, H, T}, Rest) ->
-    {cons, Line, H, cons(T, Rest)};
-cons({nil, _Line}, Rest) ->
+    io:format("H is ~p line is ~p~n", [H, Line]),
+    {cons, Line, H, cons_1(T, Rest)};
+cons_1([], Rest) ->
+    io:format("rest is ~p~n", [Rest]),
     Rest.
 
 %%--------------------------------------------------------------------
@@ -69,15 +72,27 @@ walk({call, Line1, {atom, _Line2, quote}, [Form]}, Attr) ->
     quote(Form, Opts);
 walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, #{node := expression}) ->
     %% transform quote(Form, Line) in expression
-    Opts = #{line => Line1, quote_type => expression, replaced_line => true},
-    call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1);
+    case Line of
+        {atom, _, code_line} ->
+            Opts = #{line => Line1, quote_type => expression, code_line => true},
+            quote(Form, Opts);
+        _ ->
+            Opts = #{line => Line1, quote_type => expression},
+            call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1)
+    end;
 walk({call, Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr) ->
     %% transform quote_code(Codes)
     case split_codes(Codes, NodeType) of
         {ok, NCodes, Line} ->
             Form = astranaut_code:quote_codes(NCodes),
-            Opts = #{line => Line1, quote_type => expression, replaced_line => true},
-            call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1);
+            case Line of
+                {atom, _, code_line} ->
+                    Opts = #{line => Line1, quote_type => expression, code_line => true},
+                    quote(Form, Opts);
+                _ ->
+                    Opts = #{line => Line1, quote_type => expression},
+                    call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1)
+            end;
         {ok, NCodes} ->
             Form = astranaut_code:quote_codes(NCodes),
             QuoteType = quote_type(Attr),
@@ -102,7 +117,8 @@ quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
     unquote(Unquote, Opts#{type => value});
 quote_1({cons, Line, {call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}, Rest}, Opts) ->
     %quote([a, b, unquote_splicing(V), c, d]),
-    call_remote(?MODULE, cons, [Unquotes, quote_1(Rest, Opts)], Line);
+    RestQuote = quote_1(Rest, Opts),
+    call_remote(?MODULE, cons, [Unquotes, RestQuote], Line);
 quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
     %quote({a, b, unquote_splicing(V), c, d}),
     unquote_splicing(Unquotes, T, Opts);
@@ -158,10 +174,10 @@ quote_tuple_list_1(List, Opts) ->
 
 quote_line(#{line := Line, quote_type := pattern}) ->
     {var, Line, '_'};
-quote_line(#{quote_type := expression, replaced_line := true} = Opts) ->
-    quote_1(0, Opts);
-quote_line(#{line := Line, quote_type := expression} = Opts) ->
-    quote_1(Line, Opts).
+quote_line(#{line := Line, quote_type := expression, code_line := true} = Opts) ->
+    quote_1(Line, Opts);
+quote_line(#{quote_type := expression} = Opts) ->
+    quote_1(0, Opts).
 
 update_attribute_opt([attribute, _Line, spec|_T], Opts) ->
     Opts#{attribute => spec};
