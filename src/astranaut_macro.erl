@@ -28,7 +28,7 @@ transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
           fun({M, F, A, Opts}, Acc) -> 
                   astranaut_macro_options:add({M, F, A}, Opts, Module, File, Line, Forms, Acc)
           end, {[], []}, lists:reverse(MFAOpts)),
-    exec_macros(Macros, Forms, File, Warnings).
+    transform_macros_1(Macros, Forms, File, Warnings).
 
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
@@ -36,7 +36,7 @@ parse_transform(Forms, Options) ->
     {Macros, Warnings} = macros(Forms, Module, File),
     case astranaut_macro_local:compile(Macros, Forms, Options) of
         {ok, LWarnings} ->
-            exec_macros(Macros, Forms, File, Warnings ++ LWarnings);
+            transform_macros_1(Macros, Forms, File, Warnings ++ LWarnings);
         {error, Errors, NWarnings} ->
             {error, Errors, Warnings ++ NWarnings}
     end.
@@ -94,77 +94,73 @@ macros(Forms, LocalModule, File) ->
           end, {[], []}, Macros),
     {lists:reverse(AllMacros), lists:reverse(Warnings)}.
 
-exec_macros(Macros, Forms, File, Warnings) ->
-    TraverseReturn = fold_walk_macros(Macros, Forms, [], Warnings),
-    NTraverseReturn = astranaut_traverse:parse_transform_return(TraverseReturn, File),
-    astranaut_traverse:map_traverse_return(
-      fun(FormsAcc) ->
-              NFormsAcc = astranaut:reorder_exports(FormsAcc),
-              format_forms(NFormsAcc),
-              NFormsAcc
-      end, NTraverseReturn).
+transform_macros_1(Macros, Forms, File, Warnings) ->
+    Monad = transform_macros_2(Macros, Warnings),
+    TraverseReturn = astranaut_traverse_monad:exec(Monad, Forms),
+    astranaut_traverse:parse_transform_return(TraverseReturn, File).
 
-fold_walk_macros([Options|T], Forms, Errors, Warnings) ->
-    case walk_macro(Options, Forms) of
-        {ok, NForms, NErrors, NWarnings} ->
-            fold_walk_macros(T, NForms, Errors ++ NErrors, Warnings ++ NWarnings);
-        {error, NErrors, NWarnings} ->
-            fold_walk_macros(T, Forms, Errors ++ NErrors, Warnings ++ NWarnings);
-        NForms when is_list(NForms) ->
-            fold_walk_macros(T, NForms, Errors, Warnings)
-    end;
-            
-fold_walk_macros([], Forms, [], []) ->
-    Forms;
-fold_walk_macros([], Forms, Errors, Warnings) ->
-    {ok, Forms, Errors, Warnings}.
+transform_macros_2(Macros, Warnings) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:warnings(Warnings),
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:map_m(
+          fun(MacroOpts) ->
+                  astranaut_traverse_monad:bind_state(
+                    fun(Forms) ->
+                            astranaut_traverse_monad:bind(
+                              %% transform macro attributes
+                              transform_macro_attr(MacroOpts, Forms),
+                              fun(NForms) ->
+                                      %% transform macro call
+                                      transform_macro_call(MacroOpts, NForms)
+                              end)
+                    end)
+          end, Macros),
+        astranaut_traverse_monad:modify(
+          fun(Forms) ->
+                  format_forms(astranaut:reorder_exports(Forms))
+          end))).
 
-walk_macro(#{formatter := Formatter} = MacroOpts, Forms) ->
-    Traverse = maps:get(order, MacroOpts, post),
-    MOpts = #{formatter => Formatter},
-    Opts = #{traverse => Traverse, formatter => ?MODULE},
-    Monad = 
-        astranaut_traverse_monad:bind(
-          exec_macro(MacroOpts, Forms, MOpts),
-          fun(NForms) ->
-                  astranaut_traverse:map_m(
-                    fun(Node, _Attr) ->
-                            Return = walk_macro_node(Node, MacroOpts),
-                            astranaut_traverse:fun_return_to_monad(Return, Node, MOpts)
-                    end, NForms, Opts)
-          end),
-    Reply = astranaut_traverse_monad:run(Monad, ok),
-    astranaut_traverse:map_traverse_return(
-      fun({NNode, _State}) ->
-              NNode
-      end, Reply).
+%%%===================================================================
+%%% transform_macro_attr and it's help functions.
+%%%===================================================================
+transform_macro_attr(MacroOpts, Forms) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:put({1, Forms}),
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:map_m(
+          fun(Form) ->
+                  Return = walk_macro_attr(Form, MacroOpts),
+                  astranaut_traverse_monad:bind(
+                    astranaut_traverse:fun_return_to_monad(Return, Form, MacroOpts),
+                    fun(NForm) ->
+                            %% modify the from list by transformed form.
+                            astranaut_traverse_monad:modify(
+                              fun({N, Forms1}) ->
+                                      append_form(Form, NForm, MacroOpts, N, Forms1)
+                              end)
+                    end)
+          end, Forms),
+        % return the forms modified and set state ok(useless).
+        astranaut_traverse_monad:state(
+          fun({_N, Forms1}) ->
+                  {Forms1, ok}
+          end))).
+
+walk_macro_attr({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, #{macro := Function} = Opts) ->
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
+walk_macro_attr({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA,
+                #{macro := {Module, Function}} = Opts) ->
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
+walk_macro_attr({attribute, Line, Attribute, Arguments} = NodeA, #{as_attr := Attribute} = Opts) ->
+    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
+walk_macro_attr(Node, _MacroOpts) ->
+    Node.
 
 to_list(Arguments) when is_list(Arguments) ->
     Arguments;
 to_list(Arguments) ->
     [Arguments].
-
-exec_macro(MacroOpts, Forms, MOpts) ->
-    astranaut_traverse_monad:lift_m(
-      fun({_, NForms}) ->
-              NForms
-      end,
-      astranaut_traverse_monad:then(
-        astranaut_traverse_monad:put({1, Forms}),
-        astranaut_traverse_monad:then(
-          astranaut_traverse_monad:map_m(
-            fun(Form) ->
-                    Return = walk_exec_macro(Form, MacroOpts),
-                    astranaut_traverse_monad:bind(
-                      astranaut_traverse:fun_return_to_monad(Return, Form, MOpts),
-                      fun(NForm) ->
-                              astranaut_traverse_monad:modify(
-                                fun({N, Acc}) ->
-                                        append_form(Form, NForm, MacroOpts, N, Acc)
-                                end)
-                      end)
-            end, Forms),
-          astranaut_traverse_monad:get()))).
 
 append_form(Form, Form, _MacroOpts, N, Acc) ->
     {N + 1, Acc};
@@ -173,16 +169,6 @@ append_form(Form, NForm, MacroOpts, N, Acc) ->
     {Nodes, NAcc} = update_forms(to_list(NForm), Acc, MacroOpts#{line => Line}),
     NNAcc = astranaut:replace_from_nth(Nodes, N, NAcc),
     {N + length(Nodes), NNAcc}.
-
-walk_exec_macro({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, #{macro := Function} = Opts) ->
-    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_exec_macro({attribute, Line, exec_macro, {Module, Function, Arguments}} = NodeA,
-                #{macro := {Module, Function}} = Opts) ->
-    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_exec_macro({attribute, Line, Attribute, Arguments} = NodeA, #{as_attr := Attribute} = Opts) ->
-    apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_exec_macro(Node, _MacroOpts) ->
-    Node.
 
 update_forms(Nodes, Acc, #{auto_export := true, line := Line} = Opts) ->
     Exports = exports(Nodes, Line),
@@ -217,6 +203,21 @@ update_forms(Nodes, Forms, #{merge_function := MergeFunction}) ->
 update_forms(Nodes, Acc, _MOpts) ->
     {Nodes, Acc}.
 
+insert_function({function, _Line, FName, Arity, Clauses}, 
+                [{function, Line, FName, Arity, FClauses}|T], Merge, Heads) ->
+    {ok, lists:reverse(Heads) ++ [{function, Line, FName, Arity, merge_clauses(Clauses, FClauses, Merge)}|T]};
+insert_function(_Function, [], _Merge, _Heads) ->
+    error;
+insert_function(Function, [H|T], Merge, Heads) ->
+    insert_function(Function, T, Merge, [H|Heads]).
+
+merge_clauses(Clauses1, Clauses2, head) ->
+    Clauses1 ++ Clauses2;
+merge_clauses(Clauses1, Clauses2, true) ->
+    Clauses1 ++ Clauses2;
+merge_clauses(Clauses1, Clauses2, tail) ->
+    Clauses2 ++ Clauses1.
+
 exports(Nodes, Line) ->
     case lists:foldl(
            fun({function, _Line, FName, Arity, _Clauses}, Acc) ->
@@ -230,14 +231,6 @@ exports(Nodes, Line) ->
             [astranaut:exports(lists:reverse(FAs), Line)]
     end.
 
-insert_function({function, _Line, FName, Arity, Clauses}, 
-                [{function, Line, FName, Arity, FClauses}|T], Merge, Heads) ->
-    {ok, lists:reverse(Heads) ++ [{function, Line, FName, Arity, merge_clauses(Clauses, FClauses, Merge)}|T]};
-insert_function(_Function, [], _Merge, _Heads) ->
-    error;
-insert_function(Function, [H|T], Merge, Heads) ->
-    insert_function(Function, T, Merge, [H|Heads]).
-
 already_exported(Name, Arity, [{attribute, _Line, export, FAs}|T]) ->
     case lists:member({Name, Arity}, FAs) of
         true ->
@@ -250,21 +243,29 @@ already_exported(Name, Arity, [_H|T]) ->
 already_exported(_Name, _Arity, []) ->
     false.
 
-merge_clauses(Clauses1, Clauses2, head) ->
-    Clauses1 ++ Clauses2;
-merge_clauses(Clauses1, Clauses2, true) ->
-    Clauses1 ++ Clauses2;
-merge_clauses(Clauses1, Clauses2, tail) ->
-    Clauses2 ++ Clauses1.
+%%%===================================================================
+%%% transform_macro_call and it's help functions.
+%%%===================================================================
+transform_macro_call(MacroOpts, Forms) ->
+    Traverse = maps:get(order, MacroOpts, post),
+    Opts = #{traverse => Traverse, formatter => ?MODULE},
+    astranaut_traverse:map_m(
+      fun(Node, _Attr) ->
+              Return = walk_macro_call(Node, MacroOpts),
+              astranaut_traverse:fun_return_to_monad(Return, Node, MacroOpts)
+      end, Forms, Opts).
 
-walk_macro_node({call, Line, {atom, _Line2, Function}, Arguments} = Node, #{macro := Function} = Opts) ->
+walk_macro_call({call, Line, {atom, _Line2, Function}, Arguments} = Node, #{macro := Function} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
-walk_macro_node({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
+walk_macro_call({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
                 #{macro := {Module, Function}} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
-walk_macro_node(Node, __MacroOpts) ->
+walk_macro_call(Node, __MacroOpts) ->
     Node.
 
+%%%===================================================================
+%%% apply_macro and it's help functions.
+%%%===================================================================
 apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arguments := Arguments, line := Line} = Opts) ->
     Arguments1 = group_arguments(Arguments, Opts),
     Arguments2 = append_attrs(Arguments1, Opts),
@@ -282,7 +283,6 @@ apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arg
         true ->
             astranaut_traverse:traverse_fun_return(#{node => NodeA})
     end.
-
 
 group_arguments(Arguments, #{group_args := true}) ->
     [Arguments];
@@ -302,13 +302,17 @@ apply_mfa(Module, Function, Arguments) ->
             {error, {exception, Exception, StackTrace}}
     end.
 
+%%%===================================================================
+%%% format functions.
+%%%===================================================================
 format_forms(Forms) ->
     case astranaut:attributes(debug_macro, Forms) of
         [] ->
             ok;
         [true] ->
             io:format("~s~n", [astranaut:to_string(Forms)])
-    end.
+    end,
+    Forms.
 
 format_node(Node, #{file := File, line := Line} = Opts) ->
     case maps:get(debug, Opts, false) of

@@ -10,12 +10,14 @@
 
 %% API
 -export([new/0]).
--export([run/2]).
+-export([run/2, eval/2, exec/2]).
 -export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
 -export([lift_m/2, map_m/2]).
--export([get/0, put/1, modify/1, state/1]).
+-export([get/0, put/1, modify/1, state/1, bind_state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
+
+-compile({no_auto_import, [get/0, put/1]}).
 
 %%%===================================================================
 %%% API
@@ -47,6 +49,18 @@ run(M0, State) ->
         {{{error, Reason}, Warnings}, Errors} ->
             {error, [Reason|Errors], Warnings}
     end.
+
+eval(M0, State) ->
+    astranaut_traverse:map_traverse_return(
+      fun({A, _}) ->
+              A
+      end, run(M0, State)).
+
+exec(M0, State) ->
+    astranaut_traverse:map_traverse_return(
+      fun({_, NState}) ->
+              NState
+      end, run(M0, State)). 
 
 lift_m(F, MA) ->
     astranaut_monad:lift_m(F, MA, new()).
@@ -89,6 +103,17 @@ modify(F) ->
 state(F) ->
     astranaut_monad:state(F, new()).
 
+bind_state(F) ->
+    bind(
+      get(),
+      fun(State1) ->
+              bind(
+                F(State1),
+                fun(State2) ->
+                        put(State2)
+                end)
+      end).
+    
 warning(Warning) ->
     warnings([Warning]).
 
