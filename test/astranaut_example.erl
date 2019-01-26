@@ -20,10 +20,11 @@
 -export([test_quote_string/0]).
 -export([test_attributes/0]).
 -export([test_group_args/0]).
+-export([test_cons/2]).
 
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
 -export([macro_quote_string/0, test_imported_macro/0, macro_with_attributes/1]).
--export([macro_group_args/1]).
+-export([macro_group_args/1, cons_macro/1]).
 -export([format_error/1]).
 
 -use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
@@ -84,10 +85,11 @@ test_imported_macro() ->
     F = imported_macro(),
     F().
 
-test_cons(A, B, C) ->
+test_cons(A, C) ->
     cons_macro([
                 A,
-                B,
+                erlang:now(),
+                macro_with_attributes(),
                 C
                 ]).
 
