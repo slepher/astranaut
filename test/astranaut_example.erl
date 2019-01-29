@@ -89,6 +89,9 @@ test_cons(A, C) ->
     cons_macro([
                 A,
                 erlang:now(),
+                cons_macro([
+                            erlang:now()
+                           ]),
                 macro_with_attributes(),
                 C
                 ]).

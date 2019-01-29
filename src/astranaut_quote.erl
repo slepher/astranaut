@@ -118,10 +118,10 @@ quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
     unquote(Unquote, Opts#{type => value});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
     unquote_splicing(Unquotes, T, Opts);
-quote_1({match, _Line1, Pattern, Value}, #{line := Line} = Opts) ->
+quote_1({match, _Line1, Pattern, Value}, #{line := Line, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2
     {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
-quote_1([{var, __Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
+quote_1([{var, _Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
     unquote_if_binding_list(VarForm, T, Opts);
 quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
     unquote_if_binding(VarForm, Opts);
