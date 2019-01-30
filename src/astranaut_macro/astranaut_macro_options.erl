@@ -170,7 +170,6 @@ validate_option_key(alias, Value) when is_atom(Value) ->
 validate_option_key(_Key, _Value) ->
     error.
 
-
 get_exports(Module) ->
     try
         {ok, Module:module_info(exports)}

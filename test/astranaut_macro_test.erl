@@ -104,7 +104,6 @@ test_quote_line_1() ->
 test_quote_line_2() ->
     quote_line_2(ok).
 
-
 test_case() ->
     macro_case(one_plus(), 2, 3).
 
