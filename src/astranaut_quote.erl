@@ -54,7 +54,12 @@ uncons_1(Value) ->
 cons([H|T], Rest) ->
     {cons, 0, H, cons(T, Rest)};
 cons([], Rest) ->
+    Rest;
+cons({cons, Line, Head, Tail}, Rest) ->
+    {cons, Line, Head, cons(Tail, Rest)};
+cons({nil, _Line}, Rest) ->
     Rest.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -284,6 +289,8 @@ call_remote(Module, Function, Arguments, Line) ->
 
 unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression, join := list} = Opts) ->
     call_remote(?MODULE, uncons, [Unquotes, quote_1(Rest, Opts)], Line);
+unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression, join := cons} = Opts) ->
+    call_remote(?MODULE, cons, [Unquotes, quote_1(Rest, Opts)], Line);
 unquote_splicing(Unquotes, _Rest, #{quote_type := pattern, join := list}) ->
     Unquotes.
 
