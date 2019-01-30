@@ -11,7 +11,7 @@
 %% API
 -export([parse_transform/2, format_error/1]).
 -export([quote/1, quote/2]).
--export([uncons/1, cons/2]).
+-export([uncons/2, cons/2]).
 
 %%%===================================================================
 %%% API
@@ -39,11 +39,16 @@ quote(Value, Options) ->
     Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),
     quote_0(Value, Options1).
 
-uncons({cons, _Line, Head, Tail}) ->
-    [Head|uncons(Tail)];
-uncons({nil, _Line}) ->
+uncons(Cons, []) ->
+    uncons_1(Cons);
+uncons(Cons, Rest) ->
+    uncons_1(Cons) ++ Rest.
+
+uncons_1({cons, _Line, Head, Tail}) ->
+    [Head|uncons_1(Tail)];
+uncons_1({nil, _Line}) ->
     [];
-uncons(Value) ->
+uncons_1(Value) ->
     Value.
 
 cons([H|T], Rest) ->
@@ -126,30 +131,51 @@ quote_1({cons, Line, {call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]
     call_remote(?MODULE, cons, [Unquotes, RestQuote], Line);
 quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) ->
     %quote({a, b, unquote_splicing(V), c, d}),
-    unquote_splicing(Unquotes, T, Opts);
+    unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
     unquote(Unquote, Opts#{type => value});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    unquote_splicing(Unquotes, T, Opts);
+    unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1({match, _Line1, Pattern, Value}, #{quote_line := Line, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2
     {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
-quote_1([{var, _Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
-    unquote_if_binding_list(VarForm, T, Opts);
-quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
-    unquote_if_binding(VarForm, Opts);
+quote_1({cons, _Line1, {var, Line, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
+    case parse_binding(VarName, Line) of
+        {value_list, Binding} ->
+            RestQuote = quote_1(T, Opts),
+            call_remote(?MODULE, cons, [Binding, RestQuote], Line);
+        default ->
+            quote_tuple(Tuple, Opts)
+    end;
+quote_1([{var, Line, VarName} = Var|T], Opts) when is_atom(VarName) ->
+    case parse_binding(VarName, Line) of
+        {value_list, Binding} ->
+            unquote_splicing(Binding, T, Opts#{quote_line => Line, join => list});
+        _ ->
+            quote_list([Var|T], Opts)
+    end;
+quote_1({var, Line, VarName} = Var, Opts) when is_atom(VarName) ->
+    case parse_binding(VarName, Line) of
+        {BindingType, Binding} ->
+            unquote(Binding, Opts#{type => BindingType, quote_line => Line});
+        default ->
+            quote_tuple(Var, Opts)
+    end;
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
-quote_1([H|T], #{quote_line := Line} = Opts) ->
-    {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
-quote_1([], #{quote_line := Line}) ->
-    {nil, Line};
+quote_1(List, Opts) when is_list(List) ->
+    quote_list(List, Opts);
 quote_1(Float, #{quote_line := Line}) when is_float(Float) ->
     {float, Line, Float};
 quote_1(Integer, #{quote_line := Line}) when is_integer(Integer) ->
     {integer, Line, Integer};
 quote_1(Atom, #{quote_line := Line}) when is_atom(Atom) ->
     {atom, Line, Atom}.
+
+quote_list([H|T], #{quote_line := Line} = Opts) ->
+    {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
+quote_list([], #{quote_line := Line}) ->
+    {nil, Line}.
 
 quote_tuple(Tuple, #{quote_line := Line} = Opts) ->
     TupleList = tuple_to_list(Tuple),
@@ -256,33 +282,15 @@ split_codes(Codes, NodeType) ->
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
 
-unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression} = Opts) ->
-    {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
-unquote_splicing(Unquotes, _Rest, #{quote_type := pattern}) ->
+unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression, join := list} = Opts) ->
+    call_remote(?MODULE, uncons, [Unquotes, quote_1(Rest, Opts)], Line);
+unquote_splicing(Unquotes, _Rest, #{quote_type := pattern, join := list}) ->
     Unquotes.
 
 unquote(Exp, #{type := value}) ->
     Exp;
 unquote(Exp, #{type := Type, quote_line := Line} = Opts) ->
     {tuple, Line, [quote_1(Type, Opts), quote_line(Opts), Exp]}.
-
-unquote_if_binding_list({var, Line, Atom} = Form, T, #{} = Opts) ->
-    case parse_binding(Atom, Line) of
-        {value_list, VarList} ->
-            unquote_splicing(VarList, T, Opts#{quote_line => Line});
-        _ ->
-            {cons, Line, unquote_if_binding(Form, Opts#{quote_line => Line}), quote_1(T, Opts#{quote_line => Line})}
-    end.
-
-unquote_if_binding({var, Line, Atom} = Form, Opts) ->
-    case parse_binding(Atom, Line) of
-        {value, Var} ->
-            unquote(Var, Opts#{type => value});
-        {VarType, Var} ->
-            unquote(Var, Opts#{type => VarType, quote_line => Line});
-        default ->
-            quote_tuple(Form, Opts)
-    end.
 
 parse_binding(Atom, Line) ->
     case parse_binding_1(atom_to_list(Atom)) of
