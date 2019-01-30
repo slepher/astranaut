@@ -16,7 +16,7 @@
 -export([quote_unquote_splicing/2, quote_unquote_splicing_mix/2]).
 -export([quote_match_pattern/1, quote_function_pattern/1, quote_case_pattern/1]).
 -export([quote_code/0]).
--export([quote_line/1]).
+-export([quote_line_1/1, quote_line_2/1]).
 -export([macro_function/2, macro_exported_function/2]).
 -export([macro_try_catch/0, macro_case/3]).
 -export([macro_with_attributes/1, macro_group_args/1]).
@@ -79,9 +79,13 @@ quote_case_pattern(Ast) ->
 quote_code() ->
     quote_code("test_fun()").
 
-quote_line(Ast) ->
+quote_line_1(Ast) ->
     Line = erl_syntax:get_pos(Ast),
     quote({hello, unquote(Ast)}, Line).
+
+quote_line_2(Ast) ->
+    Line = erl_syntax:get_pos(Ast),
+    quote({hello, unquote(Ast)}, Line + 3).
 
 macro_case(Body, TrueClause, FalseClause) ->
     quote(

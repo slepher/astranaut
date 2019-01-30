@@ -20,7 +20,7 @@
 -export([test_match_pattern/0]).
 -export([test_function_pattern_1/0, test_function_pattern_2/0]).
 -export([test_case_pattern_1/0, test_case_pattern_2/0, test_case_pattern_3/0]).
--export([test_quote_code/0, test_quote_line/0]).
+-export([test_quote_code/0, test_quote_line_1/0, test_quote_line_2/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_attributes/0]).
 -export([test_group_args/0]).
@@ -38,7 +38,8 @@
 -use_macro({?MACRO_MODULE, quote_function_pattern/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, quote_case_pattern/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, quote_code/0, #{alias => macro_quote_code}}).
--use_macro({?MACRO_MODULE, quote_line/1, ?DEBUG_OPTS}).
+-use_macro({?MACRO_MODULE, quote_line_1/1, ?DEBUG_OPTS}).
+-use_macro({?MACRO_MODULE, quote_line_2/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_case/3, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_try_catch/0, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_function/2, ?DEBUG_OPTS}).
@@ -97,8 +98,12 @@ test_quote_code() ->
 test_fun() ->
     ok.
 
-test_quote_line() ->
-    quote_line(ok).
+test_quote_line_1() ->
+    quote_line_1(ok).
+
+test_quote_line_2() ->
+    quote_line_2(ok).
+
 
 test_case() ->
     macro_case(one_plus(), 2, 3).
