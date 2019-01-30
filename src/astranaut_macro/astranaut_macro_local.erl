@@ -44,11 +44,11 @@ compile(MacrosOptions, Forms, Opts) ->
     Warnings = 
         lists:foldl(
           fun(#{function := Function, arity := Arity, line := Line, local := true}, Acc) ->
-                  case ordsets:is_element({Function, Arity}, LocalMacros) of
+                  case ordsets:is_element({Function, Arity}, MacroDeps) of
                       true ->
                           Acc;
                       false ->
-                          [{Line, ?MODULE, {undefined_macro, Function, Arity}}|Acc]
+                          [{Line, astranaut_macro, {undefined_macro, Function, Arity}}|Acc]
                   end;
              (#{}, Acc) ->
                   Acc

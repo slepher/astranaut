@@ -109,7 +109,7 @@ groups() ->
 all() -> 
     [test_ok_case, test_function_case, test_quote_case, 
      test_unquote_splicing_case, test_pattern_case, test_other_case,
-     test_macro_pt_case].
+     test_macro_pt_case, test_macro_with_warnings].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -172,3 +172,14 @@ test_macro_pt_case(_Config) ->
     ?assertEqual(ok, astranaut_macro_with_pt:hello(world)),
     ?assertEqual({error, foo}, astranaut_macro_with_pt:hello(foo)),
     ok.
+
+test_macro_with_warnings(_Config) ->
+    Warnings = astranaut_warnings:warnings(),
+    ?assertEqual(
+       [{28, astranaut_traverse, noop_function},
+        {34, astranaut_warnings__local_macro, noop},
+        {40, astranaut_warnings__local_macro, noop},
+        {42, astranaut_warnings__local_macro, noop}], Warnings),
+        
+    ok.
+    
