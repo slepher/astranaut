@@ -158,8 +158,8 @@ test_quote_code_case(_Config) ->
     ?assertEqual(ok, astranaut_macro_test:test_quote_code()),
     ?assertEqual({hello, ok}, astranaut_macro_test:test_quote_line_1()),
     Ast = {tuple, 20, [{atom, 20, a}, {atom, 20, b}]},
-    ?assertEqual({tuple, 23, [{atom, 23, hello}, {tuple, 20, [{atom, 20, a}, {atom, 20, b}]}]},
-                 astranaut_macro_example:quote_line_2(Ast)),
+    NewAst = {tuple, 22, [{atom, 22, ok}, {tuple, 23, [{atom, 23, hello}, Ast]}]},
+    ?assertEqual(NewAst,astranaut_macro_example:quote_line_2(Ast)),
     ok.
 
 test_other_case(_Config) ->
