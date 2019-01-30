@@ -344,7 +344,17 @@ fun_return_to_monad(Return, Node) ->
 
 fun_return_to_monad(Return, Node, Opts) ->
     MA = astranaut_traverse_monad:return(Node),
-    Line = erl_syntax:get_pos(Node),
+    Line = case Node of
+               Node when is_tuple(Node) ->
+                   case tuple_to_list(Node) of
+                       [_Action,TupleLine|_] when is_integer(TupleLine) ->
+                           TupleLine;
+                       _ ->
+                           0
+                   end;
+               _ ->
+                   0
+           end,
     fun_return_to_monad_1(Return, MA, Opts#{line => Line}).
 
 %% transform user sytle traverse return to astranaut_traverse_monad
@@ -367,6 +377,8 @@ fun_return_to_monad_1({warning, Node, Reason}, MA, Opts) ->
     astranaut_traverse_monad:then(
       astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warning(NReason)),
       astranaut_traverse_monad:return(Node));
+fun_return_to_monad_1({astranaut_monad_state_t, _} = MonadB, _MA, #{}) ->
+    MonadB;
 fun_return_to_monad_1({Node, State}, MA, #{with_state := true}) ->
     astranaut_traverse_monad:then(MA, astranaut_traverse_monad:state(fun(_) -> {Node, State} end));
 fun_return_to_monad_1(Node, MA, _Opts) ->

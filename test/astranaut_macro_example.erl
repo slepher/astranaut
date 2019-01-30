@@ -39,7 +39,7 @@ quote_binding(Ast) ->
     quote({ok, _@Ast}).
 
 quote_unquote_splicing(Ast1, Ast2) ->
-    quote({ok, {hello, unquote_splicing([Ast1, Ast2]), world}}).
+    quote({ok, {hello, unquote_splicing([Ast1, Ast2]), world}}, debug).
 
 quote_unquote_splicing_mix(Ast1, Ast2) ->
     AstList = [Ast1, Ast2],
