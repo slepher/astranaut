@@ -13,12 +13,14 @@
 %% API
 -export([test/0]).
 
+-exec_macro({astranaut_macro_example, macro_exported_function, [hello, world]}).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 test() ->
-    astranaut_example_macros:exported_macro().
+    astranaut_macro_example:quote_unquote(ok).
 
 %%--------------------------------------------------------------------
 %% @doc

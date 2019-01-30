@@ -13,7 +13,7 @@
 -include("astranaut.hrl").
 
 %% API
--export([test/0, test_in_function/0]).
+-export([test_in_function/0]).
 -export([function_macro/1, in_function_macro/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_pattern/0, test_clause/0]).
@@ -23,11 +23,10 @@
 -export([test_cons/2]).
 
 -export([macro_try_catch/0, macro_case/3, macro_function/2, macro_pattern/1, macro_clause/1]).
--export([macro_quote_string/0, test_imported_macro/0, macro_with_attributes/1]).
+-export([macro_quote_string/0, macro_with_attributes/1]).
 -export([macro_group_args/1, cons_macro/1]).
 -export([format_error/1]).
 
--use_macro({astranaut_example_macros, test_macro/0, ?DEBUG_OPT}).
 -use_macro({function_macro/1, ?DEBUG_OPT}).
 -use_macro({in_function_macro/0, ?DEBUG_OPT}).
 -use_macro({macro_try_catch/0, ?DEBUG_OPT}).
@@ -40,9 +39,6 @@
 -use_macro({macro_group_args/1, [{group_args, true}|?DEBUG_OPT]}).
 -use_macro({cons_macro/1, ?DEBUG_OPT}).
 
--use_macro({astranaut_example_macros, exported_macro/0, [{alias, imported_macro}]}).
-
--exec_macro({astranaut_example_macros, test_macro, []}).
 -exec_macro({function_macro, [a]}).
 -exec_macro({function_macro, [b]}).
 
@@ -80,10 +76,6 @@ test_attributes() ->
 
 test_group_args() ->
     macro_group_args(hello, world).
-
-test_imported_macro() ->
-    F = imported_macro(),
-    F().
 
 test_cons(A, C) ->
     cons_macro([

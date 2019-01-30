@@ -8,6 +8,9 @@
 %%%-------------------------------------------------------------------
 -module(macro_pt).
 
+-define(MACRO_MODULE, astranaut_macro_example).
+
+
 %% API
 -export([parse_transform/2, format_error/1]).
 
@@ -15,8 +18,8 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    Macro1 = {astranaut_example_macros, exported_macro, 0, []},
-    Macro2 = {astranaut_example_macros, test_macro, 0, [auto_export, {formatter, ?MODULE}]},
+    Macro1 = {?MACRO_MODULE, quote_unquote, 1, []},
+    Macro2 = {?MACRO_MODULE, macro_exported_function, 2, [auto_export]},
     astranaut_macro:transform_macros([Macro1, Macro2], Forms).
 
 format_error(Error) ->

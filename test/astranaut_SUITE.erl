@@ -107,7 +107,9 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_ok_case, test_function_case, test_quote_case, test_unquote_splicing_case, test_pattern_case, test_other_case].
+    [test_ok_case, test_function_case, test_quote_case, 
+     test_unquote_splicing_case, test_pattern_case, test_other_case,
+     test_macro_pt_case].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -165,4 +167,8 @@ test_other_case(_Config) ->
     ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
     ok.
 
-
+test_macro_pt_case(_Config) ->
+    ?assertEqual({ok, ok}, astranaut_macro_with_pt:test()),
+    ?assertEqual(ok, astranaut_macro_with_pt:hello(world)),
+    ?assertEqual({error, foo}, astranaut_macro_with_pt:hello(foo)),
+    ok.
