@@ -80,6 +80,14 @@ compile(MacrosOptions, Forms, Opts) ->
                         false ->
                             Acc
                     end;
+               ({attribute, Line, use_macro, {{Function, Arity}}}, Acc) ->
+                    case ordsets:is_element({Function, Arity}, MacroDeps) of
+                        true ->
+                            Export = {attribute, Line, export, [{Function, Arity}]},
+                            [Export|Acc];
+                        false ->
+                            Acc
+                    end;
                ({function, _Line, Name, Arity, _Clauses} = Node, Acc) ->
                     case ordsets:is_element({Name, Arity}, MacroDeps) of
                         true ->

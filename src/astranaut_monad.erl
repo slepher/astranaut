@@ -11,7 +11,7 @@
 -export_type([monad/0, monadic/2]).
 
 %% API
--export([lift_m/3, map_m/3]).
+-export([lift_m/3, map_m/3, foldl_m/4]).
 -export([bind/3, then/3, return/2]).
 -export([lift/2]).
 -export([fail/2]).
@@ -43,6 +43,17 @@ map_m(F, [X|Xs], Monad) ->
          end, Monad);
 map_m(_F, [], Monad) ->
     return([], Monad).
+
+foldl_m(F, [X|Xs], Acc, Monad) ->
+    bind(
+      F(X, Acc),
+      fun(Acc1) ->
+              foldl_m(F, Xs, Acc1, Monad)
+      end, Monad);
+foldl_m(_F, [], Acc, _Monad) ->
+    Acc.
+
+ 
 
 %% same as monad:bind/3
 bind(X, F, {T, _IM} = M) ->

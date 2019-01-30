@@ -1,5 +1,5 @@
 -module(disable_tco_example).
-
+-compile({parse_transform, astranaut_disable_tco}).
 -export([f/1,a/1]).
 
 % Auxilary function to print stack trace (by throwing an exception).

@@ -107,15 +107,13 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [my_test_case].
+    [test_ok_case, test_function_case, test_quote_case, test_unquote_splicing_case, test_pattern_case, test_other_case].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-my_test_case() -> 
-    [].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
@@ -126,14 +124,45 @@ my_test_case() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-my_test_case(_Config) -> 
-    ?assertEqual(ok, astranaut_example:test()),
-    ?assertEqual(ok, astranaut_example:test_local()),
-    ?assertEqual(ok, astranaut_example:test_in_function()),
-    ?assertEqual({hello, foo, bar, world}, astranaut_example:test_pattern()),
-    ?assertEqual({hello2, world, world, {hello, world}}, astranaut_example:test_clause()),
-    ?assertEqual(ok, astranaut_example:test_quote_string()),
-    ?assertEqual(ok, astranaut_example:test_imported_macro()),
-    ?assertEqual({hello, world}, astranaut_example:test_group_args()),
+test_ok_case(_Config) -> 
+    ?assertEqual(ok, astranaut_macro_test:test_ok()).
+
+test_function_case(_Config) ->
+    ?assertEqual(ok, astranaut_macro_test:test_function(world)),
+    ?assertEqual({error, foo}, astranaut_macro_test:test_function(foo)),
     ok.
+
+test_quote_case(_Config) ->
+    ?assertEqual({ok, ok}, astranaut_macro_test:test_unquote()),
+    ?assertEqual({ok, ok}, astranaut_macro_test:test_binding()),
+    ok.
+
+test_unquote_splicing_case(_Config) ->
+    ?assertEqual({ok, {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing()),
+    ?assertEqual({ok, [hello, foo, bar, world], {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing_mix_1()),
+    ?assertEqual({error, zaa, bar}, astranaut_macro_test:test_unquote_splicing_mix_2()),
+    ok.
+
+test_pattern_case(_Config) ->
+    ?assertEqual({hello, world, foo, bar}, astranaut_macro_test:test_match_pattern()),
+    ?assertEqual({ok, {hello2, world, world, {hello, world}}}, astranaut_macro_test:test_function_pattern_1()),
+    ?assertEqual({error, {foo, bar}}, astranaut_macro_test:test_function_pattern_2()),
+    ?assertEqual({ok, 11}, astranaut_macro_test:test_case_pattern_1()),
+    ?assertEqual({ok, {hello, world, foo, bar}}, astranaut_macro_test:test_case_pattern_2()),
+    ?assertEqual({error, task}, astranaut_macro_test:test_case_pattern_3()),
+    ok.
+
+test_quote_code_case(_Config) ->
+    ?assertEqual(ok, astranaut_macro_test:test_quote_code()),
+    ok.
+
+test_other_case(_Config) ->
+    ?assertEqual(true, astranaut_macro_test:test_case()),
+    ?assertException(exit, throw, astranaut_macro_test:test_try_catch()),
+    ?assertEqual({hello, ok, world}, astranaut_macro_test:test_function()),
+    ?assertMatch({ok, {_, 111, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
+    ?assertMatch({ok, {_, 111, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
+    ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
+    ok.
+
 

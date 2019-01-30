@@ -80,13 +80,13 @@ macros(Forms, LocalModule, File) ->
           fun({Line, {Module, {Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({Line, {Module, {Function, Arity}, Opts}}, Acc) when is_list(Opts) ->
+             ({Line, {Module, {Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
              ({Line, {{Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({Line, {{Function, Arity}, Opts}}, Acc) when is_list(Opts)->
+             ({Line, {{Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
              ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
@@ -289,8 +289,8 @@ group_arguments(Arguments, #{group_args := true}) ->
 group_arguments(Arguments, #{}) ->
     Arguments.
 
-append_attrs(Arguments, #{attributes := Attrs}) ->
-    Arguments ++ [Attrs];
+append_attrs(Arguments, #{attributes := Attrs, line := Line}) ->
+    Arguments ++ [Attrs#{line => Line}];
 append_attrs(Arguments, #{}) ->
     Arguments.
 

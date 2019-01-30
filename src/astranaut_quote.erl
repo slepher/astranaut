@@ -17,8 +17,12 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
+    dbg:tracer(),
+    dbg:tpl(compile, format_message, cx),
+    dbg:p(all, [c]),
     Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
-    astranaut_traverse:map(fun walk/2, Forms, Opts).
+    File = astranaut:file(Forms),
+    astranaut_traverse:map(fun(Node, Attr) -> walk(Node, Attr, File) end, Forms, Opts).
 
 format_error({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut:to_string(Node)]);
@@ -29,12 +33,34 @@ format_error(Message) ->
     end.
 
 quote(Value) ->
-    quote(Value, #{line => 0, quote_type => expression}).
+    quote(Value, #{}).
 
-quote(Value, Line) when is_integer(Line) ->
-    quote_1(Value, #{line => Line, quote_type => expression});
-quote(Value, Opts) when is_map(Opts) ->
-    quote_1(Value, Opts).
+quote(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
+    astranaut_traverse:map_traverse_fun_return(
+      fun(QuotedAst) ->
+              QuotedCode = astranaut:to_string(QuotedAst),
+              RelaPath = astranaut:relative_path(File),
+              io:format("~ts:~p~n~s~n", [RelaPath, QuoteLine, QuotedCode]),
+              QuotedAst
+      end, quote(Value, Options#{debug => false}));
+quote(Value, #{line := Line, quote_line := QuoteLine} = Options) ->
+    Options1 = maps:remove(line, Options),
+    astranaut_traverse:map_traverse_return(
+      fun(Quoted) ->
+              call_remote(astranaut, replace_line_zero, [Quoted, Line], QuoteLine)
+      end, quote(Value, Options1));
+quote(Value, #{warnings := Warnings} = Options) ->
+    Options1 = maps:remove(warnings, Options),
+    Quoted = quote(Value, Options1),
+    case astranaut_traverse:traverse_fun_return_struct(Quoted) of
+        #{warnings := Warnings1} = Quoted1 ->
+            Quoted1#{warnings => Warnings ++ Warnings1};
+        #{} = Quoted1 ->
+            Quoted1#{warnings => Warnings}
+    end;
+quote(Value, Options) ->
+    Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),
+    quote_1(Value, Options1).
 
 uncons({cons, _Line, Head, Tail}) ->
     [Head|uncons(Tail)];
@@ -57,53 +83,37 @@ cons([], Rest) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk({call, Line1, {atom, _Line2, quote}, [Form]}, Attr) ->
+walk({call, _Line1, {atom, _Line2, quote}, [Form]} = Node, Attr, File) ->
     %% transform quote(Form)
-    QuoteType = quote_type(Attr),
-    Opts = #{line => Line1, quote_type => QuoteType},
-    quote(Form, Opts);
-walk({call, Line1, {atom, _Line2, quote}, [Form, Line]}, #{node := expression}) ->
-    %% transform quote(Form, Line) in expression
-    case Line of
-        {atom, _, code_line} ->
-            Opts = #{line => Line1, quote_type => expression, code_line => true},
-            quote(Form, Opts);
-        _ ->
-            Opts = #{line => Line1, quote_type => expression},
-            call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1)
-    end;
-walk({call, Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr) ->
+    quote(Form, #{}, Node, Attr, File);
+walk({call, _Line1, {atom, _Line2, quote}, [Form, Options]} = Node, Attr, File) ->
+    Options1 = to_options(Options),
+    quote(Form, Options1, Node, Attr, File);
+walk({call, _Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, File) ->
     %% transform quote_code(Codes)
     case split_codes(Codes, NodeType) of
-        {ok, NCodes, Line} ->
+        {ok, NCodes, Options} ->
+            Options1 = to_options(Options),
             Form = astranaut_code:quote_codes(NCodes),
-            case Line of
-                {atom, _, code_line} ->
-                    Opts = #{line => Line1, quote_type => expression, code_line => true},
-                    quote(Form, Opts);
-                _ ->
-                    Opts = #{line => Line1, quote_type => expression},
-                    call_remote(astranaut, replace_line_zero, [quote(Form, Opts), Line], Line1)
-            end;
-        {ok, NCodes} ->
-            Form = astranaut_code:quote_codes(NCodes),
-            QuoteType = quote_type(Attr),
-            Opts = #{line => Line1, quote_type => QuoteType},
-            quote(Form, Opts);
+            quote(Form, Options1, Node, Attr, File);
         {error, invalid_quote_code} ->
             astranaut_traverse:traverse_fun_return(#{error => {invalid_quote, Node}})
     end;
-walk({match, Line1, {atom, _Line2, quote}, Form}, #{node := pattern}) ->
+walk({match, _Line1, {atom, _Line2, quote}, Form} = Node, #{node := pattern} = Attr, File) ->
     %% transform quote = Form in pattern match
-    Opts = #{line => Line1, quote_type => pattern},
-    quote(Form, Opts);
-walk({match, Line1, {atom, _Line2, quote_code}, Code}, #{node := pattern}) ->
+    quote(Form, #{}, Node, Attr, File);
+walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern} = Attr, File) ->
     %% transform quote_code = Code in pattern match
     Form = astranaut_code:quote_codes([Code]),
-    Opts = #{line => Line1, quote_type => pattern},
-    quote(Form, Opts);
-walk(Node, _Attr) ->
+    quote(Form, #{}, Node, Attr, File);
+walk(Node, _Attr, _File) ->
     Node.
+
+quote(Value, Options, Node, Attr, File) ->
+    QuoteLine = erl_syntax:get_pos(Node),
+    QuoteType = quote_type(Attr),
+    Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, file => File}, Options),
+    quote(Value, Options1).
 
 quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
     unquote(Unquote, Opts#{type => value});
@@ -118,7 +128,7 @@ quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
     unquote(Unquote, Opts#{type => value});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
     unquote_splicing(Unquotes, T, Opts);
-quote_1({match, _Line1, Pattern, Value}, #{line := Line, quote_type := pattern} = Opts) ->
+quote_1({match, _Line1, Pattern, Value}, #{quote_line := Line, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2
     {match, Line, quote_1(Pattern, Opts#{quote_type => pattern}), Value};
 quote_1([{var, _Line1, Var} = VarForm|T], Opts) when is_atom(Var) ->
@@ -127,18 +137,18 @@ quote_1({var, _Line1, Var} = VarForm, Opts) when is_atom(Var) ->
     unquote_if_binding(VarForm, Opts);
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
-quote_1([H|T], #{line := Line} = Opts) ->
+quote_1([H|T], #{quote_line := Line} = Opts) ->
     {cons, Line, quote_1(H, Opts), quote_1(T, Opts)};
-quote_1([], #{line := Line}) ->
+quote_1([], #{quote_line := Line}) ->
     {nil, Line};
-quote_1(Float, #{line := Line}) when is_float(Float) ->
+quote_1(Float, #{quote_line := Line}) when is_float(Float) ->
     {float, Line, Float};
-quote_1(Integer, #{line := Line}) when is_integer(Integer) ->
+quote_1(Integer, #{quote_line := Line}) when is_integer(Integer) ->
     {integer, Line, Integer};
-quote_1(Atom, #{line := Line}) when is_atom(Atom) ->
+quote_1(Atom, #{quote_line := Line}) when is_atom(Atom) ->
     {atom, Line, Atom}.
 
-quote_tuple(Tuple, #{line := Line} = Opts) ->
+quote_tuple(Tuple, #{quote_line := Line} = Opts) ->
     TupleList = tuple_to_list(Tuple),
     case TupleList of
         [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
@@ -159,14 +169,14 @@ quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     quote_tuple_list_1(TupleList, Opts);
 quote_tuple_list([Action, TupleLine|Rest] = TupleList, Opts) ->
     NOpts = update_attribute_opt(TupleList, Opts),
-    [quote_1(Action, Opts), quote_line(Opts#{line => TupleLine})|quote_tuple_list_1(Rest, NOpts)].
+    [quote_1(Action, Opts), quote_line(Opts#{quote_line => TupleLine})|quote_tuple_list_1(Rest, NOpts)].
 
 quote_tuple_list_1(List, Opts) ->
     lists:map(fun(Item) -> quote_1(Item, Opts) end, List).
 
-quote_line(#{line := Line, quote_type := pattern}) ->
+quote_line(#{quote_line := Line, quote_type := pattern}) ->
     {var, Line, '_'};
-quote_line(#{line := Line, quote_type := expression, code_line := true} = Opts) ->
+quote_line(#{quote_line := Line, quote_type := expression, code_line := true} = Opts) ->
     quote_1(Line, Opts);
 quote_line(#{quote_type := expression} = Opts) ->
     quote_1(0, Opts).
@@ -185,6 +195,40 @@ quote_type(#{node := pattern}) ->
 quote_type(_) ->
     expression.
 
+to_options(Ast) ->
+    Type = erl_syntax:type(Ast),
+    case lists:member(Type, [list, map_type, atom]) of
+        true ->
+            Line = erl_syntax:get_pos(Ast),
+            {Options, Warnings} = astranaut:ast_to_options(Ast),
+            validate_options(Options, Line, Warnings);
+        false ->
+            #{code_line => Ast}
+    end.
+
+validate_options(Line, _QuoteLine, Warnings) when is_integer(Line) ->
+    {#{code_line => Line}, Warnings};
+validate_options(Options, Line, Warnings) ->
+    {Options1, Warnings1} = 
+        astranaut:validate_options(
+          fun validate_quote_option/2,
+          Options),
+    Warnings2 = 
+        lists:map(
+          fun(Warning) ->
+                  {Line, astranaut_quote, Warning}
+          end, Warnings1),
+    Options1#{warnings => Warnings ++ Warnings2}.
+
+validate_quote_option(debug, Boolean) when is_boolean(Boolean) ->
+    ok;
+validate_quote_option(code_line, Boolean) when is_boolean(Boolean) ->
+    ok;
+validate_quote_option(line, _) ->
+    ok;
+validate_quote_option(_Key, _Value) ->
+    error.
+
 %% check ast in quote_code valid.
 split_codes(Codes, NodeType) ->
     case lists:partition(
@@ -201,7 +245,7 @@ split_codes(Codes, NodeType) ->
                     {error, invalid_quote_code}
             end;
         {NCodes, []} ->
-            {ok, NCodes};
+            {ok, NCodes, {nil, 0}};
         {_NCodes, _NonCodes} ->
             {error, invalid_quote_code}
     end.
@@ -209,22 +253,22 @@ split_codes(Codes, NodeType) ->
 call_remote(Module, Function, Arguments, Line) ->
     {call, Line, {remote, Line, {atom, Line, Module}, {atom, Line, Function}}, Arguments}.
 
-unquote_splicing(Unquotes, Rest, #{line := Line, quote_type := expression} = Opts) ->
+unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression} = Opts) ->
     {op, Line, '++', call_remote(?MODULE, uncons, [Unquotes], Line), quote_1(Rest, Opts)};
 unquote_splicing(Unquotes, _Rest, #{quote_type := pattern}) ->
     Unquotes.
 
 unquote(Exp, #{type := value}) ->
     Exp;
-unquote(Exp, #{type := Type, line := Line} = Opts) ->
+unquote(Exp, #{type := Type, quote_line := Line} = Opts) ->
     {tuple, Line, [quote_1(Type, Opts), quote_line(Opts), Exp]}.
 
 unquote_if_binding_list({var, Line, Atom} = Form, T, #{} = Opts) ->
     case parse_binding(Atom, Line) of
         {value_list, VarList} ->
-            unquote_splicing(VarList, T, Opts#{line => Line});
+            unquote_splicing(VarList, T, Opts#{quote_line => Line});
         _ ->
-            {cons, Line, unquote_if_binding(Form, Opts#{line => Line}), quote_1(T, Opts#{line => Line})}
+            {cons, Line, unquote_if_binding(Form, Opts#{quote_line => Line}), quote_1(T, Opts#{quote_line => Line})}
     end.
 
 unquote_if_binding({var, Line, Atom} = Form, Opts) ->
@@ -232,7 +276,7 @@ unquote_if_binding({var, Line, Atom} = Form, Opts) ->
         {value, Var} ->
             unquote(Var, Opts#{type => value});
         {VarType, Var} ->
-            unquote(Var, Opts#{type => VarType, line => Line});
+            unquote(Var, Opts#{type => VarType, quote_line => Line});
         default ->
             quote_tuple(Form, Opts)
     end.

@@ -16,6 +16,9 @@
 -export([replace_line/2, replace_line_zero/2, to_string/1]).
 -export([replace_from_nth/3]).
 -export([reorder_exports/1]).
+-export([validate_options/2]).
+-export([ast_to_options/1]).
+-export([relative_path/1]).
 %%====================================================================
 %% API functions
 %%====================================================================
@@ -177,8 +180,102 @@ replace_from_nth(Nodes, N, [{function, _Line0, _Name, _Arity, _Clauses} = Fun|Fo
 replace_from_nth(Nodes, N, [Head|Forms], Heads, WithExports) ->
     replace_from_nth(Nodes, N - 1, Forms, [Head|Heads], WithExports).
 
+ast_to_options(Ast) ->
+    ast_to_options(Ast, []).
+
+ast_to_options(Ast, ExcepKeys) ->
+    Writer = astranaut_monad_writer_t:writer_t(astranaut_monad_identity:new()),
+    MonadWriter = ast_to_options(Ast, ExcepKeys, Writer),
+    astranaut_monad_identity:run(astranaut_monad_writer_t:run(MonadWriter)).
+
+ast_to_options({cons, _Line, Head, Tail}, _Keys, Writer) ->
+    astranaut_monad:bind(
+      ast_to_value(Head, Writer),
+      fun(Head1) ->
+              astranaut_monad:bind(
+                ast_to_options(Tail, Writer),
+                fun(Tail1) ->
+                        astranaut_monad:return([Head1|Tail1], Writer)
+                end, Writer)
+      end, Writer);
+ast_to_options({nil, _Line}, _Keys, Writer) ->
+    astranaut_monad:return([], Writer);
+ast_to_options({map, _Line, MapAssocs}, Keys, Writer) ->
+    astranaut_monad:foldl_m(
+      fun({atom, _LineA, Key}, Value, Acc) ->
+              case lists:member(Key, Keys) of
+                  true ->
+                      astranaut_monad:return(maps:put(Key, Value, Acc), Writer);
+                  false ->
+                      astranaut_monad:bind(
+                        ast_to_value(Value, Writer),
+                        fun(Value1) ->
+                                astranaut_monad:return(maps:put(Key, Value1, Acc), Writer)
+                        end, Writer)
+              end;
+         (Key, _Value, _Acc) ->
+              astranaut_monad:tell({invalid_option_key, Key}, Writer)
+      end, MapAssocs);
+ast_to_options(Value, _Keys, Warnings) ->
+    ast_to_value(Value, Warnings).
+
+ast_to_value({Type, _Line, Value}, Writer) when Type == atom ; Type == integer; Type == float; Type == string ->
+    astranaut_monad:return(Value, Writer);
+ast_to_value(Value, Writer) ->
+    astranaut_monad:then(
+      astranaut_monad:tell({invalid_option_value, Value}, Writer),
+      astranaut_monad:return(undefined, Writer)).
+
+validate_options(F, Options) ->
+    validate_options(F, Options, []).
+
+validate_options(F, Options, Warnings) when is_map(Options) ->
+    maps:fold(
+        fun(Key, Value, {OptionsAcc, WarningAcc} = Acc) ->
+                case apply_f(F, Key, Value, Options) of
+                    ok ->
+                        Acc;
+                    error ->
+                        NWarningsAcc = [{invalid_option_value, Key, Value}|WarningAcc],
+                        NOptsAcc = maps:remove(Key, OptionsAcc),
+                        {NOptsAcc, NWarningsAcc};
+                    {error, Reason} ->
+                        NWarningsAcc = [Reason|WarningAcc],
+                        NOptsAcc = maps:remove(Key, OptionsAcc),
+                        {NOptsAcc, NWarningsAcc}
+                end
+        end, {Options, Warnings}, Options);
+validate_options(F, Options, Warnings) when is_list(Options) ->
+    {Options1, Warnings1} = 
+        lists:foldl(
+          fun({Key, Value}, {OptionsAcc, WarningsAcc}) when is_atom(Key) ->
+                  {maps:put(Key, Value, OptionsAcc), WarningsAcc};
+             (Key, {OptionsAcc, WarningsAcc}) when is_atom(Key) ->
+                  {maps:put(Key, true, OptionsAcc), WarningsAcc};
+             (Value, {OptionsAcc, WarningsAcc}) ->
+                  {OptionsAcc, [{invalid_option_value, Value}|WarningsAcc]}
+          end, {maps:new(), Warnings}, Options),
+    validate_options(F, Options1, Warnings1);
+validate_options(F, Attr, Warings) when is_atom(Attr) ->
+    validate_options(F, #{Attr => true}, Warings);
+validate_options(_F, Options, Warnings) ->
+    {maps:new(), [{invalid_option, Options}|Warnings]}.
+
+relative_path(Path) ->
+    case file:get_cwd() of
+        {ok, BasePath} ->
+            string:replace(Path, BasePath ++ "/", "");
+        {error, _Reason} ->
+            Path
+    end.
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
 clause_arity([{clause, _Line, Patterns, _Guards, _Body}|_T]) ->
     length(Patterns).
+
+apply_f(F, Key, Value, _Options) when is_function(F, 2) ->
+    F(Key, Value);
+apply_f(F, Key, Value, Options) when is_function(F, 3) ->
+    F(Key, Value, Options).

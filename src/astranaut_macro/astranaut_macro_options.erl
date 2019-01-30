@@ -62,7 +62,11 @@ kmfa_options(Options, {Module, Function, Arity}, _LocalModule) ->
             {error, {unloaded_macro_module, Module}}
     end.
 
-merge_attrs(#{attrs := Attrs, local_module := Module, file := File, line := Line} = Opts, Forms) ->
+merge_attrs(#{attrs := true} = Options, Forms) ->
+    merge_attrs(Options#{attrs => []}, Forms);
+merge_attrs(#{attrs := Attr} = Options, Forms) when is_atom(Attr) ->
+    merge_attrs(Options#{attrs => [Attr]}, Forms);
+merge_attrs(#{attrs := Attrs, local_module := Module, file := File} = Opts, Forms) when is_list(Attrs) ->
     AttributesMap = 
         lists:foldl(
           fun(module, Acc) ->
@@ -75,7 +79,7 @@ merge_attrs(#{attrs := Attrs, local_module := Module, file := File, line := Line
                   Attributes = astranaut:attributes(Attr, Forms),
                   maps:put(Attr, Attributes, Acc)
           end, maps:new(), Attrs),
-    Opts#{attributes => maps:merge(#{module => Module, file => File, line => Line}, AttributesMap)};
+    Opts#{attributes => maps:merge(#{module => Module, file => File}, AttributesMap)};
 merge_attrs(#{} = Opts, _Forms) ->
     Opts.
 
@@ -110,39 +114,22 @@ validate_formatter(#{formatter := Module}, _Forms) ->
         {error, undef} ->
             {error, {unloaded_formatter_module, Module}}
     end.
-
+update_alias(#{alias := true, function := Function} = Options) ->
+    Options#{macro => Function};
 update_alias(#{alias := Alias} = Options) ->
     Options#{macro => Alias};
 update_alias(#{key := Key} = Options) ->
     Options#{macro => Key}.
 
-
-
-validate_options(Opts, Line, Warnings) when is_map(Opts) ->
-    maps:fold(
-        fun(Key, Value, {OptsAcc, WarningAcc} = Acc) ->
-                case validate_option_key(Key, Value) of
-                    ok ->
-                        Acc;
-                    error ->
-                        NWarningsAcc = [{Line, astranaut_macro, {invalid_option_value, Key, Value}}|WarningAcc],
-                        NOptsAcc = maps:remove(Key, OptsAcc),
-                        {NOptsAcc, NWarningsAcc}
-                end
-        end, {Opts, Warnings}, Opts);
-validate_options(Opts, Line, Warnings) when is_list(Opts) ->
-    {Opts1, Warnings1} = 
-        lists:foldl(
-          fun({Key, Value}, {OptsAcc, WarningsAcc}) when is_atom(Key) ->
-                  {maps:put(Key, Value, OptsAcc), WarningsAcc};
-             (Key, {OptsAcc, WarningsAcc}) when is_atom(Key) ->
-                  {maps:put(Key, true, OptsAcc), WarningsAcc};
-             (Value, {OptsAcc, WarningsAcc}) ->
-                  {OptsAcc, [{Line, astranaut_macro, {invalid_option_value, Value}}|WarningsAcc]}
-          end, {maps:new(), Warnings}, Opts),
-    validate_options(Opts1, Line, Warnings1);
-validate_options(Opts, Line, Warnings) ->
-    {maps:new(), [{Line, astranaut_macro, {invalid_option, Opts}}|Warnings]}.
+validate_options(Options, Line, Warnings) ->
+    {Options1, Warnings1} = 
+        astranaut:validate_options(fun validate_option_key/2, Options),
+    Warnings2 = 
+        lists:map(
+          fun(Warning) ->
+                  {Line, astranaut_macro, Warning}
+          end, Warnings1),
+    {Options1, Warnings ++ Warnings2}.
 
 validate_option_key(attrs, Attrs) when is_atom(Attrs) ->
     ok;
@@ -168,7 +155,7 @@ validate_option_key(auto_export, Bool) when is_boolean(Bool) ->
     ok;
 validate_option_key(group_args, Bool) when is_boolean(Bool) ->
     ok;
-validate_option_key(merge_function, head) ->
+validate_option_key(function, head) ->
     ok;
 validate_option_key(merge_function, tail) ->
     ok;
