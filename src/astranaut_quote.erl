@@ -200,11 +200,10 @@ quote_type(_) ->
 
 to_options(Ast) ->
     Type = erl_syntax:type(Ast),
-    case lists:member(Type, [list, map_expr, atom, nil]) of
+    case lists:member(Type, [list, nil, map_expr, atom]) of
         true ->
             Line = erl_syntax:get_pos(Ast),
             {Options, Warnings} = astranaut:ast_to_options(Ast),
-            io:format("new options is ~p~p~n", [Options, Warnings]),
             validate_options(Options, Line, Warnings);
         false ->
             #{line => Ast}
