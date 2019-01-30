@@ -183,6 +183,5 @@ test_macro_with_warnings(_Config) ->
         {34, astranaut_warnings__local_macro, noop},
         {40, astranaut_warnings__local_macro, noop},
         {42, astranaut_warnings__local_macro, noop}], Warnings),
-        
     ok.
     
