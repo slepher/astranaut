@@ -155,7 +155,7 @@ validate_option_key(auto_export, Bool) when is_boolean(Bool) ->
     ok;
 validate_option_key(group_args, Bool) when is_boolean(Bool) ->
     ok;
-validate_option_key(function, head) ->
+validate_option_key(merge_function, head) ->
     ok;
 validate_option_key(merge_function, tail) ->
     ok;

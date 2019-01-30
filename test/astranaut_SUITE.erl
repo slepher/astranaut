@@ -156,14 +156,17 @@ test_pattern_case(_Config) ->
 
 test_quote_code_case(_Config) ->
     ?assertEqual(ok, astranaut_macro_test:test_quote_code()),
+    ?assertEqual({hello, ok}, astranaut_macro_test:test_quote_line()),
+    Ast = {tuple, 20, [{atom, 20, a}, {atom, 20, b}]},
+    ?assertEqual({tuple, 20, [{atom, 20, hello}, {tuple, 20, [{atom, 20, a}, {atom, 20, b}]}]},
+                 astranaut_macro_example:quote_line(Ast)),
     ok.
 
 test_other_case(_Config) ->
     ?assertEqual(true, astranaut_macro_test:test_case()),
     ?assertException(exit, throw, astranaut_macro_test:test_try_catch()),
     ?assertEqual({hello, ok, world}, astranaut_macro_test:test_function()),
-    ?assertMatch({ok, {_, 111, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
-    ?assertMatch({ok, {_, 111, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
+    ?assertMatch({ok, {_, _, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
     ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
     ok.
 

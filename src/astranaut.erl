@@ -95,7 +95,7 @@ replace_line_zero(Ast, Line) ->
          (_) -> false
       end, Ast, Line).
 
-replace_line_cond(Cond, Ast, Line) ->
+replace_line_cond(Cond, Ast, Line) when is_integer(Line) ->
     astranaut_traverse:map(
       fun(Node, #{node := attribute}) ->
               Node;
@@ -202,7 +202,7 @@ ast_to_options({nil, _Line}, _Keys, Writer) ->
     astranaut_monad:return([], Writer);
 ast_to_options({map, _Line, MapAssocs}, Keys, Writer) ->
     astranaut_monad:foldl_m(
-      fun({atom, _LineA, Key}, Value, Acc) ->
+      fun({map_field_assoc, _, {atom, _LineA, Key}, Value}, Acc) ->
               case lists:member(Key, Keys) of
                   true ->
                       astranaut_monad:return(maps:put(Key, Value, Acc), Writer);
@@ -213,18 +213,19 @@ ast_to_options({map, _Line, MapAssocs}, Keys, Writer) ->
                                 astranaut_monad:return(maps:put(Key, Value1, Acc), Writer)
                         end, Writer)
               end;
-         (Key, _Value, _Acc) ->
-              astranaut_monad:tell({invalid_option_key, Key}, Writer)
-      end, MapAssocs);
+         ({map_field_assoc, _, Key, _Value}, Acc) ->
+              astranaut_monad:then(
+                astranaut_monad:tell([{invalid_option_key, Key}], Writer),
+                astranaut_monad:return(Acc, Writer),
+                Writer)
+      end, maps:new(), MapAssocs, Writer);
 ast_to_options(Value, _Keys, Warnings) ->
     ast_to_value(Value, Warnings).
 
 ast_to_value({Type, _Line, Value}, Writer) when Type == atom ; Type == integer; Type == float; Type == string ->
     astranaut_monad:return(Value, Writer);
 ast_to_value(Value, Writer) ->
-    astranaut_monad:then(
-      astranaut_monad:tell({invalid_option_value, Value}, Writer),
-      astranaut_monad:return(undefined, Writer)).
+    astranaut_monad:return(Value, Writer).
 
 validate_options(F, Options) ->
     validate_options(F, Options, []).

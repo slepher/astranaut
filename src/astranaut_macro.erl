@@ -310,7 +310,9 @@ format_forms(Forms) ->
         [] ->
             ok;
         [true] ->
-            io:format("~s~n", [astranaut:to_string(Forms)])
+            io:format("~s~n", [astranaut:to_string(Forms)]);
+        [ast] ->
+            io:format("~p~n", [Forms])
     end,
     Forms.
 

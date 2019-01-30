@@ -35,32 +35,9 @@ format_error(Message) ->
 quote(Value) ->
     quote(Value, #{}).
 
-quote(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
-    astranaut_traverse:map_traverse_fun_return(
-      fun(QuotedAst) ->
-              QuotedCode = astranaut:to_string(QuotedAst),
-              RelaPath = astranaut:relative_path(File),
-              io:format("~ts:~p~n~s~n", [RelaPath, QuoteLine, QuotedCode]),
-              QuotedAst
-      end, quote(Value, Options#{debug => false}));
-quote(Value, #{line := Line, quote_line := QuoteLine} = Options) ->
-    Options1 = maps:remove(line, Options),
-    astranaut_traverse:map_traverse_return(
-      fun(Quoted) ->
-              call_remote(astranaut, replace_line_zero, [Quoted, Line], QuoteLine)
-      end, quote(Value, Options1));
-quote(Value, #{warnings := Warnings} = Options) ->
-    Options1 = maps:remove(warnings, Options),
-    Quoted = quote(Value, Options1),
-    case astranaut_traverse:traverse_fun_return_struct(Quoted) of
-        #{warnings := Warnings1} = Quoted1 ->
-            Quoted1#{warnings => Warnings ++ Warnings1};
-        #{} = Quoted1 ->
-            Quoted1#{warnings => Warnings}
-    end;
 quote(Value, Options) ->
     Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),
-    quote_1(Value, Options1).
+    quote_0(Value, Options1).
 
 uncons({cons, _Line, Head, Tail}) ->
     [Head|uncons(Tail)];
@@ -114,6 +91,32 @@ quote(Value, Options, Node, Attr, File) ->
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, file => File}, Options),
     quote(Value, Options1).
+
+quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
+    astranaut_traverse:map_traverse_fun_return(
+      fun(QuotedAst) ->
+              QuotedCode = astranaut:to_string(QuotedAst),
+              RelaPath = astranaut:relative_path(File),
+              io:format("~ts:~p~n~s~n", [RelaPath, QuoteLine, QuotedCode]),
+              QuotedAst
+      end, quote_0(Value, Options#{debug => false}));
+quote_0(Value, #{line := Line, quote_line := QuoteLine} = Options) ->
+    Options1 = maps:remove(line, Options),
+    astranaut_traverse:map_traverse_fun_return(
+      fun(Quoted) ->
+              call_remote(astranaut, replace_line_zero, [Quoted, Line], QuoteLine)
+      end, quote_0(Value, Options1));
+quote_0(Value, #{warnings := Warnings} = Options) ->
+    Options1 = maps:remove(warnings, Options),
+    Quoted = quote_0(Value, Options1),
+    case astranaut_traverse:traverse_fun_return_struct(Quoted) of
+        #{warnings := Warnings1} = Quoted1 ->
+            Quoted1#{warnings => Warnings ++ Warnings1};
+        #{} = Quoted1 ->
+            Quoted1#{warnings => Warnings}
+    end;
+quote_0(Value, #{} = Options) ->
+    quote_1(Value, Options).
 
 quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
     unquote(Unquote, Opts#{type => value});
@@ -197,13 +200,14 @@ quote_type(_) ->
 
 to_options(Ast) ->
     Type = erl_syntax:type(Ast),
-    case lists:member(Type, [list, map_type, atom]) of
+    case lists:member(Type, [list, map_expr, atom, nil]) of
         true ->
             Line = erl_syntax:get_pos(Ast),
             {Options, Warnings} = astranaut:ast_to_options(Ast),
+            io:format("new options is ~p~p~n", [Options, Warnings]),
             validate_options(Options, Line, Warnings);
         false ->
-            #{code_line => Ast}
+            #{line => Ast}
     end.
 
 validate_options(Line, _QuoteLine, Warnings) when is_integer(Line) ->

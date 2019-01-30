@@ -44,16 +44,14 @@ map_m(F, [X|Xs], Monad) ->
 map_m(_F, [], Monad) ->
     return([], Monad).
 
-foldl_m(F, [X|Xs], Acc, Monad) ->
+foldl_m(F, Acc, [X|Xs], Monad) ->
     bind(
       F(X, Acc),
       fun(Acc1) ->
-              foldl_m(F, Xs, Acc1, Monad)
+              foldl_m(F, Acc1, Xs, Monad)
       end, Monad);
-foldl_m(_F, [], Acc, _Monad) ->
-    Acc.
-
- 
+foldl_m(_F, Acc, [], Monad) ->
+    astranaut_monad:return(Acc, Monad).
 
 %% same as monad:bind/3
 bind(X, F, {T, _IM} = M) ->
