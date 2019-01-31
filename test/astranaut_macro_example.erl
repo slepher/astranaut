@@ -52,8 +52,8 @@ quote_unquote_splicing_mix(Ast1, Ast2) ->
           end),
     Fun2 = 
         quote(
-          fun(One, Two) ->
-                  {error, One, Two}
+          fun(unquote = Ast1, Two) ->
+                  {error, unquote(Ast1), Two}
           end),
     astranaut:merge_clauses([Fun1, Fun2]).
 

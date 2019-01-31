@@ -68,10 +68,10 @@ test_unquote_splicing() ->
     quote_unquote_splicing(foo, bar).
 
 test_unquote_splicing_mix_1() ->
-    (quote_unquote_splicing_mix(foo, Bar))(foo, bar).
+    (quote_unquote_splicing_mix(Foo, bar))(foo, bar).
 
 test_unquote_splicing_mix_2() ->
-    (quote_unquote_splicing_mix(foo, Bar))(zaa, bar).
+    (quote_unquote_splicing_mix(Foo, bar))(foo, zaa).
 
 test_match_pattern() ->
     quote_match_pattern(hello(world, foo, bar)).

@@ -142,7 +142,7 @@ test_quote_case(_Config) ->
 test_unquote_splicing_case(_Config) ->
     ?assertEqual({ok, {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing()),
     ?assertEqual({ok, [hello, foo, bar, world], {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing_mix_1()),
-    ?assertEqual({error, zaa, bar}, astranaut_macro_test:test_unquote_splicing_mix_2()),
+    ?assertEqual({error, foo, zaa}, astranaut_macro_test:test_unquote_splicing_mix_2()),
     ok.
 
 test_pattern_case(_Config) ->
