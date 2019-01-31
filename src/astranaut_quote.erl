@@ -27,7 +27,8 @@ parse_transform(Forms, _Options) ->
                end, Reply),
     astranaut_traverse:parse_transform_return(NReply, File).
 
-
+format_error({invalid_unquote_splicing, Binding, Var}) ->
+    io_lib:format("expected unquote, not unquote_splicing ~s in ~s", [astranaut:to_string(Binding), astranaut:to_string(Var)]);
 format_error({non_empty_tail, Rest}) ->
     io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut:to_string(Rest)]);
 format_error({invalid_quote, Node}) ->
@@ -137,38 +138,44 @@ quote_1([{call, _Line1, {atom, _Line2, unquote_splicing}, [Unquotes]}|T], Opts) 
     %quote({a, b, unquote_splicing(V), c, d}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
+    %% quote = Unquote in pattern
     unquote(Unquote, Opts#{type => value});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% unquote_splicing = Unquotes in pattern
     unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1({match, _Line1, Pattern, Value}, #{quote_line := Line, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2
     astranaut_traverse_monad:bind(
-      quote_1(Pattern, Opts#{quote_type => pattern}),
+      quote_1(Pattern, Opts),
       fun(Pattern1) ->
               astranaut_traverse_monad:return({match, Line, Pattern1, Value})
       end);
 quote_1({cons, _Line1, {var, Line, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
+    %% [A, _L@Unquotes, B] expression.
     case parse_binding(VarName, Line) of
-        {value_list, Binding} ->
-            unquote_splicing(Binding, T, Opts#{join => cons});
+        {value_list, Unquotes} ->
+            unquote_splicing(Unquotes, T, Opts#{join => cons});
         default ->
             quote_tuple(Tuple, Opts)
     end;
-quote_1([{var, Line, VarName} = Var|T], Opts) when is_atom(VarName) ->
+quote_1([{var, Line, VarName}|T] = List, Opts) when is_atom(VarName) ->
+    %% any L@Unquotes in list in absformat, like
+    %% {A, _L@Unquotes, B} expression.
+    %% fun(A, _L@Unquotes, B) -> _L@Unquotes end.
     case parse_binding(VarName, Line) of
-        {value_list, Binding} ->
-            unquote_splicing(Binding, T, Opts#{quote_line => Line, join => list});
+        {value_list, Unquotes} ->
+            unquote_splicing(Unquotes, T, Opts#{quote_line => Line, join => list});
         _ ->
-            quote_list([Var|T], Opts)
+            quote_list(List, Opts)
     end;
 quote_1({var, Line, VarName} = Var, Opts) when is_atom(VarName) ->
     case parse_binding(VarName, Line) of
-        {value_list, Binding} ->
+        {value_list, Unquotes} ->
             astranaut_traverse_monad:then(
-              astranaut_traverse_monad:warning({Line, ?MODULE, {invalid_binding, Binding}}),
+              astranaut_traverse_monad:warning({Line, ?MODULE, {invalid_unquote_splicing, Unquotes, Var}}),
               quote_tuple(Var, Opts));
-        {BindingType, Binding} ->
-            unquote(Binding, Opts#{type => BindingType, quote_line => Line});
+        {BindingType, Unquote} ->
+            unquote(Unquote, Opts#{type => BindingType, quote_line => Line});
         default ->
             quote_tuple(Var, Opts)
     end;
