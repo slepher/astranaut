@@ -266,7 +266,8 @@ walk_macro_call(Node, __MacroOpts) ->
 %%%===================================================================
 %%% apply_macro and it's help functions.
 %%%===================================================================
-apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, arguments := Arguments, line := Line} = Opts) ->
+apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, 
+                     arguments := Arguments, line := Line} = Opts) ->
     Arguments1 = group_arguments(Arguments, Opts),
     Arguments2 = append_attrs(Arguments1, Opts),
     if
@@ -299,7 +300,7 @@ apply_mfa(Module, Function, Arguments) ->
         erlang:apply(Module, Function, Arguments)
     catch
         _:Exception:StackTrace ->
-            {error, {exception, Exception, StackTrace}}
+            {error, {exception, Exception, Module, Function, StackTrace}}
     end.
 
 %%%===================================================================

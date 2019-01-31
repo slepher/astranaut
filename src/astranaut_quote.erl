@@ -28,6 +28,8 @@ parse_transform(Forms, _Options) ->
     astranaut_traverse:parse_transform_return(NReply, File).
 
 
+format_error({non_empty_tail, Rest}) ->
+    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut:to_string(Rest)]);
 format_error({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut:to_string(Node)]);
 format_error(Message) ->
@@ -124,7 +126,7 @@ quote_0(Value, #{warnings := Warnings} = Options) ->
       astranaut_traverse_monad:warnings(Warnings),
       quote_0(Value, Options1));
 quote_0(Value, #{} = Options) ->
-    quote_m(Value, Options).
+    quote_1(Value, Options).
 
 quote_1({call, _Line1, {atom, _Line2, unquote}, [Unquote]}, Opts) ->
     unquote(Unquote, Opts#{type => value});
@@ -141,7 +143,7 @@ quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
 quote_1({match, _Line1, Pattern, Value}, #{quote_line := Line, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2
     astranaut_traverse_monad:bind(
-      quote_m(Pattern, Opts#{quote_type => pattern}),
+      quote_1(Pattern, Opts#{quote_type => pattern}),
       fun(Pattern1) ->
               astranaut_traverse_monad:return({match, Line, Pattern1, Value})
       end);
@@ -174,23 +176,15 @@ quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple(Tuple, Opts);
 quote_1(List, Opts) when is_list(List) ->
     quote_list(List, Opts);
-quote_1(Float, #{quote_line := Line}) when is_float(Float) ->
-    {float, Line, Float};
-quote_1(Integer, #{quote_line := Line}) when is_integer(Integer) ->
-    {integer, Line, Integer};
-quote_1(Atom, #{quote_line := Line}) when is_atom(Atom) ->
-    {atom, Line, Atom}.
+quote_1(Literal, Opts) ->
+    astranaut_traverse_monad:return(quote_literal(Literal, Opts)).
 
-quote_m(Node, #{quote_line := Line} = Options) ->
-    Node1 = quote_1(Node, Options),
-    astranaut_traverse:fun_return_to_monad(Node1, Node, #{line => Line, formatter => ?MODULE}).
-    
 quote_list([H|T], #{quote_line := Line} = Opts) ->
     astranaut_traverse_monad:bind(
-      quote_m(H, Opts),
+      quote_1(H, Opts),
       fun(H1) ->
               astranaut_traverse_monad:bind(
-                quote_m(T, Opts),
+                quote_1(T, Opts),
                 fun(T1) ->
                         astranaut_traverse_monad:return({cons, Line, H1, T1})
                 end)
@@ -198,32 +192,33 @@ quote_list([H|T], #{quote_line := Line} = Opts) ->
 quote_list([], #{quote_line := Line}) ->
     astranaut_traverse_monad:return({nil, Line}).
 
-quote_tuple(Tuple, #{quote_line := Line} = Opts) ->
+quote_tuple(Tuple, Opts) ->
     TupleList = tuple_to_list(Tuple),
-    case TupleList of
-        [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-            astranaut_traverse_monad:bind(
-              quote_tuple_list(TupleList, Opts),
-              fun(TupleList1) ->
-                      astranaut_traverse_monad:return({tuple, TupleLine, TupleList1})
-              end);
-        _ ->
-            astranaut_traverse_monad:bind(
-              quote_tuple_list_1(TupleList, Opts),
-              fun(TupleList1) ->
-                      astranaut_traverse_monad:return({tuple, Line, TupleList1})
-              end)
-    end.
+    TupleLine = get_tuple_line(TupleList, Opts),
+    astranaut_traverse_monad:bind(
+      quote_tuple_list(TupleList, Opts),
+      fun(TupleList1) ->
+              astranaut_traverse_monad:return({tuple, TupleLine, TupleList1})
+      end).
+
+get_tuple_line(_, #{quote_line := Line, attribute := attr}) ->
+    %% if tuple is the attribute value, use the original line.
+    Line;
+get_tuple_line([_Action, TupleLine|_], #{}) when is_integer(TupleLine) ->
+    %% use the tuple line.
+    TupleLine;
+get_tuple_line(_, #{quote_line := Line}) ->
+    Line.
 
 quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
     %% special form of {attribute, Line, spec, {{F, A}, Spec}}.
     %% there is no line in {F, A}.
     NOpts = maps:remove(attribute, Opts),
     astranaut_traverse_monad:bind(
-      quote_m(MA, Opts#{attribute => attr}),
+      quote_1(MA, Opts#{attribute => attr}),
       fun(MA1) ->
               astranaut_traverse_monad:bind(
-                quote_m(Spec, NOpts),
+                quote_1(Spec, NOpts),
                 fun(Spec1) ->
                         astranaut_traverse_monad:return([MA1, Spec1])
                 end)
@@ -233,54 +228,71 @@ quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Line, Attribute, T}.
     %% there is no line in {F, A} and T.
     quote_tuple_list_1(TupleList, Opts);
-quote_tuple_list([Action, TupleLine|Rest] = TupleList, Opts) ->
+quote_tuple_list([Action, TupleLine|Rest] = TupleList, Opts) when is_integer(TupleLine) ->
     NOpts = update_attribute_opt(TupleList, Opts),
     astranaut_traverse_monad:bind(
       quote_tuple_list_1(Rest, NOpts),
       fun(Rest1) ->
-              Action1 = quote_1(Action, Opts),
+              Action1 = quote_literal(Action, Opts),
               Line1 = quote_line(Opts#{quote_line => TupleLine}),
               astranaut_traverse_monad:return([Action1, Line1|Rest1])
-      end).
+      end);
+quote_tuple_list(List, Opts) ->
+    quote_tuple_list_1(List, Opts).
+
 
 quote_tuple_list_1(List, Opts) ->
     astranaut_traverse_monad:map_m(
       fun(Item) ->
-              quote_m(Item, Opts)
+              quote_1(Item, Opts)
       end, List).
 
+%% quote_literal not return monad
+quote_literal(Float, #{quote_line := Line}) when is_float(Float) ->
+    {float, Line, Float};
+quote_literal(Integer, #{quote_line := Line}) when is_integer(Integer) ->
+    {integer, Line, Integer};
+quote_literal(Atom, #{quote_line := Line}) when is_atom(Atom) ->
+    {atom, Line, Atom}.
+
+%% quote_line not return monad
 quote_line(#{quote_line := Line, quote_type := pattern}) ->
     {var, Line, '_'};
 quote_line(#{quote_line := Line, quote_type := expression, code_line := true} = Opts) ->
-    quote_1(Line, Opts);
+    quote_literal(Line, Opts);
 quote_line(#{quote_type := expression} = Opts) ->
-    quote_1(0, Opts).
+    quote_literal(0, Opts).
 
+%% unquote return monad
 unquote(Exp, #{type := value}) ->
-    Exp;
+    astranaut_traverse_monad:return(Exp);
 unquote(Exp, #{type := Type, quote_line := Line} = Opts) ->
-    {tuple, Line, [quote_1(Type, Opts), quote_line(Opts), Exp]}.
+    astranaut_traverse_monad:return({tuple, Line, [quote_literal(Type, Opts), quote_line(Opts), Exp]}).
 
+%% unquote_splicing return monad.
 unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression, join := list} = Opts) ->
     astranaut_traverse_monad:bind(
-      quote_m(Rest, Opts),
+      quote_1(Rest, Opts),
       fun(Rest1) ->
               astranaut_traverse_monad:return(
                 call_remote(?MODULE, uncons, [Unquotes, Rest1], Line))
       end);
 unquote_splicing(Unquotes, Rest, #{quote_line := Line, quote_type := expression, join := cons} = Opts) ->
     astranaut_traverse_monad:bind(
-      quote_m(Rest, Opts),
+      quote_1(Rest, Opts),
       fun(Rest1) ->
               astranaut_traverse_monad:return(
                 call_remote(?MODULE, cons, [Unquotes, Rest1], Line))
       end);
 unquote_splicing(Unquotes, [], #{quote_type := pattern, join := list}) ->
-    Unquotes;
+    astranaut_traverse_monad:return(Unquotes);
 unquote_splicing(Unquotes, {nil, _}, #{quote_type := pattern, join := cons}) ->
-    Unquotes;
-unquote_splicing(Unquotes, Rest, #{quote_type := pattern}) ->
-    {warning, Unquotes, {non_empty_tail_unquote_splicing_pattern, Rest}}.
+    astranaut_traverse_monad:return(Unquotes);
+unquote_splicing(Unquotes, Rest, #{quote_type := pattern, quote_line := Line}) ->
+    Warning = {non_empty_tail, Rest},
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:warning({Line, ?MODULE, Warning}),
+      astranaut_traverse_monad:return(Unquotes)).
 
 update_attribute_opt([attribute, _Line, spec|_T], Opts) ->
     Opts#{attribute => spec};

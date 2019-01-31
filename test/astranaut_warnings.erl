@@ -8,7 +8,6 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_warnings).
 
--include("quote.hrl").
 -compile({parse_transform, astranaut_warnings_pt}).
 
 %% API
@@ -18,6 +17,7 @@
 -export([test_attributes/0]).
 -export([function_macro/1]).
 -export([noop_warnings/0]).
+-export([unquote_splicing_warnings/1]).
 -export([format_error/1]).
 
 -use_macro({function_macro/1}).
@@ -42,6 +42,10 @@ test_cons(A, C) ->
                 noop_warnings(),
                 C
                 ]).
+
+unquote_splicing_warnings(Ast) ->
+    quote({unquote_splicing(Head), tail}) = Ast,
+    Head.
 
 function_macro(a) ->
     astranaut:exported_function(

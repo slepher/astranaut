@@ -209,6 +209,13 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
               map_m_1(F, Subtree, Opts)
       end, Nodes, Opts);
 map_m_1(F, NodeA, Opts) ->
+    case NodeA of
+        {astranaut_monad_state_t, _} = MA ->
+            ZZ = astranaut_traverse_monad:run(MA, ok),
+            io:format("zz is ~p~n", [ZZ]);
+        _ ->
+            ok
+    end,
     NodeType = node_type(NodeA, Opts),
     PreType = 
         case erl_syntax:subtrees(NodeA) of
@@ -344,17 +351,7 @@ fun_return_to_monad(Return, Node) ->
 
 fun_return_to_monad(Return, Node, Opts) ->
     MA = astranaut_traverse_monad:return(Node),
-    Line = case Node of
-               Node when is_tuple(Node) ->
-                   case tuple_to_list(Node) of
-                       [_Action,TupleLine|_] when is_integer(TupleLine) ->
-                           TupleLine;
-                       _ ->
-                           0
-                   end;
-               _ ->
-                   0
-           end,
+    Line = erl_syntax:get_pos(Node),
     fun_return_to_monad_1(Return, MA, Opts#{line => Line}).
 
 %% transform user sytle traverse return to astranaut_traverse_monad

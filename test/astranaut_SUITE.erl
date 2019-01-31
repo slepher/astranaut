@@ -179,7 +179,8 @@ test_macro_pt_case(_Config) ->
 test_macro_with_warnings(_Config) ->
     Warnings = astranaut_warnings:warnings(),
     ?assertEqual(
-       [{28, astranaut_traverse, noop_function},
+       [{47, astranaut_quote,{non_empty_tail,[{atom,47,tail}]}},
+        {28, astranaut_traverse, noop_function},
         {34, astranaut_warnings__local_macro, noop},
         {40, astranaut_warnings__local_macro, noop},
         {42, astranaut_warnings__local_macro, noop}], Warnings),

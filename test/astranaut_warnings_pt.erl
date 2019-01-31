@@ -17,18 +17,23 @@
 %%% API
 %%%===================================================================
 
-parse_transform(Forms, Opts) ->
-    {warning, Forms1, Warnings} = astranaut_macro:parse_transform(Forms, Opts),
-    [{eof, Line}|Forms2] = lists:reverse(Forms1),
+parse_transform(Forms0, Opts) ->
+    {warning, Forms1, Warnings1} = astranaut_quote:parse_transform(Forms0, Opts),
+    {warning, Forms2, Warnings2} = astranaut_macro:parse_transform(Forms1, Opts),
+    [{eof, Line}|Forms3] = lists:reverse(Forms2),
+    Warnings = 
+        lists:foldl(
+          fun({_File, Warnings}, Acc) ->
+                  Warnings ++ Acc
+          end, [], Warnings2 ++ Warnings1),
     Function = astranaut:function(
                  warnings,
                  quote(fun() ->
-                               [{_File, Warnings}] = unquote(astranaut:abstract(Warnings)),
-                               Warnings
+                               unquote(astranaut:abstract(Warnings))
                        end, Line)),
     Export = {attribute, Line, export, [{warnings, 0}]},
-    Forms3 = astranaut:reorder_exports(lists:reverse([{eof, Line}, Function, Export|Forms2])),
-    Forms3.
+    Forms4 = astranaut:reorder_exports(lists:reverse([{eof, Line}, Function, Export|Forms3])),
+    Forms4.
 
 format_error(Error) ->
     astranaut_traverse:format_error(Error).
