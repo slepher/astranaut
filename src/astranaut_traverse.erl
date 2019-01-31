@@ -19,6 +19,7 @@
          traverse_fun_return_struct/1]).
 -export([format_error/1, parse_transform_return/2]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
+-export([monad_to_traverse_fun_return/1, monad_to_traverse_fun_return/2]).
 
 -define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -468,6 +469,29 @@ simplify_return({ok, Reply, [], []}, true) ->
     Reply;
 simplify_return(Other, _) ->
     Other.
+
+monad_to_traverse_fun_return(Monad) ->
+    monad_to_traverse_fun_return(Monad, #{}).
+
+monad_to_traverse_fun_return(Monad, #{init := Init, with_state := true}) ->
+    case astranaut_traverse_monad:run(Monad, Init) of
+        {ok, Value, [], []} ->
+            Value;
+        {ok, {Node, State}, Errors, Warnings} ->
+            traverse_fun_return(#{node => Node, state => State, errors => Errors, warnings => Warnings});
+        {error, Errors, Warnings} ->
+            traverse_fun_return(#{errors => Errors, warnings => Warnings})
+    end;
+monad_to_traverse_fun_return(Monad, #{} = Opts) ->
+    Init = maps:get(init, Opts, ok),
+    case astranaut_traverse_monad:run(Monad, Init) of
+        {ok, {Node, _}, [], []} ->
+            Node;
+        {ok, {Node, _}, Errors, Warnings} ->
+            traverse_fun_return(#{node => Node, errors => Errors, warnings => Warnings});
+        {error, Errors, Warnings} ->
+            traverse_fun_return(#{errors => Errors, warnings => Warnings})
+    end.
 
 to_parse_transform_return(Reply, Forms, Opts) when is_map(Opts) ->
     ParseTransForm = maps:get(parse_transform, Opts, false),

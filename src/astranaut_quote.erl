@@ -17,11 +17,12 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    Opts = #{traverse => pre, formatter => ?MODULE},
+    Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
     File = astranaut:file(Forms),
-    FormsM = astranaut_traverse:map_m(fun(Node, Attr) -> walk(Node, Attr, File) end, Forms, Opts),
-    Reply = astranaut_traverse_monad:eval(FormsM, ok),
-    astranaut_traverse:parse_transform_return(Reply, File).
+    astranaut_traverse:map(
+               fun(Node, Attr) -> 
+                       walk(Node, Attr, File) 
+               end, Forms, Opts).
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
@@ -37,9 +38,10 @@ format_error(Message) ->
 quote(Value) ->
     quote(Value, #{}).
 
-quote(Value, Options) ->
+quote(Node, Options) ->
     Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),
-    quote_0(Value, Options1).
+    NodeM = quote_0(Node, Options1),
+    astranaut_traverse:monad_to_traverse_fun_return(NodeM).
 
 uncons(Cons, []) ->
     uncons_1(Cons);
@@ -94,7 +96,7 @@ walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern
     Forms = astranaut_code:quote_codes([Code]),
     quote(Forms, #{}, Node, Attr, File);
 walk(Node, _Attr, _File) ->
-    astranaut_traverse_monad:return(Node).
+    Node.
 
 quote(Value, Options, Node, Attr, File) ->
     QuoteLine = erl_syntax:get_pos(Node),
