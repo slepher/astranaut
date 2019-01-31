@@ -13,7 +13,7 @@
 -export([abstract/1, abstract/2]).
 -export([file/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
--export([replace_line/2, replace_line_zero/2, to_string/1]).
+-export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
 -export([replace_from_nth/3]).
 -export([reorder_exports/1]).
 -export([validate_options/2]).
@@ -145,6 +145,14 @@ reorder_exports(Forms) ->
               end
       end, Forms, lists:seq(1, length(Forms))).
 
+safe_to_string(Form) ->
+    try 
+        to_string(Form)
+    catch
+        _:Exception ->
+            io_lib:format("ast could not format ~p~n~p", [Exception, Form])
+    end.
+
 to_string(Forms) when is_list(Forms) ->
     erl_prettypr:format(erl_syntax:form_list(Forms));
 to_string(Form) ->
@@ -174,7 +182,6 @@ replace_from_nth(Nodes, N, [{function, _Line0, _Name, _Arity, _Clauses} = Fun|Fo
              (_) ->
                   false
           end, Nodes),
-    %io:format("replaced ~p ~p~n~p~n~p~n", [Rests, N - 1, Forms, [Fun|lists:reverse(Exports) ++ Heads]]),
     replace_from_nth(Rests, N - 1, Forms, [Fun|lists:reverse(Exports) ++ Heads], false);
     
 replace_from_nth(Nodes, N, [Head|Forms], Heads, WithExports) ->

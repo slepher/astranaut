@@ -19,25 +19,20 @@
 parse_transform(Forms, _Options) ->
     Opts = #{traverse => pre, formatter => ?MODULE},
     File = astranaut:file(Forms),
-    NodeM = astranaut_traverse:map_m(fun(Node, Attr) -> walk(Node, Attr, File) end, Forms, Opts),
-    Reply = astranaut_traverse_monad:run(NodeM, ok),
-    NReply = astranaut_traverse:map_traverse_return(
-               fun({NNode, _State}) ->
-                       NNode
-               end, Reply),
-    astranaut_traverse:parse_transform_return(NReply, File).
+    FormsM = astranaut_traverse:map_m(fun(Node, Attr) -> walk(Node, Attr, File) end, Forms, Opts),
+    Reply = astranaut_traverse_monad:eval(FormsM, ok),
+    astranaut_traverse:parse_transform_return(Reply, File).
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
-    io_lib:format("expected unquote, not unquote_splicing ~s in ~s", [astranaut:to_string(Binding), astranaut:to_string(Var)]);
+    io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
+                  [astranaut:safe_to_string(Binding), astranaut:safe_to_string(Var)]);
 format_error({non_empty_tail, Rest}) ->
-    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut:to_string(Rest)]);
+    io_lib:format("non empty expression '~s' after unquote_splicing in pattern",
+                  [astranaut:safe_to_string(Rest)]);
 format_error({invalid_quote, Node}) ->
-    io_lib:format("invalid quote ~s", [astranaut:to_string(Node)]);
+    io_lib:format("invalid quote ~s", [astranaut:safe_to_string(Node)]);
 format_error(Message) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _    -> io_lib:write(Message)
-    end.
+    astranaut_traverse:format_error(Message).
 
 quote(Value) ->
     quote(Value, #{}).
@@ -96,8 +91,8 @@ walk({match, _Line1, {atom, _Line2, quote}, Form} = Node, #{node := pattern} = A
     quote(Form, #{}, Node, Attr, File);
 walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern} = Attr, File) ->
     %% transform quote_code = Code in pattern match
-    Form = astranaut_code:quote_codes([Code]),
-    quote(Form, #{}, Node, Attr, File);
+    Forms = astranaut_code:quote_codes([Code]),
+    quote(Forms, #{}, Node, Attr, File);
 walk(Node, _Attr, _File) ->
     astranaut_traverse_monad:return(Node).
 
@@ -110,7 +105,7 @@ quote(Value, Options, Node, Attr, File) ->
 quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
     astranaut_traverse_monad:lift_m(
       fun(QuotedAst) ->
-              QuotedCode = astranaut:to_string(QuotedAst),
+              QuotedCode = astranaut:safe_to_string(QuotedAst),
               RelaPath = astranaut:relative_path(File),
               io:format("~ts:~p~n~s~n", [RelaPath, QuoteLine, QuotedCode]),
               QuotedAst

@@ -311,7 +311,7 @@ format_forms(Forms) ->
         [] ->
             ok;
         [true] ->
-            io:format("~s~n", [astranaut:to_string(Forms)]);
+            io:format("~s~n", [astranaut:safe_to_string(Forms)]);
         [ast] ->
             io:format("~p~n", [Forms])
     end,
@@ -321,7 +321,7 @@ format_node(Node, #{file := File, line := Line} = Opts) ->
     case maps:get(debug, Opts, false) of
         true ->
             io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Opts)]),
-            io:format("~s~n", [astranaut:to_string(Node)]);
+            io:format("~s~n", [astranaut:safe_to_string(Node)]);
         false ->
             ok
     end,
