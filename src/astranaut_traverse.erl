@@ -210,13 +210,6 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
               map_m_1(F, Subtree, Opts)
       end, Nodes, Opts);
 map_m_1(F, NodeA, Opts) ->
-    case NodeA of
-        {astranaut_monad_state_t, _} = MA ->
-            ZZ = astranaut_traverse_monad:run(MA, ok),
-            io:format("zz is ~p~n", [ZZ]);
-        _ ->
-            ok
-    end,
     NodeType = node_type(NodeA, Opts),
     PreType = 
         case erl_syntax:subtrees(NodeA) of
