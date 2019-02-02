@@ -381,6 +381,14 @@ macro.hrl add three attribute: use_macro, exec_macro debug_macro
 -exec_macro({Module, Macro, Arguments}).
 ```
 
+*export_macro*
+
+&emsp;&emsp;used in where macro defined, options in export_macro will be merged to options in use_macro.
+
+```erlang
+-export_macro({[MacroA/A, MacroB/B], opts()}).
+```
+
 *debug_macro*
 
 ```erlang
