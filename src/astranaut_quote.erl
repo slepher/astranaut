@@ -341,7 +341,7 @@ to_options(Ast) ->
     case lists:member(Type, [list, nil, map_expr, atom]) of
         true ->
             Line = erl_syntax:get_pos(Ast),
-            {Options, Warnings} = astranaut:ast_to_options(Ast),
+            {Options, Warnings} = astranaut:ast_to_options(Ast, [line]),
             validate_options(Options, Line, Warnings);
         false ->
             #{line => Ast}

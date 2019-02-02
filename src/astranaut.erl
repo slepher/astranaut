@@ -17,7 +17,7 @@
 -export([replace_from_nth/3]).
 -export([reorder_exports/1]).
 -export([validate_options/2]).
--export([ast_to_options/1]).
+-export([ast_to_options/1, ast_to_options/2]).
 -export([relative_path/1]).
 %%====================================================================
 %% API functions
