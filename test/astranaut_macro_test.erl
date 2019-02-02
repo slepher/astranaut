@@ -28,7 +28,7 @@
 -export([quote_ok/0]).
 
 -use_macro({quote_ok/0}).
--use_macro({?MACRO_MODULE, macro_exported_function/2, [auto_export|?DEBUG_OPTS]}).
+-use_macro({?MACRO_MODULE, macro_exported_function/2, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, quote_unquote/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, quote_binding/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, quote_unquote_splicing/2, ?DEBUG_OPTS}).
@@ -43,8 +43,8 @@
 -use_macro({?MACRO_MODULE, macro_case/3, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_try_catch/0, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_function/2, ?DEBUG_OPTS}).
--use_macro({?MACRO_MODULE, macro_with_attributes/1, [attrs|?DEBUG_OPTS]}).
--use_macro({?MACRO_MODULE, macro_group_args/1, [group_args|?DEBUG_OPTS]}).
+-use_macro({?MACRO_MODULE, macro_with_attributes/1, ?DEBUG_OPTS}).
+-use_macro({?MACRO_MODULE, macro_group_args/1, ?DEBUG_OPTS}).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 

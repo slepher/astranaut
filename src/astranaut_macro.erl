@@ -23,11 +23,11 @@ transform_macro(M, F, A, Opts, Forms) ->
 transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
     File = astranaut:file(Forms),
     [{Line, Module}] = astranaut:attributes_with_line(module, Forms),
-    {Macros, Warnings} =
+    {Macros, _MacroOptions, Warnings} =
         lists:foldl(
           fun({M, F, A, Opts}, Acc) -> 
                   astranaut_macro_options:add({M, F, A}, Opts, Module, File, Line, Forms, Acc)
-          end, {[], []}, lists:reverse(MFAOpts)),
+          end, {[], maps:new(), []}, lists:reverse(MFAOpts)),
     transform_macros_1(Macros, Forms, File, Warnings).
 
 parse_transform(Forms, Options) ->
@@ -75,7 +75,7 @@ format_error(Message) ->
 %%%===================================================================
 macros(Forms, LocalModule, File) ->
     Macros = lists:flatten(astranaut:attributes_with_line(use_macro, Forms)),
-    {AllMacros, Warnings} = 
+    {AllMacros, _MacroOptions, Warnings} = 
         lists:foldl(
           fun({Line, {Module, {Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
@@ -91,7 +91,7 @@ macros(Forms, LocalModule, File) ->
                     {Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
              ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
                   {LocalMacrosAcc, AllMacrosAcc, [{Line, ?MODULE, {invalid_use_macro, Other}}|WarningsAcc]}
-          end, {[], []}, Macros),
+          end, {[], maps:new(), []}, Macros),
     {lists:reverse(AllMacros), lists:reverse(Warnings)}.
 
 transform_macros_1(Macros, Forms, File, Warnings) ->

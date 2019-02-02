@@ -14,32 +14,71 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, Warnings}) ->
+add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions, Warnings}) ->
     {Options1, Warnings1} = validate_options(Options, Line, Warnings),
-    case kmfa_options(Options1, MFA, LocalModule) of
-        {ok, Options2} ->
-            Options3 = update_alias(Options2),
-            Options4 = Options3#{local_module => LocalModule, file => File, line => Line},
-            Options5 = merge_attrs(Options4, Forms),
-            Options6 = formatter_opts(Options5),
-            case validate_formatter(Options6, Forms) of
+    {MacroOptions, ModuleMacroOptions1, Warnings1} =
+        exported_macro_options(MFA, LocalModule, Line, Forms, ModuleMacroOptions, Warnings),
+    Options2 = merge_macro_options(MacroOptions, Options1),
+    case kmfa_options(Options2, MFA, LocalModule) of
+        {ok, Options3} ->
+            Options4 = update_alias(Options3),
+            Options5 = Options4#{local_module => LocalModule, file => File, line => Line},
+            Options6 = merge_attrs(Options5, Forms),
+            Options7 = formatter_opts(Options6),
+            case validate_formatter(Options7, Forms) of
                 ok ->
-                    {[Options6|AllMacros], Warnings1};
+                    {[Options7|AllMacros], ModuleMacroOptions1, Warnings1};
                 {error, Reason} ->
-                    Options7 = Options6#{formatter => astranaut_macro},
-                    {[Options7|AllMacros], [{Line, astranaut_macro, Reason}|Warnings1]}
+                    Options8 = Options7#{formatter => astranaut_macro},
+                    {[Options8|AllMacros], ModuleMacroOptions1, [{Line, astranaut_macro, Reason}|Warnings1]}
             end;
         {error, Reason} ->
             Warnings2 = [{Line, astranaut_macro, Reason}|Warnings1],
-            {AllMacros, Warnings2}
+            {AllMacros, ModuleMacroOptions1, Warnings2}
     end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
 %% @end
 %%--------------------------------------------------------------------
+merge_macro_options(MacroOptions, Options) ->
+    maps:merge(maps:without([debug, debug_ast, alias], MacroOptions), Options).
 
+exported_macro_options({Function, Arity}, LocalModule, Line, Forms, ModuleMacroOptions, Warnings) ->
+    exported_macro_options(
+      fun() ->
+              astranaut:attributes(export_macro, Forms)
+      end, LocalModule, Function, Arity, Line, ModuleMacroOptions, Warnings);
+exported_macro_options({Module, Function, Arity}, _LocalModule, Line, _Forms, ModuleMacroOptions, Warnings) ->
+    exported_macro_options(
+      fun() ->
+              astranaut:module_attributes(export_macro, Module)
+      end, Module, Function, Arity, Line, ModuleMacroOptions, Warnings).
+
+exported_macro_options(GetAttributes, Module, Function, Arity, Line, ModuleMacroOptions, Warnings) ->
+    case maps:find(Module, ModuleMacroOptions) of
+        {ok, MacroOptions} ->
+            Options = maps:get({Function, Arity}, MacroOptions, maps:new()),
+            {Options, ModuleMacroOptions, Warnings};
+        error ->
+            Attributes = GetAttributes(),
+            {MacroOptions, Warnings1} = macro_attributes(Attributes, Line),
+            Options = maps:get({Function, Arity}, MacroOptions, maps:new()),
+            {Options, maps:put(Module, MacroOptions, ModuleMacroOptions), Warnings ++ Warnings1}
+    end.
+
+macro_attributes(Attributes, Line) ->
+    lists:foldl(
+      fun({Functions, Options}, {OptionsAcc, WarningsAcc}) ->
+              {Options1, WarningsAcc1} = validate_options(Options, Line, WarningsAcc),
+             OptionsAcc2 = 
+                  lists:foldl(
+                    fun({Function, Arity}, OptionsAcc1) ->
+                            maps:put({Function, Arity}, Options1, OptionsAcc1)
+                    end, OptionsAcc, Functions),
+              {OptionsAcc2, WarningsAcc1}
+      end, {maps:new(), []}, lists:flatten(Attributes)).
+      
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================

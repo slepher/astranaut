@@ -9,6 +9,7 @@
 -module(astranaut_macro_exports).
 
 %% API
+-export_macro({[macro_x/1], [auto_export, merge_function]}).
 -export([macro_x/1]).
 
 -include("quote.hrl").
@@ -16,7 +17,7 @@
 
 -export([hello/1]).
 
--use_macro({macro_x/1, [{as_attr, macro_x}, auto_export, merge_function]}).
+-use_macro({macro_x/1, [{as_attr, macro_x}]}).
 
 %%%===================================================================
 %%% API

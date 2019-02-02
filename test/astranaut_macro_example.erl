@@ -11,6 +11,12 @@
 -include("quote.hrl").
 -include("macro.hrl").
 %% API
+
+-export_macro({[macro_group_args/1], [group_args]}).
+-export_macro({[macro_with_attributes/1], [attrs]}).
+-export_macro({[macro_exported_function/2], [auto_export]}).
+
+
 -export([quote_ok/0]).
 -export([quote_unquote/1, quote_binding/1]).
 -export([quote_unquote_splicing/2, quote_unquote_splicing_mix/2]).
@@ -22,7 +28,7 @@
 -export([macro_with_attributes/1, macro_group_args/1]).
 
 -use_macro({quote_ok/0}).
--use_macro({macro_exported_function/2, [auto_export]}).
+-use_macro({macro_exported_function/2}).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 
