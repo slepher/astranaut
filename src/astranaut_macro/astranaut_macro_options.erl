@@ -18,9 +18,9 @@ add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions
     {Options1, Warnings1} = validate_options(Options, Line, Warnings),
     {MacroOptions, ModuleMacroOptions1, Warnings1} =
         exported_macro_options(MFA, LocalModule, Line, Forms, ModuleMacroOptions, Warnings),
-    Options2 = merge_macro_options(MacroOptions, Options1),
-    case kmfa_options(Options2, MFA, LocalModule) of
-        {ok, Options3} ->
+    case kmfa_options(Options1, MFA, LocalModule) of
+        {ok, Options2} ->
+            Options3 = merge_macro_options(MacroOptions, Options2),
             Options4 = update_alias(Options3),
             Options5 = Options4#{local_module => LocalModule, file => File, line => Line},
             Options6 = merge_attrs(Options5, Forms),
@@ -41,8 +41,15 @@ add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions
 %% @spec
 %% @end
 %%--------------------------------------------------------------------
+
+      
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 merge_macro_options(MacroOptions, Options) ->
-    maps:merge(maps:without([debug, debug_ast, alias], MacroOptions), Options).
+    WithKeys = [formatter, attrs, order, as_attr, merge_function, auto_export, group_args],
+    maps:merge(maps:with(WithKeys, MacroOptions), Options).
 
 exported_macro_options({Function, Arity}, LocalModule, Line, Forms, ModuleMacroOptions, Warnings) ->
     exported_macro_options(
@@ -78,17 +85,13 @@ macro_attributes(Attributes, Line) ->
                     end, OptionsAcc, Functions),
               {OptionsAcc2, WarningsAcc1}
       end, {maps:new(), []}, lists:flatten(Attributes)).
-      
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+
 kmfa_options(Options, {Function, Arity}, LocalModule) ->
     Module = astranaut_macro_local:module(LocalModule),
     Options1 = Options#{key => Function, module => Module, function => Function, arity => Arity, local => true},
     {ok, Options1};
 kmfa_options(Options, {Module, Function, Arity}, _LocalModule) ->
-    Options1 = Options#{key => {Module, Function}, module => Module, function => Function,
-                        arity => Arity, local => false},
+    Options1 = Options#{key => {Module, Function}, module => Module, function => Function, arity => Arity, local => false},
     case get_exports(Module) of
         {ok, Exports} ->
             case lists:member({Function, Arity}, Exports) of
