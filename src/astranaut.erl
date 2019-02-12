@@ -15,7 +15,7 @@
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
 -export([replace_from_nth/3]).
--export([reorder_exports/1]).
+-export([reorder_exports/1, reorder_forms/2]).
 -export([validate_options/2]).
 -export([ast_to_options/1, ast_to_options/2]).
 -export([relative_path/1]).
@@ -134,16 +134,20 @@ exports(Exports, Line) ->
     {attribute, Line, export, Exports}.
 
 reorder_exports(Forms) ->
+    reorder_forms(Forms, #{docks => [export], spec_as_fun => true, dock_spec => true}).
+
+reorder_forms(Forms, Options) ->
+    {_, GroupForms} =
+        lists:foldl(
+          fun(Form, {AccN, Acc}) ->
+                  {AccN + 1, [{AccN, Form}|Acc]}
+          end, {1, []}, Forms),
     lists:foldl(
-      fun(N, Acc) ->
-              Form = lists:nth(N, Forms),
-              case Form of
-                  {attribute, _Line, export, _FAs} = Export ->
-                      replace_from_nth(Export, N, Acc);
-                  _ ->
-                      Acc
-              end
-      end, Forms, lists:seq(1, length(Forms))).
+      fun({N, {attribute, _, _, _} = Attribute}, Acc) ->
+              replace_from_nth(Attribute, N, Acc, Options);
+         (_, Acc) ->
+              Acc
+      end, Forms, lists:reverse(GroupForms)).
 
 safe_to_string(Form) ->
     try 
@@ -159,7 +163,7 @@ to_string(Form) ->
     erl_prettypr:format(erl_syntax:form_list([Form])).
 
 merge_clauses([{'fun', Line, {clauses, _}}|_T] = Nodes) -> 
-    NClauses = 
+    NClauses =
         lists:flatten(
           lists:map(
             fun({'fun', _, {clauses, FClauses}}) ->
@@ -167,23 +171,89 @@ merge_clauses([{'fun', Line, {clauses, _}}|_T] = Nodes) ->
             end, Nodes)),
     {'fun', Line, {clauses, NClauses}}.
 
-replace_from_nth(Nodes, N, Forms) when is_list(Nodes), N > 0 ->
-    replace_from_nth(Nodes, N, Forms, [], true);
-replace_from_nth(Node, N, Forms) when N > 0 ->
-    replace_from_nth([Node], N, Forms).
+replace_from_nth(Nodes, N, Forms) ->
+    replace_from_nth(Nodes, N, Forms, #{docks => [export]}).
 
-replace_from_nth(Nodes, 1, [_|Forms], Heads, _WithExports) ->
-    lists:reverse(Heads) ++ Nodes ++ Forms;
-replace_from_nth(Nodes, N, [{function, _Line0, _Name, _Arity, _Clauses} = Fun|Forms], Heads, true) ->
-    {Exports, Rests} = 
-        lists:partition(
-          fun({attribute, _Line1, export, _FAs}) ->
-                  true;
-             (_) ->
-                  false
-          end, Nodes),
-    replace_from_nth(Rests, N - 1, Forms, [Fun|lists:reverse(Exports) ++ Heads], false);
+replace_from_nth(Nodes, N, Forms, #{docks := DockAttributesGroups} = Options) when is_list(Nodes) ->
+    DockMap =
+        lists:foldl(
+          fun(AttrributePos, Acc) ->
+                  case lists:nth(AttrributePos, DockAttributesGroups) of
+                      Attributes when is_list(Attributes) ->
+                          lists:foldl(
+                            fun(Attribute, Acc1) ->
+                                    maps:put(Attribute, AttrributePos, Acc1)
+                            end, Acc, Attributes);
+                      Attribute when is_atom(Attribute) ->
+                          maps:put(Attribute, AttrributePos, Acc)
+                  end
+          end, maps:new(), lists:seq(1, length(DockAttributesGroups))),
+    replace_from_nth(Nodes, N, Forms, [], Options#{dock_map => DockMap});
+replace_from_nth(Node, N, Forms, Options) when N > 0 ->
+    replace_from_nth([Node], N, Forms, Options).
     
+replace_from_nth(Nodes, 1, [_|Forms], Heads, _Options) ->
+    lists:reverse(Heads) ++ Nodes ++ Forms;
+replace_from_nth(Nodes, N, [Form|Forms], Heads, #{dock_map := DockAttributes} = Options) ->
+    PartitionFun =
+        case Form of
+            {function, _Line0, NameF, ArityF, _Clauses} ->
+                fun({attribute, _Line1, spec, {{NameS, ArityS}, _SpecValue}}) ->
+                        case maps:get(dock_spec, Options, true) of
+                            true ->
+                                (NameS == NameF) and (ArityS == ArityF);
+                            false ->
+                                maps:is_key(spec, DockAttributes)
+                        end;
+                   ({attribute, _Line1, Attribute, _AttributeValue}) ->
+                        case maps:get(force, Options, false) of
+                            true ->
+                                true;
+                            false ->
+                                maps:is_key(Attribute, DockAttributes)
+                        end;
+                   (_) ->
+                        false
+                end;
+            {attribute, _line0, Attribute1, _AttributeValue1} ->
+                SpecAsFun = maps:get(spec_as_fun, Options, false),
+                if
+                   SpecAsFun and (Attribute1 == spec) ->
+                        fun({attribute, _Line1, Attribute, _AttributeValue}) ->
+                                case maps:get(force, Options, false) of
+                                    true ->
+                                        true;
+                                    false ->
+                                        maps:is_key(Attribute, DockAttributes)
+                                end;
+                           (_) ->
+                                false
+                        end;
+                    true ->
+                        case maps:find(Attribute1, DockAttributes) of
+                            {ok, AttributePos1} ->
+                                fun({attribute, _Line1, Attribute2, _AttributeValue2}) ->
+                                        case maps:find(Attribute2, DockAttributes) of
+                                            {ok, AttributePos2} ->
+                                                AttributePos1 > AttributePos2;
+                                            error ->
+                                                false
+                                        end;
+                                   (_) ->
+                                        false
+                                end;
+                            error ->
+                                fun(_) -> false end
+                        end
+                end;
+            {eol, _Line} ->
+                fun(_) -> true end;
+            _ ->
+                fun(_) -> false end
+        end,
+    {Docks, Rests} = lists:partition(PartitionFun, Nodes),
+    replace_from_nth(Rests, N - 1, Forms, [Form|lists:reverse(Docks) ++ Heads], Options);
+
 replace_from_nth(Nodes, N, [Head|Forms], Heads, WithExports) ->
     replace_from_nth(Nodes, N - 1, Forms, [Head|Heads], WithExports).
 
