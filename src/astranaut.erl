@@ -15,7 +15,7 @@
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
 -export([replace_from_nth/3]).
--export([reorder_exports/1, reorder_forms/2]).
+-export([reorder_exports/1, reorder_attributes/2]).
 -export([validate_options/2]).
 -export([ast_to_options/1, ast_to_options/2]).
 -export([relative_path/1]).
@@ -134,9 +134,9 @@ exports(Exports, Line) ->
     {attribute, Line, export, Exports}.
 
 reorder_exports(Forms) ->
-    reorder_forms(Forms, #{docks => [export], spec_as_fun => true, dock_spec => true}).
+    reorder_attributes(Forms, #{docks => [export], spec_as_fun => true, dock_spec => true}).
 
-reorder_forms(Forms, Options) ->
+reorder_attributes(Forms, Options) ->
     {_, GroupForms} =
         lists:foldl(
           fun(Form, {AccN, Acc}) ->
