@@ -265,12 +265,12 @@ ast_to_options(Ast, ExcepKeys) ->
     MonadWriter = ast_to_options(Ast, ExcepKeys, Writer),
     astranaut_monad_identity:run(astranaut_monad_writer_t:run(MonadWriter)).
 
-ast_to_options({cons, _Line, Head, Tail}, _Keys, Writer) ->
+ast_to_options({cons, _Line, Head, Tail}, Keys, Writer) ->
     astranaut_monad:bind(
       ast_to_value(Head, Writer),
       fun(Head1) ->
               astranaut_monad:bind(
-                ast_to_options(Tail, Writer),
+                ast_to_options(Tail, Keys, Writer),
                 fun(Tail1) ->
                         astranaut_monad:return([Head1|Tail1], Writer)
                 end, Writer)
