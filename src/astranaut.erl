@@ -11,7 +11,7 @@
 %% API exports
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
 -export([abstract/1, abstract/2]).
--export([file/1]).
+-export([file/1, module/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
 -export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
 -export([replace_from_nth/3]).
@@ -65,6 +65,10 @@ module_attributes(Attribute, Module) ->
 file(Forms) ->
     [{File, _}|_] = attributes(file, Forms),
     File.
+
+module(Forms) ->
+    [Module|_] = attributes(module, Forms),
+    Module.
 
 attributes(Attribute, Forms) ->
     lists:reverse(

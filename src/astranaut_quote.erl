@@ -19,9 +19,11 @@
 parse_transform(Forms, _Options) ->
     Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
     File = astranaut:file(Forms),
+    Module = astranaut:module(Forms),
+    WalkOpts = #{file => File, module => Module},
     astranaut_traverse:map(
                fun(Node, Attr) -> 
-                       walk(Node, Attr, File) 
+                       walk(Node, Attr, WalkOpts) 
                end, Forms, Opts).
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
@@ -72,36 +74,36 @@ cons({nil, _Line}, Rest) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk({call, _Line1, {atom, _Line2, quote}, [Form]} = Node, Attr, File) ->
+walk({call, _Line1, {atom, _Line2, quote}, [Form]} = Node, Attr, WalkOpts) ->
     %% transform quote(Form)
-    quote(Form, #{}, Node, Attr, File);
-walk({call, _Line1, {atom, _Line2, quote}, [Form, Options]} = Node, Attr, File) ->
+    quote(Form, #{}, Node, Attr, WalkOpts);
+walk({call, _Line1, {atom, _Line2, quote}, [Form, Options]} = Node, Attr, WalkOpts) ->
     Options1 = to_options(Options),
-    quote(Form, Options1, Node, Attr, File);
-walk({call, _Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, File) ->
+    quote(Form, Options1, Node, Attr, WalkOpts);
+walk({call, _Line1, {atom, _Line2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, WalkOpts) ->
     %% transform quote_code(Codes)
     case split_codes(Codes, NodeType) of
         {ok, NCodes, Options} ->
             Options1 = to_options(Options),
             Form = astranaut_code:quote_codes(NCodes),
-            quote(Form, Options1, Node, Attr, File);
+            quote(Form, Options1, Node, Attr, WalkOpts);
         {error, invalid_quote_code} ->
             astranaut_traverse:traverse_fun_return(#{error => {invalid_quote, Node}})
     end;
-walk({match, _Line1, {atom, _Line2, quote}, Form} = Node, #{node := pattern} = Attr, File) ->
+walk({match, _Line1, {atom, _Line2, quote}, Form} = Node, #{node := pattern} = Attr, WalkOpts) ->
     %% transform quote = Form in pattern match
-    quote(Form, #{}, Node, Attr, File);
-walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern} = Attr, File) ->
+    quote(Form, #{}, Node, Attr, WalkOpts);
+walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern} = Attr, WalkOpts) ->
     %% transform quote_code = Code in pattern match
     Forms = astranaut_code:quote_codes([Code]),
-    quote(Forms, #{}, Node, Attr, File);
+    quote(Forms, #{}, Node, Attr, WalkOpts);
 walk(Node, _Attr, _File) ->
     Node.
 
-quote(Value, Options, Node, Attr, File) ->
+quote(Value, Options, Node, Attr, #{file := File, module := Module}) ->
     QuoteLine = erl_syntax:get_pos(Node),
     QuoteType = quote_type(Attr),
-    Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, file => File}, Options),
+    Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, file => File, module => Module}, Options),
     quote(Value, Options1).
 
 quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
@@ -165,7 +167,7 @@ quote_1([{var, Line, VarName}|T] = List, Opts) when is_atom(VarName) ->
         _ ->
             quote_list(List, Opts)
     end;
-quote_1({var, Line, VarName} = Var, Opts) when is_atom(VarName) ->
+quote_1({var, Line, VarName} = Var, #{module := Module} = Opts) when is_atom(VarName) ->
     case parse_binding(VarName, Line) of
         {value_list, Unquotes} ->
             astranaut_traverse_monad:then(
@@ -174,7 +176,9 @@ quote_1({var, Line, VarName} = Var, Opts) when is_atom(VarName) ->
         {BindingType, Unquote} ->
             unquote(Unquote, Opts#{type => BindingType, quote_line => Line});
         default ->
-            quote_tuple(Var, Opts)
+            VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
+            Var1 = {var, Line, VarName1},
+            quote_tuple(Var1, Opts)
     end;
 quote_1({LiteralType, Line, Literal}, Opts) 
   when LiteralType == atom ; 

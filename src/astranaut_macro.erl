@@ -130,7 +130,7 @@ transform_macro_attr(MacroOpts, Forms) ->
       astranaut_traverse_monad:then(
         astranaut_traverse_monad:map_m(
           fun(Form) ->
-                  Return = walk_macro_attr(Form, MacroOpts),
+                  Return = walk_macro_attr(Form, MacroOpts#{counter => 1}),
                   astranaut_traverse_monad:bind(
                     astranaut_traverse:fun_return_to_monad(Return, Form, MacroOpts),
                     fun(NForm) ->
@@ -248,26 +248,32 @@ already_exported(_Name, _Arity, []) ->
 %%%===================================================================
 transform_macro_call(MacroOpts, Forms) ->
     Traverse = maps:get(order, MacroOpts, post),
-    Opts = #{traverse => Traverse, formatter => ?MODULE},
-    astranaut_traverse:map_m(
-      fun(Node, _Attr) ->
-              Return = walk_macro_call(Node, MacroOpts),
-              astranaut_traverse:fun_return_to_monad(Return, Node, MacroOpts)
-      end, Forms, Opts).
+    Opts = #{traverse => Traverse, formatter => ?MODULE, with_state => true},
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:put(1),
+      astranaut_traverse:map_m(
+        fun(Node, _Attr) ->
+                astranaut_traverse_monad:bind(
+                  astranaut_traverse_monad:get(),
+                  fun(Counter) ->
+                          Return = walk_macro_call(Node, MacroOpts#{counter => Counter}),
+                          astranaut_traverse:fun_return_to_monad(Return, Node, MacroOpts#{with_state => true})
+                  end)
+        end, Forms, Opts)).
 
 walk_macro_call({call, Line, {atom, _Line2, Function}, Arguments} = Node, #{macro := Function} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
 walk_macro_call({call, Line, {remote, Line2, {atom, Line2, Module}, {atom, Line2, Function}}, Arguments} = Node, 
                 #{macro := {Module, Function}} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
-walk_macro_call(Node, __MacroOpts) ->
-    Node.
+walk_macro_call(Node, #{counter := Counter}) ->
+    {Node, Counter}.
 
 %%%===================================================================
 %%% apply_macro and it's help functions.
 %%%===================================================================
 apply_macro(NodeA, #{module := Module, function := Function, arity := Arity, 
-                     arguments := Arguments, line := Line} = Opts) ->
+                     arguments := Arguments, line := Line, counter := Counter} = Opts) ->
     Arguments1 = group_arguments(Arguments, Opts),
     Arguments2 = append_attrs(Arguments1, Opts),
     if
@@ -275,15 +281,21 @@ apply_macro(NodeA, #{module := Module, function := Function, arity := Arity,
             MacroReturn = apply_mfa(Module, Function, Arguments2),
             case astranaut_traverse:traverse_fun_return_struct(MacroReturn) of
                 #{node := NodeB} = MacroReturnStruct ->
-                    NodeC = astranaut:replace_line_zero(NodeB, Line),
-                    format_node(NodeC, Opts),
-                    MacroReturnStruct#{node => NodeC};
+                    MacroNameStr = macro_name_str(Opts),
+                    NodeC = update_with_counter(NodeB, MacroNameStr, integer_to_list(Counter)),
+                    NodeD = astranaut:replace_line_zero(NodeC, Line),
+                    format_node(NodeD, Opts),
+                    MacroReturnStruct#{node => NodeD, state => Counter + 1};
                 #{} = MacroReturnStruct ->
-                    MacroReturnStruct#{node => NodeA}
+                    MacroReturnStruct#{node => NodeA, state => Counter}
             end;
         true ->
-            astranaut_traverse:traverse_fun_return(#{node => NodeA})
+            astranaut_traverse:traverse_fun_return(#{node => NodeA, state => Counter})
     end.
+
+macro_name_str(#{module := Module, function := _Function, arity := _Arity}) ->
+    atom_to_list(Module).
+
 
 group_arguments(Arguments, #{group_args := true}) ->
     [Arguments];
@@ -303,9 +315,28 @@ apply_mfa(Module, Function, Arguments) ->
             {error, {exception, Exception, Module, Function, StackTrace}}
     end.
 
+update_with_counter(Tree, Module, Counter) ->
+    Opts = #{traverse => post, formatter => ?MODULE},
+    astranaut_traverse:map(
+      fun(Node, _Attr) ->
+              walk_var_counter(Node, Module, Counter)
+      end, Tree, Opts).
+
+walk_var_counter({var, Line, VarName} = Var, MacronameStr, Counter) ->
+    case string:split(atom_to_list(VarName), "@") of
+        [Head, MacronameStr] ->
+            VarName1 = list_to_atom(Head ++ "@" ++ MacronameStr ++ "@_" ++ Counter),
+            {var, Line, VarName1};
+        _ ->
+            Var
+    end;
+walk_var_counter(Node, _ModuleStr, _Counter) ->
+    Node.
 %%%===================================================================
 %%% format functions.
 %%%===================================================================
+
+
 format_forms(Forms) ->
     case astranaut:attributes(debug_macro, Forms) of
         [] ->
