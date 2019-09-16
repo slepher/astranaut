@@ -96,7 +96,7 @@ macros(Forms, LocalModule, File) ->
 
 transform_macros_1(Macros, Forms, File, Warnings) ->
     Monad = transform_macros_2(Macros, Warnings),
-    TraverseReturn = astranaut_traverse_monad:exec(Monad, Forms),
+    TraverseReturn = astranaut_traverse_monad:exec(Monad, #{forms => Forms, counter => 1}),
     astranaut_traverse:parse_transform_return(TraverseReturn, File).
 
 transform_macros_2(Macros, Warnings) ->
@@ -106,46 +106,53 @@ transform_macros_2(Macros, Warnings) ->
         astranaut_traverse_monad:map_m(
           fun(MacroOpts) ->
                   astranaut_traverse_monad:bind_state(
-                    fun(Forms) ->
+                    fun(FormsWithCounter) ->
                             astranaut_traverse_monad:bind(
                               %% transform macro attributes
-                              transform_macro_attr(MacroOpts, Forms),
-                              fun(NForms) ->
+                              transform_macro_attr(MacroOpts, FormsWithCounter),
+                              fun(FormsWithCounter1) ->
                                       %% transform macro call
-                                      transform_macro_call(MacroOpts, NForms)
+                                      transform_macro_call(MacroOpts, FormsWithCounter1)
                               end)
                     end)
           end, Macros),
         astranaut_traverse_monad:modify(
-          fun(Forms) ->
+          fun(#{forms := Forms}) ->
                   format_forms(astranaut:reorder_exports(Forms))
           end))).
 
 %%%===================================================================
 %%% transform_macro_attr and it's help functions.
 %%%===================================================================
-transform_macro_attr(MacroOpts, Forms) ->
+transform_macro_attr(MacroOpts, #{forms := Forms, counter := Counter}) ->
     astranaut_traverse_monad:then(
-      astranaut_traverse_monad:put({1, Forms}),
+      astranaut_traverse_monad:put(#{offset => 1, counter => Counter, forms => Forms}),
       astranaut_traverse_monad:then(
         astranaut_traverse_monad:map_m(
           fun(Form) ->
-                  Return = walk_macro_attr(Form, MacroOpts#{counter => 1}),
                   astranaut_traverse_monad:bind(
-                    astranaut_traverse:fun_return_to_monad(Return, Form, MacroOpts),
-                    fun(NForm) ->
-                            %% modify the from list by transformed form.
-                            astranaut_traverse_monad:modify(
-                              fun({N, Forms1}) ->
-                                      append_form(Form, NForm, MacroOpts, N, Forms1)
+                    astranaut_traverse_monad:get(),
+                    fun(#{counter := CounterAcc, forms := Forms1, offset := Offset}) ->
+                            Return = walk_macro_attr(Form, MacroOpts#{counter => CounterAcc}),
+                            astranaut_traverse_monad:bind(
+                              astranaut_traverse:fun_return_to_monad(
+                                Return, Form, MacroOpts#{with_state => true}),
+                              fun(NForm) ->
+                                      astranaut_traverse_monad:bind(
+                                        astranaut_traverse_monad:get(),
+                                        fun(CounterAcc1) ->
+                                                FormsWithCounter1 = #{offset => Offset, 
+                                                                      forms => Forms1, 
+                                                                      counter => CounterAcc1},
+                                                FormsWithCounter2 = 
+                                                    append_form(Form, NForm, MacroOpts, FormsWithCounter1),
+                                                astranaut_traverse_monad:put(FormsWithCounter2)
+                                        end)
                               end)
                     end)
           end, Forms),
-        % return the forms modified and set state ok(useless).
-        astranaut_traverse_monad:state(
-          fun({_N, Forms1}) ->
-                  {Forms1, ok}
-          end))).
+        % return the forms with counter modified.
+        astranaut_traverse_monad:get())).
 
 walk_macro_attr({attribute, Line, exec_macro, {Function, Arguments}} = NodeA, #{macro := Function} = Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
@@ -154,21 +161,21 @@ walk_macro_attr({attribute, Line, exec_macro, {Module, Function, Arguments}} = N
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
 walk_macro_attr({attribute, Line, Attribute, Arguments} = NodeA, #{as_attr := Attribute} = Opts) ->
     apply_macro(NodeA, Opts#{arguments => to_list(Arguments), line => Line});
-walk_macro_attr(Node, _MacroOpts) ->
-    Node.
+walk_macro_attr(Node, #{counter := Counter}) ->
+    {Node, Counter}.
 
 to_list(Arguments) when is_list(Arguments) ->
     Arguments;
 to_list(Arguments) ->
     [Arguments].
 
-append_form(Form, Form, _MacroOpts, N, Acc) ->
-    {N + 1, Acc};
-append_form(Form, NForm, MacroOpts, N, Acc) ->
+append_form(Form, Form, _MacroOpts, #{offset := Offset} = FormsWithCounter) ->
+    FormsWithCounter#{offset => Offset + 1};
+append_form(Form, NForm, MacroOpts, #{offset := Offset, forms := Forms} = FormsWithCounter) ->
     Line = erl_syntax:get_pos(Form),
-    {Nodes, NAcc} = update_forms(to_list(NForm), Acc, MacroOpts#{line => Line}),
-    NNAcc = astranaut:replace_from_nth(Nodes, N, NAcc),
-    {N + length(Nodes), NNAcc}.
+    {Nodes, Forms1} = update_forms(to_list(NForm), Forms, MacroOpts#{line => Line}),
+    Forms2 = astranaut:replace_from_nth(Nodes, Offset, Forms1),
+    FormsWithCounter#{offset => Offset + length(Nodes), forms => Forms2}.
 
 update_forms(Nodes, Acc, #{auto_export := true, line := Line} = Opts) ->
     Exports = exports(Nodes, Line),
@@ -246,20 +253,28 @@ already_exported(_Name, _Arity, []) ->
 %%%===================================================================
 %%% transform_macro_call and it's help functions.
 %%%===================================================================
-transform_macro_call(MacroOpts, Forms) ->
+transform_macro_call(MacroOpts, #{forms := Forms, counter := Counter}) ->
     Traverse = maps:get(order, MacroOpts, post),
     Opts = #{traverse => Traverse, formatter => ?MODULE, with_state => true},
     astranaut_traverse_monad:then(
-      astranaut_traverse_monad:put(1),
-      astranaut_traverse:map_m(
-        fun(Node, _Attr) ->
+      astranaut_traverse_monad:put(Counter),
+      astranaut_traverse_monad:bind(
+        astranaut_traverse:map_m(
+          fun(Node, _Attr) ->
+                  astranaut_traverse_monad:bind(
+                    astranaut_traverse_monad:get(),
+                    fun(CounterAcc) ->
+                            Return = walk_macro_call(Node, MacroOpts#{counter => CounterAcc}),
+                            astranaut_traverse:fun_return_to_monad(Return, Node, MacroOpts#{with_state => true})
+                  end)
+          end, Forms, Opts),
+        fun(Forms1) ->
                 astranaut_traverse_monad:bind(
                   astranaut_traverse_monad:get(),
-                  fun(Counter) ->
-                          Return = walk_macro_call(Node, MacroOpts#{counter => Counter}),
-                          astranaut_traverse:fun_return_to_monad(Return, Node, MacroOpts#{with_state => true})
+                  fun(Counter1) ->
+                          astranaut_traverse_monad:return(#{forms => Forms1, counter => Counter1})
                   end)
-        end, Forms, Opts)).
+      end)).
 
 walk_macro_call({call, Line, {atom, _Line2, Function}, Arguments} = Node, #{macro := Function} = Opts) ->
     apply_macro(Node, Opts#{arguments => Arguments, line => Line});
