@@ -536,9 +536,9 @@ macro_2(Name) ->
 
 *hygienic macro*
 
-each macro expansion has it's unique namespace.
+&emsp;&emsp; each macro expansion has it's unique namespace.
 
-@{macro_module_name}@_{counter} is added to it's original name.
+&emsp;&emsp; @{macro_module_name}@_{counter} is added to it's original name.
 
 ```erlang
 -module(macro_example).
@@ -590,13 +590,13 @@ begin
   A@macro_example@_4 = 10,
   B@macro_example@_4 = N,
   A@macro_example@_4 + B@macro_example@_4
-end
+end,
 A4 =
 begin
   A@macro_example@_2 = 10,
   B@macro_example@_2 = A1,
   A@macro_example@_2 + B@macro_example@_2
-end
+end,
 A1 + A2 + A3 + A4.
 ```
 
