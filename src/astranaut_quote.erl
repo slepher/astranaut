@@ -167,6 +167,10 @@ quote_1([{var, Line, VarName}|T] = List, Opts) when is_atom(VarName) ->
         _ ->
             quote_list(List, Opts)
     end;
+
+quote_1({var, _Line, '_'} = Var, Opts) ->
+    quote_tuple(Var, Opts);
+
 quote_1({var, Line, VarName} = Var, #{module := Module} = Opts) when is_atom(VarName) ->
     case parse_binding(VarName, Line) of
         {value_list, Unquotes} ->
