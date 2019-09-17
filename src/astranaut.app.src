@@ -1,6 +1,6 @@
 {application, astranaut,
  [{description, "Erlang Ast traverse and macro."},
-  {vsn, "0.2.10"},
+  {vsn, "0.3.0"},
   {registered, []},
   {applications,
    [kernel,
