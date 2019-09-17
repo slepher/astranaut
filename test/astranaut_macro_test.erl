@@ -45,7 +45,8 @@
 -use_macro({?MACRO_MODULE, macro_function/2, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_with_attributes/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_group_args/1, ?DEBUG_OPTS}).
--use_macro({?MACRO_MODULE, macro_with_vars/1, [alias]}).
+-use_macro({?MACRO_MODULE, macro_with_vars_1/1, [alias, debug]}).
+-use_macro({?MACRO_MODULE, macro_with_vars_2/1, [alias, debug]}).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 
@@ -122,9 +123,11 @@ test_group_args() ->
     macro_group_args(hello, world).
 
 test_macro_with_vars(N) ->
-    A1 = macro_with_vars(N),
-    A2 = macro_with_vars(A1),
-    A1 + A2.
+    A1 = macro_with_vars_1(N),
+    A2 = macro_with_vars_2(A1),
+    A3 = macro_with_vars_2(N),
+    A4 = macro_with_vars_1(A1),
+    A1 + A2 + A3 + A4.
 
 quote_ok() ->
     quote(ok).

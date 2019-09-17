@@ -188,5 +188,5 @@ test_macro_with_warnings(_Config) ->
 
 test_macro_with_vars(_Config) ->
     Value = astranaut_macro_test:test_macro_with_vars(13),
-    ?assertEqual(56, Value).
+    ?assertEqual(112, Value).
     

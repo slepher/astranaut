@@ -534,6 +534,72 @@ macro_2(Name) ->
       end)).
 ```
 
+*hygienic macro*
+
+each macro expansion has it's unique namespace.
+
+@{macro_module_name}@_{counter} is added to it's original name.
+
+```erlang
+-module(macro_example).
+macro_with_vars_1(Ast) ->
+    quote(
+      begin
+          A = 10,
+          B = unquote(Ast),
+          A + B
+      end
+     ).
+macro_with_vars_2(Ast) ->
+    quote(
+      begin
+          A = 10,
+          B = unquote(Ast),
+          A + B
+      end
+     ).
+```
+
+```erlang
+test_macro_with_vars(N) ->
+    A1 = macro_with_vars_1(N),
+    A2 = macro_with_vars_2(A1),
+    A3 = macro_with_vars_2(N),
+    A4 = macro_with_vars_1(A1),
+    A1 + A2.
+```
+
+=>
+
+```erlang
+test_macro_with_vars(N) ->
+A1 =
+begin
+  A@macro_example@_1 = 10,
+  B@macro_example@_1 = N,
+  A@macro_example@_1 + B@macro_example@_1
+end,
+A2 = 
+begin
+  A@macro_example@_3 = 10,
+  B@macro_example@_3 = A1,
+  A@macro_example@_3 + B@macro_example@_3
+end,
+A3 = 
+begin
+  A@macro_example@_4 = 10,
+  B@macro_example@_4 = N,
+  A@macro_example@_4 + B@macro_example@_4
+end
+A4 =
+begin
+  A@macro_example@_2 = 10,
+  B@macro_example@_2 = A1,
+  A@macro_example@_2 + B@macro_example@_2
+end
+A1 + A2 + A3 + A4.
+```
+
 *parse_transform*
 
 

@@ -26,7 +26,8 @@
 -export([quote_line_1/1, quote_line_2/1]).
 -export([macro_function/2, macro_exported_function/2]).
 -export([macro_try_catch/0, macro_case/3]).
--export([macro_with_attributes/1, macro_group_args/1, macro_with_vars/1]).
+-export([macro_with_attributes/1, macro_group_args/1]).
+-export([macro_with_vars_1/1, macro_with_vars_2/1]).
 
 -use_macro({quote_ok/0}).
 -use_macro({macro_exported_function/2}).
@@ -138,7 +139,16 @@ macro_with_attributes(#{file := File, line := Line, module := Module}) ->
 macro_group_args(Asts) ->
     quote({ok, {unquote_splicing(Asts)}}).
 
-macro_with_vars(Ast) ->
+macro_with_vars_1(Ast) ->
+    quote(
+      begin
+          A = 10,
+          B = unquote(Ast),
+          A + B
+      end
+     ).
+
+macro_with_vars_2(Ast) ->
     quote(
       begin
           A = 10,
