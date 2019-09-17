@@ -45,8 +45,8 @@
 -use_macro({?MACRO_MODULE, macro_function/2, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_with_attributes/1, ?DEBUG_OPTS}).
 -use_macro({?MACRO_MODULE, macro_group_args/1, ?DEBUG_OPTS}).
--use_macro({?MACRO_MODULE, macro_with_vars_1/1, [alias, debug]}).
--use_macro({?MACRO_MODULE, macro_with_vars_2/1, [alias, debug]}).
+-use_macro({?MACRO_MODULE, macro_with_vars_1/1, [alias]}).
+-use_macro({?MACRO_MODULE, macro_with_vars_2/1, [alias]}).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 

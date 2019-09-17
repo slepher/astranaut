@@ -143,6 +143,8 @@ macro_with_vars_1(Ast) ->
     quote(
       begin
           A = 10,
+          _ = A + 10,
+          _ = A + 20,
           B = unquote(Ast),
           A + B
       end
