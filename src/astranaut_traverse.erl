@@ -17,6 +17,7 @@
 -export([map_m/3]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
+-export([transform_mapfold_f/2]).
 -export([format_error/1, parse_transform_return/2]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
 -export([monad_to_traverse_fun_return/1, monad_to_traverse_fun_return/2]).
@@ -237,8 +238,8 @@ map_m_1(F, NodeA, Opts) ->
                       SyntaxType = erl_syntax:type(NodeB),
                       monad_bind(
                         map_m_subtrees(F, Subtrees, SyntaxType, Opts),
-                        fun(NSubTrees) ->
-                                NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, NSubTrees)),
+                        fun(Subtrees1) ->
+                                NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, Subtrees1)),
                                 bind_with_continue(
                                   NodeC, 
                                   F(NodeC, #{step => post, node => NodeType}),
@@ -271,6 +272,19 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
 
 map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
+map_m_subtrees(F, [Patterns, Expressions], match_expr, #{match_right_first := true} = Opts) ->
+    %% if node type is match_expr and match_right_first is true
+    %% make first subtree pattern, make second subtree expression
+    %% but traverse second tree first
+    monad_bind(
+      map_m_1(F, Expressions, Opts#{node => expression}),
+      fun(NExpressions) ->
+              monad_bind(
+                map_m_1(F, Patterns, Opts#{node => pattern}),
+                fun(NPatterns) ->
+                        monad_return([NPatterns, NExpressions], Opts)
+                end, Opts)
+      end, Opts);
 map_m_subtrees(F, [Patterns, Expressions], NodeType, Opts) 
   when (NodeType == match_expr) or (NodeType == clause) ->
     %% if node type is match_expr or clause 
