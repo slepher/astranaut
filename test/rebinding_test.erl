@@ -31,7 +31,7 @@ test(ABC) ->
                 ABC = EFG + 2,
                 ABC
         end,
-    %D = [ABC || ABC <- [ABC = ABC + 1]],
+    D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
     EFG = 
         case EFG of
             ABC ->
@@ -62,7 +62,7 @@ test(ABC) ->
     io:format("Zero is ~p~n", [Zero]),
     io:format("abc is ~p~n", [ABC]),
     io:format("efg is ~p~n", [EFG]),
-    %io:format("d is ~p~n", [D]),
+    io:format("d is ~p~n", [D]),
     io:format("c is ~p~n", [C]),
     F(10).
 

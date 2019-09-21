@@ -110,15 +110,25 @@ walk_node_1({lc, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = 
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     NodeM = 
-        astranaut_traverse_monad:bind(
-          astranaut_traverse:map_m(F, Qualifiers, Opts#{node => expression}),
-          fun(Qualifiers1) ->
-                  astranaut_traverse_monad:bind(
-                    astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
-                    fun(Expression1) ->
-                            astranaut_traverse_monad:return({lc, Line, Expression1, Qualifiers1})
-                    end)
-      end),
+        astranaut_traverse_monad:then(
+          astranaut_traverse_monad:modify(
+            fun(#{clause_stack := ClauseStackPre} = ContextPre) ->
+                    entry_function_scope(ContextPre#{clause_stack => [lc_expr|ClauseStackPre]})
+            end),
+          astranaut_traverse_monad:bind(
+            map_m_qualifiers(F, Qualifiers, Opts),
+            fun(Qualifiers1) ->
+                    astranaut_traverse_monad:bind(
+                      astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
+                      fun(Expression1) ->
+                              astranaut_traverse_monad:then(
+                                astranaut_traverse_monad:modify(
+                                  fun(#{clause_stack := [lc_expr|ClauseStackPost]} = ContextPost) ->
+                                          exit_function_scope(ContextPost#{clause_stack => ClauseStackPost})
+                                  end),
+                                astranaut_traverse_monad:return({lc, Line, Expression1, Qualifiers1}))
+                      end)
+            end)),
     {Node1, Context1} = 
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
     {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
@@ -199,11 +209,49 @@ walk_node_1({var, _Line, _Varname} = Var,
     {Var1, Context1} = add_var(Var, Context),
     io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
+walk_node_1({var, _Line, _Varname} = Var, 
+            #{clause_stack := [lc_expr|_T]} = Context, #{node := pattern}) ->
+    {Var1, Context1} = add_var(Var, Context),
+    io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
+    {Var1, Context1};
+
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
     {rename_var(Var, Context), Context};
 walk_node_1(Node, Acc, #{}) ->
     {Node, Acc}.
 
+map_m_qualifiers(F, Qualifiers, Opts) ->
+    map_m_qualifiers(F, Qualifiers, Opts, []).
+
+map_m_qualifiers(F, [{generate, Line, Pattern, Expression}|T], Opts, Acc) ->
+    astranaut_traverse_monad:bind(
+      astranaut_traverse:map_m(F, Expression, Opts),
+      fun(Expression1) ->
+              Generate1 = {generate, Line, Pattern, Expression1},
+              map_m_qualifiers(F, T, Opts, [Generate1|Acc])
+      end);
+map_m_qualifiers(F, [Expression|T], Opts, Acc) ->
+    astranaut_traverse_monad:bind(
+      astranaut_traverse:map_m(F, Expression, Opts),
+      fun(Expression1) ->
+              map_m_qualifiers(F, T, Opts, [Expression1|Acc])
+      end);
+map_m_qualifiers(F, [], Opts, Acc) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:modify(fun entry_pattern_scope/1),
+      map_m_qualifiers_1(F, lists:reverse(Acc), Opts, [])).
+
+map_m_qualifiers_1(F, [{generate, Line, Pattern, Expression}|T], Opts, Acc) ->
+    astranaut_traverse_monad:bind(
+      astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern}),
+      fun(Pattern1) ->
+              Generate1 = {generate, Line, Pattern1, Expression},
+              map_m_qualifiers_1(F, T, Opts, [Generate1|Acc])
+      end);
+map_m_qualifiers_1(F, [Expression|T], Opts, Acc) ->
+    map_m_qualifiers_1(F, T, Opts, [Expression|Acc]);
+map_m_qualifiers_1(_F, [], _Opts, Acc) ->
+    astranaut_traverse_monad:return(lists:reverse(Acc)).
 
 add_var({var, Line, Varname} = Var, 
         #{global_varnames := GlobalVarnames,
