@@ -79,12 +79,11 @@ walk_node(Node, #{clause_stack := ClauseStack} = Context, #{step := pre} = Attr)
     end;
 walk_node(Node, #{clause_stack := [ClauseParentType|ClauseStack]} = Context, #{step := post} = Attr) ->
     NodeType = erl_syntax:type(Node),
-    ClauseParentType1 = clause_parent_type(NodeType),
-    case match_clause_partent_type(ClauseParentType, ClauseParentType1) of
-        true ->
+    case clause_parent_type(NodeType) of
+        ClauseParentType ->
             Context1 = Context#{clause_stack => ClauseStack},
             walk_node_1(Node, Context1, Attr);
-        false ->
+        _ ->
             walk_node_1(Node, Context, Attr)
     end;
 walk_node(Node, Context, #{} = Attr) ->
@@ -103,16 +102,9 @@ clause_parent_type(fun_expr) ->
 clause_parent_type(named_fun_expr) ->
     fun_expr;
 clause_parent_type(match_expr) ->
-    {match_expr, false};
+    match_expr;
 clause_parent_type(_Type) ->
     none.
-
-match_clause_partent_type({match_expr, _}, {match_expr, _}) ->
-    true;
-match_clause_partent_type(ClauseParentType, ClauseParentType) ->
-    true;
-match_clause_partent_type(_ClauseParentType1, _ClauseParentType2) ->
-    false.
 
 walk_node_1({'match', Line, Patterns, Expressions}, 
           #{} = Context, 
@@ -123,16 +115,17 @@ walk_node_1({'match', Line, Patterns, Expressions},
         astranaut_traverse_monad:bind(
           astranaut_traverse:map_m(F, Expressions, Opts#{node => expression}),
           fun(NExpressions) ->
-                  astranaut_traverse_monad:bind(
-                    astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern}),
-                    fun(NPatterns) ->
-                            astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
-                    end)
+                  astranaut_traverse_monad:then(
+                    astranaut_traverse_monad:modify(fun entry_pattern_scope/1),
+                    astranaut_traverse_monad:bind(
+                      astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern}),
+                      fun(NPatterns) ->
+                              astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
+                      end))
           end),
     {Node1, Context1} = 
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
-    {Node2, Context2} = 
-        walk_node(Node1, Context1, Attr#{step => post}),
+    {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
     astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true});
 walk_node_1({named_fun, _Line, _Name, _Clauses} = Node, 
           #{} = Context, 
@@ -185,17 +178,10 @@ walk_node_1({var, _Line, _Varname} = Var,
     add_var(Var, Context);
 %% rebind var if current node is match pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
-            #{clause_stack := [{match_expr, PattenVisited}|T]} = Context, #{node := pattern}) ->
-    Context1 = 
-        case PattenVisited of
-            false ->
-                entry_pattern_scope(Context#{clause_stack := [{match_expr, true}|T]});
-            true ->
-                Context
-        end,
-    {Var1, Context2} = add_var(Var, Context1),
-    io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context1, Context2]),
-    {Var1, Context2};
+            #{clause_stack := [match_expr|_T]} = Context, #{node := pattern}) ->
+    {Var1, Context1} = add_var(Var, Context),
+    io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
+    {Var1, Context1};
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
     {rename_var(Var, Context), Context};
 walk_node_1(Node, Acc, #{}) ->
