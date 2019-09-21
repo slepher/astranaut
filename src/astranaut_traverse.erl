@@ -274,8 +274,6 @@ map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
 map_m_subtrees(F, [NameTrees, Clauses], named_fun_expr, #{} = Opts) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-
-    io:format("named fun expr ~p ~p", [Names, Clauses]),
     monad_bind(
       map_m_1(F, Names, Opts#{node => pattern}),
       fun(Name1) ->

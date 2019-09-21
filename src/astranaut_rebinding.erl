@@ -80,14 +80,11 @@ walk_node(Node, #{clause_stack := ClauseStack} = Context, #{step := pre} = Attr)
 walk_node(Node, #{clause_stack := [ClauseParentType|ClauseStack]} = Context, #{step := post} = Attr) ->
     NodeType = erl_syntax:type(Node),
     ClauseParentType1 = clause_parent_type(NodeType),
-    case ClauseParentType of
-        ClauseParentType1 ->
+    case match_clause_partent_type(ClauseParentType, ClauseParentType1) of
+        true ->
             Context1 = Context#{clause_stack => ClauseStack},
             walk_node_1(Node, Context1, Attr);
-        {ClauseParentType1, _} ->
-            Context1 = Context#{clause_stack => ClauseStack},
-            walk_node_1(Node, Context1, Attr);
-        _ ->
+        false ->
             walk_node_1(Node, Context, Attr)
     end;
 walk_node(Node, Context, #{} = Attr) ->
@@ -110,26 +107,33 @@ clause_parent_type(match_expr) ->
 clause_parent_type(_Type) ->
     none.
 
-walk_node_1({'match', _Line, _Patterns, _Expressions} = Node, 
+match_clause_partent_type({match_expr, _}, {match_expr, _}) ->
+    true;
+match_clause_partent_type(ClauseParentType, ClauseParentType) ->
+    true;
+match_clause_partent_type(_ClauseParentType1, _ClauseParentType2) ->
+    false.
+
+walk_node_1({'match', Line, Patterns, Expressions}, 
           #{} = Context, 
-          #{step := pre, node := expression}) ->
-    %% Opts = #{node => expression, traverse => all, match_right_first => true},
-    %% F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
-    %% NodeM =
-    %%     astranaut_traverse_monad:bind(
-    %%       astranaut_traverse:map_m(F, Expressions, Opts#{node => expression}),
-    %%       fun(NExpressions) ->
-    %%               astranaut_traverse_monad:bind(
-    %%                 astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern}),
-    %%                 fun(NPatterns) ->
-    %%                         astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
-    %%                 end)
-    %%       end),
-    %% {Node, Context1} = 
-    %%     astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
-    %% astranaut_traverse:traverse_fun_return(#{node => Node, state => Context1, continue => true});
-    Context1 = entry_pattern_scope(Context),
-    {Node, Context1};
+          #{step := pre, node := expression} = Attr) ->
+    Opts = #{node => expression, traverse => all, match_right_first => true},
+    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    NodeM =
+        astranaut_traverse_monad:bind(
+          astranaut_traverse:map_m(F, Expressions, Opts#{node => expression}),
+          fun(NExpressions) ->
+                  astranaut_traverse_monad:bind(
+                    astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern}),
+                    fun(NPatterns) ->
+                            astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
+                    end)
+          end),
+    {Node1, Context1} = 
+        astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
+    {Node2, Context2} = 
+        walk_node(Node1, Context1, Attr#{step => post}),
+    astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true});
 walk_node_1({named_fun, _Line, _Name, _Clauses} = Node, 
           #{} = Context, 
           #{step := pre}) ->
@@ -141,19 +145,22 @@ walk_node_1({named_fun, _Line, _Name, _Clauses} = Node,
     Context1 = exit_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [fun_expr|_T]} = Acc, 
+          #{clause_stack := [fun_expr|_T]} = Context, 
           #{step := pre}) ->
-    Acc1 = entry_function_scope(Acc),
-    {Node, Acc1};
+    Context1 = entry_function_scope(Context),
+    io:format("entry function scope ~p~n ~p~n", [Context, Context1]),
+    {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [fun_expr|_T]} = Acc, 
+          #{clause_stack := [fun_expr|_T]} = Context, 
           #{step := post}) ->
-    Acc1 = exit_function_scope(Acc),
-    {Node, Acc1};
+    Context1 = exit_function_scope(Context),
+    io:format("exit function scope ~p~n ~p~n", [Context, Context1]),
+    {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
           #{} = Context, 
           #{step := pre}) ->
     Context1 = entry_scope(Context),
+    io:format("entry scope ~p~n ~p~n", [Context, Context1]),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
           #{} = Context, 
@@ -186,7 +193,9 @@ walk_node_1({var, _Line, _Varname} = Var,
             true ->
                 Context
         end,
-    add_var(Var, Context1);
+    {Var1, Context2} = add_var(Var, Context1),
+    io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context1, Context2]),
+    {Var1, Context2};
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
     {rename_var(Var, Context), Context};
 walk_node_1(Node, Acc, #{}) ->
