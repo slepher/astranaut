@@ -106,7 +106,8 @@ clause_parent_type(match_expr) ->
 clause_parent_type(_Type) ->
     none.
 
-walk_node_1({lc, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = Attr) ->
+walk_node_1({ComprehensionType, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = Attr) 
+  when (ComprehensionType == lc) or (ComprehensionType == bc) ->
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     NodeM = 
@@ -126,7 +127,8 @@ walk_node_1({lc, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = 
                                   fun(#{clause_stack := [lc_expr|ClauseStackPost]} = ContextPost) ->
                                           exit_function_scope(ContextPost#{clause_stack => ClauseStackPost})
                                   end),
-                                astranaut_traverse_monad:return({lc, Line, Expression1, Qualifiers1}))
+                                astranaut_traverse_monad:return(
+                                  {ComprehensionType, Line, Expression1, Qualifiers1}))
                       end)
             end)),
     {Node1, Context1} = 
@@ -223,11 +225,12 @@ walk_node_1(Node, Acc, #{}) ->
 map_m_qualifiers(F, Qualifiers, Opts) ->
     map_m_qualifiers(F, Qualifiers, Opts, []).
 
-map_m_qualifiers(F, [{generate, Line, Pattern, Expression}|T], Opts, Acc) ->
+map_m_qualifiers(F, [{GenerateType, Line, Pattern, Expression}|T], Opts, Acc)
+  when (GenerateType == generate) or (GenerateType == b_generate) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Expression, Opts),
       fun(Expression1) ->
-              Generate1 = {generate, Line, Pattern, Expression1},
+              Generate1 = {GenerateType, Line, Pattern, Expression1},
               map_m_qualifiers(F, T, Opts, [Generate1|Acc])
       end);
 map_m_qualifiers(F, [Expression|T], Opts, Acc) ->
@@ -241,11 +244,12 @@ map_m_qualifiers(F, [], Opts, Acc) ->
       astranaut_traverse_monad:modify(fun entry_pattern_scope/1),
       map_m_qualifiers_1(F, lists:reverse(Acc), Opts, [])).
 
-map_m_qualifiers_1(F, [{generate, Line, Pattern, Expression}|T], Opts, Acc) ->
+map_m_qualifiers_1(F, [{GenerateType, Line, Pattern, Expression}|T], Opts, Acc)
+  when (GenerateType == generate) or (GenerateType == b_generate) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern}),
       fun(Pattern1) ->
-              Generate1 = {generate, Line, Pattern1, Expression},
+              Generate1 = {GenerateType, Line, Pattern1, Expression},
               map_m_qualifiers_1(F, T, Opts, [Generate1|Acc])
       end);
 map_m_qualifiers_1(F, [Expression|T], Opts, Acc) ->

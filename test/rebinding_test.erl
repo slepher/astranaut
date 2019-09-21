@@ -31,6 +31,8 @@ test(ABC) ->
                 ABC = EFG + 2,
                 ABC
         end,
+    D = <<ABC || ABC <- <<"123">> >>,
+    io:format("d is ~p~n", [D]),
     D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
     EFG = 
         case EFG of
