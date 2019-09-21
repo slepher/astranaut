@@ -106,6 +106,23 @@ clause_parent_type(match_expr) ->
 clause_parent_type(_Type) ->
     none.
 
+walk_node_1({lc, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = Attr) ->
+    Opts = #{node => expression, traverse => all},
+    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    NodeM = 
+        astranaut_traverse_monad:bind(
+          astranaut_traverse:map_m(F, Qualifiers, Opts#{node => expression}),
+          fun(Qualifiers1) ->
+                  astranaut_traverse_monad:bind(
+                    astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
+                    fun(Expression1) ->
+                            astranaut_traverse_monad:return({lc, Line, Expression1, Qualifiers1})
+                    end)
+      end),
+    {Node1, Context1} = 
+        astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
+    {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
+    astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true});
 walk_node_1({'match', Line, Patterns, Expressions}, 
           #{} = Context, 
           #{step := pre, node := expression} = Attr) ->
