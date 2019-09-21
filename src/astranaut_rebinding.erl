@@ -16,6 +16,9 @@
 %%%===================================================================
 parse_transform(Forms, _Options) ->
     erlang:system_flag(backtrace_depth, 30),
+    %dbg:tracer(),
+    %dbg:tpl(astranaut_rebinding, add_var, cx),
+    %dbg:p(self(), [c]),
     FormsMonad = 
         astranaut_traverse_monad:map_m(
           fun(Form) ->
@@ -59,124 +62,172 @@ walk_function_clause(Clause) ->
                  local_rename_map => maps:new(), 
                  scope_varnames_stack => [], 
                  scope_rename_map_stack => [],
-                 clause_stack => [function]},
+                 clause_stack => [fun_expr]},
     astranaut_traverse:map_with_state(
         fun(Node, Acc, Attr) ->
                 walk_node(Node, Acc, Attr)
         end, Context0, Clause, #{node => form, traverse => all, match_right_first => true}).
 
-walk_node({'case', _Line, _Expression, _Clauses} = Node, 
-          #{clause_stack := ClauseStack} = Acc, #{step := pre}) ->
-    Acc1 = Acc#{clause_stack => ['case'|ClauseStack]},
-    {Node, Acc1};
-walk_node({'case', _Line, _Expression, _Clauses} = Node, 
-          #{clause_stack := ['case'|ClauseStack]} = Acc,
-          #{step := post}) ->
-    Acc1 = Acc#{clause_stack => ClauseStack},
-    {Node, Acc1};
-walk_node({'fun', _Line, {clauses, _Clauses}} = Node, 
-          #{clause_stack := ClauseStack} = Acc, 
-          #{step := pre}) ->
-    Acc1 = Acc#{clause_stack => [function|ClauseStack]},
-    {Node, Acc1};
-walk_node({'fun', _Line, {clauses, _Clauses}} = Node, 
-          #{clause_stack := [function|ClauseStack]} = Acc, 
-          #{step := post}) ->
-    Acc1 = Acc#{clause_stack => ClauseStack},
-    {Node, Acc1};
-walk_node({'match', _Line, _Left, _Right} = Node, 
-          #{clause_stack := ClauseStack} = Acc, 
+walk_node(Node, #{clause_stack := ClauseStack} = Context, #{step := pre} = Attr) ->
+    NodeType = erl_syntax:type(Node),
+    case clause_parent_type(NodeType) of
+        none ->
+            walk_node_1(Node, Context, Attr);
+        ClauseParentType ->
+            Context1 = Context#{clause_stack => [ClauseParentType|ClauseStack]},
+            walk_node_1(Node, Context1, Attr)
+    end;
+walk_node(Node, #{clause_stack := [ClauseParentType|ClauseStack]} = Context, #{step := post} = Attr) ->
+    NodeType = erl_syntax:type(Node),
+    ClauseParentType1 = clause_parent_type(NodeType),
+    case ClauseParentType of
+        ClauseParentType1 ->
+            Context1 = Context#{clause_stack => ClauseStack},
+            walk_node_1(Node, Context1, Attr);
+        {ClauseParentType1, _} ->
+            Context1 = Context#{clause_stack => ClauseStack},
+            walk_node_1(Node, Context1, Attr);
+        _ ->
+            walk_node_1(Node, Context, Attr)
+    end;
+walk_node(Node, Context, #{} = Attr) ->
+    walk_node_1(Node, Context, Attr).
+
+clause_parent_type(case_expr) ->
+    case_expr;
+clause_parent_type(catch_expr) ->
+    catch_expr;
+clause_parent_type(receive_expr) ->
+    receive_expr;
+clause_parent_type(try_expr) ->
+    try_expr;
+clause_parent_type(fun_expr) ->
+    fun_expr;
+clause_parent_type(named_fun_expr) ->
+    fun_expr;
+clause_parent_type(match_expr) ->
+    {match_expr, false};
+clause_parent_type(_Type) ->
+    none.
+
+walk_node_1({'match', _Line, _Patterns, _Expressions} = Node, 
+          #{} = Context, 
           #{step := pre, node := expression}) ->
-    Acc1 = Acc#{clause_stack => [match|ClauseStack]},
-    {Node, Acc1};
-walk_node({'match', _Line, _Left, _Right} = Node, 
-          #{clause_stack := [match|ClauseStack]} = Acc, 
-          #{step := post, node := expression}) ->
-    Acc1 = Acc#{clause_stack => ClauseStack},
-    {Node, Acc1};
-walk_node({named_fun, _Line, _Name, _Clauses} = Node, 
-          #{clause_stack := ClauseStack} = Acc, 
+    %% Opts = #{node => expression, traverse => all, match_right_first => true},
+    %% F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    %% NodeM =
+    %%     astranaut_traverse_monad:bind(
+    %%       astranaut_traverse:map_m(F, Expressions, Opts#{node => expression}),
+    %%       fun(NExpressions) ->
+    %%               astranaut_traverse_monad:bind(
+    %%                 astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern}),
+    %%                 fun(NPatterns) ->
+    %%                         astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
+    %%                 end)
+    %%       end),
+    %% {Node, Context1} = 
+    %%     astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
+    %% astranaut_traverse:traverse_fun_return(#{node => Node, state => Context1, continue => true});
+    Context1 = entry_pattern_scope(Context),
+    {Node, Context1};
+walk_node_1({named_fun, _Line, _Name, _Clauses} = Node, 
+          #{} = Context, 
           #{step := pre}) ->
-    Acc1 = Acc#{clause_stack => [function|ClauseStack]},
-    {Node, Acc1};
-walk_node({named_fun, _Line, _Name, _Clauses} = Node, 
-          #{clause_stack := [function|ClauseStack]} = Acc,
-          #{step := post}) ->
-    Acc1 = Acc#{clause_stack => ClauseStack},
-    {Node, Acc1};
-walk_node({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [function|_T]} = Acc, 
+    Context1 = entry_scope(Context),
+    {Node, Context1};
+walk_node_1({named_fun, _Line, _Name, _Clauses} = Node, 
+            #{} = Context,
+            #{step := post}) ->
+    Context1 = exit_scope(Context),
+    {Node, Context1};
+walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
+          #{clause_stack := [fun_expr|_T]} = Acc, 
           #{step := pre}) ->
-    Acc1 = entry_scope(Acc),
+    Acc1 = entry_function_scope(Acc),
     {Node, Acc1};
-walk_node({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [function|_T]} = Acc, 
+walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
+          #{clause_stack := [fun_expr|_T]} = Acc, 
           #{step := post}) ->
-    Acc1 = exit_scope(Acc),
+    Acc1 = exit_function_scope(Acc),
     {Node, Acc1};
-walk_node({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{} = Acc, 
+walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
+          #{} = Context, 
           #{step := pre}) ->
-    Acc1 = entry_rename_map_scope(Acc),
-    {Node, Acc1};
-walk_node({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{} = Acc, 
+    Context1 = entry_scope(Context),
+    {Node, Context1};
+walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
+          #{} = Context, 
           #{step := post}) ->
-    Acc1 = exit_rename_map_scope(Acc),
-    {Node, Acc1};
+    Context1 = exit_scope(Context),
+    {Node, Context1};
 %% rename var if current node is expression.
-walk_node({var, _Line, '_'} = Var, #{} = Acc, #{}) ->
+walk_node_1({var, _Line, '_'} = Var, #{} = Acc, #{}) ->
     {Var, Acc};
-walk_node({var, _Line, _Varname} = Var, #{} = Acc, #{node := expression}) ->
+walk_node_1({op, _Line1, '+', {var, _Line3, _Varname} = Var}, 
+            #{clause_stack := [{match_expr, _}|_T]} = Context, #{node := pattern, step := pre}) ->
+    Var1 = rename_var(Var, Context),
+    astranaut_traverse:traverse_fun_return(#{node => Var1, state => Context, continue => true});
+walk_node_1({var, _Line, _Varname} = Var, #{} = Acc, #{node := expression}) ->
     {rename_var(Var, Acc), Acc};
 %% rename var if current node is guard.
-walk_node({var, _Line, _Varname} = Var, #{} = Acc, #{node := guard}) ->
+walk_node_1({var, _Line, _Varname} = Var, #{} = Acc, #{node := guard}) ->
     {rename_var(Var, Acc), Acc};
 %% rebind var if current node is function pattern.
-walk_node({var, _Line, Varname} = Var, 
-          #{clause_stack := [function|_T], function_vars := FunctionVars} = Acc, #{node := pattern}) ->
-    case ordsets:is_element(Varname, FunctionVars) of
-        true ->
-            Var1 = rename_var(Var, Acc),
-            {Var1, Acc};
-        false ->
-            FunctionVars1 = ordsets:add_element(Varname, FunctionVars),
-            Acc1 = Acc#{function_vars => FunctionVars1},
-            add_var(Var, Acc1)
-    end;
+walk_node_1({var, _Line, _Varname} = Var, 
+          #{clause_stack := [fun_expr|_T]} = Context, #{node := pattern}) ->
+    add_var(Var, Context);
 %% rebind var if current node is match pattern.
-walk_node({var, _Line, _Varname} = Var, #{clause_stack := [match|_T]} = Acc, #{node := pattern}) ->
-    add_var(Var, Acc);
-walk_node({var, _Line, _Varname} = Var, #{} = Acc, #{}) ->
-    {rename_var(Var, Acc), Acc};
-walk_node(Node, Acc, #{}) ->
+walk_node_1({var, _Line, _Varname} = Var, 
+            #{clause_stack := [{match_expr, PattenVisited}|T]} = Context, #{node := pattern}) ->
+    Context1 = 
+        case PattenVisited of
+            false ->
+                entry_pattern_scope(Context#{clause_stack := [{match_expr, true}|T]});
+            true ->
+                Context
+        end,
+    add_var(Var, Context1);
+walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
+    {rename_var(Var, Context), Context};
+walk_node_1(Node, Acc, #{}) ->
     {Node, Acc}.
+
 
 add_var({var, Line, Varname} = Var, 
         #{global_varnames := GlobalVarnames,
           local_varnames := LocalVarnames,
           global_rename_map := GlobalRenameMap,
-          local_rename_map := LocalRenameMap
+          local_rename_map := LocalRenameMap,
+          pattern_varnames := PatternVarnames
          } = Context) ->
-    case ordsets:is_element(Varname, GlobalVarnames) of
+    case ordsets:is_element(Varname, PatternVarnames) of
         true ->
-            Varname1 = new_variable_name(Varname, GlobalVarnames),
-            Var1 = {var, Line, Varname1},
-            GlobalVarnames1 = ordsets:add_element(Varname1, GlobalVarnames),
-            LocalVarnames1 = ordsets:add_element(Varname1, LocalVarnames),
-            GlobalRenameMap1 = maps:put(Varname, Varname1, GlobalRenameMap),
-            LocalRenameMap1 = maps:put(Varname, Varname1, LocalRenameMap),
-
-            Context1 = Context#{global_varnames => GlobalVarnames1,
-                                local_varnames => LocalVarnames1,
-                                global_rename_map := GlobalRenameMap1,
-                                local_rename_map := LocalRenameMap1},
-            {Var1, Context1};
+            Var1 = rename_var(Var, Context),
+            {Var1, Context};
         false ->
-            GlobalVarnames1 = ordsets:add_element(Varname, GlobalVarnames),
-            LocalVarnames1 = ordsets:add_element(Varname, LocalVarnames),
-            Context1 = Context#{global_varnames => GlobalVarnames1, local_varnames => LocalVarnames1},
-            {Var, Context1}
+            case ordsets:is_element(Varname, GlobalVarnames) of
+                true ->
+                    Varname1 = new_variable_name(Varname, GlobalVarnames),
+                    Var1 = {var, Line, Varname1},
+                    GlobalVarnames1 = ordsets:add_element(Varname1, GlobalVarnames),
+                    LocalVarnames1 = ordsets:add_element(Varname1, LocalVarnames),
+                    PatternVarnames1 = ordsets:add_element(Varname, PatternVarnames),
+                    GlobalRenameMap1 = maps:put(Varname, Varname1, GlobalRenameMap),
+                    LocalRenameMap1 = maps:put(Varname, Varname1, LocalRenameMap),
+
+                    Context1 = Context#{global_varnames => GlobalVarnames1,
+                                        local_varnames => LocalVarnames1,
+                                        global_rename_map := GlobalRenameMap1,
+                                        local_rename_map := LocalRenameMap1,
+                                        pattern_varnames => PatternVarnames1
+                                       },
+                    {Var1, Context1};
+                false ->
+                    GlobalVarnames1 = ordsets:add_element(Varname, GlobalVarnames),
+                    LocalVarnames1 = ordsets:add_element(Varname, LocalVarnames),
+                    Context1 = Context#{global_varnames => GlobalVarnames1, local_varnames => LocalVarnames1},
+                    {Var, Context1}
+            end
     end.
 
 rename_var({var, Line, Varname} = Var, #{global_rename_map := RenameMap}) ->
@@ -199,14 +250,21 @@ new_variable_name(Variable, Variables, N) ->
             Variable1
     end.
 
-entry_scope(Context) ->
+entry_function_scope(Context) ->
     Context1 = entry_varname_scope(Context),
     Context2 = entry_rename_map_scope(Context1),
-    Context2#{function_names => ordsets:new()}.
+    entry_pattern_scope(Context2).
 
-exit_scope(Context) ->
+exit_function_scope(Context) ->
     Context1 = exit_varname_scope(Context),
     exit_rename_map_scope(Context1).
+
+entry_scope(Context) ->
+    Context1 = entry_rename_map_scope(Context),
+    entry_pattern_scope(Context1).
+
+exit_scope(Context) ->
+    exit_rename_map_scope(Context).
 
 entry_rename_map_scope(#{local_rename_map := LocalRenameMap,
                          scope_rename_map_stack := ScokeRenameMapStack
@@ -242,6 +300,9 @@ exit_varname_scope(#{scope_varnames_stack := [LocalVarnames|ParentLocalVarnames]
     Context#{global_varnames => GlobalVarnames, 
              local_varnames => LocalVarnames,
              scope_varnames_stack => ParentLocalVarnames}.
+
+entry_pattern_scope(#{} = Context) ->
+    Context#{pattern_varnames => ordsets:new()}.
 
 add_suffix(Variable, N) ->
     list_to_atom(atom_to_list(Variable) ++ "_" ++ integer_to_list(N)).

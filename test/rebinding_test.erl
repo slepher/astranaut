@@ -17,10 +17,11 @@
 %%% API
 %%%===================================================================
 test(ABC) ->
-    ABC = ABC + 1,
-    ABC = ABC + 1,
+    {ABC, ABC} = {ABC + 1, ABC + 1},
+    {ABC, ABC} = {ABC + 1, ABC + 1},
     EFG = ABC + 1,
-    F = fun Hello (0) -> 0; Hello (N) -> Hello(N - 1) end,
+    ABC = ABC + 1,
+    F = fun EFG (0, {EFG, EFG} = ABC, ABC) -> 0; EFG (N, ABC, ABC) -> EFG(N - 1) end,
     ABC = 
         case EFG of
             ABC ->
@@ -30,6 +31,7 @@ test(ABC) ->
                 ABC = EFG + 2,
                 ABC
         end,
+    D = [D || D <- lists:seq(1, 10)],
     EFG = 
         case EFG of
             ABC ->
@@ -38,6 +40,17 @@ test(ABC) ->
             EFG ->
                 ABC = EFG + 2,
                 ABC
+        end,
+    C = 
+        try ABC of
+            EFG ->
+                ABC = ABC + 1,
+                ABC;
+            ABC ->
+                ABC + 1
+        catch
+            _:ABC:_Stacks ->
+                {ABC, ABC}
         end,
     Zero = 
         lists:map(
@@ -49,7 +62,8 @@ test(ABC) ->
     io:format("Zero is ~p~n", [Zero]),
     io:format("abc is ~p~n", [ABC]),
     io:format("efg is ~p~n", [EFG]),
-
+    io:format("d is ~p~n", [D]),
+    io:format("c is ~p~n", [C]),
     F(10).
 
 %%--------------------------------------------------------------------

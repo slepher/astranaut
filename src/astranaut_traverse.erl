@@ -272,6 +272,19 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
 
 map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
+map_m_subtrees(F, [NameTrees, Clauses], named_fun_expr, #{} = Opts) ->
+    Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
+
+    io:format("named fun expr ~p ~p", [Names, Clauses]),
+    monad_bind(
+      map_m_1(F, Names, Opts#{node => pattern}),
+      fun(Name1) ->
+              monad_bind(
+                map_m_1(F, Clauses, Opts#{node => expression}),
+                fun(Clauses1) ->
+                        monad_return([Name1, Clauses1], Opts)
+                end, Opts)
+      end, Opts);
 map_m_subtrees(F, [Patterns, Expressions], match_expr, #{match_right_first := true} = Opts) ->
     %% if node type is match_expr and match_right_first is true
     %% make first subtree pattern, make second subtree expression
