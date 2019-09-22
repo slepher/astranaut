@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(rebinding_test).
 
--compile({parse_transform, astranaut_rebinding}).
+-include("rebinding.hrl").
 
 %% API
 -export([test/1]).
