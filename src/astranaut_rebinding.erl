@@ -26,10 +26,10 @@ parse_transform(Forms, _Options) ->
           end, Forms),
     File = astranaut:file(Forms),
     Return = astranaut_traverse_monad:eval(FormsMonad, #{}),
-    astranaut_traverse:map_traverse_return(
-      fun(Forms1) ->
-              io:format("~s~n", [astranaut:safe_to_string(Forms1)])
-      end, Return),
+    %% astranaut_traverse:map_traverse_return(
+    %%  fun(Forms1) ->
+    %%          io:format("~s~n", [astranaut:safe_to_string(Forms1)])
+    %%  end, Return),
     astranaut_traverse:parse_transform_return(Return, File).
 
 %%--------------------------------------------------------------------
@@ -197,7 +197,7 @@ walk_node_1({var, _Line, _Varname} = Var,
 walk_node_1({var, _Line, _Varname} = Var, 
             #{clause_stack := [{lc_expr, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
-    io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
+    %% io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
 
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
