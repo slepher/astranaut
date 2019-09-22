@@ -41,6 +41,7 @@ test(ABC) ->
                 ABC;
             EFG ->
                 ABC = EFG + 2,
+                ABC = ABC + 2,
                 ABC
         end,
     C = 

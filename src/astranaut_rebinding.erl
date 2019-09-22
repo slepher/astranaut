@@ -62,7 +62,7 @@ walk_function_clause(Clause) ->
                  local_rename_map => maps:new(), 
                  scope_varnames_stack => [], 
                  scope_rename_map_stack => [],
-                 clause_stack => [fun_expr]},
+                 clause_stack => [{fun_expr, ordsets:new()}]},
     astranaut_traverse:map_with_state(
         fun(Node, Acc, Attr) ->
                 walk_node(Node, Acc, Attr)
@@ -74,15 +74,19 @@ walk_node(Node, #{clause_stack := ClauseStack} = Context, #{step := pre} = Attr)
         none ->
             walk_node_1(Node, Context, Attr);
         ClauseParentType ->
-            Context1 = Context#{clause_stack => [ClauseParentType|ClauseStack]},
+            ClauseStack1 = [{ClauseParentType, ordsets:new()}|ClauseStack],
+            Context1 = Context#{clause_stack => ClauseStack1},
             walk_node_1(Node, Context1, Attr)
     end;
-walk_node(Node, #{clause_stack := [ClauseParentType|ClauseStack]} = Context, #{step := post} = Attr) ->
+walk_node(Node, #{clause_stack := [{BlockType, BlockVarnames}|ClauseStack]} = Context,
+          #{step := post} = Attr) ->
     NodeType = erl_syntax:type(Node),
     case clause_parent_type(NodeType) of
-        ClauseParentType ->
+        BlockType ->
             Context1 = Context#{clause_stack => ClauseStack},
-            walk_node_1(Node, Context1, Attr);
+            Context2 = exit_block(BlockType, BlockVarnames, Context1),
+            %% io:format("exit block ~p ~p ~p ~n", [BlockType, Context1, Context2]),
+            walk_node_1(Node, Context2, Attr);
         _ ->
             walk_node_1(Node, Context, Attr)
     end;
@@ -106,31 +110,9 @@ clause_parent_type(match_expr) ->
 clause_parent_type(_Type) ->
     none.
 
-walk_node_1({ComprehensionType, Line, Expression, Qualifiers}, #{} = Context, #{step := pre} = Attr) 
+walk_node_1({ComprehensionType, _Line, _Expression, _Qualifiers} = Node, #{} = Context, #{step := pre} = Attr) 
   when (ComprehensionType == lc) or (ComprehensionType == bc) ->
-    Opts = #{node => expression, traverse => all},
-    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
-    NodeM = 
-        astranaut_traverse_monad:then(
-          astranaut_traverse_monad:modify(
-            fun(#{clause_stack := ClauseStackPre} = ContextPre) ->
-                    entry_function_scope(ContextPre#{clause_stack => [lc_expr|ClauseStackPre]})
-            end),
-          astranaut_traverse_monad:bind(
-            map_m_qualifiers(F, Qualifiers, Opts),
-            fun(Qualifiers1) ->
-                    astranaut_traverse_monad:bind(
-                      astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
-                      fun(Expression1) ->
-                              astranaut_traverse_monad:then(
-                                astranaut_traverse_monad:modify(
-                                  fun(#{clause_stack := [lc_expr|ClauseStackPost]} = ContextPost) ->
-                                          exit_function_scope(ContextPost#{clause_stack => ClauseStackPost})
-                                  end),
-                                astranaut_traverse_monad:return(
-                                  {ComprehensionType, Line, Expression1, Qualifiers1}))
-                      end)
-            end)),
+    NodeM = walk_comprehension(Node), 
     {Node1, Context1} = 
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
     {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
@@ -167,27 +149,28 @@ walk_node_1({named_fun, _Line, _Name, _Clauses} = Node,
     Context1 = exit_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [fun_expr|_T]} = Context, 
+          #{clause_stack := [{fun_expr, _}|_T]} = Context, 
           #{step := pre}) ->
     Context1 = entry_function_scope(Context),
-    io:format("entry function scope ~p~n ~p~n", [Context, Context1]),
+    %% io:format("entry function scope ~p~n ~p~n", [Context, Context1]),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [fun_expr|_T]} = Context, 
+          #{clause_stack := [{fun_expr, _}|_T]} = Context, 
           #{step := post}) ->
     Context1 = exit_function_scope(Context),
-    io:format("exit function scope ~p~n ~p~n", [Context, Context1]),
+    %% io:format("exit function scope ~p~n ~p~n", [Context, Context1]),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
           #{} = Context, 
           #{step := pre}) ->
     Context1 = entry_scope(Context),
-    io:format("entry scope ~p~n ~p~n", [Context, Context1]),
+    %% io:format("entry scope ~p~n ~p~n", [Context, Context1]),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
           #{} = Context, 
           #{step := post}) ->
     Context1 = exit_scope(Context),
+    %% io:format("exit scope ~p~n ~p~n", [Context, Context1]),
     {Node, Context1};
 %% rename var if current node is expression.
 walk_node_1({var, _Line, '_'} = Var, #{} = Acc, #{}) ->
@@ -203,16 +186,16 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Acc, #{node := guard}) ->
     {rename_var(Var, Acc), Acc};
 %% rebind var if current node is function pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
-          #{clause_stack := [fun_expr|_T]} = Context, #{node := pattern}) ->
+          #{clause_stack := [{fun_expr, _}|_T]} = Context, #{node := pattern}) ->
     add_var(Var, Context);
 %% rebind var if current node is match pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
-            #{clause_stack := [match_expr|_T]} = Context, #{node := pattern}) ->
+            #{clause_stack := [{match_expr, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
-    io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
+    %% io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
 walk_node_1({var, _Line, _Varname} = Var, 
-            #{clause_stack := [lc_expr|_T]} = Context, #{node := pattern}) ->
+            #{clause_stack := [{lc_expr, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
     io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
@@ -221,6 +204,31 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
     {rename_var(Var, Context), Context};
 walk_node_1(Node, Acc, #{}) ->
     {Node, Acc}.
+
+walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
+    Opts = #{node => expression, traverse => all},
+    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:modify(
+        fun(#{clause_stack := ClauseStack} = Context) ->
+                ClauseStack1 = [{lc_expr, ordsets:new()}|ClauseStack],
+                entry_function_scope(Context#{clause_stack => ClauseStack1})
+        end),
+      astranaut_traverse_monad:bind(
+        map_m_qualifiers(F, Qualifiers, Opts),
+        fun(Qualifiers1) ->
+                astranaut_traverse_monad:bind(
+                  astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
+                  fun(Expression1) ->
+                          astranaut_traverse_monad:then(
+                            astranaut_traverse_monad:modify(
+                              fun(#{clause_stack := [{lc_expr, _}|ClauseStack]} = Context) ->
+                                      exit_function_scope(Context#{clause_stack => ClauseStack})
+                              end),
+                            astranaut_traverse_monad:return(
+                              {ComprehensionType, Line, Expression1, Qualifiers1}))
+                  end)
+        end)).
 
 map_m_qualifiers(F, Qualifiers, Opts) ->
     map_m_qualifiers(F, Qualifiers, Opts, []).
@@ -314,6 +322,14 @@ new_variable_name(Variable, Variables, N) ->
             Variable1
     end.
 
+exit_block(_BlockType, BlockVarnames, 
+           #{global_varnames := GlobalVarnames, 
+             local_varnames := LocalVarnames} = Context) ->
+    GlobalVarnames1 = ordsets:union(BlockVarnames, GlobalVarnames),
+    LocalVarnames1 = ordsets:union(BlockVarnames, LocalVarnames),
+        Context#{global_varnames => GlobalVarnames1, 
+                 local_varnames => LocalVarnames1}.
+
 entry_function_scope(Context) ->
     Context1 = entry_varname_scope(Context),
     Context2 = entry_rename_map_scope(Context1),
@@ -325,10 +341,15 @@ exit_function_scope(Context) ->
 
 entry_scope(Context) ->
     Context1 = entry_rename_map_scope(Context),
-    entry_pattern_scope(Context1).
+    Context2 = entry_varname_scope(Context1),
+    entry_pattern_scope(Context2).
 
-exit_scope(Context) ->
-    exit_rename_map_scope(Context).
+exit_scope(#{local_varnames := LocalVarnames, clause_stack := [{BlockType, BlockVarnames}|T]} = Context) ->
+    BlockVarnames1 = ordsets:union(LocalVarnames, BlockVarnames),
+    ClauseStack1 = [{BlockType, BlockVarnames1}|T],
+    Context1 = Context#{clause_stack => ClauseStack1},
+    Context2 = exit_varname_scope(Context1),
+    exit_rename_map_scope(Context2).
 
 entry_rename_map_scope(#{local_rename_map := LocalRenameMap,
                          scope_rename_map_stack := ScokeRenameMapStack
