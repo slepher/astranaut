@@ -705,7 +705,7 @@ hello(A, B) ->
 
 =>
 
-```
+```erlang
 hello(A, B) ->
   A_2 = 
     case A of
