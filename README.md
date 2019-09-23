@@ -642,34 +642,22 @@ Opt = OptKey | {OptKey, OptValue}.
 
 *Rebinding Attributes*
 
-&emsp;&emsp; -rebinding_all -rebinding_fun defines rebinding scope.
-
-&emsp;&emsp; -rebinding_all meaning rebinding scope is all function.
-
-&emsp;&emsp; -rebinding_fun meaning rebinding scope is in functions mentioned.
-
-&emsp;&emsp; rebinding options is avaliable in scope mentioned.
-
-&emsp;&emsp; rebinding option debug means print code after rebinding rules applied.
-
+&emsp;&emsp; -rebinding_all -rebinding_fun defines rebinding scope.  
+&emsp;&emsp; -rebinding_all meaning rebinding scope is all function.  
+&emsp;&emsp; -rebinding_fun meaning rebinding scope is in functions mentioned.  
+&emsp;&emsp; rebinding options is avaliable in scope mentioned.  
+&emsp;&emsp; rebinding option debug means print code after rebinding rules applied.  
 &emsp;&emsp; if neither -rebinding_fun nor -rebinding_all is used, rebinding scope is all function and rebinding options is [].
 
 *Rebinding Rules* 
 
-&emsp;&emsp; pattern variables will be renamed while already used include:
-
-&emsp;&emsp;&emsp;&emsp; function pattern variables
-
-&emsp;&emsp;&emsp;&emsp; match pattern variables
-
-&emsp;&emsp;&emsp;&emsp; list comprehension pattern variables
-
-&emsp;&emsp;&emsp;&emsp; bitstring comprehension pattern variables
-
-&emsp;&emsp; pattern variables with same name in same pattern scope will be renamed to same name.
-
-&emsp;&emsp; other variable will be renamed follow last renamed vaiable last avaliable scope used.
-
+&emsp;&emsp; pattern variables will be renamed while already used include:  
+&emsp;&emsp;&emsp;&emsp; function pattern variables  
+&emsp;&emsp;&emsp;&emsp; match pattern variables  
+&emsp;&emsp;&emsp;&emsp; list comprehension pattern variables  
+&emsp;&emsp;&emsp;&emsp; bitstring comprehension pattern variables   
+&emsp;&emsp; pattern variables with same name in same pattern scope will be renamed to same name.  
+&emsp;&emsp; other variable will be renamed follow last renamed vaiable last avaliable scope used.  
 &emsp;&emsp; +{pattern variable} means pinned variable like Elixir ^{pattern variable}, also works like other variable.
 
 *Examples* 
