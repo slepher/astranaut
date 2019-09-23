@@ -623,3 +623,134 @@ Macro = {Module, Function, Arity, Opts}.
 parse_transform(Forms, _Options) ->
     astranaut_macro:transform_macro(do_macro, do, 1, [{alias, do}, formatter], Forms).
 ```
+
+### Rebinding 
+
+```erlang
+-include_lib("erlando/include/rebinding.hrl").
+
+-rebinding_all(Opts).
+-rebinding_fun(FAs).
+-rebinding_fun({FAs, Opts}).
+
+FAs = FA | [FA...].
+FA = F | F/A.
+Opts = Opt | [Opt...] | #{OptKey => OptValue}.
+Opt = OptKey | {OptKey, OptValue}.
+#{OptKey => OptValue} = #{debug => true | false}.
+```
+
+*Rebinding Attributes*
+
+&emsp;&emsp; -rebinding_all -rebinding_fun defines rebinding scope.
+&emsp;&emsp; -rebinding_all meaning rebinding scope is all function.
+&emsp;&emsp; -rebinding_fun meaning rebinding scope is in functions mentioned.
+&emsp;&emsp; rebinding options is avaliable in scope mentioned.
+&emsp;&emsp; rebinding option debug means print code after rebinding rules applied.
+&emsp;&emsp; if neither -rebinding_fun nor -rebinding_all is used, rebinding scope is all function and rebinding options is [].
+
+*Rebinding Rules* 
+
+&emsp;&emsp; pattern variables will be renamed while already used include:
+&emsp;&emsp;&emsp;&emsp; function pattern variables
+&emsp;&emsp;&emsp;&emsp; match pattern variables
+&emsp;&emsp;&emsp;&emsp; list comprehension pattern variables
+&emsp;&emsp;&emsp;&emsp; bitstring comprehension pattern variables
+&emsp;&emsp; pattern variables with same name in same pattern scope will be renamed to same name.
+&emsp;&emsp; other variable will be renamed follow last renamed vaiable last avaliable scope used.
+&emsp;&emsp; +{pattern variable} means pinned variable like Elixir ^{pattern variable}, also works like other variable.
+
+*Examples* 
+
+```erlang
+hello(A, A, B) ->
+    {A, A, B} = {A + 1, A + 1, B + 1},
+    {A, A, B}.
+```
+
+=> 
+
+```erlang
+hello(A, A, B) ->
+  {A_1, A_1, B_1} = {A + 1, A + 1, B + 1},
+  {A_1, A_1, B_1}.
+```
+
+```erlang
+hello(A, B) ->
+  A = 
+    case A of
+        B -> 
+          B = A + B,
+          A = A + B,
+          B = A + B,
+          B;
+        A ->
+          B = A + B
+          B
+    end,
+  B = 
+    case A of
+        B -> 
+          B = A + B,
+          A = A + B,
+          B = A + B,
+          B;
+        A ->
+          B = A + B
+          B
+    end,
+  {A, B}.
+```
+
+=>
+
+```
+hello(A, B) ->
+  A_2 = 
+    case A of
+        B -> 
+          B_1 = A + B,
+          A_1 = A + B_1,
+          B_2 = A_1 + B_1,
+          B_2;
+        A ->
+          B_1 = A + B
+          B_1
+    end,
+    
+  B_5 = 
+    case A_2 of
+        B -> 
+          %% B_1 and B_2 is already used, next var name is B_3, last var name in scope is B.
+          B_3 = A_2 + B,
+          A_3 = A_2 + B_3,
+          B_4 = A_3 + B_3,
+          B_4,
+        A_2 ->
+          B_3 = A_2 + B
+          B_3
+    end,
+  {A_2, B_5}.
+```
+
+
+```erlang
+hello_f(A) ->
+    A = A + 1,
+    F = fun F (0) -> 0; F (A) -> A = F(A - 1), A end,
+    A = F(A),
+    A.
+```
+
+=> 
+
+```erlang
+hello_f(A) ->
+    A_1 = A + 1,
+    F = fun F(0) -> 0; F(A_2) -> A_3 = F(A_2 - 1), A_3 end,
+    A_2 = F(A_1),
+    F_1 = fun F_1(0) -> 0; F_1(A_3) -> A_4 = F_1(A_3 - 1), A_4 end,
+    A_3 = F_1(A_2),
+    A_3.
+```

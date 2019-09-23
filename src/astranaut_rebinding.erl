@@ -16,19 +16,17 @@
 %%%===================================================================
 parse_transform(Forms, _Options) ->
     erlang:system_flag(backtrace_depth, 30),
-    BidingAllAttributes = astranaut:attributes_with_line(rebinding_all, Forms),
-    BidingAttributes = astranaut:attributes_with_line(rebinding, Forms),
-    {BidingAllAttributes1, Warnings1} = binding_all_attributes(BidingAllAttributes),
-    {BindingAttributes1, Warnings2} = binding_attributes(BidingAttributes),
+    {BindingAttributes, BindingAllAttributes, Warnings} = 
+        binding_attributes(Forms),
     %dbg:tracer(),
     %dbg:tpl(astranaut_rebinding, add_var, cx),
     %dbg:p(self(), [c]),
     FormsMonad = 
         astranaut_traverse_monad:then(
-          astranaut_traverse_monad:warnings(Warnings1 ++ Warnings2),
+          astranaut_traverse_monad:warnings(Warnings),
           astranaut_traverse_monad:map_m(
             fun(Form) ->
-                    walk_form(Form, BindingAttributes1, BidingAllAttributes1)
+                    walk_form(Form, BindingAttributes, BindingAllAttributes)
             end, Forms)),
     File = astranaut:file(Forms),
     Return = astranaut_traverse_monad:eval(FormsMonad, #{}),
@@ -79,6 +77,18 @@ walk_form({function, LINE, Name, Arity, Clauses} = Function, BindingAttributes, 
 walk_form(Form, _BidingAttributes, _BidingAllAttributes) ->
     astranaut_traverse_monad:return(Form).
 
+binding_attributes(Forms) ->
+    BindingAllAttributes = astranaut:attributes_with_line(rebinding_all, Forms),
+    BindingAttributes = astranaut:attributes_with_line(rebinding_fun, Forms),
+    case {BindingAttributes, BindingAllAttributes} of
+        {[], []} ->
+            {#{}, #{}, []};
+        _ ->
+            {BidingAllAttributes1, Warnings1} = binding_all_attributes(BindingAllAttributes),
+            {BindingAttributes1, Warnings2} = binding_fun_attributes(BindingAttributes),
+            {BindingAttributes1, BidingAllAttributes1, Warnings1 ++ Warnings2}
+    end.
+
 binding_all_attributes([]) ->
     {#{}, []};
 binding_all_attributes([{Line, Options}|_T]) ->
@@ -89,7 +99,8 @@ binding_all_attributes([{Line, Options}|_T]) ->
                   {Line, astranaut_macro, Warning}
           end, Warnings1),
     {Options1, Warnings2}.
-binding_attributes(BindingAttributes) ->
+
+binding_fun_attributes(BindingAttributes) ->
     lists:foldl(
       fun({Line, FunName}, Acc) when is_atom(FunName) ->
               add_binding_attribute(FunName, #{}, Line, Acc);
@@ -98,6 +109,12 @@ binding_attributes(BindingAttributes) ->
          ({Line, {FunName, Opts}}, Acc) ->
               add_binding_attribute(FunName, Opts, Line, Acc)
       end, {maps:new(), []}, BindingAttributes).
+
+add_binding_attribute(Funs, Options, Line, {Acc, Warnings}) when is_list(Funs) ->
+    lists:foldl(
+      fun(Fun, {Acc1, Warnings1}) ->
+              add_binding_attribute(Fun, Options, Line, {Acc1, Warnings1})
+      end, {Acc, Warnings}, Funs);
 
 add_binding_attribute(Fun, Options, Line, {Acc, Warnings}) ->
     {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),

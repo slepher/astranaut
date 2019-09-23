@@ -10,10 +10,8 @@
 
 -include("rebinding.hrl").
 
--rebinding({test/1, [debug]}).
-
 %% API
--export([test/1]).
+-export([test/1, hello/2, hello_f/1]).
 
 %%%===================================================================
 %%% API
@@ -70,6 +68,39 @@ test(ABC) ->
     io:format("d is ~p~n", [D]),
     io:format("c is ~p~n", [C]),
     F(10).
+
+hello(A, B) ->
+  A = 
+    case A of
+        B -> 
+          B = A + B,
+          A = A + B,
+          B = A + B,
+          B;
+        A ->
+          B = A + B,
+          B
+    end,
+  B = 
+    case A of
+        B -> 
+          B = A + B,
+          A = A + B,
+          B = A + B,
+          B;
+        A ->
+          B = A + B,
+          B
+    end,
+  {A, B}.
+
+hello_f(A) ->
+    A = A + 1,
+    F = fun F (0) -> 0; F (A) -> A = F(A - 1), A end,
+    A = F(A),
+    F = fun F (0) -> 0; F (A) -> A = F(A - 1), A end,
+    A = F(A),
+    A.
 
 %%--------------------------------------------------------------------
 %% @doc
