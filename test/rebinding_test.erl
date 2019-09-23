@@ -10,6 +10,8 @@
 
 -include("rebinding.hrl").
 
+%-rebinding_fun({[hello, hello_f], debug}).
+
 %% API
 -export([test/1, hello/2, hello_f/1]).
 

@@ -16,8 +16,8 @@
 %%%===================================================================
 parse_transform(Forms, _Options) ->
     erlang:system_flag(backtrace_depth, 30),
-    {BindingAttributes, BindingAllAttributes, Warnings} = 
-        binding_attributes(Forms),
+    {BFunOptions, BAllOptions, Warnings} = 
+        binding_options(Forms),
     %dbg:tracer(),
     %dbg:tpl(astranaut_rebinding, add_var, cx),
     %dbg:p(self(), [c]),
@@ -26,7 +26,7 @@ parse_transform(Forms, _Options) ->
           astranaut_traverse_monad:warnings(Warnings),
           astranaut_traverse_monad:map_m(
             fun(Form) ->
-                    walk_form(Form, BindingAttributes, BindingAllAttributes)
+                    walk_form(Form, BFunOptions, BAllOptions)
             end, Forms)),
     File = astranaut:file(Forms),
     Return = astranaut_traverse_monad:eval(FormsMonad, #{}),
@@ -50,8 +50,8 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_form({function, LINE, Name, Arity, Clauses} = Function, BindingAttributes, BindingAllAttributes) ->
-    case match_rebinding(Name, Arity, BindingAttributes, BindingAllAttributes) of
+walk_form({function, LINE, Name, Arity, Clauses} = Function, BFunOptions, BAllOptions) ->
+    case match_rebinding(Name, Arity, BFunOptions, BAllOptions) of
         {ok, BindingOpts} ->
             ClausesM = 
                 astranaut_traverse_monad:map_m(
@@ -77,21 +77,21 @@ walk_form({function, LINE, Name, Arity, Clauses} = Function, BindingAttributes, 
 walk_form(Form, _BidingAttributes, _BidingAllAttributes) ->
     astranaut_traverse_monad:return(Form).
 
-binding_attributes(Forms) ->
-    BindingAllAttributes = astranaut:attributes_with_line(rebinding_all, Forms),
-    BindingAttributes = astranaut:attributes_with_line(rebinding_fun, Forms),
-    case {BindingAttributes, BindingAllAttributes} of
+binding_options(Forms) ->
+    BFunAttrs = astranaut:attributes_with_line(rebinding_fun, Forms),
+    BAllAttrs = astranaut:attributes_with_line(rebinding_all, Forms),
+    case {BFunAttrs, BAllAttrs} of
         {[], []} ->
             {#{}, #{}, []};
         _ ->
-            {BidingAllAttributes1, Warnings1} = binding_all_attributes(BindingAllAttributes),
-            {BindingAttributes1, Warnings2} = binding_fun_attributes(BindingAttributes),
-            {BindingAttributes1, BidingAllAttributes1, Warnings1 ++ Warnings2}
+            {BFunOptions, Warnings2} = binding_fun_options(BFunAttrs),
+            {BAllOptions, Warnings1} = binding_all_options(BAllAttrs),
+            {BFunOptions, BAllOptions, Warnings1 ++ Warnings2}
     end.
 
-binding_all_attributes([]) ->
-    {#{}, []};
-binding_all_attributes([{Line, Options}|_T]) ->
+binding_all_options([]) ->
+    {none, []};
+binding_all_options([{Line, Options}|_T]) ->
     {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
     Warnings2 = 
         lists:map(
@@ -100,28 +100,28 @@ binding_all_attributes([{Line, Options}|_T]) ->
           end, Warnings1),
     {Options1, Warnings2}.
 
-binding_fun_attributes(BindingAttributes) ->
+binding_fun_options(BindingAttributes) ->
     lists:foldl(
       fun({Line, FunName}, Acc) when is_atom(FunName) ->
-              add_binding_attribute(FunName, #{}, Line, Acc);
+              add_binding_options(FunName, #{}, Line, Acc);
          ({Line, {FunName, Arity}}, Acc) when is_atom(FunName), is_integer(Arity) ->
-              add_binding_attribute({FunName, Arity}, #{}, Line, Acc);
+              add_binding_options({FunName, Arity}, #{}, Line, Acc);
          ({Line, {FunName, Opts}}, Acc) ->
-              add_binding_attribute(FunName, Opts, Line, Acc)
+              add_binding_options(FunName, Opts, Line, Acc)
       end, {maps:new(), []}, BindingAttributes).
 
-add_binding_attribute(Funs, Options, Line, {Acc, Warnings}) when is_list(Funs) ->
+add_binding_options(Funs, Options, Line, {Acc, Warnings}) when is_list(Funs) ->
     lists:foldl(
       fun(Fun, {Acc1, Warnings1}) ->
-              add_binding_attribute(Fun, Options, Line, {Acc1, Warnings1})
+              add_binding_options(Fun, Options, Line, {Acc1, Warnings1})
       end, {Acc, Warnings}, Funs);
 
-add_binding_attribute(Fun, Options, Line, {Acc, Warnings}) ->
+add_binding_options(Fun, Options, Line, {Acc, Warnings}) ->
     {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
     Warnings2 = 
         lists:map(
           fun(Warning) ->
-                  {Line, astranaut_macro, Warning}
+                  {Line, astranaut_rebinding, Warning}
           end, Warnings1),
     {maps:put(Fun, Options1, Acc), Warnings ++ Warnings2}.
 
@@ -134,16 +134,21 @@ validate_option_key(debug, _Debug) ->
 validate_option_key(_Key, _Value) ->
     error.
 
-match_rebinding(Name, Arity, BindingAttributes, BindingAllAttributes) ->
-    case maps:find(Name, BindingAttributes) of
-        {ok, Val} ->
-            {ok, Val};
+match_rebinding(Name, Arity, BFunOptions, BAllOptions) ->
+    case maps:find(Name, BFunOptions) of
+        {ok, Options} ->
+            {ok, Options};
         error ->
-            case maps:find({Name, Arity}, BindingAttributes) of
-                {ok, Val} ->
-                    {ok, Val};
+            case maps:find({Name, Arity}, BFunOptions) of
+                {ok, Options} ->
+                    {ok, Options};
                 error ->
-                    {ok, BindingAllAttributes}
+                    case BAllOptions of
+                        none ->
+                            error;
+                        #{} ->
+                            {ok, BAllOptions}
+                    end
             end
     end.
 
