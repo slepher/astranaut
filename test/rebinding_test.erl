@@ -10,6 +10,8 @@
 
 -include("rebinding.hrl").
 
+-rebinding({test/1, [debug]}).
+
 %% API
 -export([test/1]).
 
@@ -20,7 +22,7 @@ test(ABC) ->
     {ABC, ABC} = {ABC + 1, ABC + 1},
     {ABC, ABC} = {ABC + 1, ABC + 1},
     EFG = ABC + 1,
-    ABC = ABC + 1,
+    +ABC = ABC + 1,
     F = fun EFG (0, {EFG, EFG} = ABC, ABC) -> 0; EFG (N, ABC, ABC) -> EFG(N - 1) end,
     ABC = 
         case EFG of
