@@ -355,15 +355,11 @@ walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
 
 map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|RestQualifiers], Opts)
   when (GenerateType == generate) or (GenerateType == b_generate) ->
-    astranaut_traverse_monad:then(
-      astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
     astranaut_traverse_monad:bind(
-      astranaut_traverse:map_m(F, Expression, Opts),
+      map_m_qualifiers_expression(F, Expression, Opts),
       fun(Expression1) ->
               astranaut_traverse_monad:then(
-                astranaut_traverse_monad:then(
-                  astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
-                  astranaut_traverse_monad:modify(fun entry_function_scope/1)),
+                astranaut_traverse_monad:modify(fun entry_function_scope/1),
                 astranaut_traverse_monad:bind(
                   astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern}),
                   fun(Pattern1) ->
@@ -376,17 +372,13 @@ map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|R
                                       astranaut_traverse_monad:return({LastExpression1, [Generate1|RestQualifiers1]}))
                             end)
                   end))
-      end));
+      end);
 map_m_qualifiers(F, LastExpression, [Expression|RestQualifiers], Opts) ->
-    astranaut_traverse_monad:then(
-      astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
     astranaut_traverse_monad:bind(
-      astranaut_traverse:map_m(F, Expression, Opts),
+      map_m_qualifiers_expression(F, Expression, Opts),
       fun(Expression1) ->
               astranaut_traverse_monad:then(
-                astranaut_traverse_monad:then(
-                  astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
-                  astranaut_traverse_monad:modify(fun entry_function_scope/1)),
+                astranaut_traverse_monad:modify(fun entry_function_scope/1),
                 astranaut_traverse_monad:bind(
                   map_m_qualifiers(F, LastExpression, RestQualifiers, Opts),
                   fun({LastExpression1, RestQualifiers1}) ->
@@ -394,7 +386,7 @@ map_m_qualifiers(F, LastExpression, [Expression|RestQualifiers], Opts) ->
                             astranaut_traverse_monad:modify(fun exit_function_scope/1),
                             astranaut_traverse_monad:return({LastExpression1, [Expression1|RestQualifiers1]}))
                   end))
-      end));
+      end);
 map_m_qualifiers(F, LastExpression, [], Opts) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, LastExpression, Opts),
@@ -403,6 +395,17 @@ map_m_qualifiers(F, LastExpression, [], Opts) ->
                 astranaut_traverse_monad:modify(fun exit_function_scope/1),
                 astranaut_traverse_monad:return({LastExpression1, []}))
       end).
+
+map_m_qualifiers_expression(F, Expression, Opts) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
+      astranaut_traverse_monad:bind(
+        astranaut_traverse:map_m(F, Expression, Opts),
+        fun(Expression1) ->
+                astranaut_traverse_monad:then(
+                  astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
+                  astranaut_traverse_monad:return(Expression1))
+        end)).
 
 add_var({var, Line, Varname} = Var, 
         #{global_varnames := GlobalVarnames,
