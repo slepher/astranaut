@@ -138,15 +138,19 @@ test_function(A) ->
     {A, B}.
 
 test_function_origin(A) ->
-    A_4 = 
-        bind(begin A_1 = A + 1, A_1 end,
-             begin A_2 = A + 2, A_2 end,
-             fun(A_1) ->
-                     A_4 = A_1 + 10,
-                     A_4
+    A = 
+        bind([],
+             fun(_) ->
+                     bind(begin A_1 = A + 1, A_1 end,
+                          fun(A_1) ->
+                                  bind(
+                                    [begin A_2 = A_1 + 1, A_2 end],
+                                    fun(B) ->
+                                            {A_1, B}
+                                    end)
+                          end)
              end),
-    A_5 = A_4 + 1,
-    A_5.
+    A.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -156,5 +160,8 @@ test_function_origin(A) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+bind(A, K) ->
+    A(K).
+
 bind(A_1, _A_2, K) ->
     K(A_1 + 10).

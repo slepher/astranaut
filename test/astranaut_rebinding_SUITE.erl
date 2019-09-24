@@ -129,7 +129,7 @@ test_rebinding_lc() ->
 %%--------------------------------------------------------------------
 test_rebinding_lc(_Config) -> 
     A = astranaut_rebinding_test:test_lc(10),
-    ?assertEqual([{12, 11}], A),
+    ?assertEqual([{12, 13}], A),
     ok.
 
 test_rebiding_function(_Config) ->
