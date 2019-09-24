@@ -330,11 +330,11 @@ map_m_function_args(_F, [], _Opts, FunctionArgs1) ->
 map_m_function_args(F, [FunctionArgExpression|T], Opts, FunctionArgs1) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse_monad:then(
-        astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
+        astranaut_traverse_monad:modify(fun entry_function_arg_scope/1),
         astranaut_traverse:map_m(F, FunctionArgExpression, Opts)),
       fun(FunctionArgExpression1) ->
               astranaut_traverse_monad:then(
-                astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
+                astranaut_traverse_monad:modify(fun exit_function_arg_scope/1),
                 map_m_function_args(F, T, Opts, [FunctionArgExpression1|FunctionArgs1]))
       end).
 
@@ -356,10 +356,14 @@ walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
 map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|RestQualifiers], Opts)
   when (GenerateType == generate) or (GenerateType == b_generate) ->
     astranaut_traverse_monad:bind(
-      map_m_qualifiers_expression(F, Expression, Opts),
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:modify(fun entry_function_scope/1),
+        astranaut_traverse:map_m(F, Expression, Opts)),
       fun(Expression1) ->
               astranaut_traverse_monad:then(
-                astranaut_traverse_monad:modify(fun entry_function_scope/1),
+                astranaut_traverse_monad:then(
+                  astranaut_traverse_monad:modify(fun exit_function_scope/1),
+                  astranaut_traverse_monad:modify(fun entry_function_scope/1)),
                 astranaut_traverse_monad:bind(
                   astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern}),
                   fun(Pattern1) ->
@@ -375,7 +379,7 @@ map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|R
       end);
 map_m_qualifiers(F, LastExpression, [Expression|RestQualifiers], Opts) ->
     astranaut_traverse_monad:bind(
-      map_m_qualifiers_expression(F, Expression, Opts),
+      astranaut_traverse:map_m(F, Expression, Opts),
       fun(Expression1) ->
               astranaut_traverse_monad:then(
                 astranaut_traverse_monad:modify(fun entry_function_scope/1),
@@ -395,17 +399,6 @@ map_m_qualifiers(F, LastExpression, [], Opts) ->
                 astranaut_traverse_monad:modify(fun exit_function_scope/1),
                 astranaut_traverse_monad:return({LastExpression1, []}))
       end).
-
-map_m_qualifiers_expression(F, Expression, Opts) ->
-    astranaut_traverse_monad:then(
-      astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
-      astranaut_traverse_monad:bind(
-        astranaut_traverse:map_m(F, Expression, Opts),
-        fun(Expression1) ->
-                astranaut_traverse_monad:then(
-                  astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
-                  astranaut_traverse_monad:return(Expression1))
-        end)).
 
 add_var({var, Line, Varname} = Var, 
         #{global_varnames := GlobalVarnames,
@@ -472,6 +465,7 @@ exit_scope_group(ScopeGroupType,
                    local_varnames := LocalVarnames,
                    clause_stack := [{ScopeGroupType, ScopeGroupVarnames}|ClauseStack]
                   } = Context) ->
+    io:format("exit scope group ~p ~p~n", [ScopeGroupType, LocalVarnames]),
     GlobalVarnames1 = ordsets:union(ScopeGroupVarnames, GlobalVarnames),
     LocalVarnames1 = ordsets:union(ScopeGroupVarnames, LocalVarnames),
     Context#{global_varnames => GlobalVarnames1, 
@@ -486,6 +480,16 @@ entry_function_scope(Context) ->
 
 exit_function_scope(Context) ->
     Context1 = exit_varname_scope(Context),
+    exit_rename_map_scope(Context1).
+
+entry_function_arg_scope(Context) ->
+    entry_rename_map_scope(Context).
+
+exit_function_arg_scope(#{local_varnames := LocalVarnames, clause_stack := [{BlockType, BlockVarnames}|T]} = Context) ->
+    BlockVarnames1 = ordsets:union(LocalVarnames, BlockVarnames),
+    ClauseStack1 = [{BlockType, BlockVarnames1}|T],
+    Context1 = Context#{clause_stack => ClauseStack1},
+    io:format("varnames 1 is ~p ~p~n", [LocalVarnames, BlockVarnames1]),
     exit_rename_map_scope(Context1).
 
 entry_scope(Context) ->

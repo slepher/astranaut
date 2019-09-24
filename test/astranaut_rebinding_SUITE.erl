@@ -108,7 +108,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_rebinding_lc, test_rebiding_function].
+    [test_rebinding_lc, test_rebinding_lc_origin, test_rebiding_function].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -129,6 +129,11 @@ test_rebinding_lc() ->
 %%--------------------------------------------------------------------
 test_rebinding_lc(_Config) -> 
     A = astranaut_rebinding_test:test_lc(10),
+    ?assertEqual([{15, 13}], A),
+    ok.
+
+test_rebinding_lc_origin(_Config) -> 
+    A = astranaut_rebinding_test:test_lc_origin(10),
     ?assertEqual([{12, 13}], A),
     ok.
 
