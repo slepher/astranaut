@@ -6,14 +6,18 @@
 %%% @end
 %%% Created : 20 Sep 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(rebinding_test).
+-module(astranaut_rebinding_test).
 
 -include("rebinding.hrl").
 
-%-rebinding_fun({[hello, hello_f], debug}).
+-rebinding_all([]).
+-rebinding_fun({[test_lc, test_function], debug}).
+-rebinding_fun({[test_lc_origin, test_function_origin], non_rebinding}).
 
 %% API
 -export([test/1, hello/2, hello_f/1]).
+-export([test_lc/1, test_lc_origin/1]).
+-export([test_function/1, test_function_origin/1]).
 
 %%%===================================================================
 %%% API
@@ -86,10 +90,14 @@ hello(A, B) ->
   B = 
     case A of
         B -> 
-          B = A + B,
-          A = A + B,
-          B = A + B,
-          B;
+            A = 
+                begin
+                    B = A + B,
+                    A = A + B,
+                    A
+                end,
+            B = A + B,
+            B;
         A ->
           B = A + B,
           B
@@ -104,6 +112,41 @@ hello_f(A) ->
     A = F(A),
     A.
 
+test_lc(A) ->
+    A = [{A, B} || 
+            A <- [begin A = A + 2, A end], 
+            B <- [begin A = A + 1, A end]
+        ],
+    A.
+
+test_lc_origin(A) ->
+    A = [{A_1, B} || 
+            A_1 <- [begin A_1 = A + 2, A_1 end], 
+            B <- [begin A_2 = A_1 + 1, A_2 end]
+        ],
+    A.
+
+test_function(A) ->
+    B = 
+        bind(begin A = A + 1, A end,
+             begin A = A + 2, A end,
+             fun(A) ->
+                     A = A + 10,
+                     A
+             end),
+    A = A + 1,
+    {A, B}.
+
+test_function_origin(A) ->
+    A_4 = 
+        bind(begin A_1 = A + 1, A_1 end,
+             begin A_2 = A + 2, A_2 end,
+             fun(A_1) ->
+                     A_4 = A_1 + 10,
+                     A_4
+             end),
+    A_5 = A_4 + 1,
+    A_5.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -113,3 +156,5 @@ hello_f(A) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+bind(A_1, _A_2, K) ->
+    K(A_1 + 10).

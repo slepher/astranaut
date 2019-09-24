@@ -53,24 +53,29 @@ format_error(Message) ->
 walk_form({function, LINE, Name, Arity, Clauses} = Function, BFunOptions, BAllOptions) ->
     case match_rebinding(Name, Arity, BFunOptions, BAllOptions) of
         {ok, BindingOpts} ->
-            ClausesM = 
-                astranaut_traverse_monad:map_m(
-                  fun(Clause) ->
-                          Return = walk_function_clause(Clause),
-                          astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
-                  end, Clauses),
-            astranaut_traverse_monad:lift_m(
-              fun(Clauses1) ->
-                      Function1 = {function, LINE, Name, Arity, Clauses1},
-                      case maps:get(debug, BindingOpts, false) of
-                          true ->
-                              io:format("~s~n", [astranaut:safe_to_string(Function1)]);
-                          false ->
-                              ok
-                      end,
-                      Function1
-
-              end, ClausesM);
+            case maps:get(non_rebinding, BindingOpts, false) of
+                false ->
+                    ClausesM = 
+                        astranaut_traverse_monad:map_m(
+                          fun(Clause) ->
+                                  Return = walk_function_clause(Clause),
+                                  astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
+                          end, Clauses),
+                    astranaut_traverse_monad:lift_m(
+                      fun(Clauses1) ->
+                              Function1 = {function, LINE, Name, Arity, Clauses1},
+                              case maps:get(debug, BindingOpts, false) of
+                                  true ->
+                                      io:format("~s~n", [astranaut:safe_to_string(Function1)]);
+                                  false ->
+                                      ok
+                              end,
+                              Function1
+                                  
+                      end, ClausesM);
+                true ->
+                    astranaut_traverse_monad:return(Function)
+            end;
         error ->
             astranaut_traverse_monad:return(Function)
     end;
@@ -129,6 +134,12 @@ validate_option_key(debug, true) ->
     ok;
 validate_option_key(debug, false) ->
     ok;
+validate_option_key(non_rebinding, true) ->
+    ok;
+validate_option_key(non_rebinding, false) ->
+    ok;
+validate_option_key(non_rebinding, _NoRebinding) ->
+    error;
 validate_option_key(debug, _Debug) ->
     error;
 validate_option_key(_Key, _Value) ->
@@ -204,12 +215,20 @@ clause_parent_type(named_fun_expr) ->
     fun_expr;
 clause_parent_type(match_expr) ->
     match_expr;
+clause_parent_type(application) ->
+    application;
 clause_parent_type(_Type) ->
     none.
 
 walk_node_1({ComprehensionType, _Line, _Expression, _Qualifiers} = Node, #{} = Context, #{step := pre} = Attr) 
   when (ComprehensionType == lc) or (ComprehensionType == bc) ->
     NodeM = walk_comprehension(Node), 
+    {Node1, Context1} = 
+        astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
+    {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
+    astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true});
+walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre} = Attr) ->
+    NodeM = walk_function_call(Node),
     {Node1, Context1} = 
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
     {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
@@ -302,6 +321,32 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
 walk_node_1(Node, Acc, #{}) ->
     {Node, Acc}.
 
+walk_function_call({call, Line, Function, FunctionArgs}) ->
+    Opts = #{node => expression, traverse => all},
+    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    astranaut_traverse_monad:bind(
+      astranaut_traverse:map_m(F, Function, Opts),
+      fun(Function1) ->
+              astranaut_traverse_monad:bind(
+                map_m_function_args(F, FunctionArgs, Opts, []),
+                fun(FunctionArgs1) ->
+                        astranaut_traverse_monad:return({call, Line, Function1, FunctionArgs1})
+                end)
+      end).
+
+map_m_function_args(_F, [], _Opts, FunctionArgs1) ->
+    astranaut_traverse_monad:return(lists:reverse(FunctionArgs1));
+map_m_function_args(F, [FunctionArgExpression|T], Opts, FunctionArgs1) ->
+    astranaut_traverse_monad:bind(
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:modify(fun entry_rename_map_scope/1),
+        astranaut_traverse:map_m(F, FunctionArgExpression, Opts)),
+      fun(FunctionArgExpression1) ->
+              astranaut_traverse_monad:then(
+                astranaut_traverse_monad:modify(fun exit_rename_map_scope/1),
+                map_m_function_args(F, T, Opts, [FunctionArgExpression1|FunctionArgs1]))
+      end).
+
 walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
@@ -312,32 +357,44 @@ walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
                 entry_function_scope(Context#{clause_stack => ClauseStack1})
         end),
       astranaut_traverse_monad:bind(
-        map_m_qualifiers(F, Qualifiers, Opts),
-        fun(Qualifiers1) ->
-                astranaut_traverse_monad:bind(
-                  astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
-                  fun(Expression1) ->
-                          astranaut_traverse_monad:then(
-                            astranaut_traverse_monad:modify(
-                              fun(#{clause_stack := [{lc_expr, _}|ClauseStack]} = Context) ->
-                                      exit_function_scope(Context#{clause_stack => ClauseStack})
-                              end),
-                            astranaut_traverse_monad:return(
-                              {ComprehensionType, Line, Expression1, Qualifiers1}))
-                  end)
-        end)).
+        astranaut_traverse_monad:then(
+          astranaut_traverse_monad:modify(fun entry_function_scope/1),
+          %% astranaut_traverse_monad:return(ok),
+          map_m_qualifiers(F, Qualifiers, Opts)),
+          fun(Qualifiers1) ->
+                  astranaut_traverse_monad:then(
+                    %% astranaut_traverse_monad:modify(fun exit_function_scope/1),
+                    astranaut_traverse_monad:return(ok),
+                    astranaut_traverse_monad:bind(
+                      astranaut_traverse:map_m(F, Expression, Opts#{node => expression}),
+                      fun(Expression1) ->
+                              astranaut_traverse_monad:then(
+                                astranaut_traverse_monad:modify(
+                                  fun(#{clause_stack := [{lc_expr, _}|ClauseStack]} = Context) ->
+                                          exit_function_scope(Context#{clause_stack => ClauseStack})
+                                  end),
+                                astranaut_traverse_monad:return(
+                                  {ComprehensionType, Line, Expression1, Qualifiers1}))
+                      end))
+          end)).
 
 map_m_qualifiers(F, Qualifiers, Opts) ->
     map_m_qualifiers(F, Qualifiers, Opts, []).
 
 map_m_qualifiers(F, [{GenerateType, Line, Pattern, Expression}|T], Opts, Acc)
   when (GenerateType == generate) or (GenerateType == b_generate) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:modify(fun entry_lc_scope/1),
+      %%  astranaut_traverse_monad:return(ok),
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Expression, Opts),
       fun(Expression1) ->
               Generate1 = {GenerateType, Line, Pattern, Expression1},
-              map_m_qualifiers(F, T, Opts, [Generate1|Acc])
-      end);
+              astranaut_traverse_monad:then(
+                astranaut_traverse_monad:modify(fun exit_lc_scope/1),
+                %% astranaut_traverse_monad:return(ok),
+                map_m_qualifiers(F, T, Opts, [Generate1|Acc]))
+      end));
 map_m_qualifiers(F, [Expression|T], Opts, Acc) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Expression, Opts),
@@ -435,6 +492,12 @@ entry_function_scope(Context) ->
 exit_function_scope(Context) ->
     Context1 = exit_varname_scope(Context),
     exit_rename_map_scope(Context1).
+
+entry_lc_scope(Context) ->
+    entry_rename_map_scope(Context).
+
+exit_lc_scope(Context) ->
+    exit_rename_map_scope(Context).
 
 entry_scope(Context) ->
     Context1 = entry_rename_map_scope(Context),
