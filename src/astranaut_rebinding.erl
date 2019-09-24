@@ -166,7 +166,7 @@ walk_function_clause(Clause) ->
                  local_rename_map => maps:new(), 
                  scope_varnames_stack => [], 
                  scope_rename_map_stack => [],
-                 clause_stack => [{fun_expr, ordsets:new()}]},
+                 clause_stack => [{fun_expr, ordsets:new(), maps:new()}]},
     astranaut_traverse:map_with_state(
         fun(Node, Acc, Attr) ->
                 walk_node(Node, Acc, Attr)
@@ -181,7 +181,7 @@ walk_node(Node, #{} = Context, #{step := pre} = Attr) ->
             Context1 = entry_scope_group(ClauseParentType, Context),
             walk_node_1(Node, Context1, Attr)
     end;
-walk_node(Node, #{clause_stack := [{BlockType, _BlockVarnames}|_T]} = Context,
+walk_node(Node, #{clause_stack := [{BlockType, _BlockVarnames, _ScopeRenameMap}|_T]} = Context,
           #{step := post} = Attr) ->
     NodeType = erl_syntax:type(Node),
     case clause_parent_type(NodeType) of
@@ -260,12 +260,12 @@ walk_node_1({named_fun, _Line, _Name, _Clauses} = Node,
     Context1 = exit_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [{fun_expr, _}|_T]} = Context, 
+          #{clause_stack := [{fun_expr, _, _}|_T]} = Context, 
           #{step := pre}) ->
     Context1 = entry_function_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [{fun_expr, _}|_T]} = Context, 
+          #{clause_stack := [{fun_expr, _, _}|_T]} = Context, 
           #{step := post}) ->
     Context1 = exit_function_scope(Context),
     {Node, Context1};
@@ -283,7 +283,7 @@ walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node,
 walk_node_1({var, _Line, '_'} = Var, #{} = Acc, #{}) ->
     {Var, Acc};
 walk_node_1({op, _Line1, '+', {var, _Line3, _Varname} = Var}, 
-            #{clause_stack := [{match_expr, _}|_T]} = Context, #{node := pattern, step := pre}) ->
+            #{clause_stack := [{match_expr, _, _}|_T]} = Context, #{node := pattern, step := pre}) ->
     Var1 = rename_var(Var, Context),
     astranaut_traverse:traverse_fun_return(#{node => Var1, state => Context, continue => true});
 walk_node_1({var, _Line, _Varname} = Var, #{} = Acc, #{node := expression}) ->
@@ -293,16 +293,16 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Acc, #{node := guard}) ->
     {rename_var(Var, Acc), Acc};
 %% rebind var if current node is function pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
-          #{clause_stack := [{fun_expr, _}|_T]} = Context, #{node := pattern}) ->
+          #{clause_stack := [{fun_expr, _, _}|_T]} = Context, #{node := pattern}) ->
     add_var(Var, Context);
 %% rebind var if current node is match pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
-            #{clause_stack := [{match_expr, _}|_T]} = Context, #{node := pattern}) ->
+            #{clause_stack := [{match_expr, _, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
     %% io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
 walk_node_1({var, _Line, _Varname} = Var, 
-            #{clause_stack := [{lc_expr, _}|_T]} = Context, #{node := pattern}) ->
+            #{clause_stack := [{lc_expr, _, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
     %% io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
@@ -458,18 +458,23 @@ new_variable_name(Variable, Variables, N) ->
     end.
 
 entry_scope_group(ScopeGroupType, #{clause_stack := ClauseStacks} = Context) ->
-    Context#{clause_stack => [{ScopeGroupType, ordsets:new()}|ClauseStacks]}.
+    Context#{clause_stack => [{ScopeGroupType, ordsets:new(), maps:new()}|ClauseStacks]}.
 
 exit_scope_group(ScopeGroupType,
                  #{global_varnames := GlobalVarnames, 
                    local_varnames := LocalVarnames,
-                   clause_stack := [{ScopeGroupType, ScopeGroupVarnames}|ClauseStack]
+                   global_rename_map := GlobalRenameMap,
+                   local_rename_map := LocalRenameMap,
+                   clause_stack := [{ScopeGroupType, ScopeGroupVarnames, ScopeRenameMap}|ClauseStack]
                   } = Context) ->
-    io:format("exit scope group ~p ~p~n", [ScopeGroupType, LocalVarnames]),
     GlobalVarnames1 = ordsets:union(ScopeGroupVarnames, GlobalVarnames),
     LocalVarnames1 = ordsets:union(ScopeGroupVarnames, LocalVarnames),
+    GlobalRenameMap1 = maps:merge(GlobalRenameMap, ScopeRenameMap),
+    LocalRenameMap1 = maps:merge(LocalRenameMap, ScopeRenameMap),
     Context#{global_varnames => GlobalVarnames1, 
              local_varnames => LocalVarnames1,
+             global_rename_map => GlobalRenameMap1,
+             local_rename_map => LocalRenameMap1,
              clause_stack => ClauseStack
             }.
 
@@ -485,11 +490,13 @@ exit_function_scope(Context) ->
 entry_function_arg_scope(Context) ->
     entry_rename_map_scope(Context).
 
-exit_function_arg_scope(#{local_varnames := LocalVarnames, clause_stack := [{BlockType, BlockVarnames}|T]} = Context) ->
+exit_function_arg_scope(#{local_varnames := LocalVarnames, 
+                          local_rename_map := LocalRenameMap,
+                          clause_stack := [{BlockType, BlockVarnames, ScopeRenameMap}|T]} = Context) ->
     BlockVarnames1 = ordsets:union(LocalVarnames, BlockVarnames),
-    ClauseStack1 = [{BlockType, BlockVarnames1}|T],
+    ScopeRenameMap1 = maps:merge(ScopeRenameMap, LocalRenameMap),
+    ClauseStack1 = [{BlockType, BlockVarnames1, ScopeRenameMap1}|T],
     Context1 = Context#{clause_stack => ClauseStack1},
-    io:format("varnames 1 is ~p ~p~n", [LocalVarnames, BlockVarnames1]),
     exit_rename_map_scope(Context1).
 
 entry_scope(Context) ->
@@ -497,9 +504,9 @@ entry_scope(Context) ->
     Context2 = entry_varname_scope(Context1),
     entry_pattern_scope(Context2).
 
-exit_scope(#{local_varnames := LocalVarnames, clause_stack := [{BlockType, BlockVarnames}|T]} = Context) ->
+exit_scope(#{local_varnames := LocalVarnames, clause_stack := [{BlockType, BlockVarnames, ScopeRenameMap}|T]} = Context) ->
     BlockVarnames1 = ordsets:union(LocalVarnames, BlockVarnames),
-    ClauseStack1 = [{BlockType, BlockVarnames1}|T],
+    ClauseStack1 = [{BlockType, BlockVarnames1, ScopeRenameMap}|T],
     Context1 = Context#{clause_stack => ClauseStack1},
     Context2 = exit_varname_scope(Context1),
     exit_rename_map_scope(Context2).

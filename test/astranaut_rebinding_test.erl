@@ -11,7 +11,7 @@
 -include("rebinding.hrl").
 
 -rebinding_all([]).
--rebinding_fun({[test_lc, test_function], debug}).
+%% -rebinding_fun({[test_lc, test_function], debug}).
 -rebinding_fun({[test_lc_origin, test_function_origin], non_rebinding}).
 
 %% API
@@ -33,12 +33,13 @@ test_lc(A) ->
     A.
 
 test_lc_origin(A) ->
-    A_1 = [{A_3, B}
-	   || A_1 <- [begin A_1 = A + 2, A_1 end],
-	      B <- [begin A_2 = A_1 + 1, A_2 end],
-              begin A_3 = A_1 + 3, true end,
-	      is_ok(begin A_4 = A_3 + 3, A_4 end),
-              true],
+    A_1 = [{A_4, B}
+	   || B <- [begin A_1 = A + 2, A_1 end],
+	      A_1 <- [begin A_1 = A + 1, A_1 end],
+	      begin A_2 = A_1 + 3, A_2, true end,
+	      is_ok(begin A_3 = A_2 + 3, A_3 end,
+		    begin A_4 = A_2 + 4, A_4 end),
+	      true],
     A_1.
 
 test_function(A) ->
@@ -75,9 +76,6 @@ test_function_origin(A) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-is_ok(_A) ->
-    true.
-
 is_ok(_A1, _A2) ->
     true.
 
