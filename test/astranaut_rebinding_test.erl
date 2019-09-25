@@ -11,7 +11,7 @@
 -include("rebinding.hrl").
 
 -rebinding_all([]).
-%% -rebinding_fun({[test_lc, test_function], debug}).
+-rebinding_fun({[test_lc, test_function], debug}).
 -rebinding_fun({[test_lc_origin, test_function_origin], non_rebinding}).
 
 %% API
@@ -25,8 +25,8 @@
 test_lc(A) ->
     A = [{A, B} || 
             B <- [begin A = A + 2, A end], 
-            A <- [begin A = A + 1, A end],
             begin A = A + 3, A, true end,
+            A <- [begin A = A + 1, A end],
             is_ok(begin A = A + 3, A end, begin A = A + 4, A end),
             true
         ],
@@ -35,13 +35,12 @@ test_lc(A) ->
 test_lc_origin(A) ->
     A_1 = [{A_4, B}
 	   || B <- [begin A_1 = A + 2, A_1 end],
-	      A_1 <- [begin A_1 = A + 1, A_1 end],
-	      begin A_2 = A_1 + 3, A_2, true end,
+	      begin A_1 = A + 3, A_1, true end,
+	      A_2 <- [begin A_2 = A_1 + 1, A_2 end],
 	      is_ok(begin A_3 = A_2 + 3, A_3 end,
 		    begin A_4 = A_2 + 4, A_4 end),
 	      true],
     A_1.
-
 test_function(A) ->
     B = 
         bind(begin A = A + 1, A end,

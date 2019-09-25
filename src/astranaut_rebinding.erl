@@ -187,7 +187,6 @@ walk_node(Node, #{clause_stack := [{BlockType, _BlockVarnames, _ScopeRenameMap}|
     case clause_parent_type(NodeType) of
         BlockType ->
             Context2 = exit_scope_group(BlockType, Context),
-            %% io:format("exit block ~p ~p ~p ~n", [BlockType, Context1, Context2]),
             walk_node_1(Node, Context2, Attr);
         _ ->
             walk_node_1(Node, Context, Attr)
@@ -299,12 +298,10 @@ walk_node_1({var, _Line, _Varname} = Var,
 walk_node_1({var, _Line, _Varname} = Var, 
             #{clause_stack := [{match_expr, _, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
-    %% io:format("var ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
 walk_node_1({var, _Line, _Varname} = Var, 
             #{clause_stack := [{lc_expr, _, _}|_T]} = Context, #{node := pattern}) ->
     {Var1, Context1} = add_var(Var, Context),
-    %% io:format("lc ~p ~p~n context 1 ~p~n context 2 ~p~n", [Var, Var1, Context, Context1]),
     {Var1, Context1};
 
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{}) ->
@@ -342,18 +339,24 @@ walk_comprehension({ComprehensionType, Line, Expression, Qualifiers}) ->
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     astranaut_traverse_monad:then(
-      astranaut_traverse_monad:modify(fun(Context) -> entry_scope_group(lc_expr, Context) end),
+      astranaut_traverse_monad:then(
+        astranaut_traverse_monad:modify(fun(Context) -> entry_scope_group(lc_expr, Context) end),
+        astranaut_traverse_monad:modify(fun entry_function_scope/1)),
       astranaut_traverse_monad:bind(
-        astranaut_traverse_monad:then(
-          astranaut_traverse_monad:modify(fun entry_function_scope/1),
-          map_m_qualifiers(F, Expression, Qualifiers, Opts)),
-          fun({Expression1, Qualifiers1}) ->
-                  astranaut_traverse_monad:then(
-                    astranaut_traverse_monad:modify(fun(Context) -> exit_scope_group(lc_expr, Context) end),
-                    astranaut_traverse_monad:return({ComprehensionType, Line, Expression1, Qualifiers1}))
-          end)).
+        map_m_qualifiers(F, Qualifiers, Opts, []),
+        fun(Qualifiers1) ->
+                astranaut_traverse_monad:bind(
+                  astranaut_traverse:map_m(F, Expression, Opts),
+                  fun(Expression1) ->
+                          astranaut_traverse_monad:then(
+                            astranaut_traverse_monad:then(
+                              astranaut_traverse_monad:modify(fun exit_function_scope/1),
+                              astranaut_traverse_monad:modify(fun(Context) -> exit_scope_group(lc_expr, Context) end)),
+                            astranaut_traverse_monad:return({ComprehensionType, Line, Expression1, Qualifiers1}))
+                  end)
+        end)).
 
-map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|RestQualifiers], Opts)
+map_m_qualifiers(F, [{GenerateType, Line, Pattern, Expression}|RestQualifiers], Opts, Acc)
   when (GenerateType == generate) or (GenerateType == b_generate) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse_monad:then(
@@ -361,44 +364,24 @@ map_m_qualifiers(F, LastExpression, [{GenerateType, Line, Pattern, Expression}|R
         astranaut_traverse:map_m(F, Expression, Opts)),
       fun(Expression1) ->
               astranaut_traverse_monad:then(
-                astranaut_traverse_monad:then(
-                  astranaut_traverse_monad:modify(fun exit_function_scope/1),
-                  astranaut_traverse_monad:modify(fun entry_function_scope/1)),
+                astranaut_traverse_monad:modify(fun exit_function_scope/1),
                 astranaut_traverse_monad:bind(
-                  astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern}),
+                  astranaut_traverse_monad:then(
+                    astranaut_traverse_monad:modify(fun entry_pattern_scope/1),
+                    astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern})),
                   fun(Pattern1) ->
                           Generate1 = {GenerateType, Line, Pattern1, Expression1},
-                          astranaut_traverse_monad:bind(
-                            map_m_qualifiers(F, LastExpression, RestQualifiers, Opts),
-                            fun({LastExpression1, RestQualifiers1}) ->
-                                    astranaut_traverse_monad:then(
-                                      astranaut_traverse_monad:modify(fun exit_function_scope/1),
-                                      astranaut_traverse_monad:return({LastExpression1, [Generate1|RestQualifiers1]}))
-                            end)
+                          map_m_qualifiers(F, RestQualifiers, Opts, [Generate1|Acc])
                   end))
       end);
-map_m_qualifiers(F, LastExpression, [Expression|RestQualifiers], Opts) ->
+map_m_qualifiers(F, [Expression|RestQualifiers], Opts, Acc) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Expression, Opts),
       fun(Expression1) ->
-              astranaut_traverse_monad:then(
-                astranaut_traverse_monad:modify(fun entry_function_scope/1),
-                astranaut_traverse_monad:bind(
-                  map_m_qualifiers(F, LastExpression, RestQualifiers, Opts),
-                  fun({LastExpression1, RestQualifiers1}) ->
-                          astranaut_traverse_monad:then(
-                            astranaut_traverse_monad:modify(fun exit_function_scope/1),
-                            astranaut_traverse_monad:return({LastExpression1, [Expression1|RestQualifiers1]}))
-                  end))
+              map_m_qualifiers(F, RestQualifiers, Opts, [Expression1|Acc])
       end);
-map_m_qualifiers(F, LastExpression, [], Opts) ->
-    astranaut_traverse_monad:bind(
-      astranaut_traverse:map_m(F, LastExpression, Opts),
-      fun(LastExpression1) ->
-              astranaut_traverse_monad:then(
-                astranaut_traverse_monad:modify(fun exit_function_scope/1),
-                astranaut_traverse_monad:return({LastExpression1, []}))
-      end).
+map_m_qualifiers(_F, [], _Opts, Acc) ->
+    astranaut_traverse_monad:return(lists:reverse(Acc)).
 
 add_var({var, Line, Varname} = Var, 
         #{global_varnames := GlobalVarnames,
