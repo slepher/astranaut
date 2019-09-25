@@ -14,7 +14,7 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
--export([map_m/3, map_m_children/3]).
+-export([map_m/3, map_m_children/3, m_subtrees/3]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
 -export([transform_mapfold_f/2]).
@@ -283,80 +283,64 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
 
-map_m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
-    map_m_1(F, Nodes, Opts);
-map_m_subtrees(F, [NameTrees, Clauses], #{parent := named_fun_expr} = Opts) ->
+map_m_subtrees(F, Nodes, Opts) ->
+    SubtreesM = m_subtrees(F, Nodes, Opts),
+    sequence(SubtreesM, Opts).
+
+sequence([TreeM|TreeMs], Opts) ->
+    monad_bind(
+      TreeM,
+      fun(Tree) ->
+              monad_bind(
+                sequence(TreeMs, Opts),
+                fun(Trees) ->
+                        monad_return([Tree|Trees], Opts)
+                end, Opts)
+      end, Opts);
+sequence([], Opts) ->
+    monad_return([], Opts).
+
+m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
+    lists:map(
+      fun(Node) ->
+              map_m_1(F, Node, Opts)
+      end, Nodes);
+m_subtrees(F, [NameTrees, Clauses], #{parent := named_fun_expr} = Opts) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-    monad_bind(
-      map_m_1(F, Names, Opts#{node => pattern}),
-      fun(Name1) ->
-              monad_bind(
-                map_m_1(F, Clauses, Opts#{node => expression}),
-                fun(Clauses1) ->
-                        monad_return([Name1, Clauses1], Opts)
-                end, Opts)
-      end, Opts);
-map_m_subtrees(F, [Patterns, Expressions], #{parent := match_expr, match_right_first := true} = Opts) ->
-    %% if node type is match_expr and match_right_first is true
-    %% make first subtree pattern, make second subtree expression
-    %% but traverse second tree first
-    monad_bind(
-      map_m_1(F, Expressions, Opts#{node => expression}),
-      fun(NExpressions) ->
-              monad_bind(
-                map_m_1(F, Patterns, Opts#{node => pattern}),
-                fun(NPatterns) ->
-                        monad_return([NPatterns, NExpressions], Opts)
-                end, Opts)
-      end, Opts);
-map_m_subtrees(F, [Patterns, Expressions], #{parent := Parent} = Opts) 
+    [map_m_1(F, Names, Opts#{node => pattern}),
+     map_m_1(F, Clauses, Opts#{node => expression})];
+m_subtrees(F, [Patterns, Expressions], #{parent := Parent} = Opts) 
   when (Parent == match_expr) or (Parent == clause) ->
     %% if node type is match_expr or clause 
     %% make first subtree pattern, make second subtree expression
-    monad_bind(
-      map_m_1(F, Patterns, Opts#{node => pattern}),
-      fun(NPatterns) ->
-              monad_bind(
-                map_m_1(F, Expressions, Opts#{node => expression}),
-                fun(NExpressions) ->
-                        monad_return([NPatterns, NExpressions], Opts)
-                end, Opts)
-      end, Opts);
-map_m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
+    [map_m_1(F, Patterns, Opts#{node => pattern}),
+     map_m_1(F, Expressions, Opts#{node => expression})];
+m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
     %% if node type is clause contains guards 
     %% make first subtree pattern, make second subtree guard, make third subtree expression
-    monad_bind(
-      map_m_1(F, Patterns, Opts#{node => pattern}),
-      fun(NPatterns) ->
-              monad_bind(
-                map_m_1(F, Guards, Opts#{node => guard}),
-                fun(NGuards) ->
-                        monad_bind(
-                          map_m_1(F, Expressions, Opts#{node => expression}),
-                          fun(NExpressions) ->
-                                  monad_return([NPatterns, NGuards, NExpressions], Opts)
-                          end, Opts)
-                end, Opts)
-      end, Opts);
-map_m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
+    [map_m_1(F, Patterns, Opts#{node => pattern}),
+     map_m_1(F, Guards, Opts#{node => guard}),
+     map_m_1(F, Expressions, Opts#{node => expression})];
+m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
     Name = attribute_name(NameTree),
-    case Name of
-        export ->
-            % do not traverse export attribute
-            monad_return([[NameTree], BodyTrees], Opts);
-        import ->
-            % do not traverse import attribute
-            monad_return([[NameTree], BodyTrees], Opts);
-        _ ->
-            Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
-            monad_bind(
-              map_m_1(F, Bodies, Opts#{node => attribute, attribute => Name}),
-              fun(NBodies) ->
-                      monad_return([[NameTree], NBodies], Opts)
-              end, Opts)
-    end;
-map_m_subtrees(F, Nodes, Opts) ->
-    map_m_1(F, Nodes, Opts).
+    NameTreeM = monad_return([NameTree], Opts),
+    BodyTreesM = 
+        case Name of
+            export ->
+                monad_return(BodyTrees, Opts);
+            import ->
+                %% do not traverse import attribute
+                monad_return(BodyTrees, Opts);
+            _ ->
+                Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
+                map_m_1(F, Bodies, Opts#{node => attribute, attribute => Name})
+        end,
+    [NameTreeM, BodyTreesM];
+m_subtrees(F, Nodes, Opts) ->
+    lists:map(
+      fun(Node) ->
+              map_m_1(F, Node, Opts)
+      end, Nodes).
 
 attribute_name({tree, atom, _, Name}) ->
     Name.

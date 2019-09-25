@@ -217,7 +217,7 @@ clause_scope_type(named_fun_expr) ->
 clause_scope_type(_Other) ->
     nonfun_clause.
 
-walk_clause({clause, Line, Patterns, Guards, Expressions}, ScopeType) ->
+walk_clause({clause, Line, Patterns, Guards, Expressions} = Node, ScopeType) ->
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     PatternType = astranaut_rebinding_scope:scope_type_pattern(ScopeType),
