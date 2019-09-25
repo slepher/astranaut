@@ -16,17 +16,14 @@
 %%%===================================================================
 parse_transform(Forms, _Options) ->
     erlang:system_flag(backtrace_depth, 30),
-    {BFunOptions, BAllOptions, Warnings} = 
-        binding_options(Forms),
-    %dbg:tracer(),
-    %dbg:tpl(astranaut_rebinding, add_var, cx),
-    %dbg:p(self(), [c]),
+    {RebindingOptionsRec, Warnings} = 
+        astranaut_rebinding_options:rebinding_options(Forms),
     FormsMonad = 
         astranaut_traverse_monad:then(
           astranaut_traverse_monad:warnings(Warnings),
           astranaut_traverse_monad:map_m(
             fun(Form) ->
-                    walk_form(Form, BFunOptions, BAllOptions)
+                    walk_form(Form, RebindingOptionsRec)
             end, Forms)),
     File = astranaut:file(Forms),
     Return = astranaut_traverse_monad:eval(FormsMonad, #{}),
@@ -46,118 +43,32 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_form({function, LINE, Name, Arity, Clauses} = Function, BFunOptions, BAllOptions) ->
-    case match_rebinding(Name, Arity, BFunOptions, BAllOptions) of
-        {ok, BindingOpts} ->
-            case maps:get(non_rebinding, BindingOpts, false) of
-                false ->
-                    ClausesM = 
-                        astranaut_traverse_monad:map_m(
-                          fun(Clause) ->
-                                  Return = walk_function_clause(Clause),
-                                  astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
-                          end, Clauses),
-                    astranaut_traverse_monad:lift_m(
-                      fun(Clauses1) ->
-                              Function1 = {function, LINE, Name, Arity, Clauses1},
-                              case maps:get(debug, BindingOpts, false) of
-                                  true ->
-                                      io:format("~s~n", [astranaut:safe_to_string(Function1)]);
-                                  false ->
-                                      ok
-                              end,
-                              Function1
-                                  
-                      end, ClausesM);
-                true ->
-                    astranaut_traverse_monad:return(Function)
-            end;
+walk_form({function, LINE, Name, Arity, Clauses} = Function, RebindingOptionsRec) ->
+    case astranaut_rebinding_options:match_rebinding(Name, Arity, RebindingOptionsRec) of
+        {ok, RebindingOptions} ->
+            ClausesM = 
+                astranaut_traverse_monad:map_m(
+                  fun(Clause) ->
+                          Return = walk_function_clause(Clause),
+                          astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
+                  end, Clauses),
+            astranaut_traverse_monad:lift_m(
+              fun(Clauses1) ->
+                      Function1 = {function, LINE, Name, Arity, Clauses1},
+                      case maps:get(debug, RebindingOptions, false) of
+                          true ->
+                              io:format("~s~n", [astranaut:safe_to_string(Function1)]);
+                          false ->
+                              ok
+                      end,
+                      Function1
+                          
+              end, ClausesM);
         error ->
             astranaut_traverse_monad:return(Function)
     end;
-walk_form(Form, _BidingAttributes, _BidingAllAttributes) ->
+walk_form(Form, _RebindingOptionsRec) ->
     astranaut_traverse_monad:return(Form).
-
-binding_options(Forms) ->
-    BFunAttrs = astranaut:attributes_with_line(rebinding_fun, Forms),
-    BAllAttrs = astranaut:attributes_with_line(rebinding_all, Forms),
-    case {BFunAttrs, BAllAttrs} of
-        {[], []} ->
-            {#{}, #{}, []};
-        _ ->
-            {BFunOptions, Warnings2} = binding_fun_options(BFunAttrs),
-            {BAllOptions, Warnings1} = binding_all_options(BAllAttrs),
-            {BFunOptions, BAllOptions, Warnings1 ++ Warnings2}
-    end.
-
-binding_all_options([]) ->
-    {none, []};
-binding_all_options([{Line, Options}|_T]) ->
-    {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
-    Warnings2 = 
-        lists:map(
-          fun(Warning) ->
-                  {Line, astranaut_macro, Warning}
-          end, Warnings1),
-    {Options1, Warnings2}.
-
-binding_fun_options(BindingAttributes) ->
-    lists:foldl(
-      fun({Line, FunName}, Acc) when is_atom(FunName) ->
-              add_binding_options(FunName, #{}, Line, Acc);
-         ({Line, {FunName, Arity}}, Acc) when is_atom(FunName), is_integer(Arity) ->
-              add_binding_options({FunName, Arity}, #{}, Line, Acc);
-         ({Line, {FunName, Opts}}, Acc) ->
-              add_binding_options(FunName, Opts, Line, Acc)
-      end, {maps:new(), []}, BindingAttributes).
-
-add_binding_options(Funs, Options, Line, {Acc, Warnings}) when is_list(Funs) ->
-    lists:foldl(
-      fun(Fun, {Acc1, Warnings1}) ->
-              add_binding_options(Fun, Options, Line, {Acc1, Warnings1})
-      end, {Acc, Warnings}, Funs);
-
-add_binding_options(Fun, Options, Line, {Acc, Warnings}) ->
-    {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
-    Warnings2 = 
-        lists:map(
-          fun(Warning) ->
-                  {Line, astranaut_rebinding, Warning}
-          end, Warnings1),
-    {maps:put(Fun, Options1, Acc), Warnings ++ Warnings2}.
-
-validate_option_key(debug, true) ->
-    ok;
-validate_option_key(debug, false) ->
-    ok;
-validate_option_key(non_rebinding, true) ->
-    ok;
-validate_option_key(non_rebinding, false) ->
-    ok;
-validate_option_key(non_rebinding, _NoRebinding) ->
-    error;
-validate_option_key(debug, _Debug) ->
-    error;
-validate_option_key(_Key, _Value) ->
-    error.
-
-match_rebinding(Name, Arity, BFunOptions, BAllOptions) ->
-    case maps:find(Name, BFunOptions) of
-        {ok, Options} ->
-            {ok, Options};
-        error ->
-            case maps:find({Name, Arity}, BFunOptions) of
-                {ok, Options} ->
-                    {ok, Options};
-                error ->
-                    case BAllOptions of
-                        none ->
-                            error;
-                        #{} ->
-                            {ok, BAllOptions}
-                    end
-            end
-    end.
 
 walk_function_clause(Clause) ->
     Context0 = #{global_varnames => ordsets:new(), 
