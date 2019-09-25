@@ -14,7 +14,7 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
--export([map_m/3]).
+-export([map_m/3, map_m_children/3]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
 -export([transform_mapfold_f/2]).
@@ -178,6 +178,20 @@ map_m(F, Nodes, Opts) ->
     NF = transform_f(F, NOpts),
     map_m_1(NF, Nodes, NOpts).
 
+map_m_children(F, Node, Opts) ->
+    case erl_syntax:subtrees(Node) of
+        [] ->
+            monad_return(Node, Opts);
+        Subtrees ->
+            SyntaxType = erl_syntax:type(Node),
+            monad_bind(
+              map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
+              fun(Subtrees1) ->
+                      Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
+                      monad_return(Node1, Opts)
+              end, Opts)
+    end.
+
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -211,6 +225,7 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
               map_m_1(F, Subtree, Opts)
       end, Nodes, Opts);
 map_m_1(F, NodeA, Opts) ->
+    Attr = maps:with([parent], Opts),
     NodeType = node_type(NodeA, Opts),
     PreType = 
         case erl_syntax:subtrees(NodeA) of
@@ -229,20 +244,18 @@ map_m_1(F, NodeA, Opts) ->
     %%    ]).
     bind_with_continue(
       NodeA, 
-      F(NodeA, #{step => PreType, node => NodeType}),
+      F(NodeA, Attr#{step => PreType, node => NodeType}),
       fun(NodeB) ->
               case erl_syntax:subtrees(NodeB) of
                   [] ->
                       monad_return(NodeB, Opts);
-                  Subtrees ->
-                      SyntaxType = erl_syntax:type(NodeB),
+                  _ ->
                       monad_bind(
-                        map_m_subtrees(F, Subtrees, SyntaxType, Opts),
-                        fun(Subtrees1) ->
-                                NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, Subtrees1)),
+                        map_m_children(F, NodeB, Opts),
+                        fun(NodeC) ->
                                 bind_with_continue(
                                   NodeC, 
-                                  F(NodeC, #{step => post, node => NodeType}),
+                                  F(NodeC, Attr#{step => post, node => NodeType}),
                                   fun(NodeD) ->
                                           monad_return(NodeD, Opts)
                                   end, Opts)
@@ -258,7 +271,7 @@ node_type({function, _, _AttrName, _AttrValue}, #{}) ->
     form;
 node_type(_Node, #{}) ->
     expression.
-
+    
 bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
     monad_bind(
       MNodeB,
@@ -270,9 +283,9 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
 
-map_m_subtrees(F, Nodes, _NodeType, #{node := pattern} = Opts) ->
+map_m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
     map_m_1(F, Nodes, Opts);
-map_m_subtrees(F, [NameTrees, Clauses], named_fun_expr, #{} = Opts) ->
+map_m_subtrees(F, [NameTrees, Clauses], #{parent := named_fun_expr} = Opts) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
     monad_bind(
       map_m_1(F, Names, Opts#{node => pattern}),
@@ -283,7 +296,7 @@ map_m_subtrees(F, [NameTrees, Clauses], named_fun_expr, #{} = Opts) ->
                         monad_return([Name1, Clauses1], Opts)
                 end, Opts)
       end, Opts);
-map_m_subtrees(F, [Patterns, Expressions], match_expr, #{match_right_first := true} = Opts) ->
+map_m_subtrees(F, [Patterns, Expressions], #{parent := match_expr, match_right_first := true} = Opts) ->
     %% if node type is match_expr and match_right_first is true
     %% make first subtree pattern, make second subtree expression
     %% but traverse second tree first
@@ -296,8 +309,8 @@ map_m_subtrees(F, [Patterns, Expressions], match_expr, #{match_right_first := tr
                         monad_return([NPatterns, NExpressions], Opts)
                 end, Opts)
       end, Opts);
-map_m_subtrees(F, [Patterns, Expressions], NodeType, Opts) 
-  when (NodeType == match_expr) or (NodeType == clause) ->
+map_m_subtrees(F, [Patterns, Expressions], #{parent := Parent} = Opts) 
+  when (Parent == match_expr) or (Parent == clause) ->
     %% if node type is match_expr or clause 
     %% make first subtree pattern, make second subtree expression
     monad_bind(
@@ -309,7 +322,7 @@ map_m_subtrees(F, [Patterns, Expressions], NodeType, Opts)
                         monad_return([NPatterns, NExpressions], Opts)
                 end, Opts)
       end, Opts);
-map_m_subtrees(F, [Patterns, Guards, Expressions], clause, Opts) ->
+map_m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
     %% if node type is clause contains guards 
     %% make first subtree pattern, make second subtree guard, make third subtree expression
     monad_bind(
@@ -325,7 +338,7 @@ map_m_subtrees(F, [Patterns, Guards, Expressions], clause, Opts) ->
                           end, Opts)
                 end, Opts)
       end, Opts);
-map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
+map_m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
     Name = attribute_name(NameTree),
     case Name of
         export ->
@@ -342,7 +355,7 @@ map_m_subtrees(F, [[NameTree], BodyTrees], attribute, Opts) ->
                       monad_return([[NameTree], NBodies], Opts)
               end, Opts)
     end;
-map_m_subtrees(F, Nodes, _NodeType, Opts) ->
+map_m_subtrees(F, Nodes, Opts) ->
     map_m_1(F, Nodes, Opts).
 
 attribute_name({tree, atom, _, Name}) ->

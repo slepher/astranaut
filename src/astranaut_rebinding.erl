@@ -81,7 +81,7 @@ walk_function_clause(Clause) ->
     astranaut_traverse:map_with_state(
         fun(Node, Acc, Attr) ->
                 walk_node(Node, Acc, Attr)
-        end, Context0, Clause, #{node => form, traverse => all, match_right_first => true}).
+        end, Context0, Clause, #{node => form, traverse => all, match_right_first => true, parent => fun_expr}).
 
 walk_node(Node, #{} = Context, #{step := pre} = Attr) ->
     NodeType = erl_syntax:type(Node),
@@ -170,13 +170,15 @@ walk_node_1({named_fun, _Line, _Name, _Clauses} = Node,
     Context1 = exit_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [{fun_expr, _, _}|_T]} = Context, 
-          #{step := pre}) ->
+          #{} = Context, 
+          #{step := pre, parent := Parent})
+    when (Parent == fun_expr) or (Parent == named_fun_expr) ->
     Context1 = entry_function_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{clause_stack := [{fun_expr, _, _}|_T]} = Context, 
-          #{step := post}) ->
+          #{} = Context, 
+          #{step := post, parent := Parent}) 
+    when (Parent == fun_expr) or (Parent == named_fun_expr) ->
     Context1 = exit_function_scope(Context),
     {Node, Context1};
 walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
