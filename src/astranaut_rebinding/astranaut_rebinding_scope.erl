@@ -22,13 +22,16 @@
 
 %% API
 -export([new_context/0]).
+-export([scope_type_pattern/1]).
 -export([rebind_var/2, rename_var/2]).
 -export([with_scope_type/2, entry_scope_type/2, exit_scope_type/2]).
--export([entry_scope_group/1, exit_scope_group/1]).
--export([entry_nonfun_clause/1, exit_nonfun_clause/1]).
--export([entry_funcall_argument/1, exit_funcall_argument/1]).
--export([entry_shadowed/1, exit_shadowed/1]).
--export([entry_pattern_group/1, exit_pattern_group/1]).
+-export([with_scope_group/1, entry_scope_group/1, exit_scope_group/1]).
+-export([with_nonfun_clause/1, entry_nonfun_clause/1, exit_nonfun_clause/1]).
+-export([with_funcall_argument/1, entry_funcall_argument/1, exit_funcall_argument/1]).
+-export([with_shadowed/1, entry_shadowed/1, exit_shadowed/1]).
+-export([with_pattern/2, entry_pattern/2, exit_pattern/2]).
+-export([with_match_left_pattern/1, with_function_clause_pattern/1, 
+         with_comprehension_generate_pattern/1, with_clause_match_pattern/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -42,12 +45,47 @@ new_context() ->
       renames_stack     => [],
       scope_group_stack => []}.
 
+with_scope_group(NodeM) ->
+    with_scope_type(scope_group, NodeM).
+
+with_nonfun_clause(NodeM) ->
+    with_scope_type(nonfun_clause, NodeM).
+
+with_funcall_argument(NodeM) ->
+    with_scope_type(funcall_argument, NodeM).
+
+with_shadowed(NodeM) ->
+    with_scope_type(shadowed, NodeM).
+
+with_match_left_pattern(NodeM) ->
+    with_pattern(match_left, NodeM).
+
+with_function_clause_pattern(NodeM) ->
+    with_pattern(function_clause, NodeM).
+
+with_comprehension_generate_pattern(NodeM) ->
+    with_pattern(comprehension_generate, NodeM).
+
+with_clause_match_pattern(NodeM) ->
+    with_pattern(clause_match, NodeM).
+
+with_pattern(PatternType, NodeM) ->
+    ScopeType = pattern_to_scope_type(PatternType),
+    with_scope_type(ScopeType, NodeM).
+
 with_scope_type(ScopeType, NodeM) ->
     astranaut_traverse_monad:then(
       astranaut_traverse_monad:modify(fun(Context) -> entry_scope_type(ScopeType, Context) end),
       astranaut_traverse_monad:bind(
         NodeM,
         fun(Node) ->
+                case ScopeType of
+                    function_clause_pattern ->
+                        %% io:format("node is ~p~n", [Node]);
+                        ok;
+                    _ ->
+                        ok
+                end,
                 astranaut_traverse_monad:then(
                   astranaut_traverse_monad:modify(fun(Context) -> exit_scope_type(ScopeType, Context) end),
                   astranaut_traverse_monad:return(Node))
@@ -106,8 +144,9 @@ entry_scope_type(funcall_argument, Context) ->
     entry_funcall_argument(Context);
 entry_scope_type(shadowed, Context) ->
     entry_shadowed(Context);
-entry_scope_type(pattern_group, Context) ->
-    entry_pattern_group(Context).
+entry_scope_type(ScopeType, Context) ->
+    PatternType = scope_to_pattern_type(ScopeType),
+    entry_pattern(PatternType, Context).
 
 exit_scope_type(scope_group, Context) ->
     exit_scope_group(Context);
@@ -117,8 +156,9 @@ exit_scope_type(funcall_argument, Context) ->
     exit_funcall_argument(Context);
 exit_scope_type(shadowed, Context) ->
     exit_shadowed(Context);
-exit_scope_type(pattern_group, Context) ->
-    exit_pattern_group(Context).
+exit_scope_type(ScopeType, Context) ->
+    PatternType = scope_to_pattern_type(ScopeType),
+    exit_pattern(PatternType, Context).
 
 entry_scope_group(#{scope_group_stack := ScopeStack} = Context) ->
     ScokeStack1 = [{ordsets:new(), maps:new()}|ScopeStack],
@@ -147,7 +187,7 @@ exit_nonfun_clause(#{local_varnames    := LocalVarnames,
                      scope_group_stack := [{ScopeVarnames, ScopeRenames}|ScopeGroupStack]} = Context) ->
     Context1 = pop_varname_stack(Context),
     Context2 = pop_rename_stack(Context1),
-    ScopeVarnames1 = ordsets:union(LocalVarnames, ScopeVarnames),
+    ScopeVarnames1 = ordsets:union(ScopeVarnames, LocalVarnames),
     ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames}|ScopeGroupStack],
     Context2#{scope_group_stack => ScopeGroupStack1}.
 
@@ -158,8 +198,8 @@ exit_funcall_argument(#{local_varnames    := LocalVarnames,
                         local_renames     := LocalRenames,
                         scope_group_stack := [{ScopeVarnames, ScopeRenames}|ScopeGroupStack]} = Context) -> 
     Context1 = pop_rename_stack(Context),
-    ScopeVarnames1 = ordsets:union(LocalVarnames, ScopeVarnames),
-    ScopeRenames1 = maps:merge(LocalRenames, ScopeRenames),
+    ScopeVarnames1 = ordsets:union(ScopeVarnames, LocalVarnames),
+    ScopeRenames1 = maps:merge(ScopeRenames, LocalRenames),
     ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames1}|ScopeGroupStack],
     Context1#{scope_group_stack => ScopeGroupStack1}.
 
@@ -171,11 +211,14 @@ exit_shadowed(Context) ->
     Context1 = pop_varname_stack(Context),
     pop_rename_stack(Context1).
 
-entry_pattern_group(#{} = Context) ->
-    Context#{pattern_varnames => ordsets:new()}.
+entry_pattern(PatternType, #{} = Context) ->
+    %% io:format("entry pattern ~p ~p~n", [PatternType, Context]),
+    Context#{pattern => PatternType, pattern_varnames => ordsets:new()}.
 
-exit_pattern_group(#{} = Context) ->
-    Context#{pattern_varnames => ordsets:new()}.
+exit_pattern(PatternType, #{pattern := PatternType} = Context) ->
+    %% io:format("exit pattern ~p ~p~n", [PatternType, Context]),
+    Context1 = maps:remove(pattern, Context),
+    Context1#{pattern_varnames => ordsets:new()}.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -230,3 +273,31 @@ pop_rename_stack(#{renames_stack := [LocalRenames|ParentRenamesStack]} = Context
     Context#{local_renames  => LocalRenames,
              global_renames => GlobalRenames,
              renames_stack  => ParentRenamesStack}.
+
+scope_type_pattern(shadowed) ->
+    function_clause;
+scope_type_pattern(nonfun_clause) ->
+    clause_match.
+
+pattern_to_scope_type(function_clause) ->
+    function_clause_pattern;
+pattern_to_scope_type(clause_match) ->
+    clause_match_pattern;
+pattern_to_scope_type(comprehension_generate) ->
+    comprehension_generate_pattern;
+pattern_to_scope_type(match_left) ->
+    match_left_pattern.
+
+scope_to_pattern_type(function_clause_pattern) ->
+    function_clause;
+scope_to_pattern_type(clause_match_pattern) ->
+    clause_match;
+scope_to_pattern_type(comprehension_generate_pattern) ->
+    comprehension_generate;
+scope_to_pattern_type(match_left_pattern) ->
+    match_left.
+
+
+
+
+
