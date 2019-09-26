@@ -108,7 +108,11 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_rebinding_lc, test_rebinding_lc_origin, test_rebiding_function].
+    [test_lc, test_function, test_case,
+     test_map, test_map_update,
+     test_rec, test_rec_update,
+     test_operator, test_list, test_tuple
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -127,17 +131,62 @@ test_rebinding_lc() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_rebinding_lc(_Config) -> 
+test_lc(_Config) -> 
     A = astranaut_rebinding_test:test_lc(10),
-    ?assertEqual([{18, 12}], A),
+    B = astranaut_rebinding_test:test_lc_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_rebinding_lc_origin(_Config) -> 
-    A = astranaut_rebinding_test:test_lc_origin(10),
-    ?assertEqual([{18, 12}], A),
-    ok.
-
-test_rebiding_function(_Config) ->
+test_function(_Config) ->
     A = astranaut_rebinding_test:test_function(10),
-    ?assertEqual({13, 31}, A),
+    B = astranaut_rebinding_test:test_function_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_case(_Config) ->
+    A = astranaut_rebinding_test:test_case(10),
+    B = astranaut_rebinding_test:test_case_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_rec(_Config) ->
+    A = astranaut_rebinding_test:test_rec(10),
+    B = astranaut_rebinding_test:test_rec_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_rec_update(_Config) ->
+    A = astranaut_rebinding_test:test_rec_update(10),
+    B = astranaut_rebinding_test:test_rec_update_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_map(_Config) ->
+    A = astranaut_rebinding_test:test_map(10),
+    B = astranaut_rebinding_test:test_map_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_map_update(_Config) ->
+    A = astranaut_rebinding_test:test_map_update(10),
+    B = astranaut_rebinding_test:test_map_update_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_operator(_Config) ->
+    A = astranaut_rebinding_test:test_operator(10),
+    B = astranaut_rebinding_test:test_operator_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_tuple(_Config) ->
+    A = astranaut_rebinding_test:test_tuple(10),
+    B = astranaut_rebinding_test:test_tuple_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_list(_Config) ->
+    A = astranaut_rebinding_test:test_list(10),
+    B = astranaut_rebinding_test:test_list_origin(10),
+    ?assertEqual(A, B),
     ok.
