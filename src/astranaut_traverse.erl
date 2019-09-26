@@ -21,6 +21,7 @@
 -export([format_error/1, parse_transform_return/2]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
 -export([monad_to_traverse_fun_return/1, monad_to_traverse_fun_return/2]).
+-export([monad_deep_sequence_m/2, monad_deep_r_sequence_m/2]).
 
 -define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -295,55 +296,77 @@ map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
     Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
-    monad_sequence_m(SubtreesM, Opts).
+    monad_deep_sequence_m(SubtreesM, Opts).
 
 m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
-    lists:map(
-      fun(Node) ->
-              map_m_1(F, Node, Opts)
-      end, Nodes);
+    deep_m_subtrees(F, Nodes, Opts);
 m_subtrees(F, [NameTrees, Clauses], #{parent := named_fun_expr} = Opts) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-    [map_m_1(F, Names, Opts#{node => pattern}),
-     map_m_1(F, Clauses, Opts#{node => expression})];
+    [deep_m_subtrees(F, Names, Opts#{node => pattern}),
+     deep_m_subtrees(F, Clauses, Opts#{node => expression})];
 m_subtrees(F, [Patterns, Expressions], #{parent := Parent} = Opts) 
   when (Parent == match_expr) or (Parent == clause) ->
     %% if node type is match_expr or clause 
     %% make first subtree pattern, make second subtree expression
-    [map_m_1(F, Patterns, Opts#{node => pattern}),
-     map_m_1(F, Expressions, Opts#{node => expression})];
+    [deep_m_subtrees(F, Patterns, Opts#{node => pattern}),
+     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
     %% if node type is clause contains guards 
     %% make first subtree pattern, make second subtree guard, make third subtree expression
-    [map_m_1(F, Patterns, Opts#{node => pattern}),
-     map_m_1(F, Guards, Opts#{node => guard}),
-     map_m_1(F, Expressions, Opts#{node => expression})];
+    [deep_m_subtrees(F, Patterns, Opts#{node => pattern}),
+     deep_m_subtrees(F, Guards, Opts#{node => guard}),
+     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [Pattern, Expressions], #{parent := Parent} = Opts) 
   when (Parent == generator) or (Parent == binary_generator) ->
     %% if node type is clause contains guards 
     %% make first subtree pattern, make second subtree guard, make third subtree expression
-    [map_m_1(F, Pattern, Opts#{node => pattern}),
-     map_m_1(F, Expressions, Opts#{node => expression})];
+    [deep_m_subtrees(F, Pattern, Opts#{node => pattern}),
+     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
     Name = attribute_name(NameTree),
-    NameTreeM = monad_return([NameTree], Opts),
+    NameTreeM = deep_return([NameTree], Opts),
     BodyTreesM = 
         case Name of
             export ->
-                monad_return(BodyTrees, Opts);
+                deep_return(BodyTrees, Opts);
             import ->
                 %% do not traverse import attribute
-                monad_return(BodyTrees, Opts);
+                deep_return(BodyTrees, Opts);
             _ ->
                 Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
-                map_m_1(F, Bodies, Opts#{node => attribute, attribute => Name})
+                deep_m_subtrees(F, Bodies, Opts#{node => attribute, attribute => Name})
         end,
     [NameTreeM, BodyTreesM];
+m_subtrees(F, [NameTrees, Clauses], #{parent := function} = Opts) ->
+    Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
+    [deep_m_subtrees(F, Names, Opts),
+     deep_m_subtrees(F, Clauses, Opts)];
+m_subtrees(F, [ExprLeft, Op, ExprRight], #{parent := infix_expr} = Opts) ->
+    [deep_m_subtrees(F, ExprLeft, Opts),
+     deep_return(Op, Opts),
+     deep_m_subtrees(F, ExprRight, Opts)];
+m_subtrees(F, [Op, ExprRight], #{parent := prefix_expr} = Opts) ->
+    [deep_return(Op, Opts),
+     deep_m_subtrees(F, ExprRight, Opts)];
 m_subtrees(F, Nodes, Opts) ->
+    deep_m_subtrees(F, Nodes, Opts).
+
+deep_return(Nodes, Opts) when is_list(Nodes) ->
     lists:map(
       fun(Node) ->
-              map_m_1(F, Node, Opts)
-      end, Nodes).
+              deep_return(Node, Opts)
+      end, Nodes);
+deep_return(Node, Opts) ->
+    monad_return(Node, Opts).
+
+deep_m_subtrees(F, Nodes, Opts) when is_list(Nodes) ->
+    lists:map(
+      fun(Node) ->
+              deep_m_subtrees(F, Node, Opts)
+      end, Nodes);
+
+deep_m_subtrees(F, Node, Opts) ->
+    map_m_1(F, Node, Opts).
 
 attribute_name({tree, atom, _, Name}) ->
     Name.
@@ -354,8 +377,34 @@ monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:return(A, Monad).
 monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:map_m(F, MAs, Monad).
-monad_sequence_m(MAs, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:sequence_m(MAs, Monad).
+monad_lift_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:lift_m(F, MAs, Monad).
+
+monad_deep_sequence_m([MA|MAs], #{} = Opts) when is_list(MA) ->
+    monad_bind(
+      monad_deep_sequence_m(MA, Opts),
+      fun(A) ->
+              monad_bind(
+                monad_deep_sequence_m(MAs, Opts),
+                fun(As) ->
+                        monad_return([A|As], Opts)
+                end, Opts)
+      end, Opts);
+monad_deep_sequence_m([MA|MAs], #{} = Opts) -> 
+    monad_bind(
+      MA,
+      fun(A) ->
+              monad_bind(
+                monad_deep_sequence_m(MAs, Opts),
+                fun(As) ->
+                        monad_return([A|As], Opts)
+                end, Opts)
+      end, Opts);
+monad_deep_sequence_m([], Opts) -> 
+    monad_return([], Opts).
+
+monad_deep_r_sequence_m(MAs, Opts) ->
+    monad_lift_m(fun lists:reverse/1, monad_deep_sequence_m(lists:reverse(MAs), Opts), Opts).
 
 transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->

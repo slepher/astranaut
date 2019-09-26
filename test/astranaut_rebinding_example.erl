@@ -56,7 +56,9 @@ test(ABC) ->
             ABC ->
                 ABC + 1
         catch
-            _:ABC:_Stacks ->
+            exception:eft ->
+                efg;
+            _:ABC:_Stacks when (ABC == 3) ->
                 {ABC, ABC}
         end,
     Zero = 

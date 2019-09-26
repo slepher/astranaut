@@ -73,6 +73,9 @@ with_pattern(PatternType, NodeM) ->
     ScopeType = pattern_to_scope_type(PatternType),
     with_scope_type(ScopeType, NodeM).
 
+with_scope_type(ScopeType, NodeMs) when is_list(NodeMs) ->
+    NodesM = astranaut_traverse_monad:deep_sequence_m(NodeMs),
+    with_scope_type(ScopeType, NodesM);
 with_scope_type(ScopeType, NodeM) ->
     astranaut_traverse_monad:then(
       astranaut_traverse_monad:modify(fun(Context) -> entry_scope_type(ScopeType, Context) end),

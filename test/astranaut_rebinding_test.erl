@@ -11,7 +11,7 @@
 -include("rebinding.hrl").
 
 -rebinding_all([]).
--rebinding_fun({[test_lc, test_function], debug}).
+%% -rebinding_fun({[test_lc, test_function], debug}).
 -rebinding_fun({[test_lc_origin, test_function_origin], non_rebinding}).
 
 %% API
@@ -50,6 +50,7 @@ test_function(A) ->
                      A
              end),
     A = A + 1,
+    A = + A,
     {A, B}.
 
 test_function_origin(A) ->

@@ -15,7 +15,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    erlang:system_flag(backtrace_depth, 30),
+    erlang:system_flag(backtrace_depth, 100),
     dbg:tracer(),
     %% dbg:tpl(astranaut_rebinding_scope, exit_funcall_argument, cx),
     %% dbg:tpl(astranaut_traverse, m_subtrees, cx),
@@ -99,6 +99,7 @@ walk_node(Node, #{} = Context, #{step := post} = Attr) ->
         false ->
             walk_node_1(Node, Context, Attr)
     end;
+
 walk_node(Node, Context, #{} = Attr) ->
     {Node1, Context1} = walk_node_1(Node, Context, Attr),
     {Node1, Context1}.
@@ -193,50 +194,33 @@ clause_scope_type(_Other) ->
     nonfun_clause.
 
 walk_comprehension(Node, Context, Attr) ->
-    Sequence = fun astranaut_traverse_monad:r_sequence_m/1,
+    Sequence = fun astranaut_traverse_monad:deep_r_sequence_m/1,
     FNode = fun astranaut_rebinding_scope:with_shadowed/1,
     walk_sequence_children(Sequence, FNode, Node, Context, #{}, Attr).
 
 walk_generate(Node, Context, Attr) ->
-    Sequence = fun([PatternM, ExpressionM]) ->
-                       PatternM1 = astranaut_rebinding_scope:with_comprehension_generate_pattern(PatternM),
-                       ExpressionM1 = astranaut_rebinding_scope:with_shadowed(ExpressionM),
+    Sequence = fun([PatternMs, ExpressionMs]) ->
+                       PatternsM1 = astranaut_rebinding_scope:with_comprehension_generate_pattern(PatternMs),
+                       ExpressionsM1 = astranaut_rebinding_scope:with_shadowed(ExpressionMs),
                        %% walk expression first
-                       astranaut_traverse_monad:r_sequence_m([PatternM1, ExpressionM1])
+                       astranaut_traverse_monad:deep_r_sequence_m([PatternsM1, ExpressionsM1])
                end,
     walk_sequence_children(Sequence, Node, Context, #{}, Attr).
 
-walk_function_call({call, Line, Function, FunctionArgs} = Node, Context, Attr) ->
-    Parent = erl_syntax:type(Node),
-    Opts = #{node => expression, traverse => all, parent => Parent},
-    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
-    NodeM = 
-        astranaut_traverse_monad:bind(
-          astranaut_traverse:map_m(F, Function, Opts),
-          fun(Function1) ->
-                  astranaut_traverse_monad:bind(
-                    map_m_function_args(F, FunctionArgs, Opts, []),
-                    fun(FunctionArgs1) ->
-                            astranaut_traverse_monad:return({call, Line, Function1, FunctionArgs1})
-                    end)
-          end),
-    continue_node_m(NodeM, Context, Attr).
-
-map_m_function_args(_F, [], _Opts, FunctionArgs1) ->
-    astranaut_traverse_monad:return(lists:reverse(FunctionArgs1));
-map_m_function_args(F, [FunctionArgExpression|T], Opts, FunctionArgs1) ->
-    astranaut_traverse_monad:bind(
-      astranaut_rebinding_scope:with_funcall_argument(
-        astranaut_traverse:map_m(F, FunctionArgExpression, Opts)),
-      fun(FunctionArgExpression1) ->
-              map_m_function_args(F, T, Opts, [FunctionArgExpression1|FunctionArgs1])
-      end).
+walk_function_call(Node, Context, Attr) ->
+    Sequence = 
+        fun([FunctionM, FunctionArgMs]) ->
+                FunctionArgMs1 = lists:map(fun astranaut_rebinding_scope:with_funcall_argument/1, FunctionArgMs),
+                astranaut_traverse_monad:deep_sequence_m([FunctionM, FunctionArgMs1])
+        end,
+    walk_sequence_children(Sequence, Node, Context, #{}, Attr).
 
 walk_match(Node, Context, Attr) ->
-    Sequence = fun([PatternM, ExpressionM]) ->
-                       PatternM1 = astranaut_rebinding_scope:with_match_left_pattern(PatternM),
+    Sequence = fun([PatternMs, ExpressionM]) ->
+                       PatternsM = astranaut_traverse_monad:deep_sequence_m(PatternMs),
+                       PatternsM1 = astranaut_rebinding_scope:with_match_left_pattern(PatternsM),
                        %% walk expression first
-                       astranaut_traverse_monad:r_sequence_m([PatternM1, ExpressionM])
+                       astranaut_traverse_monad:deep_r_sequence_m([PatternsM1, ExpressionM])
                end,
     walk_sequence_children(Sequence, Node, Context, #{}, Attr).
 
@@ -244,17 +228,17 @@ walk_clause(Node, Context, Parent, Attr) ->
     ScopeType = clause_scope_type(Parent),
     PatternType = astranaut_rebinding_scope:scope_type_pattern(ScopeType),
 
-    Sequence = fun([PatternTreesM|RestTreesM]) ->
-                       PatternTreesM1 = astranaut_rebinding_scope:with_pattern(PatternType, PatternTreesM),
-                       astranaut_traverse_monad:sequence_m([PatternTreesM1|RestTreesM])
+    Sequence = fun([PatternMs|RestTreesM]) ->
+                       PatternsM1 = astranaut_rebinding_scope:with_pattern(PatternType, PatternMs),
+                       astranaut_traverse_monad:deep_sequence_m([PatternsM1|RestTreesM])
                end,
     FNode = fun(NodeM) -> astranaut_rebinding_scope:with_scope_type(ScopeType, NodeM) end,
     walk_sequence_children(Sequence, FNode, Node, Context, #{}, Attr).
 
 walk_named_fun(Node, Context, Attr) ->
-    Sequence = fun([NameTreeM|RestTreeMs]) ->
-                       NameTreeM1 = astranaut_rebinding_scope:with_function_clause_pattern(NameTreeM),
-                       astranaut_traverse_monad:sequence_m([NameTreeM1|RestTreeMs])
+    Sequence = fun([NameTreeMs|RestTreeMs]) ->
+                       NameTreesM1 = astranaut_rebinding_scope:with_function_clause_pattern(NameTreeMs),
+                       astranaut_traverse_monad:deep_sequence_m([NameTreesM1|RestTreeMs])
                end,
     FNode = fun astranaut_rebinding_scope:with_shadowed/1,
     walk_sequence_children(Sequence, FNode, Node, Context, #{}, Attr).

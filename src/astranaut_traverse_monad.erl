@@ -14,6 +14,7 @@
 -export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
 -export([lift_m/2, sequence_m/1, r_sequence_m/1, map_m/2]).
+-export([deep_sequence_m/1, deep_r_sequence_m/1]).
 -export([get/0, put/1, modify/1, state/1, bind_state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
 
@@ -71,6 +72,15 @@ sequence_m(MAs) ->
 r_sequence_m(MAs) ->
     astranaut_traverse_monad:lift_m(fun lists:reverse/1, sequence_m(lists:reverse(MAs))).
 
+deep_sequence_m(MAs) ->
+    MonadClass = astranaut_monad,
+    Monad = new(),
+    astranaut_traverse:monad_deep_sequence_m(MAs, #{monad_class => MonadClass, monad => Monad}).
+
+deep_r_sequence_m(MAs) ->
+    MonadClass = astranaut_monad,
+    Monad = new(),
+    astranaut_traverse:monad_deep_r_sequence_m(MAs, #{monad_class => MonadClass, monad => Monad}).
 
 map_m(F, MAs) ->
     astranaut_monad:map_m(F, MAs, new()).
