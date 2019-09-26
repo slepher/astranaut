@@ -156,9 +156,9 @@ SequenceChildren =
     %% PatternMs is a list of monad, sequence_m it to get a monad of list.
     PatternsM = astranaut_traverse_monad:sequence_m(PatternMs),
     %% do something special to PatternsM monad.
-    PatternsM = do_something_special(PatternsM),
+    PatternsM1 = do_something_special(PatternsM),
     %% deep_sequence_m the new tree.
-    astranaut_traverse_monad:deep_r_sequence_m([PatternMs|GuardsAndExpressionMs]) 
+    astranaut_traverse_monad:deep_sequence_m([PatternsM1|GuardsAndExpressionMs]) 
   end.
 ```
 
