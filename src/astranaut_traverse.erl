@@ -14,7 +14,7 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
--export([map_m/3, map_m_children/3, m_subtrees/3]).
+-export([map_m/3, map_m_children/3, m_subtrees/3, sequence/2, update_opts/1]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
 -export([transform_mapfold_f/2]).
@@ -170,11 +170,14 @@ traverse_fun_return_struct(#{'__struct__' := ?TRAVERSE_FUN_RETURN} = Struct) ->
 traverse_fun_return_struct(Node) ->
     traverse_fun_return(#{node => Node}).
 
+update_opts(Opts) ->
+    maps:merge(#{formatter => ?MODULE, traverse => all,
+                 monad_class => astranaut_monad, 
+                 monad => astranaut_traverse_monad}, Opts).
+
 -spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Opts) ->
-    NOpts = maps:merge(#{formatter => ?MODULE, traverse => all,
-                         monad_class => astranaut_monad, 
-                         monad => astranaut_traverse_monad}, Opts),
+    NOpts = update_opts(Opts),
     NF = transform_f(F, NOpts),
     map_m_1(NF, Nodes, NOpts).
 
@@ -283,6 +286,10 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
 
+map_m_subtrees(F, Nodes, #{sequence_f := Sequence} = Opts) ->
+    Opts1 = maps:remove(sequence_f, Opts),
+    SubtreesM = m_subtrees(F, Nodes, Opts1),
+    Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
     sequence(SubtreesM, Opts).

@@ -18,7 +18,7 @@ parse_transform(Forms, _Options) ->
     erlang:system_flag(backtrace_depth, 30),
     dbg:tracer(),
     %% dbg:tpl(astranaut_rebinding_scope, exit_funcall_argument, cx),
-    %% dbg:tpl(astranaut_rebinding_scope, rebind_var, cx),
+    %% dbg:tpl(astranaut_traverse, m_subtrees, cx),
     dbg:p(all, [c]),
     {RebindingOptionsRec, Warnings} = 
         astranaut_rebinding_options:rebinding_options(Forms),
@@ -217,28 +217,23 @@ clause_scope_type(named_fun_expr) ->
 clause_scope_type(_Other) ->
     nonfun_clause.
 
-walk_clause({clause, Line, Patterns, Guards, Expressions} = Node, ScopeType) ->
-    Opts = #{node => expression, traverse => all},
+walk_clause({clause, _Line, _Patterns, _Guards, _Expressions} = Node, ScopeType) ->
+    Opts0 = #{node => expression, traverse => all},
+    Opts = astranaut_traverse:update_opts(Opts0),
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     PatternType = astranaut_rebinding_scope:scope_type_pattern(ScopeType),
+    Subtrees = erl_syntax:subtrees(Node),
+    [PatternTreesM|RestTreesM] = astranaut_traverse:m_subtrees(F, Subtrees, Opts#{parent => clause}),
+    PatternTreesM1 = astranaut_rebinding_scope:with_pattern(PatternType, PatternTreesM),
+    
     %% io:format("pattern type is ~p ~p~n", [PatternType, Patterns]),
     astranaut_rebinding_scope:with_scope_type(
       ScopeType,
       astranaut_traverse_monad:bind(
-        astranaut_rebinding_scope:with_pattern(
-          PatternType,
-          astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern})),
-        fun(Patterns1) ->
-                astranaut_traverse_monad:bind(
-                  astranaut_traverse:map_m(F, Guards, Opts#{node => guard}),
-                  fun(Guards1) ->
-                          astranaut_traverse_monad:bind(
-                            astranaut_traverse:map_m(F, Expressions, Opts),
-                            fun(Expressions1) ->
-                                    astranaut_traverse_monad:return(
-                                      {clause, Line, Patterns1, Guards1, Expressions1})
-                            end)
-                end)
+        astranaut_traverse:sequence([PatternTreesM1|RestTreesM], Opts),
+        fun(Subtrees1) ->
+                Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
+                astranaut_traverse_monad:return(Node1)
         end)).
 
 walk_named_fun({named_fun, Line,  Name, Clauses} = Node) ->
