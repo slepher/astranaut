@@ -101,7 +101,8 @@
 
 ```erlang
   opts()    :: {traverse => TraverseStyle :: traverse_style(), parse_transform => ParseTransform :: boolean(),
-                node => FormType :: form_type(), formatter => Formatter}.
+                node => FormType :: form_type(), formatter => Formatter, 
+                children => Children, sequence_children => SequenceChildren}.
 ```
 
 
@@ -123,6 +124,55 @@
 *TraverseStyle*
 
 &emsp;&emsp;pre | post | all | leaf.
+
+*Children*
+
+&emsp;&emsp; true: Only traverse children of node, not traverse node its self.
+
+*SequenceChildren*
+
+&emsp;&emsp; callback to defined your own traverse children method
+
+```erlang
+SequenceChildren = fun(DeepListOfChildrenM) -> MChildren end.
+```
+
+&emsp;&emsp; traverse right expression first in match expression
+
+```erlang
+SequenceChildren = 
+  fun([PatternMs, ExpressionMs]) -> 
+    %% reverse the traverse order, traverse ExpressionMs first
+    %% deep_r_sequence_m means reverse sequence_m the first level of deep list.
+    astranaut_traverse_monad:deep_r_sequence_m([PatternMs, ExpressionMs]) 
+  end.
+```
+
+&emsp;&emsp; do something special to Clause Patterns
+
+```erlang
+SequenceChildren = 
+  fun([PatternMs|GuardsAndExpressionMs]) -> 
+    %% PatternMs is a list of monad, sequence_m it to get a monad of list.
+    PatternsM = astranaut_traverse_monad:sequence_m(PatternMs),
+    %% do something special to PatternsM monad.
+    PatternsM = do_something_special(PatternsM),
+    %% deep_sequence_m the new tree.
+    astranaut_traverse_monad:deep_r_sequence_m([PatternMs|GuardsAndExpressionMs]) 
+  end.
+```
+
+&emsp;&emsp; do something special to Each Clause Patterns
+
+```erlang
+SequenceChildren = 
+  fun([PatternMs|GuardsAndExpressionMs]) -> 
+    %% PatternMs is a list of monad, sequence_m it to get a monad of list.
+    PatternMs1 = lists:map(fun(PatternM) -> do_something_special(PatternM) end, PatternMs),
+    %% deep_sequence_m the new tree.
+    astranaut_traverse_monad:deep_sequence_m([PatternMs1|GuardsAndExpressionMs]) 
+  end.
+```
   
 *traverse_return(Return)*  
 

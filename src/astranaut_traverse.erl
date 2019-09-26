@@ -380,7 +380,7 @@ monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
 monad_lift_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:lift_m(F, MAs, Monad).
 
-monad_deep_sequence_m([MA|MAs], #{} = Opts) when is_list(MA) ->
+monad_deep_sequence_m([MA|MAs], #{} = Opts) -> 
     monad_bind(
       monad_deep_sequence_m(MA, Opts),
       fun(A) ->
@@ -390,18 +390,10 @@ monad_deep_sequence_m([MA|MAs], #{} = Opts) when is_list(MA) ->
                         monad_return([A|As], Opts)
                 end, Opts)
       end, Opts);
-monad_deep_sequence_m([MA|MAs], #{} = Opts) -> 
-    monad_bind(
-      MA,
-      fun(A) ->
-              monad_bind(
-                monad_deep_sequence_m(MAs, Opts),
-                fun(As) ->
-                        monad_return([A|As], Opts)
-                end, Opts)
-      end, Opts);
 monad_deep_sequence_m([], Opts) -> 
-    monad_return([], Opts).
+    monad_return([], Opts);
+monad_deep_sequence_m(MA, _Opts) -> 
+    MA.
 
 monad_deep_r_sequence_m(MAs, Opts) ->
     monad_lift_m(fun lists:reverse/1, monad_deep_sequence_m(lists:reverse(MAs), Opts), Opts).
