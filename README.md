@@ -174,14 +174,14 @@ SequenceChildren =
   end.
 ```
   
-*traverse_return(Return)*  
+*traverse_return(Return)*
 
 ```erlang
   traverse_return(Return) :: Return | {ok, Return, Errors :: traverse_return_error(), Warnings :: traverse_return_error()} | 
                              {error, Errors, Warnings}.
 ```
 
-*parse_transform_return(Return)*  
+*parse_transform_return(Return)*
 
 ```erlang
   parse_transform_return(Return) :: Return | {warning, Return, Warnings :: prase_transform_error()} |
