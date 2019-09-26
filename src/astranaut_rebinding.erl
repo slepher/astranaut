@@ -132,20 +132,15 @@ walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre
     walk_function_call(Node, Context, Attr);
 
 %% walk match 
-walk_node_1({'match', _Line, _Patterns, _Expressions} = Node,
-          #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({match, _Line, _Patterns, _Expressions} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
     walk_match(Node, Context, Attr);
 
 %% walk function clause and other clauses
-walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, 
-          #{} = Context, 
-          #{step := pre, parent := Parent} = Attr) ->
-    walk_clause(Node, Context, Parent, Attr);
+walk_node_1({clause, _Line, _Patterns, _Match, _Body} = Node, #{} = Context, #{step := pre} = Attr) ->
+    walk_clause(Node, Context, Attr);
 
 %% walk named fun
-walk_node_1({named_fun, _Line, _Name, _Clauses} = Node, 
-          #{} = Context, 
-          #{step := pre} = Attr) ->
+walk_node_1({named_fun, _Line, _Name, _Clauses} = Node,  #{} = Context, #{step := pre} = Attr) ->
     walk_named_fun(Node, Context, Attr);
 
 %% do nothing to _
@@ -168,6 +163,7 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{node := guard}) ->
     Var1 = rename_var(Var, Context),
     {Var1, Context};
 
+%% rename var if current node is clause match pattern.
 walk_node_1({var, _Line, _Varname} = Var, #{pattern := clause_match} = Context, #{}) ->
     Var1 = rename_clause_match_var(Var, Context),
     {Var1, Context};
@@ -179,6 +175,8 @@ walk_node_1({var, _Line, _Varname} = Var, #{pattern := function_clause} = Contex
 %% rebind var if current node is match pattern.
 walk_node_1({var, _Line, _Varname} = Var, #{pattern := match_left} = Context, #{node := pattern}) ->
     rebind_match_left_var(Var, Context);
+
+%% rebind var if current node is comprehension_generate pattern.
 walk_node_1({var, _Line, _Varname} = Var, 
             #{pattern := comprehension_generate} = Context, #{node := pattern}) ->
     rebind_comprehension_generate_var(Var, Context);
@@ -224,7 +222,7 @@ walk_match(Node, Context, Attr) ->
                end,
     walk_sequence_children(Sequence, Node, Context, #{}, Attr).
 
-walk_clause(Node, Context, Parent, Attr) ->
+walk_clause(Node, Context, #{parent := Parent} = Attr) ->
     ScopeType = clause_scope_type(Parent),
     PatternType = astranaut_rebinding_scope:scope_type_pattern(ScopeType),
 
