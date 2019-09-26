@@ -13,7 +13,7 @@
 -export([run/2, eval/2, exec/2]).
 -export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
--export([lift_m/2, map_m/2]).
+-export([lift_m/2, sequence_m/1, map_m/2]).
 -export([get/0, put/1, modify/1, state/1, bind_state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
 
@@ -64,6 +64,9 @@ exec(M0, State) ->
 
 lift_m(F, MA) ->
     astranaut_monad:lift_m(F, MA, new()).
+
+sequence_m(MAs) ->
+    astranaut_monad:sequence_m(MAs, new()).
 
 map_m(F, MAs) ->
     astranaut_monad:map_m(F, MAs, new()).

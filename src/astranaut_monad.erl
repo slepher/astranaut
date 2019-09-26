@@ -11,7 +11,7 @@
 -export_type([monad/0, monadic/2]).
 
 %% API
--export([lift_m/3, map_m/3, foldl_m/4]).
+-export([lift_m/3, sequence_m/2, map_m/3, foldl_m/4]).
 -export([bind/3, then/3, return/2]).
 -export([lift/2]).
 -export([fail/2]).
@@ -43,6 +43,9 @@ map_m(F, [X|Xs], Monad) ->
          end, Monad);
 map_m(_F, [], Monad) ->
     return([], Monad).
+
+sequence_m(Xs, Monad) ->
+    map_m(fun(A) -> A end, Xs, Monad).
 
 foldl_m(F, Acc, [X|Xs], Monad) ->
     bind(

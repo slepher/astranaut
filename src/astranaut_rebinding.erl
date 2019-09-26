@@ -218,19 +218,17 @@ clause_scope_type(_Other) ->
     nonfun_clause.
 
 walk_clause({clause, _Line, _Patterns, _Guards, _Expressions} = Node, ScopeType) ->
-    Opts0 = #{node => expression, traverse => all},
-    Opts = astranaut_traverse:update_opts(Opts0),
+    Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     PatternType = astranaut_rebinding_scope:scope_type_pattern(ScopeType),
 
     Sequence = fun([PatternTreesM|RestTreesM]) ->
                        PatternTreesM1 = astranaut_rebinding_scope:with_pattern(PatternType, PatternTreesM),
-                       astranaut_traverse:sequence([PatternTreesM1|RestTreesM])
+                       astranaut_traverse_monad:sequence_m([PatternTreesM1|RestTreesM])
                end,
-    %% io:format("pattern type is ~p ~p~n", [PatternType, Patterns]),
     astranaut_rebinding_scope:with_scope_type(
       ScopeType,
-      astranaut_traverse:map_m(F, Node, Opts#{sequence_f => Sequence})).
+      astranaut_traverse:map_m(F, Node, Opts#{sequence_children => Sequence})).
 
 walk_named_fun({named_fun, Line,  Name, Clauses} = Node) ->
     Parent = erl_syntax:type(Node),

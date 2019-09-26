@@ -286,8 +286,8 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
 
-map_m_subtrees(F, Nodes, #{sequence_f := Sequence} = Opts) ->
-    Opts1 = maps:remove(sequence_f, Opts),
+map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
+    Opts1 = maps:remove(sequence_children, Opts),
     SubtreesM = m_subtrees(F, Nodes, Opts1),
     Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
