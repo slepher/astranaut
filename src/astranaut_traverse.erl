@@ -14,7 +14,7 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
--export([map_m/3, map_m_children/3, m_subtrees/3, sequence/2, update_opts/1]).
+-export([map_m/3, map_m_children/3, m_subtrees/3, update_opts/1]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
 -export([transform_mapfold_f/2]).
@@ -181,20 +181,6 @@ map_m(F, Nodes, Opts) ->
     NF = transform_f(F, NOpts),
     map_m_1(NF, Nodes, NOpts).
 
-map_m_children(F, Node, Opts) ->
-    case erl_syntax:subtrees(Node) of
-        [] ->
-            monad_return(Node, Opts);
-        Subtrees ->
-            SyntaxType = erl_syntax:type(Node),
-            monad_bind(
-              map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
-              fun(Subtrees1) ->
-                      Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
-                      monad_return(Node1, Opts)
-              end, Opts)
-    end.
-
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -227,6 +213,9 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
       fun(Subtree) ->
               map_m_1(F, Subtree, Opts)
       end, Nodes, Opts);
+map_m_1(F, NodeA, #{children := true} = Opts) ->
+    Opts1 = maps:remove(children, Opts),
+    map_m_children(F, NodeA, Opts1);
 map_m_1(F, NodeA, Opts) ->
     Attr = maps:with([parent], Opts),
     NodeType = node_type(NodeA, Opts),
@@ -286,26 +275,27 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
               BMC(NodeB)
       end, Opts).
 
+map_m_children(F, Node, Opts) ->
+    case erl_syntax:subtrees(Node) of
+        [] ->
+            monad_return(Node, Opts);
+        Subtrees ->
+            SyntaxType = erl_syntax:type(Node),
+            monad_bind(
+              map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
+              fun(Subtrees1) ->
+                      Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
+                      monad_return(Node1, Opts)
+              end, Opts)
+    end.
+
 map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
     Opts1 = maps:remove(sequence_children, Opts),
     SubtreesM = m_subtrees(F, Nodes, Opts1),
     Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
-    sequence(SubtreesM, Opts).
-
-sequence([TreeM|TreeMs], Opts) ->
-    monad_bind(
-      TreeM,
-      fun(Tree) ->
-              monad_bind(
-                sequence(TreeMs, Opts),
-                fun(Trees) ->
-                        monad_return([Tree|Trees], Opts)
-                end, Opts)
-      end, Opts);
-sequence([], Opts) ->
-    monad_return([], Opts).
+    monad_sequence_m(SubtreesM, Opts).
 
 m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
     lists:map(
@@ -327,6 +317,12 @@ m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
     %% make first subtree pattern, make second subtree guard, make third subtree expression
     [map_m_1(F, Patterns, Opts#{node => pattern}),
      map_m_1(F, Guards, Opts#{node => guard}),
+     map_m_1(F, Expressions, Opts#{node => expression})];
+m_subtrees(F, [Pattern, Expressions], #{parent := Parent} = Opts) 
+  when (Parent == generator) or (Parent == binary_generator) ->
+    %% if node type is clause contains guards 
+    %% make first subtree pattern, make second subtree guard, make third subtree expression
+    [map_m_1(F, Pattern, Opts#{node => pattern}),
      map_m_1(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
     Name = attribute_name(NameTree),
@@ -358,6 +354,8 @@ monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:return(A, Monad).
 monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:map_m(F, MAs, Monad).
+monad_sequence_m(MAs, #{monad_class := MonadClass, monad := Monad}) ->
+    MonadClass:sequence_m(MAs, Monad).
 
 transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->

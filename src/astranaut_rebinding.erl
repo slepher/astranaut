@@ -101,7 +101,6 @@ walk_node(Node, #{} = Context, #{step := post} = Attr) ->
     end;
 walk_node(Node, Context, #{} = Attr) ->
     {Node1, Context1} = walk_node_1(Node, Context, Attr),
-    %% io:format("walk node ~p ~p ~p ~p~n", [Node, Node1, Context, Context1]),
     {Node1, Context1}.
 
 is_scope_group(case_expr) ->
@@ -130,22 +129,23 @@ walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
     {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
     astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true});
-walk_node_1({'match', Line, Patterns, Expressions},
+walk_node_1({'match', _Line, _Patterns, _Expressions} = Node,
           #{} = Context, 
           #{step := pre, node := expression}) ->
     Opts = #{node => expression, traverse => all},
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
-    NodeM =
-        astranaut_traverse_monad:bind(
-          astranaut_traverse:map_m(F, Expressions, Opts#{node => expression}),
-          fun(NExpressions) ->
-                  astranaut_traverse_monad:bind(
-                    astranaut_rebinding_scope:with_match_left_pattern(
-                      astranaut_traverse:map_m(F, Patterns, Opts#{node => pattern})),
-                    fun(NPatterns) ->
-                            astranaut_traverse_monad:return({'match', Line, NPatterns, NExpressions})
-                    end)
-          end),
+    Sequence = fun([PatternM, ExpressionM]) ->
+                       astranaut_traverse_monad:bind(
+                         ExpressionM,
+                         fun(Expression1) ->
+                                 astranaut_traverse_monad:bind(
+                                   astranaut_rebinding_scope:with_match_left_pattern(PatternM),
+                                   fun(Pattern1) ->
+                                           astranaut_traverse_monad:return([Pattern1,Expression1])
+                                   end)
+                         end)
+               end,
+    NodeM = astranaut_traverse:map_m(F, Node, Opts#{children => true, sequence_children => Sequence}),
     {Node1, Context1} = 
         astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
     astranaut_traverse:traverse_fun_return(#{node => Node1, state => Context1, continue => true});
@@ -230,22 +230,15 @@ walk_clause({clause, _Line, _Patterns, _Guards, _Expressions} = Node, ScopeType)
       ScopeType,
       astranaut_traverse:map_m(F, Node, Opts#{sequence_children => Sequence})).
 
-walk_named_fun({named_fun, Line,  Name, Clauses} = Node) ->
-    Parent = erl_syntax:type(Node),
-    Opts = #{node => expression, traverse => all, parent => Parent},
-    NameVar = {var, Line, Name},
+walk_named_fun({named_fun, _Line,  _Name, _Clauses} = Node) ->
+    Opts = #{node => expression, traverse => all},
+    Sequence = fun([NameTreeM|RestTreeMs]) ->
+                       NameTreeM1 = astranaut_rebinding_scope:with_function_clause_pattern(NameTreeM),
+                       astranaut_traverse_monad:sequence_m([NameTreeM1|RestTreeMs])
+               end,
     F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
     astranaut_rebinding_scope:with_shadowed(
-      astranaut_traverse_monad:bind(
-        astranaut_rebinding_scope:with_function_clause_pattern(
-          astranaut_traverse:map_m(F, NameVar, Opts#{node => pattern, parent => named_fun_expr})),
-        fun({var, _Line, Name1}) ->
-                astranaut_traverse_monad:bind(
-                  astranaut_traverse:map_m(F, Clauses, Opts),
-                  fun(Clauses1) ->
-                          astranaut_traverse_monad:return({named_fun, Line, Name1, Clauses1})
-                  end)
-        end)).
+      astranaut_traverse:map_m(F, Node, Opts#{children => true, sequence_children => Sequence})).
  
 map_m_function_args(_F, [], _Opts, FunctionArgs1) ->
     astranaut_traverse_monad:return(lists:reverse(FunctionArgs1));
@@ -272,20 +265,36 @@ walk_comprehension({ComprehensionType, Line, Expression, Qualifiers} = Node) ->
                   end)
         end)).
 
-map_m_qualifiers(F, [{GenerateType, Line, Pattern, Expression}|RestQualifiers], Opts, Acc)
+map_m_qualifiers(F, [{GenerateType, _Line, _Pattern, _Expression} = Node|RestQualifiers], Opts, Acc)
   when (GenerateType == generate) or (GenerateType == b_generate) ->
+    Sequence = fun([PatternM, ExpressionM]) ->
+                       astranaut_traverse_monad:bind(
+                         astranaut_rebinding_scope:with_shadowed(ExpressionM),
+                         fun(Expression1) ->
+                                 astranaut_traverse_monad:bind(
+                                   astranaut_rebinding_scope:with_comprehension_generate_pattern(PatternM),
+                                   fun(Pattern1) ->
+                                           astranaut_traverse_monad:return([Pattern1,Expression1])
+                                   end)
+                         end)
+               end,
     astranaut_traverse_monad:bind(
-      astranaut_rebinding_scope:with_shadowed(
-        astranaut_traverse:map_m(F, Expression, Opts)),
-      fun(Expression1) ->
-                astranaut_traverse_monad:bind(
-                  astranaut_rebinding_scope:with_comprehension_generate_pattern(
-                    astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern})),
-                  fun(Pattern1) ->
-                          Generate1 = {GenerateType, Line, Pattern1, Expression1},
-                          map_m_qualifiers(F, RestQualifiers, Opts, [Generate1|Acc])
-                  end)
+      astranaut_traverse:map_m(F, Node, Opts#{children => true, sequence_children => Sequence}),
+      fun(Node1) ->
+              map_m_qualifiers(F, RestQualifiers, Opts, [Node1|Acc])
       end);
+    %% astranaut_traverse_monad:bind(
+    %%   astranaut_rebinding_scope:with_shadowed(
+    %%     astranaut_traverse:map_m(F, Expression, Opts)),
+    %%   fun(Expression1) ->
+    %%             astranaut_traverse_monad:bind(
+    %%               astranaut_rebinding_scope:with_comprehension_generate_pattern(
+    %%                 astranaut_traverse:map_m(F, Pattern, Opts#{node => pattern})),
+    %%               fun(Pattern1) ->
+    %%                       Generate1 = {GenerateType, Line, Pattern1, Expression1},
+    %%                       map_m_qualifiers(F, RestQualifiers, Opts, [Generate1|Acc])
+    %%               end)
+    %%   end);
 map_m_qualifiers(F, [Expression|RestQualifiers], Opts, Acc) ->
     astranaut_traverse_monad:bind(
       astranaut_traverse:map_m(F, Expression, Opts),
