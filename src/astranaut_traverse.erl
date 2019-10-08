@@ -285,7 +285,9 @@ map_m_children(F, Node, Opts) ->
             monad_bind(
               map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
               fun(Subtrees1) ->
-                      Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
+                      %% Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
+                      %% export erl_syntax:revert_root
+                      Node1 = otp_erl_syntax:revert_root(erl_syntax:update_tree(Node, Subtrees1)),
                       monad_return(Node1, Opts)
               end, Opts)
     end.
@@ -318,8 +320,7 @@ m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
      deep_m_subtrees(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [Pattern, Expressions], #{parent := Parent} = Opts) 
   when (Parent == generator) or (Parent == binary_generator) ->
-    %% if node type is clause contains guards 
-    %% make first subtree pattern, make second subtree guard, make third subtree expression
+    %% make first subtree pattern, make second subtree expression
     [deep_m_subtrees(F, Pattern, Opts#{node => pattern}),
      deep_m_subtrees(F, Expressions, Opts#{node => expression})];
 m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
@@ -333,12 +334,12 @@ m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
                 %% do not traverse import attribute
                 deep_return(BodyTrees, Opts);
             _ ->
-                Bodies = lists:map(fun(BodyTree) -> erl_syntax:revert(BodyTree) end, BodyTrees),
+                Bodies = lists:map(fun(BodyTree) -> otp_erl_syntax:revert_root(BodyTree) end, BodyTrees),
                 deep_m_subtrees(F, Bodies, Opts#{node => attribute, attribute => Name})
         end,
     [NameTreeM, BodyTreesM];
 m_subtrees(F, [NameTrees, Clauses], #{parent := function} = Opts) ->
-    Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
+    Names = lists:map(fun(NameTree) -> otp_erl_syntax:revert_root(NameTree) end, NameTrees),
     [deep_m_subtrees(F, Names, Opts),
      deep_m_subtrees(F, Clauses, Opts)];
 m_subtrees(F, [ExprLeft, Op, ExprRight], #{parent := infix_expr} = Opts) ->

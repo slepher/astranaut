@@ -11,7 +11,7 @@
 -include("rebinding.hrl").
 
 -rebinding_fun({[test_lc, test_function, test_case], debug}).
--rebinding_fun({[test_operator, test_tuple, test_list], debug}).
+-rebinding_fun({[test_operator, test_tuple, test_list, test_try], debug}).
 -rebinding_fun({[test_map, test_map_update], debug}).
 -rebinding_fun({[test_rec, test_rec_update], debug}).
 -rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], non_rebinding}).
@@ -81,7 +81,7 @@ test_case(A) ->
     B = A + B,
     A = A + B,
     A.
-    
+
 test_case_origin(A) ->
     B = 15,
     {A_1, B_1} = {B, A},
@@ -95,6 +95,15 @@ test_case_origin(A) ->
     B_5 = A_2 + B_4,
     A_5 = A_2 + B_5,
     A_5.
+
+test_try() ->
+    A = 10,
+    try 
+        A
+    catch
+        Class:Exception:StackTrace ->
+            erlang:raise(Class, Exception, StackTrace)
+    end.
 
 test_operator(A) ->
     A = (begin A = A + 1, A end + begin A = A + 1, A end),
@@ -131,8 +140,7 @@ test_list(A) ->
     [A|B].
 
 test_operator_origin(A) ->
-    A_3 = begin A_1 = A + 1, A_1 end +
-	    begin A_2 = A + 1, A_2 end,
+    A_3 = begin A_1 = A + 1, A_1 end + begin A_2 = A + 1, A_2 end,
     A_3.
 
 test_tuple_origin(A) ->
