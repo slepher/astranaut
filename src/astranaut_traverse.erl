@@ -287,7 +287,7 @@ map_m_children(F, Node, Opts) ->
               fun(Subtrees1) ->
                       %% Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
                       %% export erl_syntax:revert_root
-                      Node1 = otp_erl_syntax:revert_root(erl_syntax:update_tree(Node, Subtrees1)),
+                      Node1 = revert_root(erl_syntax:update_tree(Node, Subtrees1)),
                       monad_return(Node1, Opts)
               end, Opts)
     end.
@@ -334,12 +334,12 @@ m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
                 %% do not traverse import attribute
                 deep_return(BodyTrees, Opts);
             _ ->
-                Bodies = lists:map(fun(BodyTree) -> otp_erl_syntax:revert_root(BodyTree) end, BodyTrees),
+                Bodies = lists:map(fun(BodyTree) -> revert_root(BodyTree) end, BodyTrees),
                 deep_m_subtrees(F, Bodies, Opts#{node => attribute, attribute => Name})
         end,
     [NameTreeM, BodyTreesM];
 m_subtrees(F, [NameTrees, Clauses], #{parent := function} = Opts) ->
-    Names = lists:map(fun(NameTree) -> otp_erl_syntax:revert_root(NameTree) end, NameTrees),
+    Names = lists:map(fun(NameTree) -> revert_root(NameTree) end, NameTrees),
     [deep_m_subtrees(F, Names, Opts),
      deep_m_subtrees(F, Clauses, Opts)];
 m_subtrees(F, [ExprLeft, Op, ExprRight], #{parent := infix_expr} = Opts) ->
@@ -574,3 +574,13 @@ file(Forms) when is_list(Forms) ->
     end;
 file(_) ->
     "".
+
+
+-ifdef(OTP_RELEASE).
+revert_root(Node) ->
+    erl_syntax_21:revert_root(Node).
+-else.
+revert_root(Node) ->
+    erl_syntax_20:revert_root(Node).
+-endif.
+    
