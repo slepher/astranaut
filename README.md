@@ -1,5 +1,11 @@
 # traverse
 
+![Travis CI](https://travis-ci.org/slepher/astranaut.svg?branch=master)
+
+## Requirements
+
+  erlang R19 or higher  
+
 ### traverse functions:
 
 ```erlang
