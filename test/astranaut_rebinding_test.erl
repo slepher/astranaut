@@ -10,10 +10,10 @@
 
 -include("rebinding.hrl").
 
--rebinding_fun({[test_lc, test_function, test_case], debug}).
--rebinding_fun({[test_operator, test_tuple, test_list, test_try], debug}).
--rebinding_fun({[test_map, test_map_update], debug}).
--rebinding_fun({[test_rec, test_rec_update], debug}).
+-rebinding_fun({[test_lc, test_function, test_case], []}).
+-rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], []}).
+-rebinding_fun({[test_map, test_map_update], []}).
+-rebinding_fun({[test_rec, test_rec_update], []}).
 -rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], non_rebinding}).
 -rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], non_rebinding}).
 -rebinding_fun({[test_map_origin, test_map_update_origin], non_rebinding}).
@@ -178,6 +178,9 @@ test_list_origin(A) ->
     B = [begin A_1 = A + 1, A_1 end,
 	 begin A_2 = A + 2, A_2 end],
     [A_2 | B].
+
+test_function_guard(As) when is_list(As) ->
+    As.
 
 %%--------------------------------------------------------------------
 %% @doc

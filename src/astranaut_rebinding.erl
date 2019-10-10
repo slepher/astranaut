@@ -15,14 +15,6 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    erlang:system_flag(backtrace_depth, 100),
-    dbg:tracer(),
-    %% dbg:tpl(astranaut_rebinding_scope, entry_scope_group, x),
-    %% dbg:tpl(astranaut_rebinding_scope, exit_scope_group, x),
-    %% dbg:tpl(astranaut_rebinding_scope, entry_funcall_argument, x),
-    %% dbg:tpl(astranaut_rebinding_scope, exit_funcall_argument, x),
-    %% dbg:tpl(astranaut_traverse, m_subtrees, cx),
-    dbg:p(all, [c]),
     {RebindingOptionsRec, Warnings} = 
         astranaut_rebinding_options:rebinding_options(Forms),
     FormsMonad = 
@@ -140,7 +132,7 @@ walk_node_1({GenerateType, _Line, _Pattern, _Expression} = Node, #{} = Context, 
     walk_generate(Node, Context, Attr);
 
 %% walk function call
-walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre} = Attr) ->
+walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
     walk_function_call(Node, Context, Attr);
 
 walk_node_1({op, _Line, _Op, _Left, _Right} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
