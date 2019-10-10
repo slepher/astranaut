@@ -577,10 +577,14 @@ file(_) ->
 
 
 -ifdef(OTP_RELEASE).
+  -if(?OTP_RELEASE >= 22).
+revert_root(Node) ->
+    erl_syntax_22:revert_root(Node).
+  -else.
 revert_root(Node) ->
     erl_syntax_21:revert_root(Node).
+  -endif.
 -else.
 revert_root(Node) ->
     erl_syntax_20:revert_root(Node).
 -endif.
-    

@@ -78,7 +78,7 @@
 %% A syntax tree can be transformed to the {@link erl_parse()}
 %% representation with the {@link revert/1} function.
 
--module(erl_syntax_21).
+-module(erl_syntax_22).
 
 -export([type/1,
 	 is_leaf/1,

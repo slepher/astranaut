@@ -78,7 +78,7 @@
 %% A syntax tree can be transformed to the {@link erl_parse()}
 %% representation with the {@link revert/1} function.
 
--module(erl_syntax_21).
+-module(erl_syntax_20).
 
 -export([type/1,
 	 is_leaf/1,
@@ -343,10 +343,8 @@
 	 typed_record_field_body/1,
          typed_record_field_type/1,
 	 class_qualifier/2,
-	 class_qualifier/3,
 	 class_qualifier_argument/1,
 	 class_qualifier_body/1,
-	 class_qualifier_stacktrace/1,
 	 tuple/1,
 	 tuple_elements/1,
 	 tuple_size/1,
@@ -2193,11 +2191,11 @@ revert_map_field_assoc(Node) ->
 -spec map_field_assoc_name(syntaxTree()) -> syntaxTree().
 
 map_field_assoc_name(Node) ->
-    case unwrap(Node) of
+    case Node of
         {map_field_assoc, _, Name, _} ->
             Name;
-        Node1 ->
-            (data(Node1))#map_field_assoc.name
+        _ ->
+            (data(Node))#map_field_assoc.name
     end.
 
 
@@ -2209,11 +2207,11 @@ map_field_assoc_name(Node) ->
 -spec map_field_assoc_value(syntaxTree()) -> syntaxTree().
 
 map_field_assoc_value(Node) ->
-    case unwrap(Node) of
+    case Node of
         {map_field_assoc, _, _, Value} ->
             Value;
-        Node1 ->
-            (data(Node1))#map_field_assoc.value
+        _ ->
+            (data(Node))#map_field_assoc.value
     end.
 
 
@@ -2251,11 +2249,11 @@ revert_map_field_exact(Node) ->
 -spec map_field_exact_name(syntaxTree()) -> syntaxTree().
 
 map_field_exact_name(Node) ->
-    case unwrap(Node) of
+    case Node of
         {map_field_exact, _, Name, _} ->
             Name;
-        Node1 ->
-            (data(Node1))#map_field_exact.name
+        _ ->
+            (data(Node))#map_field_exact.name
     end.
 
 
@@ -2267,11 +2265,11 @@ map_field_exact_name(Node) ->
 -spec map_field_exact_value(syntaxTree()) -> syntaxTree().
 
 map_field_exact_value(Node) ->
-    case unwrap(Node) of
+    case Node of
         {map_field_exact, _, _, Value} ->
             Value;
-        Node1 ->
-            (data(Node1))#map_field_exact.value
+        _ ->
+            (data(Node))#map_field_exact.value
     end.
 
 
@@ -3887,7 +3885,7 @@ fold_try_clause({clause, Pos, [P], Guard, Body}) ->
 	     class_qualifier ->
 		 {tuple, Pos, [class_qualifier_argument(P),
 			       class_qualifier_body(P),
-			       class_qualifier_stacktrace(P)]};
+			       {var, Pos, '_'}]};
 	     _ ->
 		 {tuple, Pos, [{atom, Pos, throw}, P, {var, Pos, '_'}]}
 	 end,
@@ -3896,14 +3894,12 @@ fold_try_clause({clause, Pos, [P], Guard, Body}) ->
 unfold_try_clauses(Cs) ->
     [unfold_try_clause(C) || C <- Cs].
 
-unfold_try_clause({clause, Pos, [{tuple, _, [{atom, _, throw},
-                                             V,
-                                             {var, _, '_'}]}],
+unfold_try_clause({clause, Pos, [{tuple, _, [{atom, _, throw}, V, _]}],
 		   Guard, Body}) ->
     {clause, Pos, [V], Guard, Body};
-unfold_try_clause({clause, Pos, [{tuple, _, [C, V, Stacktrace]}],
+unfold_try_clause({clause, Pos, [{tuple, _, [C, V, _]}],
 		   Guard, Body}) ->
-    {clause, Pos, [class_qualifier(C, V, Stacktrace)], Guard, Body}.
+    {clause, Pos, [class_qualifier(C, V)], Guard, Body}.
 
 
 %% =====================================================================
@@ -5340,11 +5336,11 @@ revert_map_type_assoc(Node) ->
 -spec map_type_assoc_name(syntaxTree()) -> syntaxTree().
 
 map_type_assoc_name(Node) ->
-    case unwrap(Node) of
+    case Node of
         {type, _, map_field_assoc, [Name, _]} ->
             Name;
-        Node1 ->
-            (data(Node1))#map_type_assoc.name
+        _ ->
+            (data(Node))#map_type_assoc.name
     end.
 
 
@@ -5356,11 +5352,11 @@ map_type_assoc_name(Node) ->
 -spec map_type_assoc_value(syntaxTree()) -> syntaxTree().
 
 map_type_assoc_value(Node) ->
-    case unwrap(Node) of
+    case Node of
         {type, _, map_field_assoc, [_, Value]} ->
             Value;
-        Node1 ->
-            (data(Node1))#map_type_assoc.value
+        _ ->
+            (data(Node))#map_type_assoc.value
     end.
 
 
@@ -5398,11 +5394,11 @@ revert_map_type_exact(Node) ->
 -spec map_type_exact_name(syntaxTree()) -> syntaxTree().
 
 map_type_exact_name(Node) ->
-    case unwrap(Node) of
+    case Node of
         {type, _, map_field_exact, [Name, _]} ->
             Name;
-        Node1 ->
-            (data(Node1))#map_type_exact.name
+        _ ->
+            (data(Node))#map_type_exact.name
     end.
 
 
@@ -5414,11 +5410,11 @@ map_type_exact_name(Node) ->
 -spec map_type_exact_value(syntaxTree()) -> syntaxTree().
 
 map_type_exact_value(Node) ->
-    case unwrap(Node) of
+    case Node of
         {type, _, map_field_exact, [_, Value]} ->
             Value;
-        Node1 ->
-            (data(Node1))#map_type_exact.value
+        _ ->
+            (data(Node))#map_type_exact.value
     end.
 
 
@@ -5456,12 +5452,8 @@ map_type(Fields) ->
 
 revert_map_type(Node) ->
     Pos = get_pos(Node),
-    case map_type_fields(Node) of
-        any_size ->
-            {type, Pos, map, any};
-        Fields ->
-            {type, Pos, map, Fields}
-    end.
+    {type, Pos, map, map_type_fields(Node)}.
+
 
 %% =====================================================================
 %% @doc Returns the list of field subtrees of a `map_type' node.
@@ -5719,12 +5711,7 @@ tuple_type(Elements) ->
 
 revert_tuple_type(Node) ->
     Pos = get_pos(Node),
-    case tuple_type_elements(Node) of
-        any_size ->
-            {type, Pos, tuple, any};
-        TypeElements ->
-            {type, Pos, tuple, TypeElements}
-    end.
+    {type, Pos, tuple, tuple_type_elements(Node)}.
 
 
 %% =====================================================================
@@ -6739,12 +6726,9 @@ try_expr_after(Node) ->
 %%
 %% @see class_qualifier_argument/1
 %% @see class_qualifier_body/1
-%% @see class_qualifier_stacktrace/1
 %% @see try_expr/4
 
--record(class_qualifier, {class :: syntaxTree(),
-                          body :: syntaxTree(),
-                          stacktrace :: syntaxTree()}).
+-record(class_qualifier, {class :: syntaxTree(), body :: syntaxTree()}).
 
 %% type(Node) = class_qualifier
 %% data(Node) = #class_qualifier{class :: Class, body :: Body}
@@ -6754,27 +6738,8 @@ try_expr_after(Node) ->
 -spec class_qualifier(syntaxTree(), syntaxTree()) -> syntaxTree().
 
 class_qualifier(Class, Body) ->
-    Underscore = {var, get_pos(Body), '_'},
     tree(class_qualifier,
-	 #class_qualifier{class = Class, body = Body,
-                          stacktrace = Underscore}).
-
-%% =====================================================================
-%% @doc Creates an abstract class qualifier. The result represents
-%% "<code><em>Class</em>:<em>Body</em>:<em>Stacktrace</em></code>".
-%%
-%% @see class_qualifier_argument/1
-%% @see class_qualifier_body/1
-%% @see try_expr/4
-
--spec class_qualifier(syntaxTree(), syntaxTree(), syntaxTree()) ->
-                             syntaxTree().
-
-class_qualifier(Class, Body, Stacktrace) ->
-    tree(class_qualifier,
-	 #class_qualifier{class = Class,
-                          body = Body,
-                          stacktrace = Stacktrace}).
+	 #class_qualifier{class = Class, body = Body}).
 
 
 %% =====================================================================
@@ -6798,16 +6763,6 @@ class_qualifier_argument(Node) ->
 
 class_qualifier_body(Node) ->
     (data(Node))#class_qualifier.body.
-
-%% =====================================================================
-%% @doc Returns the stacktrace subtree of a `class_qualifier' node.
-%%
-%% @see class_qualifier/2
-
--spec class_qualifier_stacktrace(syntaxTree()) -> syntaxTree().
-
-class_qualifier_stacktrace(Node) ->
-    (data(Node))#class_qualifier.stacktrace.
 
 
 %% =====================================================================
@@ -7233,7 +7188,7 @@ macro_arguments(Node) ->
 %% @doc Returns the syntax tree corresponding to an Erlang term.
 %% `Term' must be a literal term, i.e., one that can be
 %% represented as a source code literal. Thus, it may not contain a
-%% process identifier, port, reference or function value as a
+%% process identifier, port, reference, binary or function value as a
 %% subterm. The function recognises printable strings, in order to get a
 %% compact and readable representation. Evaluation fails with reason
 %% `badarg' if `Term' is not a literal term.
@@ -7267,13 +7222,6 @@ abstract(T) when is_map(T) ->
 	      || {Key,Value} <- maps:to_list(T)]);
 abstract(T) when is_binary(T) ->
     binary([binary_field(integer(B)) || B <- binary_to_list(T)]);
-abstract(T) when is_bitstring(T) ->
-    S = bit_size(T),
-    ByteS = S div 8,
-    BitS = S rem 8,
-    <<Bin:ByteS/binary, I:BitS>> = T,
-    binary([binary_field(integer(B)) || B <- binary_to_list(Bin)]
-           ++ [binary_field(integer(I), integer(BitS), [])]);
 abstract(T) ->
     erlang:error({badarg, T}).
 
@@ -7349,20 +7297,15 @@ concrete(Node) ->
 		Node0 -> maps:merge(concrete(Node0),M0)
 	    end;
 	binary ->
-            Fs = [begin
-                      B = binary_field_body(F),
-                      {Body, Size} =
-                          case type(B) of
-                              size_qualifier ->
-                                  {size_qualifier_body(B),
-                                   size_qualifier_argument(B)};
-                              _ ->
-                                  {B, none}
-                          end,
-                      revert_binary_field(
-                        binary_field(Body, Size, binary_field_types(F)))
-                  end
-                  || F <- binary_fields(Node)],
+	    Fs = [revert_binary_field(
+		    binary_field(binary_field_body(F),
+				 case binary_field_size(F) of
+				     none -> none;
+				     S ->
+					 revert(S)
+				 end,
+				 binary_field_types(F)))
+		  || F <- binary_fields(Node)],
 	    {value, B, _} =
 		eval_bits:expr_grp(Fs, [],
 				   fun(F, _) ->
@@ -7435,14 +7378,7 @@ is_literal(T) ->
 
 is_literal_binary_field(F) ->
     case binary_field_types(F) of
-	[] -> B = binary_field_body(F),
-              case type(B) of
-                  size_qualifier ->
-                      is_literal(size_qualifier_body(B)) andalso
-                          is_literal(size_qualifier_argument(B));
-                  _ ->
-                      is_literal(B)
-              end;
+	[] -> is_literal(binary_field_body(F));
 	_  -> false
     end.
 
@@ -7792,9 +7728,8 @@ subtrees(T) ->
 		catch_expr ->
 		    [[catch_expr_body(T)]];
 		class_qualifier ->
-                    [[class_qualifier_argument(T)],
-                     [class_qualifier_body(T)],
-                     [class_qualifier_stacktrace(T)]];
+		    [[class_qualifier_argument(T)],
+		     [class_qualifier_body(T)]];
 		clause ->
 		    case clause_guard(T) of
 			none ->
@@ -8015,7 +7950,6 @@ make_tree(block_expr, [B]) -> block_expr(B);
 make_tree(case_expr, [[A], C]) -> case_expr(A, C);
 make_tree(catch_expr, [[B]]) -> catch_expr(B);
 make_tree(class_qualifier, [[A], [B]]) -> class_qualifier(A, B);
-make_tree(class_qualifier, [[A], [B], [C]]) -> class_qualifier(A, B, C);
 make_tree(clause, [P, B]) -> clause(P, none, B);
 make_tree(clause, [P, [G], B]) -> clause(P, G, B);
 make_tree(cond_expr, [C]) -> cond_expr(C);
