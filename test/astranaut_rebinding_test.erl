@@ -9,6 +9,7 @@
 -module(astranaut_rebinding_test).
 
 -include("rebinding.hrl").
+-include("stacktrace.hrl").
 
 -rebinding_fun({[test_lc, test_function, test_case], []}).
 -rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], []}).
@@ -101,8 +102,8 @@ test_try() ->
     try 
         A
     catch
-        Class:Exception:StackTrace ->
-            erlang:raise(Class, Exception, StackTrace)
+        Class:Exception?CAPTURE_STACKTRACE ->
+            erlang:raise(Class, Exception, ?GET_STACKTRACE)
     end.
 
 test_operator(A) ->
