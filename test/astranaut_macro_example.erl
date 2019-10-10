@@ -105,6 +105,7 @@ macro_case(Body, TrueClause, FalseClause) ->
               false
       end).
 
+-ifdef(OTP_RELEASE).
 macro_try_catch() ->
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
@@ -117,6 +118,21 @@ macro_try_catch() ->
           _@Class:_@Exception:_@Stack ->
               erlang:raise(_L@Expr)
       end).
+-else.
+macro_try_catch() ->
+    Class = {var, 0, 'Class0'},
+    Exception = {var, 0, 'Exception0'},
+    Stack = astranaut:replace_line(quote(erlang:get_stacktrace()), 0),
+    Expr = [Class, Exception, Stack],
+    quote(
+      try
+          exit(throw)
+      catch
+          _@Class:_@Exception ->
+              erlang:raise(_L@Expr)
+      end).
+-endif.
+
 
 macro_function(Pattern, Middle) ->
     quote(fun(Head, _L@Pattern, Body) ->
