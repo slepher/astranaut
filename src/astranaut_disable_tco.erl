@@ -123,8 +123,6 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
     NVariables = sets:union(sets:from_list([Class, Exception]), Variables),
     ClassVar = {var, Line, Class},
     ExceptionVar = {var, Line, Exception},
-    Vars = [ClassVar, ExceptionVar],
-    Raise = quote(erlang:raise(unquote_splicing(Vars), erlang:get_stacktrace()), Line),
     Node = 
         quote(
           try

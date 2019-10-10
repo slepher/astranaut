@@ -58,7 +58,7 @@ test(ABC) ->
         catch
             exception:eft ->
                 efg;
-            _:ABC:_Stacks when (ABC == 3) ->
+            _:ABC when (ABC == 3) ->
                 {ABC, ABC}
         end,
     Zero = 
