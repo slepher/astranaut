@@ -322,6 +322,7 @@ append_attrs(Arguments, #{attributes := Attrs, line := Line}) ->
 append_attrs(Arguments, #{}) ->
     Arguments.
 
+-ifdef(OTP_RELEASE).
 apply_mfa(Module, Function, Arguments) ->
     try
         erlang:apply(Module, Function, Arguments)
@@ -329,6 +330,16 @@ apply_mfa(Module, Function, Arguments) ->
         _:Exception:StackTrace ->
             {error, {exception, Exception, Module, Function, StackTrace}}
     end.
+-else.
+apply_mfa(Module, Function, Arguments) ->
+    try
+        erlang:apply(Module, Function, Arguments)
+    catch
+        _:Exception ->
+            StackTrace = erlang:get_stacktrace(),
+            {error, {exception, Exception, Module, Function, StackTrace}}
+    end.
+-endif.
 
 update_with_counter(Tree, Module, Counter) ->
     Opts = #{traverse => post, formatter => ?MODULE},
