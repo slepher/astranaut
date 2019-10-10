@@ -340,7 +340,7 @@ update_with_counter(Tree, Module, Counter) ->
       end, Tree, Opts).
 
 walk_var_counter({var, Line, VarName} = Var, MacronameStr, Counter) ->
-    case string:split(atom_to_list(VarName), "@") of
+    case split_varname(atom_to_list(VarName)) of
         [Head, MacronameStr] ->
             VarName1 = list_to_atom(Head ++ "@" ++ MacronameStr ++ "@_" ++ Counter),
             {var, Line, VarName1};
@@ -352,7 +352,16 @@ walk_var_counter(Node, _ModuleStr, _Counter) ->
 %%%===================================================================
 %%% format functions.
 %%%===================================================================
-
+split_varname(String) ->
+    case lists:splitwith(
+           fun(Char) ->
+                   Char /= $@
+           end, String) of
+        {Head, [$@|Tail]} ->
+            [Head, Tail];
+        {Head, []} ->
+            [Head]
+    end.
 
 format_forms(Forms) ->
     case astranaut:attributes(debug_macro, Forms) of
