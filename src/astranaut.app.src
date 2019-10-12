@@ -5,7 +5,7 @@
   {applications, [kernel, stdlib]},
   {env,[]},
   {modules, []},
-  {maintainers, []},
+  {maintainers, ["slepher"]},
   {licenses, ["MIT"]},
-  {links, []}
+  {links, [{"Github", "https://www.github.com/slepher/astranaut"}]}
  ]}.
