@@ -12,7 +12,7 @@
 -include("stacktrace.hrl").
 
 -rebinding_fun({[test_lc, test_function, test_case], []}).
--rebinding_fun({[test_pinned_case], [clause_pinned]}).
+-rebinding_fun({[test_case_pinned], [clause_pinned]}).
 -rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], []}).
 -rebinding_fun({[test_map, test_map_update], []}).
 -rebinding_fun({[test_rec, test_rec_update], []}).
@@ -84,7 +84,7 @@ test_case(A) ->
     A = A + B,
     A.
 
-test_pinned_case(A) ->
+test_case_pinned(A) ->
     B = 15,
     {A, B} = {B, A},
     A = A + B,

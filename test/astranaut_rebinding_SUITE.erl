@@ -146,7 +146,9 @@ test_function(_Config) ->
 test_case(_Config) ->
     A = astranaut_rebinding_test:test_case(10),
     B = astranaut_rebinding_test:test_case_origin(10),
+    C = astranaut_rebinding_test:test_case_pinned(10),
     ?assertEqual(A, B),
+    ?assertEqual(A, C),
     ok.
 
 test_rec(_Config) ->
