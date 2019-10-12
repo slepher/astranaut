@@ -28,7 +28,7 @@ test(ABC) ->
     F = fun EFG (0, {EFG, EFG} = ABC, ABC) -> 0; EFG (N, ABC, ABC) -> EFG(N - 1) end,
     ABC = 
         case EFG of
-            ABC ->
+            +ABC ->
                 ABC = ABC + 1,
                 ABC;
             EFG ->
@@ -40,20 +40,20 @@ test(ABC) ->
     D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
     EFG = 
         case EFG of
-            ABC ->
+            +ABC ->
                 ABC = ABC + 1,
                 ABC;
-            EFG ->
+            +EFG ->
                 ABC = EFG + 2,
                 ABC = ABC + 2,
                 ABC
         end,
     C = 
         try ABC of
-            EFG ->
+            +EFG ->
                 ABC = ABC + 1,
                 ABC;
-            ABC ->
+            +ABC ->
                 ABC + 1
         catch
             exception:eft ->
@@ -79,18 +79,18 @@ test(ABC) ->
 hello(A, B) ->
   A = 
     case A of
-        B -> 
+        +B -> 
           B = A + B,
           A = A + B,
           B = A + B,
           B;
-        A ->
+        +A ->
           B = A + B,
           B
     end,
   B = 
     case A of
-        B -> 
+        +B -> 
             A = 
                 begin
                     B = A + B,
@@ -99,7 +99,7 @@ hello(A, B) ->
                 end,
             B = A + B,
             B;
-        A ->
+        +A ->
           B = A + B,
           B
     end,

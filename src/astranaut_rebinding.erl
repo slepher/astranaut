@@ -48,7 +48,7 @@ walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec
             ClausesM = 
                 astranaut_traverse_monad:map_m(
                   fun(Clause) ->
-                          Return = walk_function_clause(Clause),
+                          Return = walk_function_clause(Clause, RebindingOptions),
                           astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
                   end, Clauses),
             astranaut_traverse_monad:lift_m(
@@ -69,11 +69,12 @@ walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec
 walk_form(Form, _RebindingOptionsRec) ->
     astranaut_traverse_monad:return(Form).
 
-walk_function_clause(Clause) ->
+walk_function_clause(Clause, RebindingOptions) ->
     Context0 = astranaut_rebinding_scope:new_context(),
     astranaut_traverse:map_with_state(
         fun(Node, Acc, Attr) ->
-                walk_node(Node, Acc, Attr)
+                Attr1 = maps:merge(Attr, maps:with(astranaut_rebinding_options:keys(), RebindingOptions)),
+                walk_node(Node, Acc, Attr1)
         end, Context0, Clause, #{node => form, traverse => all, match_right_first => true, parent => fun_expr}).
 
 walk_node(Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
@@ -174,7 +175,8 @@ walk_node_1({var, _Line, '_'} = Var, #{} = Context, #{}) ->
 
 %% pin var if var is with + before
 walk_node_1({op, _Line1, '+', {var, _Line3, _Varname} = Var}, 
-            #{pattern := match_left} = Context, #{node := pattern, step := pre}) ->
+            #{pattern := PatternType} = Context, #{node := pattern, step := pre}) 
+  when PatternType == match_left; PatternType == clause_match ->
     Var1 = rename_pinned_var(Var, Context),
     astranaut_traverse:traverse_fun_return(#{node => Var1, state => Context, continue => true});
 
@@ -189,9 +191,13 @@ walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{node := guard}) ->
     {Var1, Context};
 
 %% rename var if current node is clause match pattern.
-walk_node_1({var, _Line, _Varname} = Var, #{pattern := clause_match} = Context, #{}) ->
+walk_node_1({var, _Line, _Varname} = Var, #{pattern := clause_match} = Context, #{clause_pinned := true}) ->
     Var1 = rename_clause_match_var(Var, Context),
     {Var1, Context};
+
+%% rename var if current node is clause match pattern.
+walk_node_1({var, _Line, _Varname} = Var, #{pattern := clause_match} = Context, #{}) ->
+    rebind_clause_match_var(Var, Context);
 
 %% rebind var if current node is function pattern.
 walk_node_1({var, _Line, _Varname} = Var, #{pattern := function_clause} = Context, #{node := pattern}) ->
@@ -329,6 +335,9 @@ rename_var(Var, Context) ->
 rename_clause_match_var(Var, Context) ->
     astranaut_rebinding_scope:rename_var(Var, Context).
 
+rebind_clause_match_var(Var, Context) ->
+    astranaut_rebinding_scope:rebind_var(Var, Context).
+
 rebind_function_clause_var(Var, Context) ->
     astranaut_rebinding_scope:rebind_var(Var, Context).
 
@@ -343,7 +352,11 @@ walk_sequence_children(Sequence, Node, Context, #{} = Opts0, Attr) ->
 
 walk_sequence_children(Sequence, FNode, Node, Context, #{} = Opts0, Attr) ->
     Opts = maps:merge(#{node => expression, traverse => all, children => true, sequence_children => Sequence}, Opts0),
-    F = astranaut_traverse:transform_mapfold_f(fun walk_node/3, Opts),
+    F = astranaut_traverse:transform_mapfold_f(
+          fun(Node1, Context1, Attr1) ->
+                  Attr2 = maps:merge(Attr1, maps:with(astranaut_rebinding_options:keys(), Attr)),
+                  walk_node(Node1, Context1, Attr2)
+          end, Opts),
     NodeM = FNode(astranaut_traverse:map_m(F, Node, Opts)),
     continue_node_m(NodeM, Context, Attr).
 

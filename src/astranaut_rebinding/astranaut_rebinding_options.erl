@@ -11,6 +11,7 @@
 %% API
 -export([rebinding_options/1]).
 -export([match_rebinding/3]).
+-export([keys/0]).
 
 -record(rebinding_options, {all_options, fun_options}).
 
@@ -41,6 +42,9 @@ match_rebinding(Name, Arity, RebindingOptionsRec) ->
         error ->
             error
     end.
+
+keys() ->
+    [clause_pinned, strict].
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -105,7 +109,6 @@ add_binding_options(Fun, Options, Line, {Acc, Warnings}) ->
           end, Warnings1),
     {maps:put(Fun, Options1, Acc), Warnings ++ Warnings2}.
 
-
 validate_option_key(debug, true) ->
     ok;
 validate_option_key(debug, false) ->
@@ -115,6 +118,18 @@ validate_option_key(non_rebinding, true) ->
 validate_option_key(non_rebinding, false) ->
     ok;
 validate_option_key(non_rebinding, _NoRebinding) ->
+    error;
+validate_option_key(clause_pinned, true) ->
+    ok;
+validate_option_key(clause_pinned, false) ->
+    ok;
+validate_option_key(clause_pinned, _ClausePinned) ->
+    error;
+validate_option_key(strict, true) ->
+    ok;
+validate_option_key(strict, false) ->
+    ok;
+validate_option_key(strict, _Strict) ->
     error;
 validate_option_key(debug, _Debug) ->
     error;
