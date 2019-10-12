@@ -79,7 +79,7 @@ walk_function_clause(Clause, RebindingOptions) ->
 
 walk_node(Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
     NodeType = erl_syntax:type(Node),
-    case is_scope_group(NodeType) of
+    case is_scope_group(NodeType, Attr) of
         true ->
             Context1 = astranaut_rebinding_scope:entry_scope_group(Context),
             walk_node_1(Node, Context1, Attr);
@@ -88,7 +88,7 @@ walk_node(Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
     end;
 walk_node(Node, #{} = Context, #{step := post, node := expression} = Attr) ->
     NodeType = erl_syntax:type(Node),
-    case is_scope_group(NodeType) of
+    case is_scope_group(NodeType, Attr) of
         true ->
             Context1 = astranaut_rebinding_scope:exit_scope_group(Context),
             walk_node_1(Node, Context1, Attr);
@@ -99,27 +99,27 @@ walk_node(Node, #{} = Context, #{step := post, node := expression} = Attr) ->
 walk_node(Node, Context, #{} = Attr) ->
     walk_node_1(Node, Context, Attr).
 
-is_scope_group(case_expr) ->
+is_scope_group(case_expr, #{}) ->
     true;
-is_scope_group(catch_expr) ->
+is_scope_group(catch_expr, #{}) ->
     true;
-is_scope_group(receive_expr) ->
+is_scope_group(receive_expr, #{}) ->
     true;
-is_scope_group(try_expr) ->
+is_scope_group(try_expr, #{}) ->
     true;
-is_scope_group(application) ->
+is_scope_group(application, #{strict := true}) ->
     true;
-is_scope_group(map_expr) ->
+is_scope_group(map_expr, #{strict := true}) ->
     true;
-is_scope_group(record_expr) ->
+is_scope_group(record_expr, #{strict := true}) ->
     true;
-is_scope_group(infix_expr) ->
+is_scope_group(infix_expr, #{strict := true}) ->
     true;
-is_scope_group(tuple) ->
+is_scope_group(tuple, #{strict := true}) ->
     true;
-is_scope_group(list) ->
+is_scope_group(list, #{strict := true}) ->
     true;
-is_scope_group(_Type) ->
+is_scope_group(_Type, #{}) ->
     false.
 
 %% walk comprehension
@@ -133,28 +133,36 @@ walk_node_1({GenerateType, _Line, _Pattern, _Expression} = Node, #{} = Context, 
     walk_generate(Node, Context, Attr);
 
 %% walk function call
-walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({call, _Line, _Function, _Args} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_function_call(Node, Context, Attr);
 
-walk_node_1({op, _Line, _Op, _Left, _Right} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({op, _Line, _Op, _Left, _Right} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_operator_call(Node, Context, Attr);
 
-walk_node_1({tuple, _Line, _TupleElements} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({tuple, _Line, _TupleElements} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_tuple(Node, Context, Attr);
 
-walk_node_1({cons, _Line, _Head, _Tail} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({cons, _Line, _Head, _Tail} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_cons(Node, Context, Attr);
 
-walk_node_1({map, _Line, _MapAssociations} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({map, _Line, _MapAssociations} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_map(Node, Context, Attr);
 
-walk_node_1({map, _Line, _Map, _MapAssociations} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({map, _Line, _Map, _MapAssociations} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_map(Node, Context, Attr);
 
-walk_node_1({record, _Line, _Name, _RecFields} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({record, _Line, _Name, _RecFields} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_record(Node, Context, Attr);
 
-walk_node_1({record, _Line, _Rec, _Name, _RecFields} = Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node_1({record, _Line, _Rec, _Name, _RecFields} = Node, #{} = Context, 
+            #{step := pre, node := expression, strict := true} = Attr) ->
     walk_record(Node, Context, Attr);
 
 %% walk match 

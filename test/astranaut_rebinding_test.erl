@@ -11,11 +11,12 @@
 -include("rebinding.hrl").
 -include("stacktrace.hrl").
 
--rebinding_fun({[test_lc, test_function, test_case], []}).
+-rebinding_fun({[test_lc, test_case], []}).
 -rebinding_fun({[test_case_pinned], [clause_pinned]}).
--rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], []}).
--rebinding_fun({[test_map, test_map_update], []}).
--rebinding_fun({[test_rec, test_rec_update], []}).
+-rebinding_fun({[test_function], [strict]}).
+-rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], [strict]}).
+-rebinding_fun({[test_map, test_map_update], [strict]}).
+-rebinding_fun({[test_rec, test_rec_update], [strict]}).
 -rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], non_rebinding}).
 -rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], non_rebinding}).
 -rebinding_fun({[test_map_origin, test_map_update_origin], non_rebinding}).
@@ -36,25 +37,24 @@ test_lc(A) ->
             B <- [begin A = A + 2, A end], 
             begin A = A + 3, A, true end,
             A <- [begin A = A + 1, A end],
-            is_ok(begin A = A + 3, A end, begin A = A + 4, A end),
+            is_ok(A + 3, begin A = A + 4, A end),
             true
         ],
     A.
 
 test_lc_origin(A) ->
-    A_1 = [{A_4, B}
+    A_1 = [{A_3, B}
 	   || B <- [begin A_1 = A + 2, A_1 end],
 	      begin A_1 = A + 3, A_1, true end,
 	      A_2 <- [begin A_2 = A_1 + 1, A_2 end],
-	      is_ok(begin A_3 = A_2 + 3, A_3 end,
-		    begin A_4 = A_2 + 4, A_4 end),
+              is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end),
 	      true],
     A_1.
 
 test_function(A) ->
     B = 10,
     B = ok(begin A = A + 1, A end, begin A = A + B, A end),
-    B = bind(begin A = A + B, A end,
+    B = bind(A + B,
              fun(A) -> A = A + B, A end),
     A = B + 1,
     A = A + 1,
