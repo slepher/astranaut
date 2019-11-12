@@ -106,28 +106,32 @@ rebind_var({var, Line, Varname} = Var,
             Var1 = rename_var(Var, Context),
             {Var1, Context};
         false ->
+            PatternVarnames1 = ordsets:add_element(Varname, PatternVarnames),
+            Context1 = Context#{pattern_varnames => PatternVarnames1},
+
             case ordsets:is_element(Varname, GlobalVarnames) of
                 true ->
                     Varname1 = new_variable_name(Varname, GlobalVarnames),
                     Var1 = {var, Line, Varname1},
                     GlobalVarnames1 = ordsets:add_element(Varname1, GlobalVarnames),
                     LocalVarnames1 = ordsets:add_element(Varname1, LocalVarnames),
-                    PatternVarnames1 = ordsets:add_element(Varname, PatternVarnames),
                     GlobalRenameMap1 = maps:put(Varname, Varname1, GlobalRenameMap),
                     LocalRenameMap1 = maps:put(Varname, Varname1, LocalRenameMap),
 
-                    Context1 = Context#{global_varnames  => GlobalVarnames1,
-                                        local_varnames   => LocalVarnames1,
-                                        global_renames   => GlobalRenameMap1,
-                                        local_renames    => LocalRenameMap1,
-                                        pattern_varnames => PatternVarnames1
-                                       },
-                    {Var1, Context1};
+                    Context2 = Context1#{global_varnames  => GlobalVarnames1,
+                                         local_varnames   => LocalVarnames1,
+                                         global_renames   => GlobalRenameMap1,
+                                         local_renames    => LocalRenameMap1,
+                                         pattern_varnames => PatternVarnames1
+                                        },
+                    {Var1, Context2};
                 false ->
                     GlobalVarnames1 = ordsets:add_element(Varname, GlobalVarnames),
                     LocalVarnames1 = ordsets:add_element(Varname, LocalVarnames),
-                    Context1 = Context#{global_varnames => GlobalVarnames1, local_varnames => LocalVarnames1},
-                    {Var, Context1}
+                    Context2 = Context1#{global_varnames => GlobalVarnames1, 
+                                         local_varnames => LocalVarnames1
+                                        },
+                    {Var, Context2}
             end
     end.
 

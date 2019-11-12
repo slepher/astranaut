@@ -111,7 +111,8 @@ all() ->
     [test_lc, test_function, test_case,
      test_map, test_map_update,
      test_rec, test_rec_update,
-     test_operator, test_list, test_tuple
+     test_operator, test_list, test_tuple,
+     test_pattern_save_var, test_pattern_save_var_in_fun, test_pattern_save_var_in_case
     ].
 
 %%--------------------------------------------------------------------
@@ -191,4 +192,25 @@ test_list(_Config) ->
     A = astranaut_rebinding_test:test_list(10),
     B = astranaut_rebinding_test:test_list_origin(10),
     ?assertEqual(A, B),
+    ok.
+
+test_pattern_save_var(_Config) ->
+    A = astranaut_rebinding_test:test_pattern_same_var(1, 2),
+    B = astranaut_rebinding_test:test_pattern_same_var(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+test_pattern_save_var_in_fun(_Config) ->
+    A = astranaut_rebinding_test:test_pattern_same_var_in_fun(1, 2),
+    B = astranaut_rebinding_test:test_pattern_same_var_in_fun(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+test_pattern_save_var_in_case(_Config) ->
+    A = astranaut_rebinding_test:test_pattern_same_var_in_case(1, 2),
+    B = astranaut_rebinding_test:test_pattern_same_var_in_case(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
     ok.

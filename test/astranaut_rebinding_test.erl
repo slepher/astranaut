@@ -21,6 +21,7 @@
 -rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], non_rebinding}).
 -rebinding_fun({[test_map_origin, test_map_update_origin], non_rebinding}).
 -rebinding_fun({[test_rec_origin, test_rec_update_origin], non_rebinding}).
+-rebinding_fun({[test_pattern_same_var, test_pattern_same_var_in_fun, test_pattern_same_var_in_case], [debug]}).
 
 -record(rec, {a, b, c, d}).
 
@@ -197,6 +198,27 @@ test_list_origin(A) ->
 
 test_function_guard(As) when is_list(As) ->
     As.
+
+test_pattern_same_var(A, A) ->
+    A * 2 + 1;
+test_pattern_same_var(A, B) ->
+    A + B.
+
+test_pattern_same_var_in_fun(Ax, B) ->
+    F = fun(Ax, Ax) ->
+                Ax * 2 + 1;
+           (A, B) ->
+                A + B
+        end,
+    F(Ax, B).
+
+test_pattern_same_var_in_case(Ax, B) ->
+    case {Ax, B} of
+        {Ax, Ax} ->
+            Ax * 2 + 1;
+        {Ax, B} ->
+            Ax + B
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
