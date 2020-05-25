@@ -217,34 +217,31 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
 map_m_1(F, NodeA, #{children := true} = Opts) ->
     Opts1 = maps:remove(children, Opts),
     map_m_children(F, NodeA, Opts1);
-map_m_1(F, NodeA, Opts) ->
+map_m_1(F, NodeA, #{} = Opts) ->
+    SyntaxLib = syntax_lib(Opts),
+    map_m_tree(F, NodeA, Opts, SyntaxLib).
+
+map_m_tree(F, NodeA, Opts, SyntaxLib) ->
     Attr = maps:with([parent], Opts),
-    NodeType = node_type(NodeA, Opts),
+    NodeType = SyntaxLib:node_type(NodeA, Opts),
     PreType = 
-        case erl_syntax:subtrees(NodeA) of
+        case SyntaxLib:subtrees(NodeA, Opts) of
             [] ->
                 leaf;
             _Subtrees ->
                 pre
         end,
-    %% do form
-    %% do([Monad ||
-    %%           NodeB <- F(NodeA, Attrs),
-    %%           SubTreesB = erl_syntax:subtrees(NodeB),
-    %%           SubtreesC <- map_m(F, SubTreesB, Opts),
-    %%           NodeC = erl_syntax:revert(erl_syntax:update_tree(NodeB, SubtreesC)),
-    %%           F(NodeD, Attrs)
-    %%    ]).
     bind_with_continue(
       NodeA, 
       F(NodeA, Attr#{step => PreType, node => NodeType}),
       fun(NodeB) ->
-              case erl_syntax:subtrees(NodeB) of
+              case SyntaxLib:subtrees(NodeB, Opts) of
                   [] ->
                       monad_return(NodeB, Opts);
-                  _ ->
+                  Subtrees ->
+                      Parent = SyntaxLib:type(NodeB),
                       monad_bind(
-                        map_m_children(F, NodeB, Opts),
+                        map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
                         fun(NodeC) ->
                                 bind_with_continue(
                                   NodeC, 
@@ -255,15 +252,6 @@ map_m_1(F, NodeA, Opts) ->
                         end, Opts)
               end
       end, Opts).
-
-node_type(_Node, #{node := NodeType}) ->
-    NodeType;
-node_type({attribute, _, _AttrName, _AttrValue}, #{}) ->
-    form;
-node_type({function, _, _AttrName, _AttrValue}, #{}) ->
-    form;
-node_type(_Node, #{}) ->
-    expression.
     
 bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
     monad_bind(
@@ -277,20 +265,26 @@ bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
       end, Opts).
 
 map_m_children(F, Node, Opts) ->
-    case erl_syntax:subtrees(Node) of
-        [] ->
-            monad_return(Node, Opts);
-        Subtrees ->
-            SyntaxType = erl_syntax:type(Node),
-            monad_bind(
-              map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
-              fun(Subtrees1) ->
-                      %% Node1 = erl_syntax:revert(erl_syntax:update_tree(Node, Subtrees1)),
-                      %% export erl_syntax:revert_root
-                      Node1 = revert_root(erl_syntax:update_tree(Node, Subtrees1)),
-                      monad_return(Node1, Opts)
-              end, Opts)
-    end.
+    SyntaxLib = syntax_lib(Opts),
+    Subtrees = SyntaxLib:subtrees(Node, Opts),
+    map_m_children(F, Node, Subtrees, Opts, SyntaxLib).
+
+map_m_children(_F, Node, [], Opts, _SyntaxLib) ->
+    monad_return(Node, Opts);
+
+map_m_children(F, Node, Subtrees, Opts, SyntaxLib) ->
+    SyntaxType = SyntaxLib:type(Node),
+    monad_bind(
+      map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
+      fun(Subtrees1) ->
+              Node1 = SyntaxLib:update_subtrees(Node, Subtrees1),
+              monad_return(Node1, Opts)
+      end, Opts).
+
+syntax_lib(#{syntax_lib := SyntaxLib}) ->
+    SyntaxLib;
+syntax_lib(#{}) ->
+    astranaut_erl_syntax.
 
 map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
     Opts1 = maps:remove(sequence_children, Opts),
@@ -300,57 +294,17 @@ map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
     monad_deep_sequence_m(SubtreesM, Opts).
 
-m_subtrees(F, Nodes, #{node := pattern} = Opts) ->
-    deep_m_subtrees(F, Nodes, Opts);
-m_subtrees(F, [NameTrees, Clauses], #{parent := named_fun_expr} = Opts) ->
-    Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-    [deep_m_subtrees(F, Names, Opts#{node => pattern}),
-     deep_m_subtrees(F, Clauses, Opts#{node => expression})];
-m_subtrees(F, [Patterns, Expressions], #{parent := Parent} = Opts) 
-  when (Parent == match_expr) or (Parent == clause) ->
-    %% if node type is match_expr or clause 
-    %% make first subtree pattern, make second subtree expression
-    [deep_m_subtrees(F, Patterns, Opts#{node => pattern}),
-     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
-m_subtrees(F, [Patterns, Guards, Expressions], #{parent := clause} = Opts) ->
-    %% if node type is clause contains guards 
-    %% make first subtree pattern, make second subtree guard, make third subtree expression
-    [deep_m_subtrees(F, Patterns, Opts#{node => pattern}),
-     deep_m_subtrees(F, Guards, Opts#{node => guard}),
-     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
-m_subtrees(F, [Pattern, Expressions], #{parent := Parent} = Opts) 
-  when (Parent == generator) or (Parent == binary_generator) ->
-    %% make first subtree pattern, make second subtree expression
-    [deep_m_subtrees(F, Pattern, Opts#{node => pattern}),
-     deep_m_subtrees(F, Expressions, Opts#{node => expression})];
-m_subtrees(F, [[NameTree], BodyTrees], #{parent := attribute} = Opts) ->
-    Name = attribute_name(NameTree),
-    NameTreeM = deep_return([NameTree], Opts),
-    BodyTreesM = 
-        case Name of
-            export ->
-                deep_return(BodyTrees, Opts);
-            import ->
-                %% do not traverse import attribute
-                deep_return(BodyTrees, Opts);
-            _ ->
-                Bodies = lists:map(fun(BodyTree) -> revert_root(BodyTree) end, BodyTrees),
-                deep_m_subtrees(F, Bodies, Opts#{node => attribute, attribute => Name})
-        end,
-    [NameTreeM, BodyTreesM];
-m_subtrees(F, [NameTrees, Clauses], #{parent := function} = Opts) ->
-    Names = lists:map(fun(NameTree) -> revert_root(NameTree) end, NameTrees),
-    [deep_m_subtrees(F, Names, Opts),
-     deep_m_subtrees(F, Clauses, Opts)];
-m_subtrees(F, [ExprLeft, Op, ExprRight], #{parent := infix_expr} = Opts) ->
-    [deep_m_subtrees(F, ExprLeft, Opts),
-     deep_return(Op, Opts),
-     deep_m_subtrees(F, ExprRight, Opts)];
-m_subtrees(F, [Op, ExprRight], #{parent := prefix_expr} = Opts) ->
-    [deep_return(Op, Opts),
-     deep_m_subtrees(F, ExprRight, Opts)];
-m_subtrees(F, Nodes, Opts) ->
-    deep_m_subtrees(F, Nodes, Opts).
+m_subtrees(F, Subtrees, Opts) ->
+    lists:map(
+      fun({skip, Subtree}) ->
+              deep_return(Subtree, Opts);
+         ({Type, Subtree}) when is_atom(Type) ->
+              deep_m_subtrees(F, Subtree, Opts#{node => Type});
+         ({Opts1, Subtree}) when is_map(Opts1) ->
+              deep_m_subtrees(F, Subtree, maps:merge(Opts, Opts1));
+         (Subtree) when is_list(Subtree) ->
+              deep_m_subtrees(F, Subtree, Opts)
+      end, Subtrees).
 
 deep_return(Nodes, Opts) when is_list(Nodes) ->
     lists:map(
@@ -369,8 +323,8 @@ deep_m_subtrees(F, Nodes, Opts) when is_list(Nodes) ->
 deep_m_subtrees(F, Node, Opts) ->
     map_m_1(F, Node, Opts).
 
-attribute_name({tree, atom, _, Name}) ->
-    Name.
+%% attribute_name({tree, atom, _, Name}) ->
+%%     Name.
 
 monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:bind(A, AFB, Monad).
@@ -413,8 +367,9 @@ fun_return_to_monad(Return, Node) ->
     fun_return_to_monad(Return, Node, #{}).
 
 fun_return_to_monad(Return, Node, Opts) ->
+    SyntaxLib = syntax_lib(Opts),
     MA = astranaut_traverse_monad:return(Node),
-    Line = erl_syntax:get_pos(Node),
+    Line = SyntaxLib:get_pos(Node),
     fun_return_to_monad_1(Return, MA, Opts#{line => Line}).
 
 %% transform user sytle traverse return to astranaut_traverse_monad
@@ -574,17 +529,3 @@ file(Forms) when is_list(Forms) ->
     end;
 file(_) ->
     "".
-
-
--ifdef(OTP_RELEASE).
-  -if(?OTP_RELEASE >= 22).
-revert_root(Node) ->
-    erl_syntax_22:revert_root(Node).
-  -else.
-revert_root(Node) ->
-    erl_syntax_21:revert_root(Node).
-  -endif.
--else.
-revert_root(Node) ->
-    erl_syntax_20:revert_root(Node).
--endif.
