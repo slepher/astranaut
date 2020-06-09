@@ -101,6 +101,8 @@ walk_node(Node, Context, #{} = Attr) ->
 
 is_scope_group(case_expr, #{}) ->
     true;
+is_scope_group(if_expr, #{}) ->
+    true;
 is_scope_group(catch_expr, #{}) ->
     true;
 is_scope_group(receive_expr, #{}) ->

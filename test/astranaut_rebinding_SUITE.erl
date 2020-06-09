@@ -108,7 +108,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_lc, test_function, test_case,
+    [test_lc, test_function, test_case, test_if,
      test_map, test_map_update,
      test_rec, test_rec_update,
      test_operator, test_list, test_tuple,
@@ -150,6 +150,12 @@ test_case(_Config) ->
     C = astranaut_rebinding_test:test_case_pinned(10),
     ?assertEqual(A, B),
     ?assertEqual(A, C),
+    ok.
+
+test_if(_Config) ->
+    A = astranaut_rebinding_test:test_if(10),
+    B = astranaut_rebinding_test:test_if_origin(10),
+    ?assertEqual(A, B),
     ok.
 
 test_rec(_Config) ->

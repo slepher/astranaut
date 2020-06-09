@@ -11,7 +11,7 @@
 -include("rebinding.hrl").
 -include("stacktrace.hrl").
 
--rebinding_fun({[test_lc, test_case], []}).
+-rebinding_fun({[test_lc, test_case, test_if], []}).
 -rebinding_fun({[test_case_pinned], [clause_pinned]}).
 -rebinding_fun({[test_function], [strict]}).
 -rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], [strict]}).
@@ -79,7 +79,7 @@ test_case(A) ->
     B = case A of
             10 -> A = A + 1, A = A + 1, A;
             +B ->  B = A + 1, A = B + 1, A;
-            +A ->  B = A + B, B
+            A ->  B = A + B, B
         end,
     B = A + B,
     A = A + B,
@@ -108,6 +108,48 @@ test_case_origin(A) ->
 	    10 ->  A_3 = A_2 + 1,   A_4 = A_3 + 1, A_4;
 	    B_2 -> B_3 = A_2 + 1,   A_3 = B_3 + 1, A_3;
 	    A_2 -> B_3 = A_2 + B_2, B_3
+	  end,
+    B_5 = A_2 + B_4,
+    A_5 = A_2 + B_5,
+    A_5.
+
+test_if(A) ->
+    B = 15,
+    {A, B} = {B, A},
+    A = A + B,
+    B = A + B,
+    B = if
+            A == 10 -> A = A + 1, A = A + 1, A;
+            A == B -> B = A + 1, A = B + 1, A;
+            true -> B = A + B, B
+        end,
+    B = A + B,
+    A = A + B,
+    A.
+
+test_if_pinned(A) ->
+    B = 15,
+    {A, B} = {B, A},
+    A = A + B,
+    B = A + B,
+    B = if
+            A == 10 -> A = A + 1, A = A + 1, A;
+            A == B -> B = A + 1, A = B + 1, A;
+            true -> B = A + B, B
+        end,
+    B = A + B,
+    A = A + B,
+    A.
+
+test_if_origin(A) ->
+    B = 15,
+    {A_1, B_1} = {B, A},
+    A_2 = A_1 + B_1,
+    B_2 = A_2 + B_1,
+    B_4 = if
+              A_2 == 10 ->  A_3 = A_2 + 1,   A_4 = A_3 + 1, A_4;
+              A_2 == B_2 -> B_3 = A_2 + 1,   A_3 = B_3 + 1, A_3;
+              true -> B_3 = A_2 + B_2, B_3
 	  end,
     B_5 = A_2 + B_4,
     A_5 = A_2 + B_5,
