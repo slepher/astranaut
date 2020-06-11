@@ -2,7 +2,7 @@
   [{"0.6.0", [
     {load_module, astranaut_rebinding}
   ]}],
-  {"0.6.0", [
+  [{"0.6.0", [
     {load_module, astranaut_rebinding}
   ]}]
 }.
