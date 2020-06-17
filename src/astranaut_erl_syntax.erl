@@ -24,9 +24,16 @@ get_pos(Node) ->
     erl_syntax:get_pos(Node).
 
 subtrees(Node, Opts) ->
-    Type = erl_syntax:type(Node),
-    Subtrees = erl_syntax:subtrees(Node),
-    up_subtrees(Subtrees, Opts#{parent => Type}).
+    try erl_syntax:type(Node) of
+        Type ->
+            Subtrees = erl_syntax:subtrees(Node),
+            up_subtrees(Subtrees, Opts#{parent => Type})
+    catch
+        EType:{badarg, _}:Backtrace ->
+            erlang:raise(EType, {invalid_node, Node, Opts}, Backtrace);
+        EType:Exception:Backtrace ->
+            erlang:raise(EType, Exception, Backtrace)
+    end.
 
 update_subtrees(Node, Subtrees) ->
     revert_root(erl_syntax:update_tree(Node, Subtrees)).

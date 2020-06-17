@@ -21,7 +21,7 @@
 -rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], non_rebinding}).
 -rebinding_fun({[test_map_origin, test_map_update_origin], non_rebinding}).
 -rebinding_fun({[test_rec_origin, test_rec_update_origin], non_rebinding}).
--rebinding_fun({[test_pattern_same_var, test_pattern_same_var_in_fun, test_pattern_same_var_in_case], [debug]}).
+-rebinding_fun({[test_pattern_same_var, test_pattern_same_var_in_fun, test_pattern_same_var_in_case], []}).
 
 -record(rec, {a, b, c, d}).
 

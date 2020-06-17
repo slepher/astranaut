@@ -9,7 +9,7 @@
 -module(astranaut_traverse).
 
 %% API
--export([traverse_fun_return/1, traverse_error/1]).
+-export([reply_to_traverse_fun_return/2, traverse_fun_return/1, traverse_error/1]).
 -export([map/2, map/3]).
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
@@ -111,19 +111,58 @@ reduce(F, Init, TopNode, Opts) ->
       end, mapfold(NF, Init, TopNode, Opts)).
 
 -spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_final_return({Node, State}).
-map_with_state(F, Init, Node, Opts) ->
+map_with_state(F, Init, Forms, Opts) ->
+    case maps:get(parse_transform, Opts, false) of
+        false ->
+            map_with_state_1(F, Init, Forms, Opts);
+        File ->
+            {Forms1, Errors} = extract_errors(Forms, [], []),
+            Reply = map_with_state_1(F, Init, Forms1, Opts),
+            Reply1 = merge_errors(Reply, Errors),
+            File1 =
+                case File of
+                    true ->
+                        file(Forms);
+                    File when is_list(File) ->
+                        File
+                end,
+            parse_transform_return(Reply1, File1)
+    end.
+
+map_with_state_1(F, Init, Node, Opts) ->
     Reply = mapfold(F, Init, Node, Opts),
-    NReply = map_traverse_return(
-               fun({NNode, _State}) ->
-                       NNode
-               end, Reply),
-    to_parse_transform_return(NReply, Node, Opts).
+    map_traverse_return(
+      fun({NNode, _State}) ->
+              NNode
+      end, Reply).
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
     SimplifyReturn = maps:get(simplify_return, Opts, true),
     Return = mapfold_1(F, Init, Node, Opts),
     simplify_return(Return, SimplifyReturn).
+
+extract_errors([{error, Error}|T], Nodes, Errors) ->
+    extract_errors(T, Nodes, [Error|Errors]);
+extract_errors([Form|T], Nodes, Errors) ->
+    extract_errors(T, [Form|Nodes], Errors);
+extract_errors([], Nodes, Errors) ->
+    {lists:reverse(Nodes), lists:reverse(Errors)};
+extract_errors(Node, [], []) ->
+    {Node, []}.
+
+merge_errors({ok, Reply, Errors, Warnings}, Errors1) ->
+    {ok, Reply, Errors1 ++ Errors, Warnings};
+merge_errors({error, Errors, Warnings}, Errors1) ->
+    {error, Errors1 ++ Errors, Warnings};
+merge_errors({warning, Reply, Warnings}, []) ->
+    {warning, Reply, Warnings};
+merge_errors({warning, Reply, Warnings}, Errors) ->
+    {ok, Reply, Errors, Warnings};
+merge_errors(Reply, []) ->
+    Reply;
+merge_errors(Reply, Errors1) ->
+    {ok, Reply, Errors1, []}.
 
 -spec map_traverse_return(fun((A) -> B), traverse_return(A)) -> parse_transform_return(B).
 map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
@@ -143,7 +182,6 @@ map_traverse_return_e(F, {warning, Reply, Warnings}) ->
     F(Reply, [], Warnings);
 map_traverse_return_e(F, Reply) ->
     F(Reply, [], []).
-
 
 map_traverse_fun_return(F, {warning, Node, Reason}) ->
     {warning, F(Node), Reason};
@@ -217,6 +255,8 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
 map_m_1(F, NodeA, #{children := true} = Opts) ->
     Opts1 = maps:remove(children, Opts),
     map_m_children(F, NodeA, Opts1);
+map_m_1(F, NodeA, #{traverse := list}) ->
+    F(NodeA, #{});
 map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
@@ -487,6 +527,33 @@ simplify_return({ok, Reply, [], []}, true) ->
 simplify_return(Other, _) ->
     Other.
 
+reply_to_traverse_fun_return(Reply, Node) ->
+    case reply_to_traverse_fun_return(Reply) of
+        #{node := _Node1} = Return ->
+            Return;
+        #{} = Return ->
+            Return#{node => Node};
+        Return ->
+            Return
+    end.
+
+reply_to_traverse_fun_return({ok, Reply, [], []}) ->
+    Reply;
+reply_to_traverse_fun_return({ok, Reply, [], Warnings}) ->
+    traverse_fun_return(#{node => Reply, warnings => Warnings});
+reply_to_traverse_fun_return({ok, Reply, Errors, []}) ->
+    traverse_fun_return(#{node => Reply, errors => Errors});
+reply_to_traverse_fun_return({ok, Reply, Errors, Warnings}) ->
+    traverse_fun_return(#{node => Reply, warnings => Warnings, errors => Errors});
+reply_to_traverse_fun_return({warning, Reply, Warnings}) ->
+    traverse_fun_return(#{node => Reply, warnings => Warnings});
+reply_to_traverse_fun_return({error, Reply, Errors}) ->
+    traverse_fun_return(#{node => Reply, error => Errors});
+reply_to_traverse_fun_return({error, Errors}) ->
+    traverse_fun_return(#{errors => Errors});
+reply_to_traverse_fun_return(Reply) ->
+    Reply.
+
 monad_to_traverse_fun_return(Monad) ->
     monad_to_traverse_fun_return(Monad, #{}).
 
@@ -508,16 +575,6 @@ monad_to_traverse_fun_return(Monad, #{} = Opts) ->
             traverse_fun_return(#{node => Node, errors => Errors, warnings => Warnings});
         {error, Errors, Warnings} ->
             traverse_fun_return(#{errors => Errors, warnings => Warnings})
-    end.
-
-to_parse_transform_return(Reply, Forms, Opts) when is_map(Opts) ->
-    ParseTransForm = maps:get(parse_transform, Opts, false),
-    case ParseTransForm of
-        true ->
-            File = file(Forms),
-            parse_transform_return(Reply, File);
-        false ->
-            Reply
     end.
 
 file(Forms) when is_list(Forms) ->
