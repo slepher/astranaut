@@ -833,8 +833,8 @@ update_name(Name, #test{} = Test) ->
 
 *Desc*
 
-&emsp;&emsp; convert erlang record to elixir like struct 
-&emsp;&emsp; code above is converted to code below
+&emsp;&emsp; convert erlang record to elixir like struct  
+&emsp;&emsp; code above is converted to code below  
 
 ```erlang
 -include_lib("erlando/include/struct.hrl").
