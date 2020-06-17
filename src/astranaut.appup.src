@@ -1,8 +1,16 @@
-{"0.6.3",
-  [{"0.6.0", [
-    {load_module, astranaut_rebinding}
-  ]}],
-  [{"0.6.0", [
-    {load_module, astranaut_rebinding}
-  ]}]
+{ "0.7.0",
+    [{ "0.6.0",
+        [{add_module,astranaut_struct,[]},
+         {add_module,astranaut_struct_transformer,[]},
+         {load_module,astranaut_erl_syntax,brutal_purge,brutal_purge,[]},
+         {load_module,astranaut_rebinding,brutal_purge,brutal_purge,
+                      [astranaut_traverse]},
+         {load_module,astranaut_traverse,brutal_purge,brutal_purge,[]}] }],
+    [{ "0.6.0",
+        [{load_module,astranaut_traverse,brutal_purge,brutal_purge,[]},
+         {load_module,astranaut_rebinding,brutal_purge,brutal_purge,
+                      [astranaut_traverse]},
+         {load_module,astranaut_erl_syntax,brutal_purge,brutal_purge,[]},
+         {delete_module,astranaut_struct_transformer},
+         {delete_module,astranaut_struct}] }]
 }.

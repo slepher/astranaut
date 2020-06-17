@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_erl_syntax).
 
+-include("stacktrace.hrl").
+
 %% API
 -export([type/1]).
 -export([subtrees/2]).
@@ -29,10 +31,10 @@ subtrees(Node, Opts) ->
             Subtrees = erl_syntax:subtrees(Node),
             up_subtrees(Subtrees, Opts#{parent => Type})
     catch
-        EType:{badarg, _}:Backtrace ->
-            erlang:raise(EType, {invalid_node, Node, Opts}, Backtrace);
-        EType:Exception:Backtrace ->
-            erlang:raise(EType, Exception, Backtrace)
+        EType:{badarg, _}?CAPTURE_STACKTRACE ->
+            erlang:raise(EType, {invalid_node, Node, Opts}, ?GET_STACKTRACE);
+        EType:Exception?CAPTURE_STACKTRACE ->
+            erlang:raise(EType, Exception, ?GET_STACKTRACE)
     end.
 
 update_subtrees(Node, Subtrees) ->
