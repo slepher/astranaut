@@ -853,7 +853,8 @@ update_name(Name, #{'__struct__' := test} = Test) ->
 *Macros*
 
 ```erlang
-astranaut_struct:from_record(RecordName, Record) -> Struct. %% convert a recrod to struct with same name
-astranaut_struct:to_record(RecordName, Struct) -> Record. %% convert a struct to record with same name
-astranaut_struct:update(RecordName, Struct) -> Struct. %% update a struct from it's old version.
+astranaut_struct:from_record(StructName, Record) -> Struct. %% convert a recrod to struct with same name
+astranaut_struct:to_record(StructName, Struct) -> Record. %% convert a struct to record with same name
+astranaut_struct:from_map(StructName, Struct) -> Struct. %% build a struct from map.
+astranaut_struct:update(StructName, Struct) -> Struct. %% update a struct from it's old version.
 ```
