@@ -847,7 +847,7 @@ new() ->
   #{'__struct__' => test, name => hello, value => undefined}.
     
 update_name(Name, #{'__struct__' := test} = Test) ->
-  Test#{name = Name}.
+  Test#{name => Name}.
 ```
 
 *Macros*
