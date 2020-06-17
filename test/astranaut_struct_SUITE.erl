@@ -109,7 +109,8 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_struct_new, test_struct_update, test_struct_test, test_from_record, test_to_record, test_update_fail].
+    [test_struct_new, test_struct_update, test_struct_test,
+     test_from_record, test_to_record, test_from_map, test_update_struct, test_update_fail].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -154,11 +155,16 @@ test_to_record(_Config) ->
     {test, hello, world} = Test1,
     ok.
 
+test_from_map(_Config) ->
+    Test = #{name => test_name, desc => test_desc},
+    Test1 = astranaut_struct_test:from_map(Test),
+    ?assertEqual(#{'__struct__' => test, name => test_name, value => <<"world">>}, Test1),
+    ok.
 
 test_update_struct(_Config) ->
     Test = #{'__struct__' => test, name => bye},
     Test1 = astranaut_struct_test:update(Test),
-    #{'__struct__' := test, name := bye, value := world} = Test1,
+    ?assertEqual(#{'__struct__' => test, name => bye, value => <<"world">>}, Test1),
     ok.
 
 test_update_fail(_Config) ->

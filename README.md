@@ -811,3 +811,49 @@ hello_f(A) ->
     A_3 = F_1(A_2),
     A_3.
 ```
+
+
+### Struct
+
+*Usage*
+
+```erlang
+-include_lib("erlando/include/struct.hrl").
+-record(test, {name = hello, value}).
+-astranaut_struct([test]).
+
+-export([new/0, update_name/2]).
+
+new() ->
+  #test{}.
+    
+update_name(Name, #test{} = Test) ->
+  Test#test{name = Name}. 
+```
+
+*Desc*
+
+&emsp;&emsp; convert erlang record to elixir like struct 
+&emsp;&emsp; code above is converted to code below
+
+```erlang
+-include_lib("erlando/include/struct.hrl").
+-record(test, {name = hello, value}).
+-astranaut_struct([test]).
+
+-export([new/0, update_name/2]).
+
+new() ->
+  #{'__struct__' => test, name => hello, value => undefined}.
+    
+update_name(Name, #{'__struct__' := test} = Test) ->
+  Test#{name = Name}.
+```
+
+*Macros*
+
+```erlang
+astranaut_struct:from_record(RecordName, Record) -> Struct. %% convert a recrod to struct with same name
+astranaut_struct:to_record(RecordName, Struct) -> Record. %% convert a struct to record with same name
+astranaut_struct:update(RecordName, Struct) -> Struct. %% update a struct from it's old version.
+```

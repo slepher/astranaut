@@ -14,7 +14,7 @@
 -export([new/0]).
 -export([update_name/2]).
 -export([test/1]).
--export([from_record/1, to_record/1, update/1]).
+-export([from_record/1, to_record/1, from_map/1, update/1]).
 
 -include("test_record.hrl").
 
@@ -43,7 +43,8 @@ to_record(Struct) ->
 update(Struct) ->
     astranaut_struct:update(test, Struct).
 
-
+from_map(Map) ->
+    astranaut_struct:from_map(test, Map).
 
 %%--------------------------------------------------------------------
 %% @doc
