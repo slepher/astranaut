@@ -230,7 +230,9 @@ add_struct_defs(Structs, Opts, #{state := StructMap} = TraverseState) ->
 add_struct_errors(Struct, {StructMap, Errors}) ->
     {StructMap, [{invalid_struct_def, Struct}|Errors]}.
 
-struct_options_validator(non_fill_undefined, true) ->
+struct_options_validator(non_auto_fill, Boolean) when is_boolean(Boolean) ->
+    ok;
+struct_options_validator(auto_fill, Boolean) when is_boolean(Boolean) ->
     ok;
 struct_options_validator(enforce_keys, Keys) ->
     case lists:filter(
