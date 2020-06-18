@@ -62,15 +62,15 @@ up_subtrees(Subtrees, #{node := pattern}) ->
     Subtrees;
 up_subtrees([NameTrees, Clauses], #{parent := named_fun_expr}) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-    [{pattern, Names}, {expression, Clauses}];
+    [{#{node => pattern}, Names}, {#{node => expression}, Clauses}];
 up_subtrees([Patterns, Expressions], #{parent := Parent}) 
   when (Parent == match_expr) or (Parent == clause) ->
-    [{pattern, Patterns}, {expression, Expressions}];
+    [{#{node => pattern}, Patterns}, {#{node => expression}, Expressions}];
 up_subtrees([Patterns, Guards, Expressions], #{parent := clause}) ->
-    [{pattern, Patterns}, {guard, Guards}, {expression, Expressions}];
+    [{#{node => pattern}, Patterns}, {#{node => guard}, Guards}, {#{node => expression}, Expressions}];
 up_subtrees([Patterns, Expressions], #{parent := Parent}) 
   when (Parent == generator) or (Parent == binary_generator) ->
-    [{pattern, Patterns}, {expression, Expressions}];
+    [{#{node => pattern}, Patterns}, {#{node => expression}, Expressions}];
 up_subtrees([[NameTree], BodyTrees], #{parent := attribute}) ->
     Name = attribute_name(NameTree),
     BodyTrees1 = update_attribute_body_trees(Name, BodyTrees),
@@ -101,9 +101,9 @@ update_attribute_body_trees(spec = Name, [SpecTree]) ->
     end;
 update_attribute_body_trees(type = Name, [TypeTree]) ->
     case erl_syntax:concrete(TypeTree) of
-        {Name, Type, Variables} ->
+        {TypeName, Type, Variables} ->
             T = fun([Type1|Variables1]) ->
-                        [erl_syntax:abstract({Name, Type1, Variables1})]
+                        [erl_syntax:abstract({TypeName, Type1, Variables1})]
                 end,
             {transformer, #{node => attribute, attribute => Name}, [Type|Variables], T};
         _ ->

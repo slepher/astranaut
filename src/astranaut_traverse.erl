@@ -336,23 +336,25 @@ map_m_subtrees(F, Nodes, Opts) ->
 
 m_subtrees(F, Subtrees, Opts) when is_list(Subtrees) ->
     lists:map(
-      fun({skip, Subtree}) ->
-              deep_return(Subtree, Opts);
-         ({transformer, Opts1, Subtree, Transformer}) ->
-              Opts2 = update_subtree_opts(Opts1, Opts),
-              MSubtree = map_m_subtrees(F, Subtree, Opts2),                        
-              monad_bind(
-                MSubtree,
-                fun(Subtree1) ->
-                        Transformed = Transformer(Subtree1),
-                        monad_return(Transformed, Opts)
-                end, Opts);
-         ({Opts1, Subtree}) ->
-              Opts2 = update_subtree_opts(Opts1, Opts),
-              deep_m_subtrees(F, Subtree, Opts2);
-         (Subtree) ->
-              deep_m_subtrees(F, Subtree, Opts)
-      end, Subtrees).
+      fun(Subtree) ->
+              m_subtrees(F, Subtree, Opts)
+      end, Subtrees);
+m_subtrees(_F, {skip, Subtree}, Opts) ->
+    deep_return(Subtree, Opts);
+m_subtrees(F, {transformer, Opts1, Subtree, Transformer}, Opts) ->
+    Opts2 = update_subtree_opts(Opts1, Opts),
+    MSubtree = map_m_subtrees(F, Subtree, Opts2),                        
+    monad_bind(
+      MSubtree,
+      fun(Subtree1) ->
+              Transformed = Transformer(Subtree1),
+              monad_return(Transformed, Opts)
+      end, Opts);
+m_subtrees(F, {Opts1, Subtree}, Opts) when is_map(Opts1) ->
+    Opts2 = update_subtree_opts(Opts1, Opts),
+    m_subtrees(F, Subtree, Opts2);
+m_subtrees(F, Subtree, Opts) ->
+    map_m_1(F, Subtree, Opts).
 
 update_subtree_opts(Type, Opts) when is_atom(Type) ->
     Opts#{node => Type};
@@ -366,18 +368,6 @@ deep_return(Nodes, Opts) when is_list(Nodes) ->
       end, Nodes);
 deep_return(Node, Opts) ->
     monad_return(Node, Opts).
-
-deep_m_subtrees(F, Nodes, Opts) when is_list(Nodes) ->
-    lists:map(
-      fun(Node) ->
-              deep_m_subtrees(F, Node, Opts)
-      end, Nodes);
-
-deep_m_subtrees(F, Node, Opts) ->
-    map_m_1(F, Node, Opts).
-
-%% attribute_name({tree, atom, _, Name}) ->
-%%     Name.
 
 monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
     MonadClass:bind(A, AFB, Monad).
