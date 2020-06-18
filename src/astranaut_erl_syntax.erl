@@ -73,19 +73,9 @@ up_subtrees([Patterns, Expressions], #{parent := Parent})
     [{pattern, Patterns}, {expression, Expressions}];
 up_subtrees([[NameTree], BodyTrees], #{parent := attribute}) ->
     Name = attribute_name(NameTree),
-    BodyTrees1 = 
-        case Name of
-            export ->
-                {skip, BodyTrees};
-            import ->
-                %% do not traverse import attribute
-                {skip, BodyTrees};
-            _ ->
-                Bodies = lists:map(fun(BodyTree) -> revert_root(BodyTree) end, BodyTrees),
-                {#{node => attribute, attribute => Name}, Bodies}
-        end,
-    [[NameTree], BodyTrees1];
-up_subtrees([NameTrees, Clauses], #{parent := function} ) ->
+    BodyTrees1 = update_attribute_body_trees(Name, BodyTrees),
+    [{skip, [NameTree]}, BodyTrees1];
+up_subtrees([NameTrees, Clauses], #{parent := function}) ->
     Names = lists:map(fun(NameTree) -> revert_root(NameTree) end, NameTrees),
     [Names, Clauses];
 up_subtrees([ExprLeft, Op, ExprRight], #{parent := infix_expr}) ->
@@ -95,8 +85,39 @@ up_subtrees([Op, ExprRight], #{parent := prefix_expr}) ->
 up_subtrees(Subtrees, #{}) ->
     Subtrees.
 
+update_attribute_body_trees(export, BodyTrees) ->
+    {skip, BodyTrees};
+update_attribute_body_trees(import, BodyTrees) ->
+    {skip, BodyTrees};
+update_attribute_body_trees(spec = Name, [SpecTree]) ->
+    case erl_syntax:concrete(SpecTree) of
+        {FunName, Types} ->
+            T = fun(Types1) ->
+                        [erl_syntax:abstract({FunName, Types1})]
+                end,
+            {transformer, #{node => attribute, attribute => Name}, Types, T};
+        _ ->
+            [SpecTree]
+    end;
+update_attribute_body_trees(type = Name, [TypeTree]) ->
+    case erl_syntax:concrete(TypeTree) of
+        {Name, Type, Variables} ->
+            T = fun([Type1|Variables1]) ->
+                        [erl_syntax:abstract({Name, Type1, Variables1})]
+                end,
+            {transformer, #{node => attribute, attribute => Name}, [Type|Variables], T};
+        _ ->
+            [TypeTree]
+    end;
+update_attribute_body_trees(_ = Name, BodyTrees) ->
+    default_revert_body_trees(Name, BodyTrees).
+
 attribute_name({tree, atom, _, Name}) ->
     Name.
+
+default_revert_body_trees(Name, BodyTrees) ->
+  Bodies = lists:map(fun(BodyTree) -> revert_root(BodyTree) end, BodyTrees),
+  {#{node => attribute, attribute => Name}, Bodies}.
 
 -ifdef(OTP_RELEASE).
   -if(?OTP_RELEASE >= 22).

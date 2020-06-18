@@ -334,17 +334,30 @@ map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
     monad_deep_sequence_m(SubtreesM, Opts).
 
-m_subtrees(F, Subtrees, Opts) ->
+m_subtrees(F, Subtrees, Opts) when is_list(Subtrees) ->
     lists:map(
       fun({skip, Subtree}) ->
               deep_return(Subtree, Opts);
-         ({Type, Subtree}) when is_atom(Type) ->
-              deep_m_subtrees(F, Subtree, Opts#{node => Type});
-         ({Opts1, Subtree}) when is_map(Opts1) ->
-              deep_m_subtrees(F, Subtree, maps:merge(Opts, Opts1));
-         (Subtree) when is_list(Subtree) ->
+         ({transformer, Opts1, Subtree, Transformer}) ->
+              Opts2 = update_subtree_opts(Opts1, Opts),
+              MSubtree = map_m_subtrees(F, Subtree, Opts2),                        
+              monad_bind(
+                MSubtree,
+                fun(Subtree1) ->
+                        Transformed = Transformer(Subtree1),
+                        monad_return(Transformed, Opts)
+                end, Opts);
+         ({Opts1, Subtree}) ->
+              Opts2 = update_subtree_opts(Opts1, Opts),
+              deep_m_subtrees(F, Subtree, Opts2);
+         (Subtree) ->
               deep_m_subtrees(F, Subtree, Opts)
       end, Subtrees).
+
+update_subtree_opts(Type, Opts) when is_atom(Type) ->
+    Opts#{node => Type};
+update_subtree_opts(Opts1, Opts) when is_map(Opts1) ->
+    maps:merge(Opts, Opts1).
 
 deep_return(Nodes, Opts) when is_list(Nodes) ->
     lists:map(

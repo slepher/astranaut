@@ -24,15 +24,16 @@ parse_transform(Forms, _Options) ->
     MapRecords = astranaut:attributes(astranaut_struct, Forms),
     case init_structs(Module, MapRecords, Records) of
         {ok, StructInitMap} ->
-            astranaut_traverse:map(
-              fun(Node, Attrs) ->
-                      walk(Node, StructInitMap, Attrs)
-              end, Forms, #{traverse => pre, formatter => ?MODULE, parse_transform => File});
-            %% astranaut_traverse:map_traverse_return(
-            %%   fun(Forms) ->
-            %%           io:format("~s~n", [astranaut:to_string(Forms)]),
-            %%           Forms
-            %%   end, Return);
+            Return = 
+                astranaut_traverse:map(
+                  fun(Node, Attrs) ->
+                          walk(Node, StructInitMap, Attrs)
+                  end, Forms, #{traverse => pre, formatter => ?MODULE, parse_transform => File}),
+            astranaut_traverse:map_traverse_return(
+              fun(Forms) ->
+                      io:format("~s~n", [astranaut:to_string(Forms)]),
+                      Forms
+              end, Return);
         {error, Reasons} ->
             Error = {error, Reasons, []},
             astranaut_traverse:parse_transform_return(Error, File)
@@ -59,8 +60,33 @@ walk({record, Line, Name, Fields} = Node, StructInitMap, #{node := NodeType}) ->
 
 walk({record, Line, Update, Name, Fields} = Node, StructInitMap, #{node := NodeType}) ->
     update_record(Name, Line, Fields, StructInitMap, #{type => NodeType, update => Update, node => Node});
-    
-walk(Node, _RecordInitMap, #{}) ->
+
+walk({record_index, Line, RecordName, {atom, _Line2, FieldName}} = Node, StructIntMap, #{}) ->
+    case maps:find(RecordName, StructIntMap) of
+        {ok, StructFieldsMap} ->
+            case maps:is_key(FieldName, StructFieldsMap) of
+                true ->
+                    {atom, Line, FieldName};
+                false ->
+                    {error, {undefined_recorid_field, RecordName, FieldName}}
+            end;
+        error ->
+            Node
+    end;
+
+walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInitMap, #{}) ->
+    case maps:find(RecordName, StructInitMap) of
+        {ok, StructFieldsMap} ->
+            FieldTypes = update_record_field_types(RecordName, Line, Fields, StructFieldsMap),
+            {type, Line, map, FieldTypes};
+        error ->
+            Node
+    end;
+
+walk({remote_type, _Line1, [{atom, _Line2, astranaut_struct}, {atom, _Line3, record}, [TypeNode]]}, _StructIntMap, #{}) ->
+    astranaut_traverse:traverse_fun_return(#{node => TypeNode, continue => true});
+
+walk(Node, _StructInitMap, #{}) ->
     Node.
 
 record_opts(#{update := Update}) ->
@@ -122,6 +148,28 @@ append_struct(RecordName, Fields, Line, #{append_struct := true, field_type := M
     [{MapFieldType, Line, {atom, Line, '__struct__'}, {atom, Line, RecordName}}|Fields];
 append_struct(_RecordName, Fields, _Line, #{}) ->
     Fields.
+
+update_record_field_types(RecordName, Line, Fields, FieldsMap) ->
+    Return = 
+        astranaut_traverse:mapfold(
+          fun({type, Line1, field_type, [{atom, _Line2, AtomFieldName} = FieldName, FieldType]}, Acc, #{}) ->
+                  MapFieldTypeNode = {type, Line1, map_field_exact, [FieldName, FieldType]},
+                  case maps:is_key(AtomFieldName, FieldsMap) of
+                      true ->
+                          {MapFieldTypeNode, [FieldName|Acc]};
+                      false ->
+                          Error = {undefined_recorid_field, RecordName, FieldName},
+                          astranaut_traverse:traverse_fun_return(#{node => MapFieldTypeNode, state => Acc, error => Error})
+                  end
+          end, [], Fields, #{traverse => list, formatter => ?MODULE}),
+    Return1 = astranaut_traverse:reply_to_traverse_fun_return(Return, {Fields, []}),
+    astranaut_traverse:map_traverse_fun_return(
+      fun({Fields1, _FieldNames}) ->
+              append_struct_type(RecordName, Fields1, Line)
+      end, Return1).
+
+append_struct_type(RecordName, Fields, Line) ->
+    [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
 init_structs(Module, MapRecords, Records) ->
     MapRecords1 = lists:flatten(MapRecords),

@@ -18,13 +18,18 @@
 
 -include("test_record.hrl").
 
+-type test() :: #test{}.
+-type test_with_name(Name) :: #test{ name :: Name }.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+-spec new() -> test().
 new() ->
     #test{}.
 
-update_name(#test{} = Test, Name) ->    
+-spec update_name(#test{}, atom()) -> #test{}.
+update_name(#test{} = Test, Name) ->
     Test#test{name = Name}.
 
 test(#test{name = #test{name = A} = B}) ->
@@ -34,15 +39,19 @@ test(#test{name = A}) ->
 test(#test2{'name' = A}) ->
     A.
 
+-spec from_record(astranaut_struct:record(#test{})) -> #test{}.
 from_record(Record) ->
     astranaut_struct:from_record(test, Record).
 
+-spec to_record(#test{}) -> astranaut_struct:record(#test{}).
 to_record(Struct) ->
     astranaut_struct:to_record(test, Struct).
 
+-spec update(#test{}) -> #test{}.
 update(Struct) ->
     astranaut_struct:update(test, Struct).
 
+-spec from_map(#{}) -> #test{}.
 from_map(Map) ->
     astranaut_struct:from_map(test, Map).
 
