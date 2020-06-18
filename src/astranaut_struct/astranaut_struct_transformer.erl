@@ -31,7 +31,7 @@ parse_transform(Forms, _Options) ->
                   end, Forms, #{traverse => pre, formatter => ?MODULE, parse_transform => File}),
             astranaut_traverse:map_traverse_return(
               fun(Forms) ->
-                      io:format("~s~n", [astranaut:to_string(Forms)]),
+                      %% io:format("~s~n", [astranaut:to_string(Forms)]),
                       Forms
               end, Return);
         {error, Reasons} ->
@@ -39,7 +39,7 @@ parse_transform(Forms, _Options) ->
             astranaut_traverse:parse_transform_return(Error, File)
     end.
 
-format_error({undefined_recorid_field, RecordName, FieldName}) ->
+format_error({undefined_record_field, RecordName, FieldName}) ->
     io_lib:format("field ~p undefined in record ~p", [FieldName, RecordName]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -55,12 +55,25 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% Record abstract format is transformed to Map abstract format when RecordName is mentioned in -astranaut_struct([RecordName...]).
+
+%% transform record creation like #RecordName{Field1 = Value1, Field2 = Value2...} in pattern and expression
+%% if record creation is in pattern, transformed to #{'__struct__' := RecordName, Field1 := Value1, Field2 := Value2}.
+%% if record creation is in expression, transformed to #{'__struct__' => RecordName, Field1 => Value1, Field2 => Value2, ... RestFieldDefaultValueInitialize}.
+%% compile will fail when FieldX is undefined in Record.
 walk({record, Line, Name, Fields} = Node, StructInitMap, #{node := NodeType}) ->
     update_record(Name, Line, Fields, StructInitMap, #{type => NodeType, node => Node});
 
+%% transform record update like Record#RecordName{Field1 = Value1, Field2 = Value2...} in expression.
+%% transformed to Record#{'__struct__' => RecordName, Field1 => Value1, Field2 => Value2}.
+%% compile will fail when FieldX is undefined in Record.
 walk({record, Line, Update, Name, Fields} = Node, StructInitMap, #{node := NodeType}) ->
     update_record(Name, Line, Fields, StructInitMap, #{type => NodeType, update => Update, node => Node});
 
+%% transform record index like #RecordName.Field
+%% transformed to Field.
+%% compile will fail when Field is undefined in Record.
 walk({record_index, Line, RecordName, {atom, _Line2, FieldName}} = Node, StructIntMap, #{}) ->
     case maps:find(RecordName, StructIntMap) of
         {ok, StructFieldsMap} ->
@@ -68,12 +81,31 @@ walk({record_index, Line, RecordName, {atom, _Line2, FieldName}} = Node, StructI
                 true ->
                     {atom, Line, FieldName};
                 false ->
-                    {error, {undefined_recorid_field, RecordName, FieldName}}
+                    {error, {undefined_record_field, RecordName, FieldName}}
             end;
         error ->
             Node
     end;
 
+%% transform record index access like Record#RecordName.Field in expression.
+%% transformed to maps:get(Field, Record, FieldDefaultValue),
+walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field} = Node, StructInitMap, #{}) ->
+    case maps:find(RecordName, StructInitMap) of
+        {ok, StructFieldsMap} ->
+            case maps:find(FieldName, StructFieldsMap) of
+                {ok, FieldInit} ->
+                    Init = astranaut:replace_line(FieldInit, Line),
+                    quote(maps:get(unquote(Field), unquote(Struct), unquote(Init)));
+                error ->
+                    Error = {undefined_record_field, RecordName, FieldName},
+                    {error, Error}
+            end;
+        error ->
+            Node
+    end;
+
+%% transform record type like #Record{Field1 :: FieldType1, Field2 :; FieldType2}.
+%% transformed to #{'__struct__' => RecordName, Field1 => FieldType1, Field2 => FieldType2, ... RestFieldTypes}.
 walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInitMap, #{}) ->
     case maps:find(RecordName, StructInitMap) of
         {ok, StructFieldsMap} ->
@@ -83,6 +115,7 @@ walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInit
             Node
     end;
 
+%% record type with astranaut_struct:record(#Record{}) will not be transformed.
 walk({remote_type, _Line1, [{atom, _Line2, astranaut_struct}, {atom, _Line3, record}, [TypeNode]]}, _StructIntMap, #{}) ->
     astranaut_traverse:traverse_fun_return(#{node => TypeNode, continue => true});
 
@@ -123,7 +156,7 @@ update_record_fields(RecordName, Line, Fields, FieldsMap, #{field_type := MapFie
                       true ->
                           {MapFieldNode, [FieldName|Acc]};
                       false ->
-                          Error = {undefined_recorid_field, RecordName, FieldName},
+                          Error = {undefined_record_field, RecordName, FieldName},
                           astranaut_traverse:traverse_fun_return(#{node => MapFieldNode, state => Acc, error => Error})
                   end
           end, [], Fields, #{traverse => list, formatter => ?MODULE}),

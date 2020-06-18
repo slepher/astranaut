@@ -262,7 +262,7 @@ map_m_1(F, NodeA, #{} = Opts) ->
     map_m_tree(F, NodeA, Opts, SyntaxLib).
 
 map_m_tree(F, NodeA, Opts, SyntaxLib) ->
-    Attr = maps:with([parent], Opts),
+    Attr = maps:without([traverse, parse_transform, monad, monad_class, formatter], Opts),
     NodeType = SyntaxLib:node_type(NodeA, Opts),
     PreType = 
         case SyntaxLib:subtrees(NodeA, Opts) of
@@ -341,25 +341,21 @@ m_subtrees(F, Subtrees, Opts) when is_list(Subtrees) ->
       end, Subtrees);
 m_subtrees(_F, {skip, Subtree}, Opts) ->
     deep_return(Subtree, Opts);
-m_subtrees(F, {transformer, Opts1, Subtree, Transformer}, Opts) ->
-    Opts2 = update_subtree_opts(Opts1, Opts),
-    MSubtree = map_m_subtrees(F, Subtree, Opts2),                        
+m_subtrees(F, {transformer, Subtree, Transformer}, Opts) ->
     monad_bind(
-      MSubtree,
+      map_m_subtrees(F, Subtree, Opts),
       fun(Subtree1) ->
               Transformed = Transformer(Subtree1),
               monad_return(Transformed, Opts)
       end, Opts);
-m_subtrees(F, {Opts1, Subtree}, Opts) when is_map(Opts1) ->
-    Opts2 = update_subtree_opts(Opts1, Opts),
-    m_subtrees(F, Subtree, Opts2);
+m_subtrees(F, {up_attr, Attr, Subtree}, Opts) when is_map(Attr) ->
+    Opts1 = maps:merge(Opts, Attr),
+    m_subtrees(F, Subtree, Opts1);
+m_subtrees(F, {up_node, Node, Subtree}, Opts) when is_atom(Node) ->
+    Opts1 = Opts#{node => Node},
+    m_subtrees(F, Subtree, Opts1);
 m_subtrees(F, Subtree, Opts) ->
     map_m_1(F, Subtree, Opts).
-
-update_subtree_opts(Type, Opts) when is_atom(Type) ->
-    Opts#{node => Type};
-update_subtree_opts(Opts1, Opts) when is_map(Opts1) ->
-    maps:merge(Opts, Opts1).
 
 deep_return(Nodes, Opts) when is_list(Nodes) ->
     lists:map(

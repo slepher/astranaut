@@ -28,12 +28,13 @@
 new() ->
     #test{}.
 
--spec update_name(#test{}, atom()) -> #test{}.
+-spec update_name(test_with_name(Name), Name) -> #test{ name :: Name } when  Name :: atom().
 update_name(#test{} = Test, Name) ->
     Test#test{name = Name}.
 
-test(#test{name = #test{name = A} = B}) ->
-    {A, B};
+test(#test{name = #test{name = A} = B} = D) ->
+    C = B#test.value,
+    D#test{name = A, value = C};
 test(#test{name = A}) ->
     A;
 test(#test2{'name' = A}) ->

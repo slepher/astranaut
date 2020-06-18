@@ -62,15 +62,15 @@ up_subtrees(Subtrees, #{node := pattern}) ->
     Subtrees;
 up_subtrees([NameTrees, Clauses], #{parent := named_fun_expr}) ->
     Names = lists:map(fun(NameTree) -> erl_syntax:revert(NameTree) end, NameTrees),
-    [{#{node => pattern}, Names}, {#{node => expression}, Clauses}];
+    [{up_node, pattern, Names}, {up_node, expression, Clauses}];
 up_subtrees([Patterns, Expressions], #{parent := Parent}) 
   when (Parent == match_expr) or (Parent == clause) ->
-    [{#{node => pattern}, Patterns}, {#{node => expression}, Expressions}];
+    [{up_node, pattern, Patterns}, {up_node, expression, Expressions}];
 up_subtrees([Patterns, Guards, Expressions], #{parent := clause}) ->
-    [{#{node => pattern}, Patterns}, {#{node => guard}, Guards}, {#{node => expression}, Expressions}];
+    [{up_node, pattern, Patterns}, {up_node, guard, Guards}, {up_node, expression, Expressions}];
 up_subtrees([Patterns, Expressions], #{parent := Parent}) 
   when (Parent == generator) or (Parent == binary_generator) ->
-    [{#{node => pattern}, Patterns}, {#{node => expression}, Expressions}];
+    [{up_node, pattern, Patterns}, {up_node, expression, Expressions}];
 up_subtrees([[NameTree], BodyTrees], #{parent := attribute}) ->
     Name = attribute_name(NameTree),
     BodyTrees1 = update_attribute_body_trees(Name, BodyTrees),
@@ -95,17 +95,21 @@ update_attribute_body_trees(spec = Name, [SpecTree]) ->
             T = fun(Types1) ->
                         [erl_syntax:abstract({FunName, Types1})]
                 end,
-            {transformer, #{node => attribute, attribute => Name}, Types, T};
+            {up_attr, #{node => type, attribute => Name}, {transformer, Types, T}};
         _ ->
             [SpecTree]
     end;
-update_attribute_body_trees(type = Name, [TypeTree]) ->
+update_attribute_body_trees(Name, [TypeTree]) when (Name == type); (Name == opaque) ->
     case erl_syntax:concrete(TypeTree) of
         {TypeName, Type, Variables} ->
-            T = fun([Type1|Variables1]) ->
-                        [erl_syntax:abstract({TypeName, Type1, Variables1})]
+            T = fun([Type2|Variables2]) ->
+                        [erl_syntax:abstract({TypeName, Type2, Variables2})]
                 end,
-            {transformer, #{node => attribute, attribute => Name}, [Type|Variables], T};
+            Type1 = {up_attr, #{node => type, attribute => Name}, Type},
+            Variables1 = lists:map(
+                           fun(Variable) -> {up_attr, #{node => type_variable, attribute => Name}, Variable} 
+                           end, Variables),
+            {transformer, [Type1|Variables1], T};
         _ ->
             [TypeTree]
     end;
@@ -117,7 +121,7 @@ attribute_name({tree, atom, _, Name}) ->
 
 default_revert_body_trees(Name, BodyTrees) ->
   Bodies = lists:map(fun(BodyTree) -> revert_root(BodyTree) end, BodyTrees),
-  {#{node => attribute, attribute => Name}, Bodies}.
+  {up_attr, #{node => attribute, attribute => Name}, Bodies}.
 
 -ifdef(OTP_RELEASE).
   -if(?OTP_RELEASE >= 22).
