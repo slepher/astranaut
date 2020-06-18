@@ -9,6 +9,7 @@
 -module(astranaut_traverse).
 
 %% API
+-export([new_state/1, merge_state/2]).
 -export([reply_to_traverse_fun_return/2, traverse_fun_return/1, traverse_error/1]).
 -export([map/2, map/3]).
 -export([map_with_state/3, map_with_state/4]).
@@ -141,6 +142,42 @@ mapfold(F, Init, Node, Opts) ->
     SimplifyReturn = maps:get(simplify_return, Opts, true),
     Return = mapfold_1(F, Init, Node, Opts),
     simplify_return(Return, SimplifyReturn).
+
+new_state(State) ->
+    traverse_fun_return(#{state => State}).
+
+merge_state(Return, #{'__struct__' := ?TRAVERSE_FUN_RETURN} = Struct)  ->
+    merge_traverse_state_1(traverse_fun_return_struct(Return), Struct).
+
+merge_traverse_state_1(#{error := Error} = Return, Struct) ->
+    Errors0 = maps:get(errors, Struct, []),
+    Errors1 = Errors0 ++ [Error],
+    Struct1 = Struct#{errors => Errors1},
+    Return1 = maps:remove(error, Return),
+    merge_traverse_state_1(Return1, Struct1);
+merge_traverse_state_1(#{errors := Errors} = Return, Struct) ->
+    Errors0 = maps:get(errors, Struct, []),
+    Errors1 = Errors0 ++ Errors,
+    Struct1 = Struct#{errors => Errors1},
+    Return1 = maps:remove(errors, Return),
+    merge_traverse_state_1(Return1, Struct1);
+merge_traverse_state_1(#{warning := Warning} = Return, Struct) ->
+    Warnings0 = maps:get(warnings, Struct, []),
+    Warnings1 = Warnings0 ++ [Warning],
+    Struct1 = Struct#{warnings => Warnings1},
+    Return1 = maps:remove(warning, Return),
+    merge_traverse_state_1(Return1, Struct1);
+merge_traverse_state_1(#{warnings := Warnings} = Return, Struct) ->
+    Warnings0 = maps:get(warnings, Struct, []),
+    Warnings1 = Warnings0 ++ Warnings,
+    Struct1 = Struct#{warnings => Warnings1},
+    Return1 = maps:remove(warnings, Return),
+    merge_traverse_state_1(Return1, Struct1);
+merge_traverse_state_1(#{state := State} = Return, Struct) ->
+    Return1 = maps:remove(state, Return),
+    merge_traverse_state_1(Return1, Struct#{state => State});
+merge_traverse_state_1(#{}, Struct) ->
+    Struct.
 
 extract_errors([{error, Error}|T], Nodes, Errors) ->
     extract_errors(T, Nodes, [Error|Errors]);

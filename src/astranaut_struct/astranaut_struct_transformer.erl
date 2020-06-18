@@ -21,9 +21,11 @@ parse_transform(Forms, _Options) ->
     File = astranaut:file(Forms),
     Module = astranaut:module(Forms),
     Records = astranaut:attributes(record, Forms),
-    MapRecords = astranaut:attributes(astranaut_struct, Forms),
-    case init_structs(Module, MapRecords, Records) of
-        {ok, StructInitMap} ->
+    StructAttributes = astranaut:attributes(astranaut_struct, Forms),
+    TraverseState = init_struct_defs(Module, StructAttributes),
+    #{errors := Errors, state := StructInitMap} = init_structs(Module, Records, TraverseState),
+    case Errors of
+        [] ->
             Return = 
                 astranaut_traverse:map(
                   fun(Node, Attrs) ->
@@ -31,12 +33,11 @@ parse_transform(Forms, _Options) ->
                   end, Forms, #{traverse => pre, formatter => ?MODULE, parse_transform => File}),
             astranaut_traverse:map_traverse_return(
               fun(Forms) ->
-                      %% io:format("~s~n", [astranaut:to_string(Forms)]),
+                      io:format("~s~n", [astranaut:to_string(Forms)]),
                       Forms
               end, Return);
-        {error, Reasons} ->
-            Error = {error, Reasons, []},
-            astranaut_traverse:parse_transform_return(Error, File)
+        _ ->
+            astranaut_traverse:parse_transform_return({error, Errors, []}, File)
     end.
 
 format_error({undefined_record_field, RecordName, FieldName}) ->
@@ -204,24 +205,60 @@ update_record_field_types(RecordName, Line, Fields, FieldsMap) ->
 append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
-init_structs(Module, MapRecords, Records) ->
-    MapRecords1 = lists:flatten(MapRecords),
-    {RecordInitMap, Errors} = 
+init_struct_defs(_Module, StructDefs) ->
+    lists:foldl(
+      fun({Struct, Opts}, Acc) when is_atom(Struct) ->
+              add_struct_defs([Struct], Opts, Acc);
+         ({Structs, Opts}, Acc) when is_list(Structs) ->
+              add_struct_defs(Structs, Opts, Acc);
+         (Struct, Acc) when is_atom(Struct) ->
+              add_struct_defs([Struct], [], Acc);
+         (Struct, Acc) ->
+              add_struct_errors(Struct, Acc)
+      end, astranaut_traverse:new_state(maps:new()), StructDefs).
+
+add_struct_defs(Structs, Opts, #{state := StructMap} = TraverseState) ->
+    {Opts1, Errors1} = astranaut:validate_options(fun struct_options_validator/2, Opts),
+    StructMap1 =
         lists:foldl(
-          fun({RecordName, _Fields} = Record, {Acc, AccError}) ->
-                  case lists:member(RecordName, MapRecords1) of
-                      true ->
-                          RecordDef = astranaut_struct_record:record_def(Module, Record),
-                          FieldsErrors = astranaut_struct_record:warnings(RecordDef),
-                          InitMap = astranaut_struct_record:full_init_values(RecordDef),
-                          {maps:put(RecordName, InitMap, Acc), AccError ++ FieldsErrors};
-                      false ->
-                          {Acc, AccError}
-                  end
-          end, {maps:new(), []}, Records),
-    case Errors of
+          fun(Struct, Acc) ->
+              maps:put(Struct, Opts1, Acc)
+          end, StructMap, Structs),
+    State = astranaut_traverse:traverse_fun_return(#{state => StructMap1, errors => Errors1}),
+    astranaut_traverse:merge_state(State, TraverseState).
+
+add_struct_errors(Struct, {StructMap, Errors}) ->
+    {StructMap, [{invalid_struct_def, Struct}|Errors]}.
+
+struct_options_validator(non_fill_undefined, true) ->
+    ok;
+struct_options_validator(enforce_keys, Keys) ->
+    case lists:filter(
+           fun(Key) ->
+                   not is_atom(Key)
+           end, Keys) of
         [] ->
-            {ok, RecordInitMap};
-        Errors ->
-            {error, Errors}
-    end.
+            ok;
+        NonAtomKeys ->
+            {error, {invalid_enforce_keys, NonAtomKeys}}
+    end;
+struct_options_validator(_Key, _Value) ->
+    error.
+
+init_structs(Module, Records, #{state := Defs} = TraverseState) ->
+    MapRecords1 = maps:keys(Defs),
+    TraverseState1 = TraverseState#{state => maps:new()},
+    lists:foldl(
+      fun({RecordName, _Fields} = Record, #{state := RecordMapAcc} = StateAcc) ->
+              case lists:member(RecordName, MapRecords1) of
+                  true ->
+                      RecordDef = astranaut_struct_record:record_def(Module, Record),
+                      FieldsErrors = astranaut_struct_record:warnings(RecordDef),
+                      InitMap = astranaut_struct_record:full_init_values(RecordDef),
+                      RecordMapAcc1 = maps:put(RecordName, InitMap, RecordMapAcc),
+                      State = astranaut_traverse:traverse_fun_return(#{state => RecordMapAcc1, errors => FieldsErrors}),
+                      astranaut_traverse:merge_state(State, StateAcc);
+                  false ->
+                      StateAcc
+              end
+      end, TraverseState1, Records).
