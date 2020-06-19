@@ -34,7 +34,7 @@ parse_transform(Forms, _Options) ->
                   end, Forms2, #{traverse => pre, formatter => ?MODULE, parse_transform => File}),
             astranaut_traverse:map_traverse_return(
               fun(Forms3) ->
-                      io:format("~s~n", [astranaut:to_string(Forms3)]),
+                      %% io:format("~s~n", [astranaut:to_string(Forms3)]),
                       Forms3
               end, Return);
         _ ->

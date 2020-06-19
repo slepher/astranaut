@@ -11,7 +11,6 @@
 -include("quote.hrl").
 -include("macro.hrl").
 
-
 -export_macro({[from_record/2, to_record/2], []}).
 -export_macro({[from_map/3, update/3], [{attrs, [astranaut_struct_def]}]}).
 
