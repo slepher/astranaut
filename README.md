@@ -81,11 +81,11 @@
 
 *State*
 
-  &emsp;&emsp;state used in traverse_walk_fun(), default is state() provided in traverse_walk_fun().
+  &emsp;&emsp;state used in traverse\_walk\_fun(), default is state() provided in traverse_walk_fun().
 
 *Continue*
   
-&emsp;&emsp;if Continue is true or traverse_fun_return(A) is continue | {continue, A}, and Step of attr() is pre  
+&emsp;&emsp;if Continue is true or traverse\_fun\_return(A) is continue | {continue, A}, and Step of attr() is pre  
 &emsp;&emsp;skip traverse children of currrent node and go to next node, nothing affected when Step of attr() is leaf or post.
 
 *error()*
@@ -124,9 +124,9 @@
 
 *NodeType*
 
-&emsp;&emsp;node_type(). if from() is incomplete erlang ast, this should be provided to help generate node_type() in attr().  
-&emsp;&emsp;if top node is function or attribute, default top node_type() in attr() is form.  
-&emsp;&emsp;else, default top node_type() in attr() is expression.
+&emsp;&emsp;node\_type(). if from() is incomplete erlang ast, this should be provided to help generate node_type() in attr().  
+&emsp;&emsp;if top node is function or attribute, default top node\_type() in attr() is form.  
+&emsp;&emsp;else, default top node\_type() in attr() is expression.
 
 *TraverseStyle*
 
@@ -211,7 +211,7 @@ SequenceChildren =
 
 *Advanced*
 
-&emsp;&emsp;powerful map_m function if you famillar with monad.
+&emsp;&emsp;powerful map\_m function if you famillar with monad.
 
 ```erlang
   astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
@@ -293,7 +293,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
   
 *bind one ast*
 
-&emsp;&emsp;_@V, same as unquote(V)
+&emsp;&emsp;\_@V, same as unquote(V)
   
 ```erlang
     V = {var, 10, 'Var'},
@@ -304,7 +304,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 *bind a list of ast*
 
-&emsp;&emsp;_L@Vs,same as unquote_splicing(Vs)
+&emsp;&emsp;\_L@Vs,same as unquote_splicing(Vs)
 
 ```erlang
     Vs = [{var, 2, 'Var'}, {atom, 2, atom}],
@@ -331,7 +331,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 *why binding*
 
-&emsp;&emsp;_X@V could be used in any part of quoted ast.  
+&emsp;&emsp;\_X@V could be used in any part of quoted ast.  
 &emsp;&emsp;it's legal:
   
 ```erlang
@@ -420,7 +420,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 -include_lib("astranaut/include/macro.hrl").
 ```
 
-macro.hrl add three attribute: use_macro, exec_macro debug_macro
+macro.hrl add three attribute: use\_macro, exec\_macro debug\_macro
 
 *use_macro*
 
@@ -440,7 +440,7 @@ macro.hrl add three attribute: use_macro, exec_macro debug_macro
 
 *export_macro*
 
-&emsp;&emsp;used in where macro defined, options in export_macro will be merged to options in use_macro.
+&emsp;&emsp;used in where macro defined, options in export\_macro will be merged to options in use_macro.
 
 ```erlang
 -export_macro({[MacroA/A, MacroB/B], opts()}).
@@ -452,7 +452,7 @@ macro.hrl add three attribute: use_macro, exec_macro debug_macro
 -debug_macro(true).
 ```
 
-&emsp;&emsp; module will be printed to console after astranaut_macro transform.
+&emsp;&emsp; module will be printed to console after astranaut\_macro transform.
 
 *opts()*
 
@@ -479,9 +479,9 @@ macro.hrl add three attribute: use_macro, exec_macro debug_macro
 
 *Formatter*
 
-&emsp;&emsp; module include format_error/1 to format macro errors,  
+&emsp;&emsp; module include format\_error/1 to format macro errors,  
 &emsp;&emsp; if formatter is true, formatter is the module where macro defined,  
-&emsp;&emsp; default is astranaut_traverse.
+&emsp;&emsp; default is astranaut\_traverse.
 
 *Attrs*
 
@@ -506,15 +506,15 @@ macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attribut
 
 *AsAttr*
 
-&emsp;&emsp; user defined attribute name replace of -exec_macro.
+&emsp;&emsp; user defined attribute name replace of -exec\_macro.
 
 *MergeFunction*
 
-&emsp;&emsp; -exec_macro ast function merge to function with same name and arity if exists.
+&emsp;&emsp; -exec\_macro ast function merge to function with same name and arity if exists.
 
 *AutoExport*
 
-&emsp;&emsp; -exec_macro ast function auto export, merge to current export if exists.
+&emsp;&emsp; -exec\_macro ast function auto export, merge to current export if exists.
 
 *GroupArgs* 
 
@@ -531,13 +531,13 @@ a(Asts) ->
 ```
 
 &emsp;&emsp;define macro as normal erlang functions.  
-&emsp;&emsp;macro expand order is the order of -use_macro in file.  
-&emsp;&emsp;macro will be expand at compile time by parse_transformer astranaut_macro.  
+&emsp;&emsp;macro expand order is the order of -use\_macro in file.  
+&emsp;&emsp;macro will be expand at compile time by parse\_transformer astranaut\_macro.  
 &emsp;&emsp;macro does not know runtime value of arguments.  
 &emsp;&emsp;arguments passed in macro is erlang ast.  
-&emsp;&emsp;arguments passed in -exec_macro is term.  
+&emsp;&emsp;arguments passed in -exec\_macro is term.  
 &emsp;&emsp;-export will be moved to appropriate location in ast forms.  
-&emsp;&emsp;macro return value is same meaning of traverse_fun_return().  
+&emsp;&emsp;macro return value is same meaning of traverse\_fun\_return().  
 
 ```erlang
 -use_macro({macro_1/1, []}).
@@ -595,7 +595,7 @@ macro_2(Name) ->
 
 &emsp;&emsp; each macro expansion has it's unique namespace.
 
-&emsp;&emsp; @{macro_module_name}@_{counter} is added to it's original name.
+&emsp;&emsp; @{macro\_module\_name}@\_{counter} is added to it's original name.
 
 ```erlang
 -module(macro_example).
@@ -699,12 +699,12 @@ Opt = OptKey | {OptKey, OptValue}.
 
 *Rebinding Attributes*
 
-&emsp;&emsp; -rebinding_all -rebinding_fun defines rebinding scope.  
-&emsp;&emsp; -rebinding_all meaning rebinding scope is all function.  
-&emsp;&emsp; -rebinding_fun meaning rebinding scope is in functions mentioned.  
+&emsp;&emsp; -rebinding\_all -rebinding\_fun defines rebinding scope.  
+&emsp;&emsp; -rebinding\_all meaning rebinding scope is all function.  
+&emsp;&emsp; -rebinding\_fun meaning rebinding scope is in functions mentioned.  
 &emsp;&emsp; rebinding options is avaliable in scope mentioned.  
 &emsp;&emsp; rebinding option debug means print code after rebinding rules applied.  
-&emsp;&emsp; if neither -rebinding_fun nor -rebinding_all is used, rebinding scope is all function and rebinding options is [].
+&emsp;&emsp; if neither -rebinding\_fun nor -rebinding\_all is used, rebinding scope is all function and rebinding options is [].
 
 *Rebinding Rules* 
 
@@ -850,11 +850,43 @@ update_name(Name, #{'__struct__' := test} = Test) ->
   Test#{name => Name}.
 ```
 
+*Struct Options*
+
+&emsp;&emsp; -astranaut\_struct could have extra options:  
+&emsp;&emsp; non\_auto\_fill : means fields will not set default to undefined when not defined and initialized.  
+&emsp;&emsp; enforce\_keys : means compile will failed when field is not setted when construct struct, works like elixir.
+
+```erlang
+-astranaut_struct({test, [non_auto_fill, {enforce_keys, [name]}]}).
+
+test_failed() ->
+  #test{}. 
+  
+%% compile failed
+%% the following keys must also be given when building struct test: [name]
+
+test_non_auto_fill() ->
+  #test{name = test}. 
+
+%% ==>
+
+test_non_auto_fill_transformed() ->
+  #{'__struct__' => test, name => test}. %% value is not set to undefined
+  
+test_auto_fill() ->
+  #test{name = test}.
+  
+%% ==>
+
+test_auto_fill_transformed() ->
+  #{'__struct__' => test, name => test, value => undefined}. %% value is set to undefined at default.
+```
+
 *Macros*
 
 ```erlang
-astranaut_struct:from_record(StructName, Record) -> Struct. %% convert a recrod to struct with same name
-astranaut_struct:to_record(StructName, Struct) -> Record. %% convert a struct to record with same name
-astranaut_struct:from_map(StructName, Struct) -> Struct. %% build a struct from map.
+astranaut_struct:from_record(StructName, Record) -> Struct. %% convert a recrod to struct with same name.
+astranaut_struct:to_record(StructName, Struct) -> Record. %% convert a struct to record with same name.
+astranaut_struct:from_map(StructName, Struct) -> Struct. %% build a struct from map, enforce_keys will be checked.
 astranaut_struct:update(StructName, Struct) -> Struct. %% update a struct from it's old version.
 ```
