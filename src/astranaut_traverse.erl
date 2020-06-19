@@ -203,7 +203,16 @@ merge_errors(Reply, Errors1) ->
 
 -spec map_traverse_return(fun((A) -> B), traverse_return(A)) -> parse_transform_return(B).
 map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
-    {ok, F(Reply), Errors, Warnings};
+    case F(Reply) of
+        {error, Error} ->
+            {error, [Error|Errors], Warnings};
+        {error, Reply1, Error} ->
+            {ok, Reply1, [Error|Errors], Warnings};
+        {ok, Reply1} ->
+            {ok, Reply1, Errors, Warnings};
+        Reply1 ->
+            {ok, Reply1, Errors, Warnings}
+    end;
 map_traverse_return(_F, {error, Errors, Warnings}) ->
     {error, Errors, Warnings};
 map_traverse_return(F, {warning, Reply, Warnings}) ->

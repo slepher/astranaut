@@ -1,7 +1,7 @@
 -ifndef(ASTRANAUT_STRUCT).
 -define(ASTRANAUT_STRUCT, true).
--include("macro.hrl").
 -compile({parse_transform, astranaut_struct_transformer}).
+-include("macro.hrl").
 -use_macro({astranaut_struct, from_record/2}).
 -use_macro({astranaut_struct, to_record/2}).
 -use_macro({astranaut_struct, from_map/3}).

@@ -205,7 +205,7 @@ update_forms(Nodes, Forms, #{merge_function := MergeFunction}) ->
                           {[NExport|Rests], Acc}
                   end;
              (Form, {Rests, Acc}) ->
-              {[Form|Rests], Acc}
+                  {[Form|Rests], Acc}
           end, {[], Forms}, Nodes),
     {lists:reverse(NRests), NForms};
 update_forms(Nodes, Acc, _MOpts) ->

@@ -26,7 +26,7 @@
 %%%===================================================================
 -spec new() -> test().
 new() ->
-    #test{}.
+    #test{name = hello}.
 
 -spec update_name(test_with_name(Name), Name) -> #test{ name :: Name } when  Name :: atom().
 update_name(#test{} = Test, Name) ->

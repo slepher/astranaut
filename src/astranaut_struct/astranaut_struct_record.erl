@@ -11,25 +11,63 @@
 -include("rebinding.hrl").
 
 %% API
--export([record_def/2]).
--export([fields/1, init_values/1, full_init_values/1, types/1, warnings/1]).
+-export([record_def/3]).
+-export([fields/1, init_values/1]).
+-export([types/1, warnings/1, enforce_keys/1]).
+-export([set_auto_fill/2]).
+-export([filled_init_values/1, update_init_values/1, update_enforce_keys/4]).
 
--record(record_def, {module, name, fields = [], init_values = maps:new(), types = maps:new(), warnings = []}).
+-record(record_def, {name :: atom(), 
+                     module :: module(), 
+                     line :: integer(),
+                     fields = [] :: fields(),
+                     init_values = maps:new() :: init_values(),
+                     types = maps:new() :: types(),
+                     enforce_keys = [] :: enforce_keys(),
+                     auto_fill = true :: boolean(),
+                     warnings = [] :: warnings()}).
+
+-type fields() :: [atom()].
+-type init_values() :: #{atom() => term()}.
+-type types() :: #{atom() => term()}.
+-type enforce_keys() :: [atom()].
+-type warning() :: {module(), integer(), term()}.
+-type warnings() :: [warning()].
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-record_def(Module, {RecordName, Fields}) ->
-    RecordDef = #record_def{module = Module, name = RecordName},
+-spec record_def(module(), {atom(), [term()]}, integer()) -> #record_def{}.
+record_def(Module, {RecordName, Fields}, Line) ->
+    RecordDef = #record_def{module = Module, line = Line, name = RecordName},
     add_fields(Fields, RecordDef).
 
+-spec fields(#record_def{}) -> fields().
 fields(#record_def{fields = Fields}) ->
     Fields.
 
+-spec init_values(#record_def{}) -> init_values().
 init_values(#record_def{init_values = InitValues}) ->
     InitValues.
 
-full_init_values(#record_def{fields = Fields, init_values = InitValues}) ->
+-spec enforce_keys(#record_def{}) -> enforce_keys().
+enforce_keys(#record_def{enforce_keys = EnforceKeys}) ->
+    EnforceKeys.
+
+-spec types(#record_def{}) -> types().
+types(#record_def{types = Types}) ->
+    Types.
+
+-spec warnings(#record_def{}) -> warnings().
+warnings(#record_def{warnings = Warnings}) ->
+    Warnings.
+
+-spec set_auto_fill(boolean(), #record_def{}) -> #record_def{}.
+set_auto_fill(AutoFill, #record_def{} = RefordDef) when is_boolean(AutoFill)  ->
+    RefordDef#record_def{auto_fill = AutoFill}.
+
+-spec filled_init_values(#record_def{}) -> init_values().
+filled_init_values(#record_def{fields = Fields, init_values = InitValues, auto_fill = true}) ->
     lists:foldl(
       fun(Field, Acc) ->
               case maps:find(Field, InitValues) of
@@ -38,14 +76,39 @@ full_init_values(#record_def{fields = Fields, init_values = InitValues}) ->
                   error ->
                       maps:put(Field, {atom, 0, undefined}, Acc)
               end
-      end, maps:new(), Fields).
+      end, maps:new(), Fields);
+filled_init_values(#record_def{} = RecordDef) ->
+    init_values(RecordDef).
 
-types(#record_def{types = Types}) ->
-    Types.
+-spec update_init_values(#record_def{}) -> #record_def{}.
+update_init_values(#record_def{} = RecordDef) ->
+    InitValues1 = filled_init_values(RecordDef),
+    RecordDef#record_def{init_values = InitValues1}.
 
-warnings(#record_def{warnings = Warnings}) ->
-    Warnings.
+-spec update_enforce_keys([atom()], module(), integer(), #record_def{}) -> #record_def{}.
+update_enforce_keys(EnforceKeys, Module, Line,
+                    #record_def{name = Name, fields = Fields, init_values = InitValues, warnings = Warnings} = RecordDef) ->
+    UndefinedKeys = EnforceKeys -- Fields,
+    case UndefinedKeys of
+        [] ->
+            InitedKeys = maps:keys(InitValues),
+            EnforceKeys1 = EnforceKeys -- InitedKeys,
+            RecordDef#record_def{enforce_keys = EnforceKeys1};
+        _ ->
+            EnforceKeys1 = EnforceKeys -- UndefinedKeys,
+            Error = {enforce_keys_not_in_struct, Name, UndefinedKeys},
+            Warnings1 = Warnings ++ [{Line, Module, Error}],
+            RecordDef#record_def{enforce_keys = EnforceKeys1, warnings = Warnings1}
+    end.
+%%--------------------------------------------------------------------
+%% @doc
+%% @spec
+%% @end
+%%--------------------------------------------------------------------
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 add_fields([{typed_record_field, RecordField, TypeForm}|T], RecordDef) ->
     RecordDef = 
         add_detyped_field(
@@ -95,12 +158,3 @@ add_field_init(#{}, RecordDef) ->
 
 add_warning({Line, Reason}, #record_def{module = Module, warnings = Warnings} = RecordDef) ->
     RecordDef#record_def{warnings = [{Line, Module, Reason}|Warnings]}.
-%%--------------------------------------------------------------------
-%% @doc
-%% @spec
-%% @end
-%%--------------------------------------------------------------------
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================

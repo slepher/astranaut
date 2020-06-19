@@ -48,7 +48,7 @@ add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions
 %%%===================================================================
 
 merge_macro_options(MacroOptions, Options) ->
-    WithKeys = [formatter, attrs, order, as_attr, merge_function, auto_export, group_args],
+    WithKeys = [formatter, attrs, order, as_attr, merge_function, auto_export, group_args, debug, debug_ast],
     maps:merge(maps:with(WithKeys, MacroOptions), Options).
 
 exported_macro_options({Function, Arity}, LocalModule, Line, Forms, ModuleMacroOptions, Warnings) ->

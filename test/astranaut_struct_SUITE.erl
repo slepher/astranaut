@@ -13,7 +13,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
-
+-include("test_record.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -110,7 +110,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [test_struct_new, test_struct_update, test_struct_test,
-     test_from_record, test_to_record, test_from_map, test_update_struct, test_update_fail].
+     test_from_record, test_to_record, test_from_map, test_update_struct,
+     test_from_map_missing_name, test_update_missing_name, test_update_fail].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -144,27 +145,51 @@ test_struct_test(_Config) ->
     ok.
     
 test_from_record(_Config) ->
-    Test = {test, hello, world},
+    Test = #test{name = hello, value = world},
     Test1 = astranaut_struct_test:from_record(Test),
-    #{'__struct__' := test, name := hello, value := world} = Test1,
+    ?assertEqual(#{'__struct__' => test,
+                   name => hello, value => world, enable => true,
+                   desc => undefined}, Test1),
     ok.
 
 test_to_record(_Config) ->
     Test = #{'__struct__' => test, name => hello, value => world},
     Test1 = astranaut_struct_test:to_record(Test),
-    {test, hello, world} = Test1,
+    ?assertEqual(#test{name = hello, value = world, 
+                       enable = undefined, desc = undefined}, Test1),
     ok.
 
 test_from_map(_Config) ->
-    Test = #{name => test_name, desc => test_desc},
+    Test = #{name => test_name, desc => test_desc, beep => none},
     Test1 = astranaut_struct_test:from_map(Test),
-    ?assertEqual(#{'__struct__' => test, name => test_name, value => <<"world">>}, Test1),
+    ?assertEqual(#{'__struct__' => test,
+                   name => test_name, 
+                   value => <<"world">>,
+                   desc => test_desc,
+                   enable => true}, 
+                 Test1),
+    ok.
+
+test_from_map_missing_name(_Config) ->
+    Test = #{desc => test_desc, beep => none},
+    ?assertException(exit, {missing_enforce_keys, test, [name]}, 
+                     astranaut_struct_test:from_map(Test)),
     ok.
 
 test_update_struct(_Config) ->
     Test = #{'__struct__' => test, name => bye},
     Test1 = astranaut_struct_test:update(Test),
-    ?assertEqual(#{'__struct__' => test, name => bye, value => <<"world">>}, Test1),
+    ?assertEqual(#{'__struct__' => test, 
+                   name => bye, 
+                   value => <<"world">>,
+                   enable => true
+                  }, Test1),
+    ok.
+
+test_update_missing_name(_Config) ->
+    Test = #{'__struct__' => test, desc => bye},
+    ?assertException(exit, {missing_enforce_keys, test, [name]}, 
+                     astranaut_struct_test:update(Test)),
     ok.
 
 test_update_fail(_Config) ->
