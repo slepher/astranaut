@@ -10,7 +10,7 @@
 
 %% API exports
 -export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
--export([init_attributes/3]).
+-export([init_attributes/3, is_mfa/1, is_opts/1]).
 -export([abstract/1, abstract/2]).
 -export([file/1, module/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
@@ -101,34 +101,7 @@ add_attribute(F, Attributes, Line, Acc) when is_list(Attributes) ->
               add_attribute(F, Attrribute, Line, Acc1)
       end, Acc, Attributes);
 add_attribute(F, Attribute, Line, Acc) ->
-    case mfa_with_opts(Attribute) of
-        {ok, {MFAs, Opts}} when is_list(MFAs) ->
-            F(MFAs, Line, Opts, Acc);
-        {ok, {MFA, Opts}} ->
-            F([MFA], Line, Opts, Acc);
-        {error, Reason} ->
-            F(Reason, Line, [], Acc)
-    end.
-
-mfa_with_opts(MFA) ->
-    case is_mfa(MFA) of
-        true ->
-            {ok, {MFA, []}}; 
-        false ->
-            case MFA of
-                {MFA1, Opts} ->
-                    case is_opts(Opts) of
-                        true ->
-                            {ok, {MFA1, Opts}};
-                        false ->
-                            {error, {invalid_attribute, MFA}}
-                    end;
-                {MFA1} ->
-                    {ok, {MFA1, []}};
-                _ ->
-                    {error, {invalid_attribute, MFA}}
-            end
-    end.
+    F(Attribute, Line, Acc).
 
 is_mfa({Module, {Function, Arity}}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->
     true;

@@ -97,8 +97,8 @@ init_structs(StructName, AstranautStructDefs) ->
     case lists:keyfind(StructName, 2, AstranautStructDefs) of
         StructDef when is_tuple(StructDef) ->
             {ok, StructDef};
-        undefined ->
-            {error, {undefined_struct, struct_name}}
+        false ->
+            {error, {undefined_struct, StructName}}
     end.
 
 struct_init_abs(Line, StructInits) ->
@@ -125,7 +125,8 @@ do_struct_function(FunctionName, {atom, Line, StructName} = AtomStructName, Stru
             InitAbs = struct_init_abs(Line, InitValue),
             FieldsAbs =  astranaut_quote:quote(Fields, #{quote_line => Line}),
             EnforceKeysAbs = astranaut_quote:quote(EnforceKeys, #{quote_line => Line}),
-            quote(astranaut_struct:(unquote(FunctionName))(unquote(AtomStructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct)));
+            quote(astranaut_struct:(unquote(FunctionName))(
+                    unquote(AtomStructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct)));
         {error, Reason} ->
             {error, Reason}
     end;
