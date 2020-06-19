@@ -243,15 +243,11 @@ append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
 init_struct_defs(Module, StructDefs) ->
-    lists:foldl(
-      fun({Line, {Struct, Opts}}, Acc) when is_atom(Struct) ->
-              add_struct_defs([Struct], Line, Opts, Acc);
-         ({Line, {Structs, Opts}}, Acc) when is_list(Structs) ->
-              add_struct_defs(Structs, Line, Opts, Acc);
-         ({Line, Struct}, Acc) when is_atom(Struct) ->
-              add_struct_defs([Struct], Line, [], Acc);
-         ({Line, Struct}, Acc) ->
-              add_struct_errors(Struct, Module, Line, Acc)
+    astranaut:init_attributes(
+      fun({error, {invalid_attribute, Structs}}, Line, _Opts, Acc) ->
+              add_struct_errors(Structs, Module, Line, Acc);
+         (Structs, Line, Opts, Acc) ->
+              add_struct_defs(Structs, Line, Opts, Acc)
       end, astranaut_traverse:new_state(maps:new()), StructDefs).
 
 add_struct_defs(Structs, Line, Opts, #{state := StructMap} = TraverseState) ->
