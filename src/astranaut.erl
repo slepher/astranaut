@@ -9,7 +9,7 @@
 -module(astranaut).
 
 %% API exports
--export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
+-export([attributes/2, attributes_with_line/2, attributes_with_file_line/2, module_attributes/2, read/1]).
 -export([init_attributes/3, is_mfa/1, is_opts/1]).
 -export([abstract/1, abstract/2]).
 -export([file/1, module/1]).
@@ -88,6 +88,19 @@ attributes_with_line(Attribute, Forms) ->
            (_Other, Acc) ->
                 Acc
         end, [], Forms)).
+
+attributes_with_file_line(Attribute, Forms) ->
+    lists:reverse(
+      element(1, 
+              lists:foldl(
+                fun({attribute, _Line1, file, {File, _Line2}}, {Acc, _}) ->
+                        {Acc, File};
+                   ({attribute, Line, Attr, Values}, {Acc, File}) when Attr == Attribute ->
+                        {[{File, Line, Values}|Acc], File};
+                   (_Other, Acc) ->
+                        Acc
+                end, {[], undefined}, Forms))).
+
 
 init_attributes(Fun, Init, AttributeWithLines) ->
     lists:foldl(

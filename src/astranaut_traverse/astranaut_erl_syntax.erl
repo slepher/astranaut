@@ -16,6 +16,7 @@
 -export([update_subtrees/2]).
 -export([get_pos/1]).
 -export([node_type/2]).
+-export([is_file/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -49,6 +50,13 @@ node_type({function, _, _AttrName, _AttrValue}, #{}) ->
 node_type(_Node, #{}) ->
     expression.
     
+is_file({attribute, _Line1, file, {File, _Line2}}) ->
+    {file, File};
+is_file({eof, _Line}) ->
+    {file, undefined};
+is_file(_Node) ->
+    false.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

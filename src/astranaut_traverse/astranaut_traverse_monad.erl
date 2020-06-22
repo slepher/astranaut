@@ -16,6 +16,7 @@
 -export([lift_m/2, sequence_m/1, r_sequence_m/1, map_m/2]).
 -export([deep_sequence_m/1, deep_r_sequence_m/1]).
 -export([get/0, put/1, modify/1, state/1, bind_state/1]).
+-export([update_file/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
 
 -compile({no_auto_import, [get/0, put/1]}).
@@ -31,24 +32,23 @@ new_1() ->
     astranaut_monad_error_t:error_t(new_2()).
 
 new_2() ->
-    astranaut_monad_writer_t:writer_t(new_3()).
+    astranaut_monad_state_t:state_t(new_3()).
 
 new_3() ->
-    astranaut_monad_writer_t:writer_t(new_4()).
-
-new_4() ->
     astranaut_monad_identity.
+
+init_error_state() ->
+    #{errors => [], warnings => [], file_errors => #{}, file_warnings => #{}, file => undefined}.
 
 run(M0, State) ->
     M1 = astranaut_monad_state_t:run(M0, State),
     M2 = astranaut_monad_error_t:run(M1),
-    M3 = astranaut_monad_writer_t:run(M2),
-    M4 = astranaut_monad_writer_t:run(M3),
-    case astranaut_monad_identity:run(M4) of
-        {{{ok, {A, NState}}, Warnings}, Errors} ->
-            {ok, {A, NState}, Errors, Warnings};
-        {{{error, Reason}, Warnings}, Errors} ->
-            {error, [Reason|Errors], Warnings}
+    M3 = astranaut_monad_state_t:run(M2, init_error_state()),
+    case astranaut_monad_identity:run(M3) of
+        {{ok, {A, NState}}, ErrorState} ->
+            {ok, {A, NState}, ErrorState};
+        {{error, Reason}, #{errors := Errors} = ErrorState} ->
+            {error, ErrorState#{errors := [Reason|Errors]}}
     end.
 
 eval(M0, State) ->
@@ -108,6 +108,17 @@ return(A) ->
 fail(E) ->
     astranaut_monad:fail(E, new()).
 
+update_file(File) ->
+    modify_error_state(
+      fun(State) ->
+              astranaut_traverse_error_state:update_file(File, State)
+      end).
+
+modify_error_state(F) ->
+    M2 = astranaut_monad:modify(F, new_2()),
+    M1 = astranaut_monad:lift(M2, new_1()),
+    astranaut_monad:lift(M1, new()).
+
 get() ->
     astranaut_monad:get(new()).
 
@@ -135,16 +146,19 @@ warning(Warning) ->
     warnings([Warning]).
 
 warnings(Warnings) ->
-    astranaut_monad:tell(Warnings, new()).
+    modify_error_state(
+      fun(State) ->
+              astranaut_traverse_error_state:warnings(Warnings, State)
+      end).
 
 error(Error) ->
     errors([Error]).
 
 errors(Errors) ->
-    M2 = astranaut_monad:lift_tell(Errors, new_2()),
-    M1 = astranaut_monad:lift(M2, new_1()),
-    astranaut_monad:lift(M1, new()).
-
+    modify_error_state(
+      fun(State) ->
+              astranaut_traverse_error_state:errors(Errors, State)
+      end).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

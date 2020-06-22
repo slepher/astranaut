@@ -25,13 +25,14 @@ parse_transform(Forms, _Options) ->
     #{errors := Errors, state := State} = init_structs(Module, Forms, TraverseState),
     #{structs := StructInitMap, forms := Forms1} = State,
     Forms2 = lists:reverse(Forms1),
+    io:format("forms is ~p~n", [Forms]),
     case Errors of
         [] ->
             Return = 
                 astranaut_traverse:map(
                   fun(Node, Attrs) ->
                           walk(Node, StructInitMap, Attrs)
-                  end, Forms2, #{traverse => pre, formatter => ?MODULE, parse_transform => File}),
+                  end, Forms2, #{traverse => pre, formatter => ?MODULE, parse_transform => true}),
             astranaut_traverse:map_traverse_return(
               fun(Forms3) ->
                       %% io:format("~s~n", [astranaut:to_string(Forms3)]),

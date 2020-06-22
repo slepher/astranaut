@@ -34,7 +34,7 @@ transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
     [Module] = astranaut:attributes(module, Forms),
-    {Macros, Warnings} = macros(Forms, Module, File),
+    {Macros, Warnings} = macros(Forms, Module),
     case astranaut_macro_local:compile(Macros, Forms, Options) of
         {ok, LWarnings} ->
             transform_macros_1(Macros, Forms, File, Warnings ++ LWarnings);
@@ -74,23 +74,23 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-macros(Forms, LocalModule, File) ->
-    Macros = lists:flatten(astranaut:attributes_with_line(use_macro, Forms)),
+macros(Forms, LocalModule) ->
+    Macros = lists:flatten(astranaut:attributes_with_file_line(use_macro, Forms)),
     {AllMacros, _MacroOptions, Warnings} = 
         lists:foldl(
-          fun({Line, {Module, {Function, Arity}}}, Acc) ->
+          fun({File, Line, {Module, {Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({Line, {Module, {Function, Arity}, Opts}}, Acc) ->
+             ({File, Line, {Module, {Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
-             ({Line, {{Function, Arity}}}, Acc) ->
+             ({File, Line, {{Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({Line, {{Function, Arity}, Opts}}, Acc) ->
+             ({File, Line, {{Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
-             ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
+             ({_File, Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
                   {LocalMacrosAcc, AllMacrosAcc, [{Line, ?MODULE, {invalid_use_macro, Other}}|WarningsAcc]}
           end, {[], maps:new(), []}, Macros),
     {lists:reverse(AllMacros), lists:reverse(Warnings)}.
@@ -105,16 +105,18 @@ transform_macros_2(Macros, Warnings) ->
       astranaut_traverse_monad:warnings(Warnings),
       astranaut_traverse_monad:then(
         astranaut_traverse_monad:map_m(
-          fun(MacroOpts) ->
+          fun(#{file := File} = MacroOpts) ->
                   astranaut_traverse_monad:bind_state(
                     fun(FormsWithCounter) ->
-                            astranaut_traverse_monad:bind(
-                              %% transform macro attributes
-                              transform_macro_attr(MacroOpts, FormsWithCounter),
-                              fun(FormsWithCounter1) ->
-                                      %% transform macro call
-                                      transform_macro_call(MacroOpts, FormsWithCounter1)
-                              end)
+                            astranaut_traverse_monad:then(
+                              astranaut_traverse_monad:update_file(File),
+                              astranaut_traverse_monad:bind(
+                                %% transform macro attributes
+                                transform_macro_attr(MacroOpts, FormsWithCounter),
+                                fun(FormsWithCounter1) ->
+                                        %% transform macro call
+                                        transform_macro_call(MacroOpts, FormsWithCounter1)
+                                end))
                     end)
           end, Macros),
         astranaut_traverse_monad:modify(

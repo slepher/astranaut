@@ -19,7 +19,7 @@
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
 -export([transform_mapfold_f/2]).
--export([format_error/1, parse_transform_return/2]).
+-export([format_error/1, parse_transform_return/1, parse_transform_return/2]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
 -export([monad_to_traverse_fun_return/1, monad_to_traverse_fun_return/2]).
 -export([monad_deep_sequence_m/2, monad_deep_r_sequence_m/2]).
@@ -112,30 +112,19 @@ reduce(F, Init, TopNode, Opts) ->
       end, mapfold(NF, Init, TopNode, Opts)).
 
 -spec map_with_state(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_final_return({Node, State}).
-map_with_state(F, Init, Forms, Opts) ->
-    case maps:get(parse_transform, Opts, false) of
-        false ->
-            map_with_state_1(F, Init, Forms, Opts);
-        File ->
-            {Forms1, Errors} = extract_errors(Forms, [], []),
-            Reply = map_with_state_1(F, Init, Forms1, Opts),
-            Reply1 = merge_errors(Reply, Errors),
-            File1 =
-                case File of
-                    true ->
-                        file(Forms);
-                    File when is_list(File) ->
-                        File
-                end,
-            parse_transform_return(Reply1, File1)
-    end.
-
-map_with_state_1(F, Init, Node, Opts) ->
+map_with_state(F, Init, Node, Opts) ->
     Reply = mapfold(F, Init, Node, Opts),
-    map_traverse_return(
-      fun({NNode, _State}) ->
-              NNode
-      end, Reply).
+    Reply1 = 
+        map_traverse_return(
+          fun({NNode, _State}) ->
+                  NNode
+          end, Reply),
+    case maps:get(parse_transform, Opts, false) of
+        true ->
+            parse_transform_return(Reply1);
+        false ->
+            Reply1
+    end.
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
@@ -179,39 +168,17 @@ merge_traverse_state_1(#{state := State} = Return, Struct) ->
 merge_traverse_state_1(#{}, Struct) ->
     Struct.
 
-extract_errors([{error, Error}|T], Nodes, Errors) ->
-    extract_errors(T, Nodes, [Error|Errors]);
-extract_errors([Form|T], Nodes, Errors) ->
-    extract_errors(T, [Form|Nodes], Errors);
-extract_errors([], Nodes, Errors) ->
-    {lists:reverse(Nodes), lists:reverse(Errors)};
-extract_errors(Node, [], []) ->
-    {Node, []}.
-
-merge_errors({ok, Reply, Errors, Warnings}, Errors1) ->
-    {ok, Reply, Errors1 ++ Errors, Warnings};
-merge_errors({error, Errors, Warnings}, Errors1) ->
-    {error, Errors1 ++ Errors, Warnings};
-merge_errors({warning, Reply, Warnings}, []) ->
-    {warning, Reply, Warnings};
-merge_errors({warning, Reply, Warnings}, Errors) ->
-    {ok, Reply, Errors, Warnings};
-merge_errors(Reply, []) ->
-    Reply;
-merge_errors(Reply, Errors1) ->
-    {ok, Reply, Errors1, []}.
-
 -spec map_traverse_return(fun((A) -> B), traverse_return(A)) -> parse_transform_return(B).
-map_traverse_return(F, {ok, Reply, Errors, Warnings}) ->
+map_traverse_return(F, {ok, Reply, ErrorState}) ->
     case F(Reply) of
         {error, Error} ->
-            {error, [Error|Errors], Warnings};
+            {error, astranaut_traverse_error_state:error(Error, ErrorState)};
         {error, Reply1, Error} ->
-            {ok, Reply1, [Error|Errors], Warnings};
+            {error, Reply1, astranaut_traverse_error_state:error(Error, ErrorState)};
         {ok, Reply1} ->
-            {ok, Reply1, Errors, Warnings};
+            {ok, Reply1, ErrorState};
         Reply1 ->
-            {ok, Reply1, Errors, Warnings}
+            {ok, Reply1, ErrorState}
     end;
 map_traverse_return(_F, {error, Errors, Warnings}) ->
     {error, Errors, Warnings};
@@ -272,16 +239,24 @@ format_error(Message) ->
         _    -> io_lib:write(Message)
     end.
 
-parse_transform_return({ok, Reply, [], []}, _File) ->
-    Reply;
-parse_transform_return({ok, Reply, [], Warnings}, File) ->
-    {warning, Reply, [{File, Warnings}]};
-parse_transform_return({ok, _Reply, Errors, Warnings}, File) ->
-    {error, [{File, Errors}], [{File, Warnings}]};
-parse_transform_return({error, Errors, Warnings}, File) ->
-    {error, [{File, Errors}], [{File, Warnings}]};
-parse_transform_return(Reply, _File) ->
-    Reply.
+parse_transform_return({ok, Forms, ErrorState}) when is_list(Forms) ->
+    case astranaut_traverse_error_state:realize(ErrorState) of
+        {[], []} ->
+            Forms;
+        {[], Warnings} ->
+            {warning, Forms, Warnings};
+        {Errors, Warnings} ->
+            {error, Errors, Warnings}
+    end;
+parse_transform_return({error, ErrorState}) ->
+    {Errors, Warnings} = astranaut_traverse_error_state:realize(ErrorState),
+    {error, Errors, Warnings};
+parse_transform_return(Forms) when is_list(Forms)->
+    Forms.
+
+
+parse_transform_return(Return, _File) ->
+    parse_transform_return(Return).
 
 %%====================================================================
 %% Internal functions
@@ -307,37 +282,47 @@ map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
 
+map_m_tree(_F, {error, Reason}, _Opts, _SyntaxLib) ->
+    astranaut_traverse_monad:error(Reason);
 map_m_tree(F, NodeA, Opts, SyntaxLib) ->
     Attr = maps:without([traverse, parse_transform, monad, monad_class, formatter], Opts),
-    NodeType = SyntaxLib:node_type(NodeA, Opts),
-    PreType = 
-        case SyntaxLib:subtrees(NodeA, Opts) of
-            [] ->
-                leaf;
-            _Subtrees ->
-                pre
-        end,
-    bind_with_continue(
-      NodeA, 
-      F(NodeA, Attr#{step => PreType, node => NodeType}),
-      fun(NodeB) ->
-              case SyntaxLib:subtrees(NodeB, Opts) of
-                  [] ->
-                      monad_return(NodeB, Opts);
-                  Subtrees ->
-                      Parent = SyntaxLib:type(NodeB),
-                      monad_bind(
-                        map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
-                        fun(NodeC) ->
-                                bind_with_continue(
-                                  NodeC, 
-                                  F(NodeC, Attr#{step => post, node => NodeType}),
-                                  fun(NodeD) ->
-                                          monad_return(NodeD, Opts)
-                                  end, Opts)
-                        end, Opts)
-              end
-      end, Opts).
+    case SyntaxLib:is_file(NodeA) of
+        false ->
+            NodeType = SyntaxLib:node_type(NodeA, Opts),
+            PreType = 
+                case SyntaxLib:subtrees(NodeA, Opts) of
+                    [] ->
+                        leaf;
+                    _Subtrees ->
+                        pre
+                end,
+            bind_with_continue(
+              NodeA, 
+              F(NodeA, Attr#{step => PreType, node => NodeType}),
+              fun(NodeB) ->
+                      case SyntaxLib:subtrees(NodeB, Opts) of
+                          [] ->
+                              monad_return(NodeB, Opts);
+                          Subtrees ->
+                              Parent = SyntaxLib:type(NodeB),
+                              monad_bind(
+                                map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
+                                fun(NodeC) ->
+                                        bind_with_continue(
+                                          NodeC, 
+                                          F(NodeC, Attr#{step => post, node => NodeType}),
+                                          fun(NodeD) ->
+                                                  monad_return(NodeD, Opts)
+                                          end, Opts)
+                                end, Opts)
+                      end
+              end, Opts);
+        {file, File} ->
+            astranaut_traverse_monad:then(
+              astranaut_traverse_monad:update_file(File),
+              F(NodeA, Attr#{step => leaf, node => file})
+             )
+    end.
     
 bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
     monad_bind(
@@ -567,8 +552,13 @@ map_walk_return(F, WalkReturn) ->
             F(WalkReturn)
     end.
 
-simplify_return({ok, Reply, [], []}, true) ->
-    Reply;
+simplify_return({ok, Reply, ErrorState}, true) ->
+    case astranaut_traverse_error_state:realize(ErrorState) of
+        {[], []} ->
+            Reply;
+        _ ->
+            {ok, Reply, ErrorState}
+    end;
 simplify_return(Other, _) ->
     Other.
 
@@ -604,30 +594,20 @@ monad_to_traverse_fun_return(Monad) ->
 
 monad_to_traverse_fun_return(Monad, #{init := Init, with_state := true}) ->
     case astranaut_traverse_monad:run(Monad, Init) of
-        {ok, Value, [], []} ->
+        {ok, Value, #{errors := [], warnings := []}} ->
             Value;
-        {ok, {Node, State}, Errors, Warnings} ->
+        {ok, {Node, State}, #{errors := Errors, warnings := Warnings}} ->
             traverse_fun_return(#{node => Node, state => State, errors => Errors, warnings => Warnings});
-        {error, Errors, Warnings} ->
+        {error, #{errors := Errors, warnings := Warnings}} ->
             traverse_fun_return(#{errors => Errors, warnings => Warnings})
     end;
 monad_to_traverse_fun_return(Monad, #{} = Opts) ->
     Init = maps:get(init, Opts, ok),
     case astranaut_traverse_monad:run(Monad, Init) of
-        {ok, {Node, _}, [], []} ->
+        {ok, {Node, _}, #{errors := [], warnings := []}} ->
             Node;
-        {ok, {Node, _}, Errors, Warnings} ->
+        {ok, {Node, _}, #{errors := Errors, warnings := Warnings}} ->
             traverse_fun_return(#{node => Node, errors => Errors, warnings => Warnings});
-        {error, Errors, Warnings} ->
+        {error, #{errors := Errors, warnings := Warnings}} ->
             traverse_fun_return(#{errors => Errors, warnings => Warnings})
     end.
-
-file(Forms) when is_list(Forms) ->
-    case astranaut:attributes(file, Forms) of
-        [{File, _}|_] ->
-            File;
-        _ ->
-            ""
-    end;
-file(_) ->
-    "".
