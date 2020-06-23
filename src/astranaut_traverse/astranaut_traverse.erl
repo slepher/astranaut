@@ -193,8 +193,11 @@ then_return(Return1, Return2) ->
 without_errors(Forms) ->
     FormsWithErrors = 
         with_form(
-          fun({error, Errors}, FormsAcc, ErrorState) ->
+          fun({error, Errors}, FormsAcc, ErrorState) when is_list(Errors) ->
                   ErrorState1 = astranaut_traverse_error_state:errors(Errors, ErrorState),
+                  {FormsAcc, ErrorState1};
+             ({error, Error}, FormsAcc, ErrorState) ->
+                  ErrorState1 = astranaut_traverse_error_state:error(Error, ErrorState),
                   {FormsAcc, ErrorState1};
              (Form, FormsAcc, ErrorState) ->
                   {[Form|FormsAcc], ErrorState}
