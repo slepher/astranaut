@@ -18,28 +18,31 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    File = astranaut:file(Forms),
     Module = astranaut:module(Forms),
-    StructAttributes = astranaut:attributes_with_line(astranaut_struct, Forms),
-    TraverseState = init_struct_defs(StructAttributes),
-    #{errors := Errors, state := State} = init_structs(Module, Forms, TraverseState),
-    #{structs := StructInitMap, forms := Forms1} = State,
-    Forms2 = lists:reverse(Forms1),
-    case Errors of
-        [] ->
-            Return = 
-                astranaut_traverse:map(
-                  fun(Node, Attrs) ->
-                          walk(Node, StructInitMap, Attrs)
-                  end, Forms2, #{traverse => pre, formatter => ?MODULE, parse_transform => true}),
-            astranaut_traverse:map_traverse_return(
-              fun(Forms3) ->
-                      %% io:format("~s~n", [astranaut:to_string(Forms3)]),
-                      Forms3
-              end, Return);
-        _ ->
-            astranaut_traverse:parse_transform_return({error, Errors, []}, File)
-    end.
+    Return = 
+        astranaut_traverse:bind(
+          astranaut_traverse:bind(
+            astranaut_traverse:without_errors(Forms),
+            fun(Forms) ->
+                    astranaut_traverse:bind(
+                      init_struct_defs(Forms),
+                      fun(StructDefs) ->
+                              astranaut_traverse:bind(
+                                init_structs(Module, Forms, StructDefs),
+                                fun(#{structs := StructInitMap, forms := Forms}) ->
+                                        Forms = lists:reverse(Forms),
+                                        astranaut_traverse:map(
+                                          fun(Node, Attrs) ->
+                                                  walk(Node, StructInitMap, Attrs)
+                                          end, Forms, #{traverse => pre, formatter => ?MODULE})
+                                end)
+                      end)
+            end),
+          fun(Forms) ->
+                  %% io:format("forms is ~ts~n", [astranaut:to_string(Forms)]),
+                  Forms
+          end),
+    astranaut_traverse:parse_transform_return(Return).
 
 format_error({invalid_struct_def, Struct}) ->
     io_lib:format("~p is not a valid struct name", [Struct]);
@@ -244,18 +247,18 @@ update_record_field_types(RecordName, Line, Fields, StructDef) ->
 append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
-init_struct_defs(StructDefs) ->
-    astranaut:init_attributes(
+init_struct_defs(Forms) ->
+    astranaut_traverse:with_attributes(
       fun({Structs, Opts} = Rec, Line, Acc) ->
               case astranaut:is_opts(Opts) of
                   true ->
                       add_struct_defs(Structs, Line, Opts, Acc);
                   false ->
-                      add_struct_errors(Rec, Line, Acc)
+                      {error, {invalid_struct_def, Rec}}
               end;
          (Structs, Line, Acc) ->
-              add_struct_defs(Structs, Line, [], Acc)
-      end, astranaut_traverse:new_state(maps:new()), StructDefs).
+              add_struct_defs(Structs, [], Line, Acc)
+      end, maps:new(), astranaut_struct, Forms, #{formatter => ?MODULE}).
 
 add_struct_defs(Structs, Line, Opts, State) when is_list(Structs) ->
     add_struct_defs_1(Structs, Line, Opts, State);
@@ -264,21 +267,15 @@ add_struct_defs(Struct, Line, Opts, State) ->
 
 add_struct_defs_1(Structs, Line, Opts, TraverseState) ->
     {Opts1, Errors1} = astranaut:validate_options(fun struct_options_validator/2, Opts),
-    TraverseState1 = astranaut_traverse:merge_state(#{errors => Errors1}, TraverseState),
-    TraverseState2 =
-        lists:foldl(
-          fun(Struct, #{state := StructMap} = Acc) when is_atom(Struct) ->
-                  StructMap1 = maps:put(Struct, Opts1#{line => Line}, StructMap),
-                  Acc#{state => StructMap1};
-             (Struct, StateAcc) ->
-                  add_struct_errors(Struct, Line, StateAcc)
-          end, TraverseState1, Structs),
-    astranaut_traverse:merge_state(TraverseState2, TraverseState).
-
-add_struct_errors(Struct, Line, #{} = State) ->
-    Errors = maps:get(errors, State, []),
-    Error = {invalid_struct_def, Struct},
-    State#{errors => [{Line, ?MODULE, Error}|Errors]}.
+    astranaut_traverse:then_return(
+      #{state => ok, errors => Errors1},
+      astranaut_traverse:fold_bind_returns(
+        fun(Struct, StructMap) when is_atom(Struct) ->
+                StructMap1 = maps:put(Struct, Opts1#{line => Line}, StructMap),
+                {ok, StructMap1};
+           (Struct, StructMap) ->
+                {error, StructMap, {invalid_struct_def, Struct}}
+        end, TraverseState, Structs)).
 
 struct_options_validator(non_auto_fill, Boolean) when is_boolean(Boolean) ->
     ok;
@@ -297,32 +294,32 @@ struct_options_validator(enforce_keys, Keys) ->
 struct_options_validator(_Key, _Value) ->
     error.
 
-init_structs(Module, Forms, #{state := StructDefs} = TraverseState) ->
-    TraverseState1 = TraverseState#{state => #{structs => maps:new(), forms => []}},
-    lists:foldl(
-      fun({attribute, Line, record, {RecordName, _RecordFields} = Record} = Node, 
-          #{state := #{structs := RecordMapAcc, forms := FormsAcc} = StateAcc} = Acc) ->
+init_structs(Module, Forms, StructDefs) ->
+    State = #{structs => maps:new(), forms => []},
+    astranaut_traverse:reduce(
+      fun({attribute, Line, record, {RecordName, _RecordFields} = Record} = Node,
+          #{structs := RecordMapAcc, forms := FormsAcc} = StateAcc, #{}) ->
               case maps:find(RecordName, StructDefs) of
                   {ok, StructDef} ->
                       RecordDef = astranaut_struct_record:record_def(Module, Record, Line),
                       RecordDef1 = update_record_def(RecordDef, StructDef),
-                      FieldsErrors = astranaut_struct_record:warnings(RecordDef1),
+                      FieldErrors = astranaut_struct_record:warnings(RecordDef1),
+                      FieldErrors1 = lists:map(fun(FieldError) -> {Line, ?MODULE, FieldError} end, FieldErrors),
                       RecordMapAcc1 = maps:put(RecordName, RecordDef1, RecordMapAcc),
-                      Node1 = {attribute, Line, astranaut_struct_def, RecordDef1},
+                      Node1 = astranaut:attribute_node(astranaut_struct_def, Line, RecordDef1),
                       StateAcc1 = StateAcc#{structs => RecordMapAcc1, forms := [Node1, Node|FormsAcc]},
-                      State = astranaut_traverse:traverse_fun_return(#{state => StateAcc1, errors => FieldsErrors}),
-                      astranaut_traverse:merge_state(State, Acc);
+                      astranaut_traverse:traverse_fun_return(#{state => StateAcc1, errors => FieldErrors1});
                   error ->
-                      Acc#{state => StateAcc#{forms => [Node|FormsAcc]}}
+                      StateAcc#{forms => [Node|FormsAcc]}
               end;
-         (Node, #{state := #{forms := FormsAcc} = StateAcc} = Acc) ->
-              Acc#{state => StateAcc#{forms => [Node|FormsAcc]}}
-      end, TraverseState1, Forms).
+         (Node, #{forms := FormsAcc} = StateAcc, #{}) ->
+              StateAcc#{forms => [Node|FormsAcc]}
+      end, State, Forms, #{traverse => list, formatter => ?MODULE}).
 
-update_record_def(RecordDef, #{line := Line} = StructDef) ->
+update_record_def(RecordDef, #{} = StructDef) ->
     AutoFill = not maps:get(non_auto_fill, StructDef, false),
     EnforceKeys = maps:get(enforce_keys, StructDef, []),
     RecordDef1 = astranaut_struct_record:set_auto_fill(AutoFill, RecordDef),
-    RecordDef2 = astranaut_struct_record:update_enforce_keys(EnforceKeys, ?MODULE, Line, RecordDef1),
+    RecordDef2 = astranaut_struct_record:update_enforce_keys(EnforceKeys, RecordDef1),
     RecordDef3 = astranaut_struct_record:update_init_values(RecordDef2),
     RecordDef3.

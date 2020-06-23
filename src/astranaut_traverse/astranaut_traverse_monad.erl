@@ -16,7 +16,7 @@
 -export([lift_m/2, sequence_m/1, r_sequence_m/1, map_m/2]).
 -export([deep_sequence_m/1, deep_r_sequence_m/1]).
 -export([get/0, put/1, modify/1, state/1, bind_state/1]).
--export([update_file/1]).
+-export([update_file/1, merge_error_state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
 
 -compile({no_auto_import, [get/0, put/1]}).
@@ -112,6 +112,12 @@ update_file(File) ->
     modify_error_state(
       fun(State) ->
               astranaut_traverse_error_state:update_file(File, State)
+      end).
+
+merge_error_state(ErrorState) ->
+    modify_error_state(
+      fun(State) ->
+              astranaut_traverse_error_state:merge(State, ErrorState)
       end).
 
 modify_error_state(F) ->

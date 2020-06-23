@@ -16,8 +16,8 @@
 %%%===================================================================
 add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions, Warnings}) ->
     {Options1, Warnings1} = validate_options(Options, Line, Warnings),
-    {MacroOptions, ModuleMacroOptions1, Warnings1} =
-        exported_macro_options(MFA, LocalModule, Line, Forms, ModuleMacroOptions, Warnings),
+    {MacroOptions, ModuleMacroOptions1, Warnings2} =
+        exported_macro_options(MFA, LocalModule, Line, Forms, ModuleMacroOptions, Warnings1),
     case kmfa_options(Options1, MFA, LocalModule) of
         {ok, Options2} ->
             Options3 = merge_macro_options(MacroOptions, Options2),
@@ -27,14 +27,14 @@ add(MFA, Options, LocalModule, File, Line, Forms, {AllMacros, ModuleMacroOptions
             Options7 = formatter_opts(Options6),
             case validate_formatter(Options7, Forms) of
                 ok ->
-                    {[Options7|AllMacros], ModuleMacroOptions1, Warnings1};
+                    {[Options7|AllMacros], ModuleMacroOptions1, Warnings2};
                 {error, Reason} ->
                     Options8 = Options7#{formatter => astranaut_macro},
-                    {[Options8|AllMacros], ModuleMacroOptions1, [{Line, astranaut_macro, Reason}|Warnings1]}
+                    {[Options8|AllMacros], ModuleMacroOptions1, [{Line, astranaut_macro, Reason}|Warnings2]}
             end;
         {error, Reason} ->
-            Warnings2 = [{Line, astranaut_macro, Reason}|Warnings1],
-            {AllMacros, ModuleMacroOptions1, Warnings2}
+            Warnings3 = [{Line, astranaut_macro, Reason}|Warnings2],
+            {AllMacros, ModuleMacroOptions1, Warnings3}
     end.
 %%--------------------------------------------------------------------
 %% @doc

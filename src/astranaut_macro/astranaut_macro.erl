@@ -34,7 +34,7 @@ transform_macros(MFAOpts, Forms) when is_list(MFAOpts) ->
 parse_transform(Forms, Options) ->
     File = astranaut:file(Forms),
     [Module] = astranaut:attributes(module, Forms),
-    {Macros, Warnings} = macros(Forms, Module),
+    {Macros, Warnings} = macros(File, Forms, Module),
     case astranaut_macro_local:compile(Macros, Forms, Options) of
         {ok, LWarnings} ->
             transform_macros_1(Macros, Forms, File, Warnings ++ LWarnings);
@@ -74,23 +74,23 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-macros(Forms, LocalModule) ->
-    Macros = lists:flatten(astranaut:attributes_with_file_line(use_macro, Forms)),
+macros(File, Forms, LocalModule) ->
+    Macros = lists:flatten(astranaut:attributes_with_line(use_macro, Forms)),
     {AllMacros, _MacroOptions, Warnings} = 
         lists:foldl(
-          fun({File, Line, {Module, {Function, Arity}}}, Acc) ->
+          fun({Line, {Module, {Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({File, Line, {Module, {Function, Arity}, Opts}}, Acc) ->
+             ({Line, {Module, {Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Module, Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
-             ({File, Line, {{Function, Arity}}}, Acc) ->
+             ({Line, {{Function, Arity}}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, [], LocalModule, File, Line, Forms, Acc);
-             ({File, Line, {{Function, Arity}, Opts}}, Acc) ->
+             ({Line, {{Function, Arity}, Opts}}, Acc) ->
                   astranaut_macro_options:add(
                     {Function, Arity}, Opts, LocalModule, File, Line, Forms, Acc);
-             ({_File, Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
+             ({Line, Other}, {LocalMacrosAcc, AllMacrosAcc, WarningsAcc}) ->
                   {LocalMacrosAcc, AllMacrosAcc, [{Line, ?MODULE, {invalid_use_macro, Other}}|WarningsAcc]}
           end, {[], maps:new(), []}, Macros),
     {lists:reverse(AllMacros), lists:reverse(Warnings)}.

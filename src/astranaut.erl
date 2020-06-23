@@ -9,8 +9,9 @@
 -module(astranaut).
 
 %% API exports
--export([attributes/2, attributes_with_line/2, attributes_with_file_line/2, module_attributes/2, read/1]).
--export([init_attributes/3, is_mfa/1, is_opts/1]).
+-export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
+-export([is_mfa/1, is_opts/1]).
+-export([attribute_node/3]).
 -export([abstract/1, abstract/2]).
 -export([file/1, module/1]).
 -export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
@@ -89,32 +90,8 @@ attributes_with_line(Attribute, Forms) ->
                 Acc
         end, [], Forms)).
 
-attributes_with_file_line(Attribute, Forms) ->
-    lists:reverse(
-      element(1, 
-              lists:foldl(
-                fun({attribute, _Line1, file, {File, _Line2}}, {Acc, _}) ->
-                        {Acc, File};
-                   ({attribute, Line, Attr, Values}, {Acc, File}) when Attr == Attribute ->
-                        {[{File, Line, Values}|Acc], File};
-                   (_Other, Acc) ->
-                        Acc
-                end, {[], undefined}, Forms))).
-
-
-init_attributes(Fun, Init, AttributeWithLines) ->
-    lists:foldl(
-      fun({Line, Attribute}, Acc) ->
-              add_attribute(Fun, Attribute, Line, Acc)
-      end, Init, AttributeWithLines).
-
-add_attribute(F, Attributes, Line, Acc) when is_list(Attributes) ->
-    lists:foldl(
-      fun(Attrribute, Acc1) ->
-              add_attribute(F, Attrribute, Line, Acc1)
-      end, Acc, Attributes);
-add_attribute(F, Attribute, Line, Acc) ->
-    F(Attribute, Line, Acc).
+attribute_node(Name, Line, Value) ->
+    {attribute, Line, Name, Value}.
 
 is_mfa({Module, {Function, Arity}}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->
     true;
@@ -201,7 +178,12 @@ reorder_attributes(Forms, Options) ->
           end, {1, []}, Forms),
     lists:foldl(
       fun({N, {attribute, _, _, _} = Attribute}, Acc) ->
-              replace_from_nth(Attribute, N, Acc, Options);
+              case astranaut_erl_syntax:is_file(Attribute) of
+                  {file, _File} ->
+                      Acc;
+                  _ ->
+                      replace_from_nth(Attribute, N, Acc, Options)
+              end;
          (_, Acc) ->
               Acc
       end, Forms, lists:reverse(GroupForms)).

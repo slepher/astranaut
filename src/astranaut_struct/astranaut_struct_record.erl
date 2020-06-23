@@ -15,7 +15,7 @@
 -export([fields/1, init_values/1]).
 -export([types/1, warnings/1, enforce_keys/1]).
 -export([set_auto_fill/2]).
--export([filled_init_values/1, update_init_values/1, update_enforce_keys/4]).
+-export([filled_init_values/1, update_init_values/1, update_enforce_keys/2]).
 
 -record(record_def, {name :: atom(), 
                      module :: module(), 
@@ -85,8 +85,8 @@ update_init_values(#record_def{} = RecordDef) ->
     InitValues1 = filled_init_values(RecordDef),
     RecordDef#record_def{init_values = InitValues1}.
 
--spec update_enforce_keys([atom()], module(), integer(), #record_def{}) -> #record_def{}.
-update_enforce_keys(EnforceKeys, Module, Line,
+-spec update_enforce_keys([atom()],#record_def{}) -> #record_def{}.
+update_enforce_keys(EnforceKeys,
                     #record_def{name = Name, fields = Fields, init_values = InitValues, warnings = Warnings} = RecordDef) ->
     UndefinedKeys = EnforceKeys -- Fields,
     case UndefinedKeys of
@@ -97,7 +97,7 @@ update_enforce_keys(EnforceKeys, Module, Line,
         _ ->
             EnforceKeys1 = EnforceKeys -- UndefinedKeys,
             Error = {enforce_keys_not_in_struct, Name, UndefinedKeys},
-            Warnings1 = Warnings ++ [{Line, Module, Error}],
+            Warnings1 = Warnings ++ [Error],
             RecordDef#record_def{enforce_keys = EnforceKeys1, warnings = Warnings1}
     end.
 %%--------------------------------------------------------------------

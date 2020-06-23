@@ -15,6 +15,8 @@
 -export([map_with_state/3, map_with_state/4]).
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
+-export([bind/2, then/2, bind_return/2, then_return/2, fold_bind_returns/3]).
+-export([without_errors/1, with_attributes/5, with_form/3]).
 -export([map_m/3, map_m_children/3, m_subtrees/3, update_opts/1]).
 -export([map_traverse_return/2, map_traverse_return_e/2, map_traverse_fun_return/2,
          traverse_fun_return_struct/1]).
@@ -38,6 +40,11 @@
                                  formatter => module(),
                                  monad_class => module(), monad => term()
                                 }.
+
+-type traverse_error_state() :: #{file => string(), errors => traverse_return_error(), warnings => traverse_return_error(),
+                                  file_errors => parse_transform_return_error(), 
+                                  file_warnings => parse_transform_return_error()}.
+
 -type node_type() :: attribute | pattern | expression | guard | form.
 -type traverse_style() :: traverse_step() | all.
 -type traverse_step() :: pre | post | leaf.
@@ -51,8 +58,8 @@
                                continue | {traverse_node(), traverse_state()} | traverse_node().
 
 -type traverse_return(ReturnType) :: ReturnType | 
-                                     {ok, ReturnType, traverse_return_error(), traverse_return_error()} |
-                                     {error, traverse_return_error(), traverse_return_error()}.
+                                     {ok, ReturnType, traverse_error_state()} |
+                                     {error, traverse_error_state()}.
 
 -type traverse_final_return(ReturnType) :: traverse_return(ReturnType) | parse_transform_return(ReturnType).
 
@@ -128,9 +135,161 @@ map_with_state(F, Init, Node, Opts) ->
 
 -spec mapfold(traverse_state_fun(), State, Node, traverse_opts()) -> traverse_return({Node, State}).
 mapfold(F, Init, Node, Opts) ->
-    SimplifyReturn = maps:get(simplify_return, Opts, true),
     Return = mapfold_1(F, Init, Node, Opts),
-    simplify_return(Return, SimplifyReturn).
+    case maps:get(simplify_return, Opts, true) of
+        true ->
+            simplify_return(Return);
+        false ->
+            Return
+    end.
+
+-spec bind(traverse_return(A), fun((A) -> B)) -> traverse_return(B).
+bind({ok, Return, ErrorState0}, F) ->
+    case F(Return) of
+        {error, ErrorState1} ->
+            ErrorState2 = astranaut_traverse_error_state:merge(ErrorState0, ErrorState1),
+            {error, ErrorState2};
+        {ok, Return1, ErrorState1} ->
+            ErrorState2 = astranaut_traverse_error_state:merge(ErrorState0, ErrorState1),
+            {error, Return1, ErrorState2};
+        {ok, Return1} ->
+            {ok, Return1, ErrorState0};
+        Return1 ->
+            {ok, Return1, ErrorState0}
+    end;
+bind({error, ErrorState}, _F) ->
+    {error, ErrorState};
+bind(Return, F) ->
+    F(Return).
+
+then(A, B) ->
+    bind(A, fun(_) -> B end).
+
+fold_bind_returns(F, Init, [H|T]) ->
+    bind_return(
+      F(H, Init),
+      fun(Acc) ->
+              fold_bind_returns(F, Acc, T)
+      end);
+fold_bind_returns(_F, Acc, []) ->
+    {ok, Acc}.
+
+bind_return(Return, F) ->
+    case update_return(Return) of
+        #{state := State} = Return1 ->
+            Return2 = update_return(F(State)),
+            Errors1 = maps:get(errors, Return1, []),
+            Warnings1 = maps:get(warnings, Return1, []),
+            Errors2 = maps:get(errors, Return2, []),
+            Warnings2 = maps:get(warnings, Return2, []),
+            maps:merge(Return1, Return2#{errors => Errors1 ++ Errors2, warnings => Warnings1 ++ Warnings2});
+        #{} = Return1 ->
+            Return1
+    end.
+
+then_return(Return1, Return2) ->
+    bind_return(Return1, fun(_) -> Return2 end).
+
+without_errors(Forms) ->
+    FormsWithErrors = 
+        with_form(
+          fun({error, Errors}, FormsAcc, ErrorState) ->
+                  ErrorState1 = astranaut_traverse_error_state:errors(Errors, ErrorState),
+                  {FormsAcc, ErrorState1};
+             (Form, FormsAcc, ErrorState) ->
+                  {[Form|FormsAcc], ErrorState}
+          end, [], Forms),
+    bind(
+      FormsWithErrors,
+      fun(Forms1) ->
+              lists:reverse(Forms1)
+      end).
+
+with_attributes(F, Init, Name, Forms, Opts) ->
+    with_form(
+      fun({attribute, Line, Attr, AttrValues}, Acc, ErrorState) when Attr == Name ->
+              add_attribute(F, AttrValues, Line, Acc, ErrorState, Opts);
+         (_Form, Acc, ErrorState) ->
+              {Acc, ErrorState}
+      end, Init, Forms).
+
+add_attribute(F, AttrValues, Line, Acc, ErrorState, Opts) when is_list(AttrValues) ->
+    lists:foldl(
+      fun(AttrValue, {Acc1, ErrorState1}) ->
+              add_attribute(F, AttrValue, Line, Acc1, ErrorState1, Opts)
+      end, {Acc, ErrorState}, AttrValues);
+add_attribute(F, AttrValue, Line, Acc, ErrorState, #{formatter := Formatter}) ->
+    Acc1 = apply_attribute_f(F, AttrValue, Line, Acc),
+    apply_return(Acc1, Line, Formatter, Acc, ErrorState).
+
+apply_attribute_f(F, AttributeValue, Line, Acc) when is_function(F, 3) ->
+    F(AttributeValue, Line, Acc);
+apply_attribute_f(F, AttributeValue, _Line, Acc) when is_function(F, 2) ->
+    F(AttributeValue, Acc).
+        
+apply_return(#{state := State} = Return, Line, Formatter, _State0, ErrorState) ->
+    Return1 = maps:remove(state, Return),
+    apply_return(Return1,  Line, Formatter, State, ErrorState);
+apply_return(#{errors := Errors} = Return, Line, Formatter, State, ErrorState) ->
+    Return1 = maps:remove(errors, Return),
+    ErrorState1 = add_errors(Errors, Line, Formatter, ErrorState),
+    apply_return(Return1,  Line, Formatter, State, ErrorState1);
+apply_return(#{warnings := Warnings} = Return, Line, Formatter, State, ErrorState) ->
+    Return1 = maps:remove(warnings, Return),
+    ErrorState1 = add_warnings(Warnings, Line, Formatter, ErrorState),
+    apply_return(Return1,  Line, Formatter, State, ErrorState1);
+apply_return(#{}, _Line, _Formatter, State, ErrorState) ->
+    {State, ErrorState};
+apply_return(Return, Line, Formatter, State0, ErrorState) ->
+    Return1 = update_return(Return),
+    apply_return(Return1, Line, Formatter, State0, ErrorState).
+
+update_return({ok, State}) ->
+    #{state => State};
+update_return({error, State1, Error}) ->
+    #{state => State1, errors => [Error]};
+update_return({errors, Errors}) ->
+    #{errors => Errors};
+update_return({errors, State1, Errors}) ->
+    #{state => State1, errors => Errors};
+update_return({warning, State1, Warning}) ->
+    #{state => State1, warnings => [Warning]};
+update_return({warnings, State1, Warnings}) ->
+    #{state => State1, warnings => Warnings};
+update_return(#{} = Return) ->
+    Return.
+
+
+add_errors(Errors, Line, Formatter, ErrorState) ->
+    Errors1 = format(Line, Formatter, Errors),
+    astranaut_traverse_error_state:errors(Errors1, ErrorState).
+
+add_warnings(Warnings, Line, Formatter, ErrorState) ->
+    Warnings1 = format(Line, Formatter, Warnings),
+    astranaut_traverse_error_state:warnings(Warnings1, ErrorState).
+
+format(Line, Formatter, Errors) ->
+    lists:map(fun(Error) -> {Line, Formatter, Error} end, Errors).
+
+with_form(F, Init, Forms) ->
+    {Forms1, ErrorState} = 
+        lists:foldl(
+          fun({attribute, _Line1, file, {File, _Line2}} = Form, {Acc, ErrorState}) ->
+                  ErrorState1 = astranaut_traverse_error_state:update_file(File, ErrorState),
+                  apply_with_form_f(F, Form, Acc, ErrorState1);
+             ({eof, _Line} = Form, {Acc, ErrorState}) ->
+                  ErrorState1 = astranaut_traverse_error_state:update_file(undefined, ErrorState),
+                  apply_with_form_f(F, Form, Acc, ErrorState1);
+             (Form, {Acc, ErrorState}) ->
+                  apply_with_form_f(F, Form, Acc, ErrorState)
+          end, {Init, astranaut_traverse_error_state:new()}, Forms),
+    simplify_return({ok, Forms1, ErrorState}).
+
+apply_with_form_f(F, Form, Acc, ErrorState) when is_function(F, 3) ->
+    F(Form, Acc, ErrorState);
+apply_with_form_f(F, Form, Acc, ErrorState) when is_function(F, 2) ->
+    Acc1 = F(Form, Acc),
+    {Acc1, ErrorState}.
 
 new_state(State) ->
     traverse_fun_return(#{state => State}).
@@ -254,7 +413,6 @@ parse_transform_return({error, ErrorState}) ->
 parse_transform_return(Forms) when is_list(Forms)->
     Forms.
 
-
 parse_transform_return(Return, _File) ->
     parse_transform_return(Return).
 
@@ -276,8 +434,17 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
 map_m_1(F, NodeA, #{children := true} = Opts) ->
     Opts1 = maps:remove(children, Opts),
     map_m_children(F, NodeA, Opts1);
-map_m_1(F, NodeA, #{traverse := list}) ->
-    F(NodeA, #{});
+map_m_1(F, NodeA, #{traverse := list} = Opts) ->
+    SyntaxLib = syntax_lib(Opts),
+    case SyntaxLib:is_file(NodeA) of
+        false ->
+            F(NodeA, #{});
+        {file, File} ->
+            astranaut_traverse_monad:then(
+              astranaut_traverse_monad:update_file(File),
+              F(NodeA, #{})
+             )
+    end;
 map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
@@ -462,6 +629,12 @@ fun_return_to_monad_1({warning, Node, Reason}, MA, Opts) ->
     astranaut_traverse_monad:then(
       astranaut_traverse_monad:then(MA, astranaut_traverse_monad:warning(NReason)),
       astranaut_traverse_monad:return(Node));
+fun_return_to_monad_1({ok, Return, ErrorState}, MA, #{}) ->
+    astranaut_traverse_monad:then(
+      astranaut_traverse_monad:then(
+        MA,
+        astranaut_traverse_monad:merge_error_state(ErrorState)),
+      astranaut_traverse_monad:return(Return));
 fun_return_to_monad_1({astranaut_monad_state_t, _} = MonadB, _MA, #{}) ->
     MonadB;
 fun_return_to_monad_1({Node, State}, MA, #{with_state := true}) ->
@@ -552,14 +725,14 @@ map_walk_return(F, WalkReturn) ->
             F(WalkReturn)
     end.
 
-simplify_return({ok, Reply, ErrorState}, true) ->
-    case astranaut_traverse_error_state:realize(ErrorState) of
-        {[], []} ->
-            Reply;
+simplify_return({ok, Return, ErrorState}) ->
+    case astranaut_traverse_error_state:is_empty(ErrorState) of
+        true ->
+            Return;
         _ ->
-            {ok, Reply, ErrorState}
+            {ok, Return, ErrorState}
     end;
-simplify_return(Other, _) ->
+simplify_return(Other) ->
     Other.
 
 reply_to_traverse_fun_return(Reply, Node) ->
