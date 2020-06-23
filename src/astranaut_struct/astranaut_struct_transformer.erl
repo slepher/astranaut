@@ -257,7 +257,7 @@ init_struct_defs(Forms) ->
                       {error, {invalid_struct_def, Rec}}
               end;
          (Structs, Line, Acc) ->
-              add_struct_defs(Structs, [], Line, Acc)
+              add_struct_defs(Structs, Line, [], Acc)
       end, maps:new(), astranaut_struct, Forms, #{formatter => ?MODULE}).
 
 add_struct_defs(Structs, Line, Opts, State) when is_list(Structs) ->
