@@ -8,13 +8,21 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_traverse_monad).
 
+-erlando_type(?MODULE).
+
+-export_type([astranaut_traverse_monad/0]).
+
+-opaque astranaut_traverse_monad() :: {?MODULE, any()}.
+
+-erlando_future_behaviour(monad).
+
 %% API
 -export([new/0]).
 -export([run/2, eval/2, exec/2]).
+-export(['>>='/3, return/2, fail/2]).
 -export([bind/2, then/2, left_then/2, return/1]).
 -export([fail/1]).
 -export([lift_m/2, sequence_m/1, r_sequence_m/1, map_m/2]).
--export([deep_sequence_m/1, deep_r_sequence_m/1]).
 -export([get/0, put/1, modify/1, state/1, bind_state/1]).
 -export([update_file/1, merge_error_state/1]).
 -export([warning/1, warnings/1, error/1, errors/1]).
@@ -25,26 +33,37 @@
 %%% API
 %%%===================================================================
 
+
 new() ->
-    astranaut_monad_state_t:state_t(new_1()).
+    astranaut_traverse_monad.
 
 new_1() ->
-    astranaut_monad_error_t:error_t(new_2()).
+    astranaut_monad_state_t:state_t(new_2()).
 
 new_2() ->
-    astranaut_monad_state_t:state_t(new_3()).
+    astranaut_monad_error_t:error_t(new_3()).
 
 new_3() ->
+    astranaut_monad_state_t:state_t(new_4()).
+
+new_4() ->
     astranaut_monad_identity.
+
+new(M) ->
+    {?MODULE, M}.
+
+run({?MODULE, M}) ->
+    M.
 
 init_error_state() ->
     #{errors => [], warnings => [], file_errors => #{}, file_warnings => #{}, file => undefined}.
 
 run(M0, State) ->
-    M1 = astranaut_monad_state_t:run(M0, State),
-    M2 = astranaut_monad_error_t:run(M1),
-    M3 = astranaut_monad_state_t:run(M2, init_error_state()),
-    case astranaut_monad_identity:run(M3) of
+    M1 = run(M0),
+    M2 = astranaut_monad_state_t:run(M1, State),
+    M3 = astranaut_monad_error_t:run(M2),
+    M4 = astranaut_monad_state_t:run(M3, init_error_state()),
+    case astranaut_monad_identity:run(M4) of
         {{ok, {A, NState}}, ErrorState} ->
             {ok, {A, NState}, ErrorState};
         {{error, Reason}, #{errors := Errors} = ErrorState} ->
@@ -70,26 +89,25 @@ sequence_m(MAs) ->
     astranaut_monad:sequence_m(MAs, new()).
 
 r_sequence_m(MAs) ->
-    astranaut_traverse_monad:lift_m(fun lists:reverse/1, sequence_m(lists:reverse(MAs))).
-
-deep_sequence_m(MAs) ->
-    MonadClass = astranaut_monad,
-    Monad = new(),
-    astranaut_traverse:monad_deep_sequence_m(MAs, #{monad_class => MonadClass, monad => Monad}).
-
-deep_r_sequence_m(MAs) ->
-    MonadClass = astranaut_monad,
-    Monad = new(),
-    astranaut_traverse:monad_deep_r_sequence_m(MAs, #{monad_class => MonadClass, monad => Monad}).
+    lift_m(fun lists:reverse/1, sequence_m(lists:reverse(MAs))).
 
 map_m(F, MAs) ->
     astranaut_monad:map_m(F, MAs, new()).
 
 bind(MA, KMB) ->
-    astranaut_monad:bind(MA, KMB, new()).
+    MA0 = run(MA),
+    KMB0 = 
+        fun(A) ->
+                run(KMB(A))
+        end,
+    MC = astranaut_monad:bind(MA0, KMB0, new_1()),
+    new(MC).
+
+'>>='(MA, KMB, astranaut_traverse_monad) ->
+    bind(MA, KMB).
 
 then(MA, MB) ->
-    astranaut_monad:then(MA, MB, new()).
+    bind(MA, fun(_) -> MB end).
 
 left_then(MA, MB) ->
     bind(
@@ -103,10 +121,18 @@ left_then(MA, MB) ->
       end).
 
 return(A) ->
-    astranaut_monad:return(A, new()).
+    MA = astranaut_monad:return(A, new_1()),
+    new(MA).
+
+return(A, astranaut_traverse_monad) ->
+    return(A).
 
 fail(E) ->
-    astranaut_monad:fail(E, new()).
+    ME = astranaut_monad:fail(E, new_1()),
+    new(ME).
+
+fail(E, astranaut_traverse_monad) ->
+    fail(E).
 
 update_file(File) ->
     modify_error_state(
@@ -121,21 +147,26 @@ merge_error_state(ErrorState) ->
       end).
 
 modify_error_state(F) ->
-    M2 = astranaut_monad:modify(F, new_2()),
-    M1 = astranaut_monad:lift(M2, new_1()),
-    astranaut_monad:lift(M1, new()).
+    M2 = astranaut_monad:modify(F, new_3()),
+    M1 = astranaut_monad:lift(M2, new_2()),
+    M0 = astranaut_monad:lift(M1, new_1()),
+    new(M0).
 
 get() ->
-    astranaut_monad:get(new()).
+    MG = astranaut_monad:get(new_1()),
+    new(MG).
 
 put(S) ->
-    astranaut_monad:put(S, new()).
+    MP = astranaut_monad:put(S, new_1()),
+    new(MP).
 
 modify(F) ->
-    astranaut_monad:modify(F, new()).
+    MM = astranaut_monad:modify(F, new_1()),
+    new(MM).
 
 state(F) ->
-    astranaut_monad:state(F, new()).
+    MS = astranaut_monad:state(F, new_1()),
+    new(MS).
 
 bind_state(F) ->
     bind(

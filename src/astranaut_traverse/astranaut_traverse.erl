@@ -24,7 +24,7 @@
 -export([format_error/1, parse_transform_return/1, parse_transform_return/2]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
 -export([monad_to_traverse_fun_return/1, monad_to_traverse_fun_return/2]).
--export([monad_deep_sequence_m/2, monad_deep_r_sequence_m/2]).
+-export([deep_sequence_m/1, deep_r_sequence_m/1]).
 
 -define(TRAVERSE_FUN_RETURN, astranaut_traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -37,8 +37,7 @@
 
 -type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
                                  node => node_type(), attribute => atom(), 
-                                 formatter => module(),
-                                 monad_class => module(), monad => term()
+                                 formatter => module()
                                 }.
 
 -type traverse_error_state() :: #{file => string(), errors => traverse_return_error(), warnings => traverse_return_error(),
@@ -385,9 +384,7 @@ traverse_fun_return_struct(Node) ->
     traverse_fun_return(#{node => Node}).
 
 update_opts(Opts) ->
-    maps:merge(#{formatter => ?MODULE, traverse => all,
-                 monad_class => astranaut_monad, 
-                 monad => astranaut_traverse_monad}, Opts).
+    maps:merge(#{formatter => ?MODULE, traverse => all}, Opts).
 
 -spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Opts) ->
@@ -423,17 +420,15 @@ parse_transform_return(Return, _File) ->
 %% Internal functions
 %%====================================================================
 mapfold_1(F, Init, Node, Opts) ->
-    Monad = astranaut_traverse_monad:new(),
-    NOpts = Opts#{monad => Monad, monad_class => astranaut_monad},
-    NF = transform_mapfold_f(F, NOpts),
-    NodeM = map_m(NF, Node, NOpts),
+    NF = transform_mapfold_f(F, Opts),
+    NodeM = map_m(NF, Node, Opts),
     astranaut_traverse_monad:run(NodeM, Init).
 
 map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
-    monad_map_m(
+    astranaut_traverse_monad:map_m(
       fun(Subtree) ->
               map_m_1(F, Subtree, Opts)
-      end, Nodes, Opts);
+      end, Nodes);
 map_m_1(F, NodeA, #{children := true} = Opts) ->
     Opts1 = maps:remove(children, Opts),
     map_m_children(F, NodeA, Opts1);
@@ -472,21 +467,21 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
               fun(NodeB) ->
                       case SyntaxLib:subtrees(NodeB, Opts) of
                           [] ->
-                              monad_return(NodeB, Opts);
+                              astranaut_traverse_monad:return(NodeB);
                           Subtrees ->
                               Parent = SyntaxLib:type(NodeB),
-                              monad_bind(
+                              astranaut_traverse_monad:bind(
                                 map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
                                 fun(NodeC) ->
                                         bind_with_continue(
                                           NodeC, 
                                           F(NodeC, Attr#{step => post, node => NodeType}),
                                           fun(NodeD) ->
-                                                  monad_return(NodeD, Opts)
-                                          end, Opts)
-                                end, Opts)
+                                                  astranaut_traverse_monad:return(NodeD)
+                                          end)
+                                end)
                       end
-              end, Opts);
+              end);
         {file, File} ->
             astranaut_traverse_monad:then(
               astranaut_traverse_monad:update_file(File),
@@ -494,33 +489,33 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
              )
     end.
     
-bind_with_continue(NodeA, MNodeB, BMC, Opts) ->
-    monad_bind(
+bind_with_continue(NodeA, MNodeB, BMC) ->
+    astranaut_traverse_monad:bind(
       MNodeB,
       fun(continue) ->
-              monad_return(NodeA, Opts);
+              astranaut_traverse_monad:return(NodeA);
          ({continue, NodeB}) ->
-              monad_return(NodeB, Opts);
+              astranaut_traverse_monad:return(NodeB);
          (NodeB) ->
               BMC(NodeB)
-      end, Opts).
+      end).
 
 map_m_children(F, Node, Opts) ->
     SyntaxLib = syntax_lib(Opts),
     Subtrees = SyntaxLib:subtrees(Node, Opts),
     map_m_children(F, Node, Subtrees, Opts, SyntaxLib).
 
-map_m_children(_F, Node, [], Opts, _SyntaxLib) ->
-    monad_return(Node, Opts);
+map_m_children(_F, Node, [], _Opts, _SyntaxLib) ->
+    astranaut_traverse_monad:return(Node);
 
 map_m_children(F, Node, Subtrees, Opts, SyntaxLib) ->
     SyntaxType = SyntaxLib:type(Node),
-    monad_bind(
+    astranaut_traverse_monad:bind(
       map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
       fun(Subtrees1) ->
               Node1 = SyntaxLib:update_subtrees(Node, Subtrees1),
-              monad_return(Node1, Opts)
-      end, Opts).
+              astranaut_traverse_monad:return(Node1)
+      end).
 
 syntax_lib(#{syntax_lib := SyntaxLib}) ->
     SyntaxLib;
@@ -533,22 +528,22 @@ map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
     Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
-    monad_deep_sequence_m(SubtreesM, Opts).
+    deep_sequence_m(SubtreesM).
 
 m_subtrees(F, Subtrees, Opts) when is_list(Subtrees) ->
     lists:map(
       fun(Subtree) ->
               m_subtrees(F, Subtree, Opts)
       end, Subtrees);
-m_subtrees(_F, {skip, Subtree}, Opts) ->
-    deep_return(Subtree, Opts);
+m_subtrees(_F, {skip, Subtree}, _Opts) ->
+    deep_return(Subtree);
 m_subtrees(F, {transformer, Subtree, Transformer}, Opts) ->
-    monad_bind(
+    astranaut_traverse_monad:bind(
       map_m_subtrees(F, Subtree, Opts),
       fun(Subtree1) ->
               Transformed = Transformer(Subtree1),
-              monad_return(Transformed, Opts)
-      end, Opts);
+              astranaut_traverse_monad:return(Transformed)
+      end);
 m_subtrees(F, {up_attr, Attr, Subtree}, Opts) when is_map(Attr) ->
     Opts1 = maps:merge(Opts, Attr),
     m_subtrees(F, Subtree, Opts1);
@@ -558,40 +553,31 @@ m_subtrees(F, {up_node, Node, Subtree}, Opts) when is_atom(Node) ->
 m_subtrees(F, Subtree, Opts) ->
     map_m_1(F, Subtree, Opts).
 
-deep_return(Nodes, Opts) when is_list(Nodes) ->
+deep_return(Nodes) when is_list(Nodes) ->
     lists:map(
       fun(Node) ->
-              deep_return(Node, Opts)
+              astranaut_traverse_monad:return(Node)
       end, Nodes);
-deep_return(Node, Opts) ->
-    monad_return(Node, Opts).
+deep_return(Node) ->
+    astranaut_traverse_monad:return(Node).
 
-monad_bind(A, AFB, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:bind(A, AFB, Monad).
-monad_return(A, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:return(A, Monad).
-monad_map_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:map_m(F, MAs, Monad).
-monad_lift_m(F, MAs, #{monad_class := MonadClass, monad := Monad}) ->
-    MonadClass:lift_m(F, MAs, Monad).
-
-monad_deep_sequence_m([MA|MAs], #{} = Opts) -> 
-    monad_bind(
-      monad_deep_sequence_m(MA, Opts),
+deep_sequence_m([MA|MAs]) -> 
+    astranaut_traverse_monad:bind(
+      deep_sequence_m(MA),
       fun(A) ->
-              monad_bind(
-                monad_deep_sequence_m(MAs, Opts),
+              astranaut_traverse_monad:bind(
+                deep_sequence_m(MAs),
                 fun(As) ->
-                        monad_return([A|As], Opts)
-                end, Opts)
-      end, Opts);
-monad_deep_sequence_m([], Opts) -> 
-    monad_return([], Opts);
-monad_deep_sequence_m(MA, _Opts) -> 
+                        astranaut_traverse_monad:return([A|As])
+                end)
+      end);
+deep_sequence_m([]) -> 
+    astranaut_traverse_monad:return([]);
+deep_sequence_m(MA) -> 
     MA.
 
-monad_deep_r_sequence_m(MAs, Opts) ->
-    monad_lift_m(fun lists:reverse/1, monad_deep_sequence_m(lists:reverse(MAs), Opts), Opts).
+deep_r_sequence_m(MAs) ->
+    astranaut_traverse_monad:lift_m(fun lists:reverse/1, deep_sequence_m(lists:reverse(MAs))).
 
 transform_mapfold_f(F, Opts) ->
     fun(Node, Attr) ->
@@ -698,20 +684,20 @@ format_error({Line1, Module1, Error}, #{}) when is_integer(Line1), is_atom(Modul
 format_error(Error, #{line := Line, formatter := Module}) ->
     {Line, Module, Error}.
 
-transform_f(F, #{traverse := pre} = Opts) ->
+transform_f(F, #{traverse := pre}) ->
     fun(Node, #{step := pre  } = Attr) -> F(Node, Attr);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
-       (Node, #{step := post }) -> monad_return(Node, Opts)
+       (Node, #{step := post }) -> astranaut_traverse_monad:return(Node)
     end;
-transform_f(F, #{traverse := post} = Opts) ->
-    fun(Node, #{step := pre  }) -> monad_return(Node, Opts);
+transform_f(F, #{traverse := post}) ->
+    fun(Node, #{step := pre  }) -> astranaut_traverse_monad:return(Node);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
        (Node, #{step := post } = Attr) -> F(Node, Attr)
     end;
-transform_f(F, #{traverse := leaf} = Opts) ->
-    fun(Node, #{step := pre  }) -> monad_return(Node, Opts);
+transform_f(F, #{traverse := leaf}) ->
+    fun(Node, #{step := pre  }) -> astranaut_traverse_monad:return(Node);
        (Node, #{step := leaf } = Attr) -> F(Node, Attr);
-       (Node, #{step := post }) -> monad_return(Node, Opts)
+       (Node, #{step := post }) -> astranaut_traverse_monad:return(Node)
     end;
 transform_f(F, _) ->
     F.
