@@ -50,8 +50,8 @@ format_error(Message) ->
 %%%===================================================================
 abstract_code(ImportedModule) ->
     Beam = code:which(ImportedModule),
-    case beam_lib:chunks(Beam, [debug_info]) of
-        {ok, {ImportedModule, [{debug_info, {debug_info_v1, erl_abstract_code, {AbstractCode, _CompileOpts}}}]}} ->
+    case beam_lib:chunks(Beam, [abstract_code]) of
+        {ok, {ImportedModule, [{abstract_code, {raw_abstract_v1, AbstractCode}}]}} ->
             {ok, AbstractCode};
         {error, beam_lib, Reason} ->
             {error, Reason};
