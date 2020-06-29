@@ -128,8 +128,17 @@ attribute_name({tree, atom, _, Name}) ->
     Name.
 
 default_revert_body_trees(Name, BodyTrees) ->
-  Bodies = lists:map(fun(BodyTree) -> astranaut_imported_erl_syntax:revert_root(BodyTree) end, BodyTrees),
+  Bodies = lists:map(fun(BodyTree) -> revert_root_0(BodyTree) end, BodyTrees),
   {up_attr, #{node => attribute, attribute => Name}, Bodies}.
+
+revert_root_0(BodyTree) ->
+    try astranaut_imported_erl_syntax:revert_root(BodyTree) of
+        BodyTree1 ->
+            BodyTree1
+    catch
+        _:undef ->
+            revert_root(BodyTree)
+    end.
 
 -ifdef(OTP_RELEASE).
   -if(?OTP_RELEASE >= 22).
