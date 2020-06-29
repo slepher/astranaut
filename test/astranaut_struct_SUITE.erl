@@ -111,7 +111,8 @@ groups() ->
 all() -> 
     [test_struct_new, test_struct_update, test_struct_test,
      test_from_record, test_to_record, test_from_map, test_update_struct,
-     test_from_map_missing_name, test_update_missing_name, test_update_fail].
+     test_from_map_missing_name, test_update_missing_name, test_update_fail,
+     test_compile_enforece_fail, test_compile_non_record_fail].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -195,4 +196,17 @@ test_update_missing_name(_Config) ->
 test_update_fail(_Config) ->
     Test = #{'__struct__' => test2, name => bye},
     ?assertException(exit, {invalid_struct, test, Test}, astranaut_struct_test:update(Test)),
+    ok.
+
+test_compile_enforece_fail(Config) ->
+    {error, [{File, [Error]}], []} = astranaut_fail_compiler:compile("astranaut_struct_fail_0", Config),
+    ?assertEqual("astranaut_struct_fail_0.erl", filename:basename(File)),
+    ?assertEqual({15,astranaut_struct_transformer, {enforce_keys_not_in_struct,test,[desc]}}, Error),
+    ok.
+
+test_compile_non_record_fail(Config) ->
+    astranaut_fail_compiler:copy("test_record_1.hrl", Config),
+    {error, [{File, [Error]}], []} = astranaut_fail_compiler:compile("astranaut_struct_fail_1", Config),
+    ?assertEqual("test_record_1.hrl", filename:basename(File)),
+    ?assertEqual({3,astranaut_struct_transformer,{undefined_record,other_test}}, Error),
     ok.
