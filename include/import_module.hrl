@@ -1,0 +1,4 @@
+-ifndef(ASTRANAUT_IMPORT_MODULE).
+-define(ASTRANAUT_IMPORT_MODULE, true).
+-compile({parse_transform, astranaut_import_module}).
+-endif.
