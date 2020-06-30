@@ -108,8 +108,7 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [test_ok_case, test_function_case, test_quote_case, 
-     test_unquote_splicing_case, test_pattern_case, test_other_case,
-     test_macro_pt_case, test_macro_with_warnings, test_macro_with_vars].
+     test_unquote_splicing_case, test_pattern_case, test_other_case].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -169,24 +168,3 @@ test_other_case(_Config) ->
     ?assertMatch({ok, {_, _, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
     ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
     ok.
-
-test_macro_pt_case(_Config) ->
-    ?assertEqual({ok, ok}, astranaut_macro_with_pt:test()),
-    ?assertEqual(ok, astranaut_macro_with_pt:hello(world)),
-    ?assertEqual({error, foo}, astranaut_macro_with_pt:hello(foo)),
-    ok.
-
-test_macro_with_warnings(_Config) ->
-    Warnings = astranaut_warnings:warnings(),
-    ?assertEqual(
-       [{47, astranaut_quote,{non_empty_tail,[{atom,47,tail}]}},
-        {28, astranaut_traverse, noop_function},
-        {34, astranaut_warnings__local_macro, noop},
-        {40, astranaut_warnings__local_macro, noop},
-        {42, astranaut_warnings__local_macro, noop}], Warnings),
-    ok.
-
-test_macro_with_vars(_Config) ->
-    Value = astranaut_macro_test:test_macro_with_vars(13),
-    ?assertEqual(112, Value).
-    

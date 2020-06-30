@@ -8,7 +8,11 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_warnings).
 
--compile({parse_transform, astranaut_warnings_pt}).
+-include_lib("astranaut/include/compile_meta.hrl").
+-astranaut_compile_meta([{transformers, [astranaut_quote, astranaut_macro]}]).
+-astranaut_compile_meta(silent).
+%% -include_lib("astranaut/include/quote.hrl").
+%% -include_lib("astranaut/include/macro.hrl").
 
 %% API
 -export([test_cons/2]).
@@ -23,6 +27,7 @@
 -use_macro({function_macro/1}).
 -use_macro({noop_warnings/0, [formatter]}).
 -use_macro({cons_macro/1}).
+-base_line(true).
 
 -exec_macro({function_macro, [a]}).
 -exec_macro({function_macro, [b]}).
@@ -30,6 +35,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
 test_attributes() ->
     noop_warnings().
 

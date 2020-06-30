@@ -392,6 +392,8 @@ validate_options(F, Options, Warnings) when is_list(Options) ->
     validate_options(F, Options1, Warnings1);
 validate_options(F, Attr, Warings) when is_atom(Attr) ->
     validate_options(F, #{Attr => true}, Warings);
+validate_options(F, {Key, Value}, Warings) when is_atom(Key) ->
+    validate_options(F, #{Key => Value}, Warings);
 validate_options(_F, Options, Warnings) ->
     {maps:new(), [{invalid_option, Options}|Warnings]}.
 
