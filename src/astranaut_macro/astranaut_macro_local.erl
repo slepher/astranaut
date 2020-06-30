@@ -17,7 +17,8 @@
 module(Module) ->
     list_to_atom(atom_to_list(Module) ++ "__local_macro").
 
-compile(MacrosOptions, Forms, Opts) ->
+compile(MacrosOptions, Forms, Opts0) ->
+    Opts = Opts0 -- [{parse_transform, astranaut_macro}],
     LocalMacros = 
         lists:foldl(
           fun(#{function := Function, arity := Arity, local := true}, Acc) ->
