@@ -6,9 +6,16 @@
 %%% @end
 %%% Created : 28 Jun 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_struct_fail_1).
+-module(astranaut_struct_fail_0).
 
--include("test_record_1.hrl").
+-include_lib("astranaut/include/compile_fail.hrl").
+-include_lib("astranaut/include/struct.hrl").
+
+-record(test, {name, value}).
+
+-astranaut_compile_fail(keep_silent).
+
+-astranaut_struct({test, [{enforce_keys, [desc]}]}).
 
 %% API
 -export([new/0]).

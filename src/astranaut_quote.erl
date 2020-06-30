@@ -38,7 +38,7 @@ format_error(Message) ->
     astranaut_traverse:format_error(Message).
 
 quote(Value) ->
-    quote(Value, #{}).
+    quote(Value, #{code_line => true}).
 
 quote(Node, Options) ->
     Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),

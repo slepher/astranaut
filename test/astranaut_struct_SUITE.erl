@@ -198,15 +198,18 @@ test_update_fail(_Config) ->
     ?assertException(exit, {invalid_struct, test, Test}, astranaut_struct_test:update(Test)),
     ok.
 
-test_compile_enforece_fail(Config) ->
-    {error, [{File, [Error]}], []} = astranaut_fail_compiler:compile("astranaut_struct_fail_0", Config),
+test_compile_enforece_fail(_Config) ->
+    [{File, [Error]}] = astranaut_struct_fail_0:errors(),
+    Forms = astranaut_struct_fail_0:forms(),
+    [{Line, {test, _Opts}}] = astranaut:attributes_with_line(astranaut_struct, Forms),
     ?assertEqual("astranaut_struct_fail_0.erl", filename:basename(File)),
-    ?assertEqual({15,astranaut_struct_transformer, {enforce_keys_not_in_struct,test,[desc]}}, Error),
+    ?assertEqual({Line,astranaut_struct_transformer, {enforce_keys_not_in_struct,test,[desc]}}, Error),
     ok.
 
-test_compile_non_record_fail(Config) ->
-    astranaut_fail_compiler:copy("test_record_1.hrl", Config),
-    {error, [{File, [Error]}], []} = astranaut_fail_compiler:compile("astranaut_struct_fail_1", Config),
+test_compile_non_record_fail(_Config) ->
+    [{File, [Error]}] = astranaut_struct_fail_1:errors(),
+    Forms = astranaut_struct_fail_1:forms(),
+    [{Line, other_test}] = astranaut:attributes_with_line(astranaut_struct, Forms),
     ?assertEqual("test_record_1.hrl", filename:basename(File)),
-    ?assertEqual({3,astranaut_struct_transformer,{undefined_record,other_test}}, Error),
+    ?assertMatch({Line,astranaut_struct_transformer,{undefined_record,other_test, _}}, Error),
     ok.

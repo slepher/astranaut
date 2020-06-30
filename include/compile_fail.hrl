@@ -1,0 +1,4 @@
+-ifndef(ASTRANAUT_COMPILE_FAIL).
+-define(ASTRANAUT_COMPILE_FAIL, true).
+-compile({parse_transform, astranaut_compile_fail_transformer}).
+-endif.

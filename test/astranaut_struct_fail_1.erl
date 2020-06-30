@@ -6,13 +6,11 @@
 %%% @end
 %%% Created : 28 Jun 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_struct_fail_0).
+-module(astranaut_struct_fail_1).
 
--include_lib("astranaut/include/struct.hrl").
+-include_lib("astranaut/include/compile_fail.hrl").
 
--record(test, {name, value}).
-
--astranaut_struct({test, [{enforce_keys, [desc]}]}).
+-include("test_record_1.hrl").
 
 %% API
 -export([new/0]).
@@ -21,7 +19,8 @@
 %%% API
 %%%===================================================================
 new() ->
-    #test{}.
+    A = #test{},
+    A.
 
 %%--------------------------------------------------------------------
 %% @doc

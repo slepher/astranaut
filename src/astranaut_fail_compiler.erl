@@ -38,6 +38,14 @@ copy(From, To, Config) ->
         false ->
             exit({file_not_exists, FilenameBefore})
     end.
+
+%% parse_file(File, Opts) ->
+%%     epp:parse_file(File,
+%%                    [{includes,[".",Dir|inc_paths(Opts)]},
+%%                     {source_name, SourceName},
+%%                     {macros,pre_defs(Opts)},
+%%                     {default_encoding,DefEncoding},
+%%                     extra]).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

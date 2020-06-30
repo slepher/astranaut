@@ -41,8 +41,10 @@ parse_transform(Forms, _Options) ->
           end),
     astranaut_traverse:parse_transform_return(Return).
 
-format_error({invalid_struct_def, Struct}) ->
-    io_lib:format("~p is not a valid struct name", [Struct]);
+format_error({undefined_record, Record, Attribute}) ->
+    io_lib:format("[~s]: record ~p in is not defined", [astranaut:to_string(Attribute), Record]);
+format_error({invalid_struct_def, Struct, Attribute}) ->
+    io_lib:format("[~s]: ~p is not a valid struct name in", [astranaut:to_string(Attribute), Struct]);
 format_error({enforce_keys_not_in_struct, RecordName, Keys}) ->
     io_lib:format("the enforce keys must be defined in record ~p: ~p", [RecordName, Keys]);
 format_error({missing_enforce_keys, RecordName, Keys}) ->
@@ -249,29 +251,29 @@ init_struct_defs(Forms, RecordDefMap) ->
     astranaut_traverse:reduce(
       fun({attribute, Line, astranaut_struct, Struct} = Node, #{forms := FormsAcc} = StateAcc, #{}) ->
               StateAcc1 = StateAcc#{forms := [Node|FormsAcc]},
-              #{state := State, errors := Errors} = add_struct(Struct, Line, StateAcc1, RecordDefMap),
+              #{state := State, errors := Errors} = add_struct(Struct, Line, Node, StateAcc1, RecordDefMap),
               Errors1 = lists:map(fun(Error) -> {Line, ?MODULE, Error} end, Errors),
               astranaut_traverse:traverse_fun_return(#{state => State, errors => Errors1});
          (Node, #{forms := FormsAcc} = StateAcc, #{}) ->
               StateAcc#{forms => [Node|FormsAcc]}
       end, State, Forms, #{traverse => list, formatter => ?MODULE}).
 
-add_struct({Structs, Opts} = Rec, Line, Acc, StructDefMap) ->
+add_struct({Structs, Opts} = Rec, Line, Node, Acc, StructDefMap) ->
     case astranaut:is_opts(Opts) of
         true ->
-            add_struct_defs(Structs, Line, Opts, Acc, StructDefMap);
+            add_struct_defs(Structs, Line, Node, Opts, Acc, StructDefMap);
         false ->
             {error, {invalid_struct_def, Rec}}
     end;
-add_struct(Structs, Line, Acc, StructDefMap) ->
-    add_struct_defs(Structs, Line, [], Acc, StructDefMap).
+add_struct(Structs, Line, Node,  Acc, StructDefMap) ->
+    add_struct_defs(Structs, Line, Node, [], Acc, StructDefMap).
 
-add_struct_defs(Structs, Line, Opts, State, StructDefMap) when is_list(Structs) ->
-    add_struct_defs_1(Structs, Line, Opts, State, StructDefMap);
-add_struct_defs(Struct, Line, Opts, State, StructDefMap) ->
-    add_struct_defs_1([Struct], Line, Opts, State, StructDefMap).
+add_struct_defs(Structs, Line, Node, Opts, State, StructDefMap) when is_list(Structs) ->
+    add_struct_defs_1(Structs, Line, Node, Opts, State, StructDefMap);
+add_struct_defs(Struct, Line, Node, Opts, State, StructDefMap) ->
+    add_struct_defs_1([Struct], Line, Node, Opts, State, StructDefMap).
 
-add_struct_defs_1(Structs, Line, Opts, TraverseState, RecordDefMap) ->
+add_struct_defs_1(Structs, Line, Node, Opts, TraverseState, RecordDefMap) ->
     {Opts1, Errors1} = astranaut:validate_options(fun struct_options_validator/2, Opts),
     astranaut_traverse:then_return(
       #{state => ok, errors => Errors1},
@@ -292,10 +294,10 @@ add_struct_defs_1(Structs, Line, Opts, TraverseState, RecordDefMap) ->
                                 {errors, StateAcc, FieldErrors}
                         end;
                     error ->
-                        {error, StateAcc, {undefined_record, Struct}}
+                        {error, StateAcc, {undefined_record, Struct, Node}}
                 end;
            (Struct, StateAcc) ->
-                {error, StateAcc, {invalid_struct_def, Struct}}
+                {error, StateAcc, {invalid_struct_def, Struct, Node}}
         end, TraverseState, Structs)).
 
 struct_options_validator(non_auto_fill, Boolean) when is_boolean(Boolean) ->
