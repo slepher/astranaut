@@ -9,7 +9,7 @@
 -module(astranaut).
 
 %% API exports
--export([attributes/2, attributes_with_line/2, module_attributes/2, read/1]).
+-export([attributes/2, attributes_with_line/2, attribute_nodes/2,  module_attributes/2, read/1]).
 -export([is_mfa/1, is_opts/1]).
 -export([attribute_node/3]).
 -export([abstract/1, abstract/2]).
@@ -18,7 +18,7 @@
 -export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
 -export([replace_from_nth/3]).
 -export([reorder_exports/1, reorder_attributes/2]).
--export([validate_options/2]).
+-export([update_option_warnings/2, validate_options/2]).
 -export([ast_to_options/1, ast_to_options/2]).
 -export([relative_path/1]).
 %%====================================================================
@@ -71,6 +71,15 @@ file(Forms) ->
 module(Forms) ->
     [Module|_] = attributes(module, Forms),
     Module.
+
+attribute_nodes(Attribute, Forms) ->
+    lists:reverse(
+      lists:foldl(
+        fun({attribute, _Line, Attr, _Values} = Node, Acc) when Attr == Attribute ->
+                [Node|Acc];
+           (_Other, Acc) ->
+                Acc
+        end, [], Forms)).
 
 attributes(Attribute, Forms) ->
     lists:reverse(
@@ -285,7 +294,7 @@ replace_from_nth(Nodes, N, [Form|Forms], Heads, #{dock_map := DockAttributes} = 
                                 fun(_) -> false end
                         end
                 end;
-            {eol, _Line} ->
+            {eof, _Line} ->
                 fun(_) -> true end;
             _ ->
                 fun(_) -> false end
@@ -342,6 +351,14 @@ ast_to_value({Type, _Line, Value}, Writer) when Type == atom ; Type == integer; 
     astranaut_monad:return(Value, Writer);
 ast_to_value(Value, Writer) ->
     astranaut_monad:return(Value, Writer).
+
+update_option_warnings(OptionName, Warnings) ->
+    lists:map(
+      fun({invalid_option, Value}) ->
+              {invalid_option_value, OptionName, Value};
+         ({invalid_option_value, Key, Value})  ->
+              {invalid_option_value, OptionName, Key, Value}
+      end, Warnings).
 
 validate_options(F, Options) ->
     validate_options(F, Options, []).

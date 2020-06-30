@@ -197,7 +197,6 @@ update_record_fields(RecordName, Line, Fields, StructDef, #{field_type := MapFie
     Return2 = astranaut_traverse:reply_to_traverse_fun_return(Return1, Fields),
     Return2.
 
-
 append_init(RecordName, FieldNames, StructDef, Fields, Line, #{append_init := true, field_type := MapFieldType}) ->
     EnforceKeys = astranaut_struct_record:enforce_keys(StructDef),
     MissingKeys = EnforceKeys -- FieldNames,

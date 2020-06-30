@@ -8,12 +8,12 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_struct_fail_0).
 
--include_lib("astranaut/include/compile_fail.hrl").
+-include_lib("astranaut/include/compile_meta.hrl").
 -include_lib("astranaut/include/struct.hrl").
 
 -record(test, {name, value}).
 
--astranaut_compile_fail(keep_silent).
+-astranaut_compile_meta(silent).
 
 -astranaut_struct({test, [{enforce_keys, [desc]}]}).
 

@@ -8,9 +8,11 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_struct_fail_1).
 
--include_lib("astranaut/include/compile_fail.hrl").
+-include_lib("astranaut/include/compile_meta.hrl").
 
 -include("test_record_1.hrl").
+
+-astranaut_compile_meta(silent).
 
 %% API
 -export([new/0]).

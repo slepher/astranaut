@@ -392,6 +392,10 @@ map_m(F, Nodes, Opts) ->
     NF = transform_f(F, NOpts),
     map_m_1(NF, Nodes, NOpts).
 
+format_error({invalid_option_value, OptionName, Key, Value}) ->
+    io_lib:format("invalid option of ~p: ~p, ~p", [OptionName, Key, Value]);
+format_error({invalid_option, OptionName, Value}) ->
+    io_lib:format("invalid option of ~p: ~p", [OptionName, Value]);
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
         true -> Message;
@@ -399,6 +403,15 @@ format_error(Message) ->
     end.
 
 parse_transform_return({ok, Forms, ErrorState}) when is_list(Forms) ->
+    case astranaut_traverse_error_state:realize(ErrorState) of
+        {[], []} ->
+            Forms;
+        {[], Warnings} ->
+            {warning, Forms, Warnings};
+        {Errors, Warnings} ->
+            {error, Errors, Warnings}
+    end;
+parse_transform_return({error, Forms, ErrorState}) when is_list(Forms) ->
     case astranaut_traverse_error_state:realize(ErrorState) of
         {[], []} ->
             Forms;
