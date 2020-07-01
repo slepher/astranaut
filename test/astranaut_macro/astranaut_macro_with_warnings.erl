@@ -6,7 +6,7 @@
 %%% @end
 %%% Created :  8 Dec 2018 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_warnings).
+-module(astranaut_macro_with_warnings).
 
 -include_lib("astranaut/include/compile_meta.hrl").
 -astranaut_compile_meta([{transformers, [astranaut_quote, astranaut_macro]}]).

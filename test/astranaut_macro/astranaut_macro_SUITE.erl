@@ -131,23 +131,23 @@ test_macro_pt_case(_Config) ->
     ok.
 
 test_macro_with_warnings(_Config) ->
-    Forms = astranaut_warnings:forms(),
+    Forms = astranaut_macro_with_warnings:forms(),
     [{BaseLine, _}] = astranaut:attributes_with_line(base_line, Forms),
-    [{File1, Warnings1}, {File2, Warnings2}] = astranaut_warnings:warnings(),
+    [{File1, Warnings1}, {File2, Warnings2}] = astranaut_macro_with_warnings:warnings(),
     Line1 = BaseLine + 3,
     Line2 = BaseLine + 10,
     Line3 = BaseLine + 16,
     Line4 = BaseLine + 18,
     Line5 = BaseLine + 23,
-    ?assertEqual("astranaut_warnings.erl", filename:basename(File1)),
-    ?assertEqual("astranaut_warnings.erl", filename:basename(File2)),
+    ?assertEqual("astranaut_macro_with_warnings.erl", filename:basename(File1)),
+    ?assertEqual("astranaut_macro_with_warnings.erl", filename:basename(File2)),
     ?assertEqual(
         [{Line5, astranaut_quote,{non_empty_tail,[{atom,Line5,tail}]}}], Warnings1),
     ?assertEqual(
        [{Line1, astranaut_traverse, noop_function},
-        {Line2, astranaut_warnings__local_macro, noop},
-        {Line3, astranaut_warnings__local_macro, noop},
-        {Line4, astranaut_warnings__local_macro, noop}],
+        {Line2, astranaut_macro_with_warnings__local_macro, noop},
+        {Line3, astranaut_macro_with_warnings__local_macro, noop},
+        {Line4, astranaut_macro_with_warnings__local_macro, noop}],
        Warnings2),
     ok.
 
