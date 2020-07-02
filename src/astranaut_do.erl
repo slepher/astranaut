@@ -17,7 +17,13 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-do({lc, Line, {MonadType, _Line3, _MonadModule} = Monad, Comprehensions}, Opts) ->
+do(Ast, #{monad := MonadClass, monad_fail := MonadFailClass} = Opts) when is_atom(MonadClass), is_atom(MonadFailClass) ->
+    do_1(Ast, Opts);
+do(_Ast, Opts) ->
+    {error, {invalid_options, Opts}}.
+
+do_1({lc, Line, {MonadType, _Line3, _MonadModule} = Monad, Comprehensions}, Opts) ->
+   
     case lists:member(MonadType, [atom, var, tuple]) of
         true ->
             case do_comprehensions(Comprehensions, Monad, Opts) of
@@ -32,7 +38,7 @@ do({lc, Line, {MonadType, _Line3, _MonadModule} = Monad, Comprehensions}, Opts) 
         false ->
             {error, expected_monad_type}
     end;
-do(_Ast, _Opts) ->
+do_1(_Ast, _Opts) ->
     {error, expected_list_comprehension}.
 
 format_error(non_empty_do) ->
@@ -41,7 +47,6 @@ format_error(non_last_expression) ->
     "The last statement in a 'do' construct must be an expression";
 format_error(Reason) ->
     astranaut_traverse:format_error(Reason).
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -60,31 +65,38 @@ do_comprehensions([{GenerateOrMatch, _Line, _Pattern, _Expr}], _Monad, _Opts)
 do_comprehensions([{generate, Line, Pattern, Expr} | Exprs], Monad, #{monad := MonadClass} = Opts) ->
     %% "Pattern <- Expr, Tail" where Pattern is a simple variable
     %% is transformed to
-    %% "monad:'>>='(Expr, fun (Pattern) -> Tail end, Monad)"
+    %% "MonadClass:'>>='(Expr, fun (Pattern) -> Tail end, Monad)"
     %% without a fail to match clause
     MonadAtom = {atom, Line, MonadClass},
     Expr1 = update_expression(Expr, Monad, Opts),
-    Exprs1 = bind_expression(Line, Pattern, Exprs, Monad, Opts),
-    [quote((unquote(MonadAtom)):'>>='(unquote(Expr1), unquote(Exprs1), unquote(Monad)), Line)];
+    bind(
+      bind_expression(Line, Pattern, Exprs, Monad, Opts),
+      fun(BindExpr) ->
+              [quote((unquote(MonadAtom)):'>>='(unquote(Expr1), unquote(BindExpr), unquote(Monad)), Line)]
+      end);
 do_comprehensions([Expr], Monad, Opts) ->
     %% Don't do '>>' chaining on the last elem
-    NExpr = update_expression(Expr, Monad, Opts),
-    [NExpr]; 
+    Expr1 = update_expression(Expr, Monad, Opts),
+    [Expr1];
 do_comprehensions([{match, _Line, _Pattern, _Expr} = Expr | Exprs], Monad, Opts) ->
     %% Handles 'let binding' in do expression a-la Haskell
-    NExpr = update_expression(Expr, Monad, Opts),
-    [NExpr|do_comprehensions(Exprs, Monad, Opts)];
+    Expr1 = update_expression(Expr, Monad, Opts),
+    bind(
+      do_comprehensions(Exprs, Monad, Opts),
+      fun(Exprs1) ->
+              [Expr1|Exprs1]
+      end);
 do_comprehensions([Expr | Exprs], Monad, #{monad := MonadClass} = Opts) ->
-    %% "Expr, Tail" is transformed to "monad:'>>='(Monad, Expr, fun (_) -> Tail')"
+    %% "Expr, Tail" is transformed to "MonadClass:'>>='(Monad, Expr, fun (_) -> Tail')"
     Line = erl_syntax:get_pos(Expr),
     MonadAtom = {atom, Line, MonadClass},
-    case do_comprehensions(Exprs, Monad, Opts) of
-        RestExprs when is_list(RestExprs) ->
-            NExpr = update_expression(Expr, Monad, Opts),
-            [quote((unquote(MonadAtom)):'>>='(unquote(NExpr), fun(_) -> unquote_splicing(RestExprs) end, unquote(Monad)), Line)];
-        {error, Reason} ->
-            {error, Reason}
-    end.
+    Expr1 = update_expression(Expr, Monad, Opts),
+    bind(
+      do_comprehensions(Exprs, Monad, Opts),
+      fun(Exprs1) ->
+              [quote((unquote(MonadAtom)):'>>='(
+                       unquote(Expr1), fun(_) -> unquote_splicing(Exprs1) end, unquote(Monad)), Line)]
+      end).
 
 update_expression(Expression, Monad, #{monad := MonadClass, monad_fail := MonadFailClass}) ->
     astranaut_traverse:map(
@@ -93,31 +105,48 @@ update_expression(Expression, Monad, #{monad := MonadClass, monad_fail := MonadF
               %% 'return' calls of a particular form:
               %% return(Argument), and
               %% Transformed to:
-              %% "monad:return(Argument, Monad)" in monadic context
+              %% "MonadClass:return(Argument, Monad)" in monadic context
               quote((unquote(MonadFailAtom)):fail(unquote(Arg), unquote(Monad)), Line);
          ({call, Line, {atom, _Line1, return}, [Arg]}, _Attr) ->
               MonadAtom = {atom, Line, MonadClass},
               %% 'fail' calls of a particular form:
               %% fail(Argument)
               %% Transformed to:
-              %% 'monad_fail:fail(Argument, Monad)" in monadic context
+              %% "MonadFailClass:fail(Argument, Monad)" in monadic context
               quote((unquote(MonadAtom)):return(unquote(Arg), unquote(Monad)), Line);
          (Node, _Attr) ->
               Node
       end, Expression).
 
 bind_expression(Line, {var, _Line, _Var} = Pattern, Exprs, Monad, Opts) ->
-    quote(
-      fun(unquote = Pattern) ->
-              unquote_splicing(do_comprehensions(Exprs, Monad, Opts))
-      end, Line);
-bind_expression(Line, Pattern, Exprs, Monad,  #{monad_fail := MonadFailClass} = Opts) ->
-    LineExpr = astranaut:abstract(Line, Line),
-    String = astranaut:abstract(astranaut:to_string(Pattern), Line),
-    MonadFailAtom = {atom, Line, MonadFailClass},
-    quote(
-      fun(unquote = Pattern) ->
-              unquote_splicing(do_comprehensions(Exprs, Monad, Opts));
-         (Var) ->
-              (unquote(MonadFailAtom)):fail({monad_badmatch, Var, unquote(LineExpr), unquote(String)})
-      end, Line).
+    bind(
+      do_comprehensions(Exprs, Monad, Opts),
+      fun(Exprs1) ->
+              quote(
+                fun(unquote = Pattern) ->
+                        unquote_splicing(Exprs1)
+                end, Line)
+      end);
+bind_expression(Line, Pattern, Exprs, Monad, #{monad_fail := MonadFailClass} = Opts) ->
+    bind(
+      do_comprehensions(Exprs, Monad, Opts),
+      fun(Exprs1) ->
+              LineExpr = astranaut:abstract(Line, Line),
+              String = astranaut:abstract(astranaut:to_string(Pattern), Line),
+              MonadFailAtom = {atom, Line, MonadFailClass},
+              quote(
+                fun(unquote = Pattern) ->
+                        unquote_splicing(Exprs1);
+                   (Var) ->
+                        
+                        (unquote(MonadFailAtom)):fail({monad_badmatch, Var, unquote(LineExpr), unquote(String)})
+                end, Line)
+      end).
+
+bind(Expr, K) ->
+    case Expr of
+        {error, Reason} ->
+            {error, Reason};
+        Expr ->
+            K(Expr)
+    end.
