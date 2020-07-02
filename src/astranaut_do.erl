@@ -137,8 +137,7 @@ bind_expression(Line, Pattern, Exprs, Monad, #{monad_fail := MonadFailClass} = O
                 fun(unquote = Pattern) ->
                         unquote_splicing(Exprs1);
                    (Var) ->
-                        
-                        (unquote(MonadFailAtom)):fail({monad_badmatch, Var, unquote(LineExpr), unquote(String)})
+                        (unquote(MonadFailAtom)):fail({monad_badmatch, Var, unquote(LineExpr), unquote(String)}, unquote(Monad))
                 end, Line)
       end).
 

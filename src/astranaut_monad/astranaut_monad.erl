@@ -77,7 +77,9 @@ lift(MA, {T, _IM} = M) ->
     T:lift(MA, M).
 
 fail(MA, {T, _IM} = M) ->
-    T:fail(MA, M).
+    T:fail(MA, M);
+fail(MA, M) ->
+    M:fail(MA).
 
 get({T, _IM} = M) ->
     T:get(M).

@@ -32,7 +32,7 @@ format_error(Reason) ->
 %%%===================================================================
 walk_node({call, _Line, {atom, __Line1, do},
            [{lc, _Line2, _Monad, _Comprehensions} = LCNode]}, #{}) ->
-    astranaut_do:do(LCNode, #{monad => astranaut_monad, monad_fail => astranaut_monad_fail});
+    astranaut_do:do(LCNode, #{monad => astranaut_monad, monad_fail => astranaut_monad});
 walk_node(Node, _Attrs) ->
     Node.
 
