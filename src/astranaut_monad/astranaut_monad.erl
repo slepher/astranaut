@@ -12,7 +12,7 @@
 
 %% API
 -export([lift_m/3, sequence_m/2, map_m/3, foldl_m/4]).
--export([bind/3, then/3, return/2]).
+-export([bind/3, '>>='/3, then/3, return/2]).
 -export([lift/2]).
 -export([fail/2]).
 -export([get/1, put/2, modify/2, state/2]).
@@ -61,6 +61,9 @@ bind(X, F, {T, _IM} = M) ->
     T:bind(X, F, M);
 bind(X, F, M) ->
     M:bind(X, F).
+
+'>>='(X, F, M) ->
+    bind(X, F, M).
 
 then(X, Y, M) ->
     bind(X, fun(_) -> Y end, M).

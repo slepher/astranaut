@@ -325,28 +325,6 @@ init_records(Module, Forms) ->
               RecordMapAcc
       end, maps:new(), Forms).
 
-%% init_structs(Module, Forms, StructDefs) ->
-%%     State = #{structs => maps:new(), forms => []},
-%%     astranaut_traverse:reduce(
-%%       fun({attribute, Line, record, {RecordName, _RecordFields} = Record} = Node,
-%%           #{structs := RecordMapAcc, forms := FormsAcc} = StateAcc, #{}) ->
-%%               case maps:find(RecordName, StructDefs) of
-%%                   {ok, StructDef} ->
-%%                       RecordDef = astranaut_struct_record:record_def(Module, Record, Line),
-%%                       RecordDef1 = update_record_def(RecordDef, StructDef),
-%%                       FieldErrors = astranaut_struct_record:warnings(RecordDef1),
-%%                       FieldErrors1 = lists:map(fun(FieldError) -> {Line, ?MODULE, FieldError} end, FieldErrors),
-%%                       RecordMapAcc1 = maps:put(RecordName, RecordDef1, RecordMapAcc),
-%%                       Node1 = astranaut:attribute_node(astranaut_struct_def, Line, RecordDef1),
-%%                       StateAcc1 = StateAcc#{structs => RecordMapAcc1, forms := [Node1, Node|FormsAcc]},
-%%                       astranaut_traverse:traverse_fun_return(#{state => StateAcc1, errors => FieldErrors1});
-%%                   error ->
-%%                       StateAcc#{forms => [Node|FormsAcc]}
-%%               end;
-%%          (Node, #{forms := FormsAcc} = StateAcc, #{}) ->
-%%               StateAcc#{forms => [Node|FormsAcc]}
-%%       end, State, Forms, #{traverse => list, formatter => ?MODULE}).
-
 update_record_def(RecordDef, #{} = StructDef) ->
     AutoFill = not maps:get(non_auto_fill, StructDef, false),
     EnforceKeys = maps:get(enforce_keys, StructDef, []),

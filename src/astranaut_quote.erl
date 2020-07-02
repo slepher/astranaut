@@ -20,11 +20,18 @@ parse_transform(Forms, _Options) ->
     Opts = #{traverse => pre, formatter => ?MODULE, parse_transform => true},
     File = astranaut:file(Forms),
     Module = astranaut:module(Forms),
+    QuoteAttr = astranaut:attributes(astranaut_quote, Forms),
     WalkOpts = #{file => File, module => Module},
-    astranaut_traverse:map(
-               fun(Node, Attr) -> 
-                       walk(Node, Attr, WalkOpts) 
-               end, Forms, Opts).
+    Return = 
+        astranaut_traverse:map(
+          fun(Node, Attr) -> 
+                  walk(Node, Attr, WalkOpts) 
+          end, Forms, Opts),
+    astranaut_traverse:map_traverse_return(
+      fun(Forms1) ->
+              debug_forms(Forms1, QuoteAttr),
+              Forms1
+      end, Return).
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
@@ -36,6 +43,14 @@ format_error({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut:safe_to_string(Node)]);
 format_error(Message) ->
     astranaut_traverse:format_error(Message).
+
+debug_forms(Forms1, QuoteAttr) ->
+    case QuoteAttr of
+        [debug] ->
+            io:format("~s~n", [astranaut:to_string(Forms1)]);
+        _ ->
+            ok
+    end.
 
 quote(Value) ->
     quote(Value, #{code_line => true}).
