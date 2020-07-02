@@ -18,7 +18,7 @@
 %% API
 -export([astranaut_base_m/1]).
 -export([to_astranaut_base_m/1]).
--export([new/0]).
+-export([new/0, run/1]).
 -export([bind/2, then/2, return/1]).
 -export(['>>='/3, return/2]).
 -export([error/1, warning/1, errors/1, warnings/1]).
@@ -41,30 +41,36 @@ astranaut_base_m(#{} = Map) ->
 %%%===================================================================
 %%% convert traverse return value to astranaut_base_m
 %%%===================================================================
-to_astranaut_base_m({warnings, Warnings}) ->
-    astranaut_base_m(#{warnings => Warnings});
-to_astranaut_base_m({warning, Warning}) ->
-    astranaut_base_m(#{warning => Warning});
-to_astranaut_base_m({warnings, Return, Warnings}) ->
-    astranaut_base_m(#{return => Return, warnings => Warnings});
-to_astranaut_base_m({warning, Return, Warning}) ->
-    astranaut_base_m(#{return => Return, warning => Warning});
-to_astranaut_base_m({errors, Errors}) ->
-    astranaut_base_m(#{errors => Errors});
-to_astranaut_base_m({error, Error}) ->
-    astranaut_base_m(#{errors => [Error]});
-to_astranaut_base_m({ok, A}) ->
-    astranaut_base_m(#{return => A});
-to_astranaut_base_m(#{'__struct__' := ?MODULE} = BaseM) ->
-    BaseM;
 to_astranaut_base_m(A) ->
-    astranaut_base_m(#{return => A}).
+    to_astranaut_base_m(ok, A).
+
+to_astranaut_base_m(A, {warning, Warning}) ->
+    astranaut_base_m(#{return => A, warning => Warning});
+to_astranaut_base_m(A, {warnings, Warnings}) ->
+    astranaut_base_m(#{return => A, warnings => Warnings});
+to_astranaut_base_m(_A, {warning, B, Warning}) ->
+    astranaut_base_m(#{return => B, warning => Warning});
+to_astranaut_base_m(_A, {warnings, B, Warnings}) ->
+    astranaut_base_m(#{return => B, warnings => Warnings});
+to_astranaut_base_m(A, {error, Error}) ->
+    astranaut_base_m(#{return => A, error => Error});
+to_astranaut_base_m(A, {errors, Errors}) ->
+    astranaut_base_m(#{return => A, errors => Errors});
+to_astranaut_base_m(_A, {ok, B}) ->
+    astranaut_base_m(#{return => B});
+to_astranaut_base_m(_A, #{'__struct__' := ?MODULE} = BaseM) ->
+    BaseM;
+to_astranaut_base_m(_A, B) ->
+    astranaut_base_m(#{return => B}).
 
 %%%===================================================================
 %%% fill struct default values
 %%%===================================================================
 default(#{} = Map) ->
     maps:merge(#{'__struct__' => ?MODULE, return => ok, errors => [], warnings => []}, Map).
+
+run(#{warnings := Warnings, errors := Errors, return := A}) ->
+    {A, Errors, Warnings}.
 
 new() ->
     ?MODULE.

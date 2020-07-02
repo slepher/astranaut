@@ -20,7 +20,9 @@
 %%% API
 %%%===================================================================
 new() ->
-    #{errors => [], warnings => [], file_errors => #{}, file_warnings => #{}, file => undefined}.
+    #{errors => [], warnings => [], 
+      file_errors => #{}, file_warnings => #{}, 
+      file => undefined, formatter => undefined, line => 0}.
 
 is_empty(#{errors := [], warnings := [], file_errors := FErrors, file_warnings := FWarnings}) 
   when (map_size(FErrors) == 0) and (map_size(FWarnings) == 0) ->
