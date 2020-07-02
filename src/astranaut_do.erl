@@ -23,15 +23,14 @@ do(_Ast, Opts) ->
     {error, {invalid_options, Opts}}.
 
 do_1({lc, Line, {MonadType, _Line3, _MonadModule} = Monad, Comprehensions}, Opts) ->
-   
     case lists:member(MonadType, [atom, var, tuple]) of
         true ->
             case do_comprehensions(Comprehensions, Monad, Opts) of
                 Expressions when is_list(Expressions) ->
                     quote(
-                      (fun() ->
-                               unquote_splicing(Expressions)
-                       end)(), Line);
+                        (fun() ->
+                                 unquote_splicing(Expressions)
+                         end)(), Line);
                 {error, Reason} ->
                     {error, Reason}
             end;
