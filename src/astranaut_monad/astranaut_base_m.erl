@@ -77,8 +77,9 @@ new() ->
 %%%===================================================================
 %%% API
 %%%===================================================================
-bind(#{'__struct__' := ?MODULE, return := A, errors := Errors0, warnings := Warnings0}, KMB) ->
-    #{'__struct__' := ?MODULE, return := B, errors := Errors1, warnings := Warnings1} = KMB(A),
+bind(MA, KMB) ->
+    #{'__struct__' := ?MODULE, return := A, errors := Errors0, warnings := Warnings0} = to_astranaut_base_m(MA),
+    #{'__struct__' := ?MODULE, return := B, errors := Errors1, warnings := Warnings1} = to_astranaut_base_m(A, KMB(A)),
     default(#{return => B, errors => Errors0 ++ Errors1, warnings => Warnings0 ++ Warnings1}).
 
 then(MA, MB) ->
