@@ -111,7 +111,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_state_1, test_state_2, test_state_3, test_state_4, test_state_5].
+    [test_state_1, test_state_2, test_state_3, test_state_4, test_state_5, test_state_6, test_state_7].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -193,4 +193,43 @@ test_state_5(_Config) ->
     State = astranaut_traverse_m_error:warning(warning_2, State),
     State = astranaut_traverse_m_error:update_file(undefined, State),
     ?assertEqual({Errors, Warnings}, astranaut_traverse_m_error:realize(State)),
+    ok.
+
+test_state_6(_Config) ->
+    Init = astranaut_traverse_m_error:new(),
+    File2 = ?FILE ++ "_2",
+    Errors = maps:to_list(#{?FILE =>[{5, ?MODULE, error_0}, {10, ?MODULE, error_1}], File2 => [{20, ?MODULE, error_2}]}),
+    Warnings = [{?FILE, [{5, ?MODULE, warning_0}, {15, ?MODULE, warning_1}, {25, ?MODULE, warning_2}]}],
+    State0 = astranaut_traverse_m_error:warning(warning_0, Init),
+    State0 = astranaut_traverse_m_error:error(error_0, State0),
+    State = astranaut_traverse_m_error:update_line(5, ?MODULE, Init),
+    State = astranaut_traverse_m_error:merge(State0, State),
+    State = astranaut_traverse_m_error:update_line(10, ?MODULE, State),
+    State = astranaut_traverse_m_error:error(error_1, State),
+    State = astranaut_traverse_m_error:update_file(?FILE, State),
+    State = astranaut_traverse_m_error:update_line(15, ?MODULE, State),
+    State = astranaut_traverse_m_error:warning(warning_1, State),
+    State = astranaut_traverse_m_error:update_file(File2, State),
+    State = astranaut_traverse_m_error:update_line(20, ?MODULE, State),
+    State = astranaut_traverse_m_error:error(error_2, State),
+    State = astranaut_traverse_m_error:update_file(?FILE, State),
+    State = astranaut_traverse_m_error:update_line(25, ?MODULE, State),
+    State = astranaut_traverse_m_error:warning(warning_2, State),
+    State = astranaut_traverse_m_error:update_file(undefined, State),
+    ?assertEqual({Errors, Warnings}, astranaut_traverse_m_error:realize(State)),
+    ok.
+
+test_state_7(_Config) ->
+    Init = astranaut_traverse_m_error:new(),
+    State = astranaut_traverse_m_error:new_line(20, ?MODULE),
+    State1 = astranaut_traverse_m_error:error(error_0, Init),
+    State = astranaut_traverse_m_error:merge(State, State1),
+    State1 = astranaut_traverse_m_error:new_line(25, ?MODULE),
+    State = astranaut_traverse_m_error:merge(State, State1),
+    State1 = astranaut_traverse_m_error:warning(warning_0, Init),
+    State = astranaut_traverse_m_error:merge(State, State1),
+    Errors = [{20, ?MODULE, error_0}],
+    Warnings = [{25, ?MODULE, warning_0}],
+    Final = Init#{formatted_errors => Errors, formatted_warnings => Warnings, formatter => ?MODULE, line => 25},
+    ?assertEqual(Final, State),
     ok.

@@ -206,5 +206,7 @@ add_errors_file_errors_1(File, Errors0, ErrorsWithFile) ->
             maps:put(File, Errors0, ErrorsWithFile)
     end.
 
+append(Errors0, []) ->
+    Errors0;
 append(Errors0, Errors1) when is_list(Errors0), is_list(Errors1) ->
     Errors1 ++ Errors0.

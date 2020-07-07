@@ -109,7 +109,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_return, test_bind, test_error_0].
+    [test_return, test_bind, test_error_0, test_state, test_line, test_line_2, test_file_line].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -155,4 +155,86 @@ test_error_0(_Config) ->
     ErrorState1 = astranaut_traverse_m_error:error(error_0, ErrorState),
     Result = astranaut_traverse_m:new_state(20, ok, ErrorState1),
     ?assertEqual(Result, astranaut_traverse_m:run(MA, undefined, ok)),
+    ok.
+
+test_state(_Config) ->
+    MA = 
+        do([astranaut_traverse_m ||
+               astranaut_traverse_m:put(10),
+               astranaut_traverse_m:state(
+                 fun(A) ->
+                         {A + 10, A + 20}
+                 end)
+           ]),
+    Result = astranaut_traverse_m:new_state(20, 30),
+    ?assertEqual(Result, astranaut_traverse_m:run(MA, undefined, ok)),
+    ok.
+
+test_line(_Config) ->
+    MA = 
+        do([astranaut_traverse_m ||
+               astranaut_traverse_m:put(10),
+               astranaut_traverse_m:update_line(20),
+               astranaut_traverse_m:error(error_0),
+               astranaut_traverse_m:state(
+                 fun(A) ->
+                         {A + 10, A + 20}
+                 end)
+           ]),
+    ErrorState = astranaut_traverse_m_error:new(),
+    ErrorState1 = astranaut_traverse_m_error:error(error_0, ErrorState),
+    ErrorState2 = astranaut_traverse_m_error:update_line(20, ?MODULE, ErrorState1),
+    Result = astranaut_traverse_m:new_state(20, 30, ErrorState2),
+    ?assertEqual(Result, astranaut_traverse_m:run(MA, ?MODULE, ok)),
+    ok.
+
+
+test_line_2(_Config) ->
+    MA = 
+        do([astranaut_traverse_m ||
+               astranaut_traverse_m:update_line(20),
+               astranaut_traverse_m:error(error_0),
+               astranaut_traverse_m:update_line(25),
+               return(10)
+           ]),
+    ErrorState = astranaut_traverse_m_error:new(),
+    ErrorState1 = ErrorState#{formatted_errors => [{20, ?MODULE, error_0}],
+                              line => 25, formatter => ?MODULE},
+    Result = astranaut_traverse_m:new_state(10, ok, ErrorState1),
+    ?assertEqual(Result, astranaut_traverse_m:run(MA, ?MODULE, ok)),
+    ok.
+
+test_file_line(_Config) ->
+    MA = 
+        do([astranaut_traverse_m ||
+               astranaut_traverse_m:update_file(?FILE),
+               astranaut_traverse_m:put(10),
+               astranaut_traverse_m:with_formatter(
+                 astranaut_traverse_m,
+                 do([astranaut_traverse_m ||
+                        astranaut_traverse_m:update_line(20),
+                        astranaut_traverse_m:error(error_0)
+                    ])),
+               astranaut_traverse_m:update_line(25),
+               astranaut_traverse_m:warning(warning_0),
+               B <- astranaut_traverse_m:get(),
+               astranaut_traverse_m:modify(
+                 fun(A) ->
+                         A + 20
+                 end),
+               astranaut_traverse_m:eof(),
+               return(B + 10)
+           ]),
+    ErrorState = astranaut_traverse_m_error:new(),
+    ErrorState1 = ErrorState#{errors => [],
+                              file => undefined,
+                              file_errors => #{?FILE => [{20, astranaut_traverse_m, error_0}]},
+                              file_warnings => #{?FILE => [{25, ?MODULE, warning_0}]},
+                              formatted_errors => [],
+                              formatted_warnings => [],
+                              formatter => ?MODULE,
+                              line => 25,
+                              warnings => []},
+    Result = astranaut_traverse_m:new_state(20, 30, ErrorState1),
+    ?assertEqual(Result, astranaut_traverse_m:run(MA, ?MODULE, ok)),
     ok.
