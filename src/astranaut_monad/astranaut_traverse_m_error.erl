@@ -29,7 +29,7 @@
 -type formatted_error() :: {line(), formatter(), any()}.
 %% API
 
--export([new/0, new_file/1, new_line/2]).
+-export([new/0, new/2, new_file/1, new_line/2]).
 -export([run/1]).
 -export([is_empty/1, is_empty_error/1]).
 -export([realize/1]).
@@ -53,6 +53,12 @@ new() ->
       errors => [], warnings => [], 
       formatted_errors => [], formatted_warnings => [],
       file_errors => #{}, file_warnings => #{}}.
+
+new(Errors, Warnings) ->
+    State = new(),
+    State1 = errors(Errors, State),
+    State2 = warnings(Warnings, State1),
+    State2.
 
 run(#{'__struct__' := ?MODULE, 
       errors := Errors, warnings := Warnings, 

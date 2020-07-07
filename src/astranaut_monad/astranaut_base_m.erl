@@ -16,8 +16,8 @@
 -astranaut_future_behaviour(monad).
 
 %% API
--export([astranaut_base_m/1]).
--export([to_astranaut_base_m/1]).
+-export([astranaut_base_m/1, to_monad/1]).
+-export([to_struct_base/2, up_struct_base/1]).
 -export([new/0, run/1]).
 -export([bind/2, then/2, return/1]).
 -export(['>>='/3, return/2]).
@@ -25,43 +25,74 @@
 
 %%%===================================================================
 %%% Construct astranaut_base_m by map
-%%%===================================================================
-astranaut_base_m(#{warning := Warning} = Map) ->
-    Map1 = maps:remove(warning, Map),
-    default(Map1#{warnings => [Warning]});
-astranaut_base_m(#{error := Error} = Map) ->
-    Map1 = maps:remove(error, Map),
-    default(Map1#{errors => [Error]});
-astranaut_base_m(#{errors := Errors}) when not is_list(Errors) ->
-    exit({errors_should_be_list, Errors});
-astranaut_base_m(#{warnings := Warnings}) when not is_list(Warnings) ->
-    exit({warnings_should_be_list, Warnings});
 astranaut_base_m(#{} = Map) ->
-    default(Map).
+    Map1 = up_struct_base(Map),
+    default(Map1).
 %%%===================================================================
 %%% convert traverse return value to astranaut_base_m
 %%%===================================================================
-to_astranaut_base_m(A) ->
-    to_astranaut_base_m(ok, A).
+to_monad(A) ->
+    to_monad(ok, A).
 
-to_astranaut_base_m(A, {warning, Warning}) ->
-    astranaut_base_m(#{return => A, warning => Warning});
-to_astranaut_base_m(A, {warnings, Warnings}) ->
-    astranaut_base_m(#{return => A, warnings => Warnings});
-to_astranaut_base_m(_A, {warning, B, Warning}) ->
-    astranaut_base_m(#{return => B, warning => Warning});
-to_astranaut_base_m(_A, {warnings, B, Warnings}) ->
-    astranaut_base_m(#{return => B, warnings => Warnings});
-to_astranaut_base_m(A, {error, Error}) ->
-    astranaut_base_m(#{return => A, error => Error});
-to_astranaut_base_m(A, {errors, Errors}) ->
-    astranaut_base_m(#{return => A, errors => Errors});
-to_astranaut_base_m(_A, {ok, B}) ->
-    astranaut_base_m(#{return => B});
-to_astranaut_base_m(_A, #{'__struct__' := ?MODULE} = BaseM) ->
+to_monad(A, Return) ->
+    case to_struct_base(A, Return) of
+        {ok, StructBase} ->
+            Return = maps:get(return, StructBase, A),
+            astranaut_base_m(StructBase#{return => Return});
+        error ->
+            to_monad_1(Return)
+    end.
+
+to_monad_1(#{'__struct__' := ?MODULE} = BaseM) ->
     BaseM;
-to_astranaut_base_m(_A, B) ->
+to_monad_1(B) ->
     astranaut_base_m(#{return => B}).
+
+to_struct_base(A, {warning, Warning}) ->
+    {ok, #{return => A, warnings => [Warning]}};
+to_struct_base(A, {warnings, Warnings}) ->
+    {ok, #{return => A, warnings => Warnings}};
+to_struct_base(_A, {warning, B, Warning}) ->
+    {ok, #{return => B, warnings => [Warning]}};
+to_struct_base(_A, {warnings, B, Warnings}) ->
+    {ok, #{return => B, warnings => Warnings}};
+to_struct_base(_A, {error, Error}) ->
+    {ok, #{errors => [Error]}};
+to_struct_base(_A, {errors, Errors}) when is_list(Errors) ->
+    {ok, #{errors => Errors}};
+to_struct_base(_A, {error, B, Error}) ->
+    {ok, #{return => B, errors => [Error]}};
+to_struct_base(_A, {errors, B, Errors}) when is_list(Errors) ->
+    {ok, #{return => B, errors => Errors}};
+to_struct_base(_A, {ok, B}) ->
+    {ok, #{return => B}};
+to_struct_base(_A, _Other) ->
+    error.
+
+up_struct_base(#{warning := Warning} = Map) ->
+    Map1 = maps:remove(warning, Map),
+    Warnings = maps:get(warnings, Map, []),
+    Map1#{warnings => [Warning|Warnings]};
+up_struct_base(#{error := Error} = Map) ->
+    Map1 = maps:remove(error, Map),
+    Errors = maps:get(warnings, Map, []),
+    Map1#{errors => [Error|Errors]};
+up_struct_base(#{errors := Errors}) when not is_list(Errors) ->
+    exit({errors_should_be_list, Errors});
+up_struct_base(#{warnings := Warnings}) when not is_list(Warnings) ->
+    exit({warnings_should_be_list, Warnings});
+up_struct_base(#{} = Map) ->
+    case maps:get(errors, Map, []) of
+        [] ->
+            case maps:is_key(return, Map) of
+                false ->
+                    exit({no_return_without_errors, Map});
+                true ->
+                    Map
+            end;
+        _ ->
+            Map
+    end.
 
 %%%===================================================================
 %%% fill struct default values
@@ -78,8 +109,8 @@ new() ->
 %%% API
 %%%===================================================================
 bind(MA, KMB) ->
-    #{'__struct__' := ?MODULE, return := A, errors := Errors0, warnings := Warnings0} = to_astranaut_base_m(MA),
-    #{'__struct__' := ?MODULE, return := B, errors := Errors1, warnings := Warnings1} = to_astranaut_base_m(A, KMB(A)),
+    #{'__struct__' := ?MODULE, return := A, errors := Errors0, warnings := Warnings0} = to_monad(MA),
+    #{'__struct__' := ?MODULE, return := B, errors := Errors1, warnings := Warnings1} = to_monad(A, KMB(A)),
     default(#{return => B, errors => Errors0 ++ Errors1, warnings => Warnings0 ++ Warnings1}).
 
 then(MA, MB) ->
