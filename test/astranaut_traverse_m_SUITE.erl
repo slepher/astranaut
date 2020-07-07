@@ -209,12 +209,11 @@ test_file_line(_Config) ->
         do([astranaut_traverse_m ||
                astranaut_traverse_m:update_file(?FILE),
                astranaut_traverse_m:put(10),
+               astranaut_traverse_m:update_line(20),
                astranaut_traverse_m:with_formatter(
                  astranaut_traverse_m,
-                 do([astranaut_traverse_m ||
-                        astranaut_traverse_m:update_line(20),
-                        astranaut_traverse_m:error(error_0)
-                    ])),
+                 astranaut_traverse_m:error(error_0)
+                ),
                astranaut_traverse_m:update_line(25),
                astranaut_traverse_m:warning(warning_0),
                B <- astranaut_traverse_m:get(),
@@ -226,15 +225,11 @@ test_file_line(_Config) ->
                return(B + 10)
            ]),
     ErrorState = astranaut_traverse_m_error:new(),
-    ErrorState1 = ErrorState#{errors => [],
-                              file => undefined,
+    ErrorState1 = ErrorState#{file => undefined,
                               file_errors => #{?FILE => [{20, astranaut_traverse_m, error_0}]},
                               file_warnings => #{?FILE => [{25, ?MODULE, warning_0}]},
-                              formatted_errors => [],
-                              formatted_warnings => [],
                               formatter => ?MODULE,
-                              line => 25,
-                              warnings => []},
+                              line => 25},
     Result = astranaut_traverse_m:new_state(20, 30, ErrorState1),
     ?assertEqual(Result, astranaut_traverse_m:run(MA, ?MODULE, ok)),
     ok.

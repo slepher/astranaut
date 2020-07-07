@@ -109,8 +109,12 @@ put(State) ->
 
 with_formatter(Formatter, MA) ->
     Inner = 
-        fun(_Formatter0,  State, Error) ->
-                run(MA, Formatter, State, Error)
+        fun(Formatter0,  State, Error0) ->
+                Error1 = astranaut_traverse_m_error:update_formatter(Formatter, Error0),
+                #{'__struct__' := ?STATE, return := A, state := State1, error := Error2} =
+                    run(MA, Formatter, State, Error1),
+                Error3 = astranaut_traverse_m_error:update_formatter(Formatter0, Error2),
+                new_state(A, State1, Error3)
         end,
     new(Inner).
 

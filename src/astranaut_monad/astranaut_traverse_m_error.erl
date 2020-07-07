@@ -34,7 +34,7 @@
 -export([is_empty/1, is_empty_error/1]).
 -export([realize/1]).
 -export([merge/2]).
--export([update_file/2, update_line/3]).
+-export([update_file/2, update_line/3, update_formatter/2]).
 -export([warning/2, warnings/2, error/2, errors/2]).
 
 %%%===================================================================
@@ -106,6 +106,12 @@ update_line(Line, Formatter, #{errors := Errors, warnings := Warnings} = State) 
     State2 = append_warnings(Warnings, State1),
     State3 = append_errors(Errors, State2), 
     State3.
+
+update_formatter(Formatter, #{line := _Line} = State) ->
+    State#{formatter => Formatter};
+update_formatter(_Formatter, #{} = State) ->
+    State.
+
 
 warning(Warning, State) ->
     warnings([Warning], State).
