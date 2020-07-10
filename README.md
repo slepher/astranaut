@@ -3,7 +3,7 @@
 
 # requirements
 
-  erlang R19 or higher  
+&emsp;&emsp; erlang R19 or higher  
   
 # traverse
 
@@ -69,10 +69,14 @@
 *TraverseFunReturn*
 
 ```erlang
-  traverse_fun_return(A) :: A | {error, error()} | continue | {continue, A} |
-                            #{'__struct__' => astranaut_traverse_fun_return, 
-                              node := Node :: node(), state := State :: state(), continue := Continue :: boolean(),
-                              error := error(), warning := error(), errors := [error()], warnings => [error()]}.
+  traverse_fun_return(SA) :: SA | {error, error()} | {error, SA, error()} | 
+                            {warning, SA, error()} | {warning, error()} |
+                            continue | {continue, SA} |
+                            astranaut_walk_return:astranaut_walk_return(A) |
+                            astranaut_traverse_m:astranaut_traverse_m(S, A) |
+                            astranaut_return_m:astranaut_return_m(A) |
+                            astranaut_base_m:astranaut_base_m(A).
+  SA is same return type in traverse_fun(), but A is always node(), and S is always state().
 ```
 
 *Node*
@@ -91,10 +95,8 @@
 *error()*
 
 ```erlang
-  error()   :: #{'__struct__' => astranaut_traverse_error, 
-                 line := Line :: integer(), module := Module :: module(), reason => Reason :: term()} | 
-                {Line, Module, Reason} | {Line, Reason} | Reason.
-```            
+  error()   :: Reason.
+```
     
 *Line*
 
@@ -151,7 +153,7 @@ SequenceChildren =
   fun([PatternMs, ExpressionMs]) -> 
     %% reverse the traverse order, traverse ExpressionMs first
     %% deep_r_sequence_m means reverse sequence_m the first level of deep list.
-    astranaut_traverse_monad:deep_r_sequence_m([PatternMs, ExpressionMs]) 
+    astranaut_traverse:deep_r_sequence_m([PatternMs, ExpressionMs]) 
   end.
 ```
 
@@ -161,11 +163,11 @@ SequenceChildren =
 SequenceChildren = 
   fun([PatternMs|GuardsAndExpressionMs]) -> 
     %% PatternMs is a list of monad, sequence_m it to get a monad of list.
-    PatternsM = astranaut_traverse_monad:sequence_m(PatternMs),
+    PatternsM = astranaut_traverse:deep_sequence_m(PatternMs),
     %% do something special to PatternsM monad.
     PatternsM1 = do_something_special(PatternsM),
     %% deep_sequence_m the new tree.
-    astranaut_traverse_monad:deep_sequence_m([PatternsM1|GuardsAndExpressionMs]) 
+    astranaut_traverse:deep_sequence_m([PatternsM1|GuardsAndExpressionMs]) 
   end.
 ```
 
@@ -177,7 +179,7 @@ SequenceChildren =
     %% PatternMs is a list of monad, sequence_m it to get a monad of list.
     PatternMs1 = lists:map(fun(PatternM) -> do_something_special(PatternM) end, PatternMs),
     %% deep_sequence_m the new tree.
-    astranaut_traverse_monad:deep_sequence_m([PatternMs1|GuardsAndExpressionMs]) 
+    astranaut_traverse:deep_sequence_m([PatternMs1|GuardsAndExpressionMs]) 
   end.
 ```
   
@@ -216,8 +218,37 @@ SequenceChildren =
 ```erlang
   astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
 ```
+  
+# monad modules
 
-## Quote
+### astranaut\_traverse\_m
+
+&emsp;&emsp; the main monad of astranaut_traverse.__
+
+### astranaut\_base\_m
+
+&emsp;&emsp; a monad with errors and warnings.__
+&emsp;&emsp; you could just append errors or warnings to it.__
+
+```erlang
+  astranaut_base_m:then(
+    astranaut_base_m:warning(warning_0),
+    astranaut_base_m:return(ok)).
+```
+
+### astranaut\_return\_m
+
+&emsp;&emsp; the monad result of astranaut\_traverse\_m:run(MA, Formatter, State).__
+&emsp;&emsp; could be transformed to compiler return format with astranaut\_return\_m:to\_compiler/1__
+&emsp;&emsp; could transforme compiler return format to astranaut\_return\_m with astranaut\_return\_m:from_compiler/1__
+
+### astranaut\_error\_state
+
+### astranaut\_walk\_return
+
+&emsp;&emsp; return type of Fun in astranut\_traverse:(map\_m|map|reduce|map\_with\_state|mapfold|)(Fun, Forms, Opts). 
+
+# Quote
 
 ### quick start
    
@@ -412,7 +443,7 @@ quote(fun(unquote = Var) -> unquote(Var) end).
      end.
 ```
 
-## Macro
+# Macro
 
 *Usage*
 
@@ -681,7 +712,7 @@ parse_transform(Forms, _Options) ->
     astranaut_macro:transform_macro(do_macro, do, 1, [{alias, do}, formatter], Forms).
 ```
 
-### Rebinding 
+# Rebinding 
 
 ```erlang
 -include_lib("erlando/include/rebinding.hrl").
@@ -813,7 +844,7 @@ hello_f(A) ->
 ```
 
 
-### Struct
+# Struct
 
 *Usage*
 
