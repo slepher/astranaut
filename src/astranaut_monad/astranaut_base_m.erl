@@ -9,15 +9,15 @@
 -module(astranaut_base_m).
 
 -erlando_type(?MODULE).
-
--export_type([astranaut_base_m/0]).
--opaque astranaut_base_m() :: #{'__struct__' => ?MODULE, return => any(), errors => [any()], warnings => [any()]}.
-
 -astranaut_future_behaviour(monad).
+
+%% Types
+-export_type([astranaut_base_m/1]).
+-opaque astranaut_base_m(A) :: #{'__struct__' => ?MODULE, return => A, errors => [any()], warnings => [any()]}.
 
 %% API
 -export([astranaut_base_m/1, to_monad/1]).
--export([to_struct_base/2, up_struct_base/1]).
+-export([to_struct_base/1, to_struct_base/2, up_struct_base/1]).
 -export([new/0, run/1]).
 -export([bind/2, then/2, return/1]).
 -export(['>>='/3, return/2]).
@@ -25,6 +25,7 @@
 
 %%%===================================================================
 %%% Construct astranaut_base_m by map
+%%%===================================================================
 astranaut_base_m(#{} = Map) ->
     Map1 = up_struct_base(Map),
     default(Map1).
@@ -48,26 +49,47 @@ to_monad_1(#{'__struct__' := ?MODULE} = BaseM) ->
 to_monad_1(B) ->
     astranaut_base_m(#{return => B}).
 
-to_struct_base(A, {warning, Warning}) ->
-    {ok, #{return => A, warnings => [Warning]}};
-to_struct_base(A, {warnings, Warnings}) ->
-    {ok, #{return => A, warnings => Warnings}};
-to_struct_base(_A, {warning, B, Warning}) ->
+to_struct_base({warning, Warning}) ->
+    {ok, #{warnings => [Warning]}};
+to_struct_base({warnings, Warnings}) ->
+    {ok, #{warnings => Warnings}};
+to_struct_base({warning, B, Warning}) ->
     {ok, #{return => B, warnings => [Warning]}};
-to_struct_base(_A, {warnings, B, Warnings}) ->
+to_struct_base({warnings, B, Warnings}) ->
     {ok, #{return => B, warnings => Warnings}};
-to_struct_base(_A, {error, Error}) ->
+to_struct_base({error, Error}) ->
     {ok, #{errors => [Error]}};
-to_struct_base(_A, {errors, Errors}) when is_list(Errors) ->
+to_struct_base({errors, Errors}) when is_list(Errors) ->
     {ok, #{errors => Errors}};
-to_struct_base(_A, {error, B, Error}) ->
+to_struct_base({error, B, Error}) ->
     {ok, #{return => B, errors => [Error]}};
-to_struct_base(_A, {errors, B, Errors}) when is_list(Errors) ->
+to_struct_base({errors, B, Errors}) when is_list(Errors) ->
     {ok, #{return => B, errors => Errors}};
-to_struct_base(_A, {ok, B}) ->
+to_struct_base({ok, B}) ->
     {ok, #{return => B}};
-to_struct_base(_A, _Other) ->
+to_struct_base(continue) ->
+    {ok, #{continue => true}};
+to_struct_base({continue, B}) ->
+    {ok, #{continue => true, return => B}};
+to_struct_base(_Other) ->
     error.
+
+to_struct_base(A, Return) ->
+    case to_struct_base(Return) of
+        {ok, Map} ->
+            Map1 = merge_a(A, Map),
+            Map2 = up_struct_base(Map1),
+            {ok, Map2};
+        error ->
+            error
+    end.
+
+merge_a(_A, #{errors := _Errors} = Map) ->
+    Map;
+merge_a(_A, #{return := _Return} = Map) ->
+    Map;
+merge_a(A, #{} = Map) ->
+    Map#{return => A}.
 
 up_struct_base(#{warning := Warning} = Map) ->
     Map1 = maps:remove(warning, Map),

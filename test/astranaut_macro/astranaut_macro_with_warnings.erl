@@ -9,10 +9,10 @@
 -module(astranaut_macro_with_warnings).
 
 -include_lib("astranaut/include/compile_meta.hrl").
--astranaut_compile_meta([{transformers, [astranaut_quote, astranaut_macro]}]).
--astranaut_compile_meta(silent).
 %% -include_lib("astranaut/include/quote.hrl").
 %% -include_lib("astranaut/include/macro.hrl").
+-astranaut_compile_meta([{transformers, [astranaut_quote, astranaut_macro]}]).
+-astranaut_compile_meta(silent).
 
 %% API
 -export([test_cons/2]).

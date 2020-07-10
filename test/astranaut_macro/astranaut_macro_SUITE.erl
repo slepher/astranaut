@@ -107,7 +107,9 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_macro_with_warnings, test_macro_with_vars].
+    [test_ok_case, test_function_case, test_quote_case,
+     test_unquote_splicing_case, test_pattern_case, test_other_case,
+     test_macro_with_warnings, test_macro_with_vars].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -124,6 +126,50 @@ all() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
+test_ok_case(_Config) ->
+    ?assertEqual(ok, astranaut_macro_test:test_ok()).
+
+test_function_case(_Config) ->
+    ?assertEqual(ok, astranaut_macro_test:test_function(world)),
+    ?assertEqual({error, foo}, astranaut_macro_test:test_function(foo)),
+    ok.
+
+test_quote_case(_Config) ->
+    ?assertEqual({ok, ok}, astranaut_macro_test:test_unquote()),
+    ?assertEqual({ok, ok}, astranaut_macro_test:test_binding()),
+    ok.
+
+test_unquote_splicing_case(_Config) ->
+    ?assertEqual({ok, {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing()),
+    ?assertEqual({ok, [hello, foo, bar, world], {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing_mix_1()),
+    ?assertEqual({error, foo, zaa}, astranaut_macro_test:test_unquote_splicing_mix_2()),
+    ok.
+
+test_pattern_case(_Config) ->
+    ?assertEqual({hello, world, foo, bar}, astranaut_macro_test:test_match_pattern()),
+    ?assertEqual({ok, {hello2, world, world, {hello, world}}}, astranaut_macro_test:test_function_pattern_1()),
+    ?assertEqual({error, {foo, bar}}, astranaut_macro_test:test_function_pattern_2()),
+    ?assertEqual({ok, 11}, astranaut_macro_test:test_case_pattern_1()),
+    ?assertEqual({ok, {hello, world, foo, bar}}, astranaut_macro_test:test_case_pattern_2()),
+    ?assertEqual({error, task}, astranaut_macro_test:test_case_pattern_3()),
+    ok.
+
+test_quote_code_case(_Config) ->
+    ?assertEqual(ok, astranaut_macro_test:test_quote_code()),
+    ?assertEqual({hello, ok}, astranaut_macro_test:test_quote_line_1()),
+    Ast = {tuple, 20, [{atom, 20, a}, {atom, 20, b}]},
+    NewAst = {tuple, 22, [{atom, 22, ok}, {tuple, 23, [{atom, 23, hello}, Ast]}]},
+    ?assertEqual(NewAst,astranaut_macro_example:quote_line_2(Ast)),
+    ok.
+
+test_other_case(_Config) ->
+    ?assertEqual(true, astranaut_macro_test:test_case()),
+    ?assertException(exit, throw, astranaut_macro_test:test_try_catch()),
+    ?assertEqual({hello, ok, world}, astranaut_macro_test:test_function()),
+    ?assertMatch({ok, {_, _, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
+    ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
+    ok.
+
 test_macro_pt_case(_Config) ->
     ?assertEqual({ok, ok}, astranaut_macro_with_pt:test()),
     ?assertEqual(ok, astranaut_macro_with_pt:hello(world)),
@@ -133,25 +179,23 @@ test_macro_pt_case(_Config) ->
 test_macro_with_warnings(_Config) ->
     Forms = astranaut_macro_with_warnings:forms(),
     [{BaseLine, _}] = astranaut:attributes_with_line(base_line, Forms),
-    [{File1, Warnings1}, {File2, Warnings2}] = astranaut_macro_with_warnings:warnings(),
+    [{File, Warnings}] = astranaut_macro_with_warnings:warnings(),
     Line1 = BaseLine + 3,
     Line2 = BaseLine + 10,
     Line3 = BaseLine + 16,
     Line4 = BaseLine + 18,
     Line5 = BaseLine + 23,
-    ?assertEqual("astranaut_macro_with_warnings.erl", filename:basename(File1)),
-    ?assertEqual("astranaut_macro_with_warnings.erl", filename:basename(File2)),
+    Local = astranaut_macro_with_warnings__local_macro,
+    ?assertEqual("astranaut_macro_with_warnings.erl", filename:basename(File)),
     ?assertEqual(
-        [{Line5, astranaut_quote,{non_empty_tail,[{atom,Line5,tail}]}}], Warnings1),
-    ?assertEqual(
-       [{Line1, astranaut_traverse, noop_function},
-        {Line2, astranaut_macro_with_warnings__local_macro, noop},
-        {Line3, astranaut_macro_with_warnings__local_macro, noop},
-        {Line4, astranaut_macro_with_warnings__local_macro, noop}],
-       Warnings2),
+       [{Line5, astranaut_quote,{non_empty_tail,[{atom,Line5,tail}]}},
+        {Line1, Local, noop_function},
+        {Line2, Local, noop},
+        {Line3, Local, noop},
+        {Line4, Local, noop}],
+       Warnings),
     ok.
 
 test_macro_with_vars(_Config) ->
     Value = astranaut_macro_test:test_macro_with_vars(13),
     ?assertEqual(112, Value).
-    

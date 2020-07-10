@@ -118,7 +118,6 @@ update_formatter(Formatter, #{line := _Line} = State) ->
 update_formatter(_Formatter, #{} = State) ->
     State.
 
-
 warning(Warning, State) ->
     warnings([Warning], State).
     

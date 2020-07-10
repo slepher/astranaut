@@ -9,6 +9,7 @@
 -module(astranaut_compile_meta_transformer).
 
 -include("quote.hrl").
+-include("astranaut_do.hrl").
 
 %% API
 -export([parse_transform/2]).
@@ -19,20 +20,13 @@
 %%%===================================================================
 parse_transform(Forms, Opts) ->
     File = astranaut:file(Forms),
-    case parse_file(File, Opts) of
-        {ok, Forms1} ->
-            case meta_options(Forms1) of
-                {ok, MetaOpts, ErrorState} ->
-                    {_Errors, Warnings} = astranaut_traverse_error_state:realize(ErrorState),
-                    Forms2 = compile(File, Forms1, Forms, Opts, MetaOpts),
-                    append_warnings(Forms2, Warnings);
-                MetaOpts ->
-                    compile(File, Forms1, Forms, Opts, MetaOpts)
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-    
+    MA =
+        do([astranaut_return_m ||
+               Forms1 <- parse_file(File, Opts),
+               MetaOpts <- meta_options(Forms1),
+               compile(File, Forms1, Forms, Opts, MetaOpts)
+           ]),
+    astranaut_return_m:to_compiler(MA).
 
 format_error({undefined_transformer, Transformer}) ->
     io_lib:format("transformer ~p is not compiled or undefined", [Transformer]);
@@ -52,12 +46,8 @@ meta_options(Forms) ->
               {Opts1, Warnings} = astranaut:validate_options(fun compile_meta_options_validator/2, Opts),
               Warnings1 = astranaut:update_option_warnings(astranaut_compile_meta, Warnings),
               Acc1 = merge_options(Acc, Opts1),
-              case Warnings of
-                  [] ->
-                      {ok, Acc1};
-                  _ ->
-                      {warnings, Acc1, Warnings1}
-              end
+              astranaut_walk_return:new(
+                #{node => ok, state => Acc1, warnings => Warnings1})
       end, maps:new(), astranaut_compile_meta, Forms, #{formatter => astranaut_traverse}).
 
 merge_options(Options1, Options2) ->
@@ -139,19 +129,19 @@ parse_file(File, Opts) ->
 	    Encoding = proplists:get_value(encoding, Extra),
 	    case find_invalid_unicode(Forms, File) of
 		none ->
-		    {ok,Forms};
+		    Forms;
 		{invalid_unicode, File, Line} ->
 		    case Encoding of
 			none ->
                             Es = [{File,[{Line, compile, reparsing_invalid_unicode}]}],
                             {error, Es, []};
 			_ ->
-			    {ok, Forms}
+			    Forms
 		    end
 	    end;
 	{error,E} ->
 	    Es = [{File,[{none,compile,{epp,E}}]}],
-	    {error,Es, []}
+	    {error, Es, []}
     end.
 
 find_invalid_unicode([H|T], File0) ->
@@ -180,18 +170,21 @@ pre_defs([]) -> [].
 %%%===================================================================
 %%% compile form functions
 %%%===================================================================
-fold_transformers(File, [Transformer|T], Forms, Opts) ->
-    bind_form(
-      apply_transformer(File, Transformer, Forms, Opts),
-      fun(Forms1) ->
-              fold_transformers(File, T, Forms1, Opts)
-      end);
-fold_transformers(_File, [], Forms, _Opts) when is_list(Forms) ->
+fold_transformers(File, Transformers, Forms, Opts) ->
+    to_compiler(
+      astranaut_return_m:to_compiler(
+        astranaut_monad:foldl_m(
+          fun(Transformer, FormsAcc) ->
+                  astranaut_return_m:to_monad(
+                    apply_transformer(File, Transformer, FormsAcc, Opts))
+          end, Forms, Transformers, astranaut_return_m))).
+
+to_compiler(Forms) when is_list(Forms) ->
     {ok, Forms, []};
-fold_transformers(_File, [], {warning, Forms, Warnings}, _Opts) ->
+to_compiler({warning, Forms, Warnings}) ->
     {ok, Forms, Warnings};
-fold_transformers(_File, [], {error, Errors, Warings}, _Opts) ->
-    {error, Errors, Warings}.
+to_compiler({error, Warnings, Errors}) ->
+    {error, Warnings, Errors}.
 
 apply_transformer(File, Transformer, Forms, Opts) ->
     try Transformer:parse_transform(Forms, Opts) of
@@ -199,23 +192,8 @@ apply_transformer(File, Transformer, Forms, Opts) ->
             Return
     catch
         _:undef ->
-            {warning, Forms, [{File, [{0, ?MODULE, {undefined_transformer, Transformer}}]}]}
-    end.
-
-bind_form(Forms, F) when is_list(Forms) ->
-    F(Forms);
-bind_form({error, Errors, Warnings}, _F) ->
-    {error, Errors, Warnings};
-bind_form({warning, Forms, Warnings}, F) ->
-    case F(Forms) of
-        Forms1 when is_list(Forms1) ->
-            {warning, Forms1, Warnings};
-        {error, Errors, Warnings1} ->
-            {error, Errors, Warnings ++ Warnings1};
-        {ok, Forms1, Warnings1} ->
-            {ok, Forms1, Warnings ++ Warnings1};
-        {warning, Forms1, Warnings1} ->
-            {warning, Forms1, Warnings ++ Warnings1}
+            Warnings = [{File, [{0, ?MODULE, {undefined_transformer, Transformer}}]}],
+            {warning, Forms, Warnings}
     end.
 
 compile(File, OriginForms, _Forms, Opts, MetaOpts) ->
@@ -269,7 +247,8 @@ append_forms(Forms, OrigForms, Errors, Warnings, Opts) ->
     BaseForms2 = lists:reverse(BaseForms1),
     MetaForms = meta_forms(OrigForms, Errors, Warnings, Opts),
     astranaut:reorder_attributes(
-      BaseForms2 ++ MetaForms ++ [Eof], #{docks => [file, module, export], spec_as_fun => true, dock_spec => true}).
+      BaseForms2 ++ MetaForms ++ [Eof],
+      #{docks => [file, module, export], spec_as_fun => true, dock_spec => true}).
 
 base_forms([], OrigForms) ->
     [Eof|_T] = lists:reverse(OrigForms),
@@ -289,12 +268,18 @@ meta_forms(Forms, Errors, Warnings, Opts) ->
     FormsForms ++ ErrorsForms ++ WarningsForms.
 
 meta_fun_forms(MetaFun, Forms) ->
-    astranaut:exported_function(
-      MetaFun,
-      quote(
-        fun() ->
-                unquote(astranaut:abstract(Forms))
-        end)).
+    try astranaut:abstract(Forms) of
+        AbsForms ->
+            astranaut:exported_function(
+              MetaFun,
+              quote(
+                fun() ->
+                        unquote(AbsForms)
+                end))
+    catch
+        _:_Exception ->
+            exit(Forms)
+    end.
 
 report_errors(Forms, Errors, Warnings, Opts) ->
     Errors1 = errors(Errors, Opts),
@@ -321,11 +306,3 @@ warnings(Warnings, Opts) ->
         false ->
             Warnings
     end.
-
-append_warnings({warning, Forms, Warings}, Warnings0) ->
-    {warning, Forms, Warnings0 ++ Warings};
-append_warnings(Forms, []) when is_list(Forms) ->
-    Forms;
-append_warnings(Forms, Warnings) when is_list(Forms) ->
-    {warning, Forms, Warnings}.
-

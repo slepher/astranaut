@@ -97,7 +97,7 @@ update_attribute_body_trees(export, BodyTrees) ->
     {skip, BodyTrees};
 update_attribute_body_trees(import, BodyTrees) ->
     {skip, BodyTrees};
-update_attribute_body_trees(spec = Name, [SpecTree]) ->
+update_attribute_body_trees(Name, [SpecTree]) when (Name == spec); (Name == callback) ->
     case erl_syntax:concrete(SpecTree) of
         {FunName, Types} ->
             T = fun(Types1) ->
@@ -121,8 +121,10 @@ update_attribute_body_trees(Name, [TypeTree]) when (Name == type); (Name == opaq
         _ ->
             [TypeTree]
     end;
-update_attribute_body_trees(_ = Name, BodyTrees) ->
-    default_revert_body_trees(Name, BodyTrees).
+update_attribute_body_trees(record = Name, BodyTrees) ->
+    default_revert_body_trees(Name, BodyTrees);
+update_attribute_body_trees(_Name, BodyTrees) ->
+    {skip, BodyTrees}.
 
 attribute_name({tree, atom, _, Name}) ->
     Name.

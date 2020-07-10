@@ -8,15 +8,14 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_macro_example).
 
--include("quote.hrl").
--include("macro.hrl").
+-include_lib("astranaut/include/quote.hrl").
+-include_lib("astranaut/include/macro.hrl").
 %% API
 
 -export_macro({[macro_group_args/1], [group_args]}).
 -export_macro({[macro_with_attributes/1], [attrs]}).
 -export_macro({[macro_exported_function/2], [auto_export]}).
 -export_macro({[macro_with_vars/0], []}).
-
 
 -export([quote_ok/0]).
 -export([quote_unquote/1, quote_binding/1]).

@@ -18,15 +18,18 @@ parse_transform(Forms, _Options) ->
     {RebindingOptionsRec, Warnings} = 
         astranaut_rebinding_options:rebinding_options(Forms),
     FormsMonad = 
-        astranaut_traverse_monad:then(
-          astranaut_traverse_monad:warnings(Warnings),
-          astranaut_traverse_monad:map_m(
+        astranaut_traverse_m:then(
+          astranaut_traverse_m:warnings(Warnings),
+          astranaut_monad:map_m(
             fun(Form) ->
                     walk_form(Form, RebindingOptionsRec)
-            end, Forms)),
-    File = astranaut:file(Forms),
-    Return = astranaut_traverse_monad:eval(FormsMonad, #{}),
-    astranaut_traverse:parse_transform_return(Return, File).
+            end, Forms, astranaut_traverse_m)),
+    Return = astranaut_traverse_m:run(FormsMonad, ?MODULE, #{}),
+    Return1 = astranaut_monad:lift_m(
+                fun({Forms1, _}) ->
+                        Forms1
+                end, Return, astranaut_return_m),
+    astranaut_traverse:parse_transform_return(Return1).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -46,12 +49,12 @@ walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec
     case astranaut_rebinding_options:match_rebinding(Name, Arity, RebindingOptionsRec) of
         {ok, RebindingOptions} ->
             ClausesM = 
-                astranaut_traverse_monad:map_m(
+                astranaut_monad:map_m(
                   fun(Clause) ->
                           Return = walk_function_clause(Clause, RebindingOptions),
                           astranaut_traverse:fun_return_to_monad(Return, Clause, #{with_state => true})
-                  end, Clauses),
-            astranaut_traverse_monad:lift_m(
+                  end, Clauses, astranaut_traverse_m),
+            astranaut_monad:lift_m(
               fun(Clauses1) ->
                       Function1 = {function, Line, Name, Arity, Clauses1},
                       case maps:get(debug, RebindingOptions, false) of
@@ -62,12 +65,12 @@ walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec
                       end,
                       Function1
                           
-              end, ClausesM);
+              end, ClausesM, astranaut_traverse_m);
         error ->
-            astranaut_traverse_monad:return(Function)
+            astranaut_traverse_m:return(Function)
     end;
 walk_form(Form, _RebindingOptionsRec) ->
-    astranaut_traverse_monad:return(Form).
+    astranaut_traverse_m:return(Form).
 
 walk_function_clause(Clause, RebindingOptions) ->
     Context0 = astranaut_rebinding_scope:new_context(),
@@ -188,7 +191,7 @@ walk_node_1({op, _Line1, '+', {var, _Line3, _Varname} = Var},
             #{pattern := PatternType} = Context, #{node := pattern, step := pre}) 
   when PatternType == match_left; PatternType == clause_match ->
     Var1 = rename_pinned_var(Var, Context),
-    astranaut_traverse:traverse_fun_return(#{node => Var1, state => Context, continue => true});
+    astranaut_walk_return:new(#{node => Var1, state => Context, continue => true});
 
 %% rename var if current node is expression.
 walk_node_1({var, _Line, _Varname} = Var, #{} = Context, #{node := expression}) ->
@@ -371,7 +374,19 @@ walk_sequence_children(Sequence, FNode, Node, Context, #{} = Opts0, Attr) ->
     continue_node_m(NodeM, Context, Attr).
 
 continue_node_m(NodeM, Context, Attr) ->
-    {Node1, Context1} = 
-        astranaut_traverse:monad_to_traverse_fun_return(NodeM, #{init => Context, with_state => true}),
-    {Node2, Context2} = walk_node(Node1, Context1, Attr#{step => post}),
-    astranaut_traverse:traverse_fun_return(#{node => Node2, state => Context2, continue => true}).
+    astranaut_traverse_m:then(
+      astranaut_traverse_m:put(Context),
+    astranaut_traverse_m:bind(
+      NodeM,
+      fun(Node1) ->
+              astranaut_traverse_m:bind(
+               astranaut_traverse_m:get(),
+                fun(Context1) ->
+                        PostNode = walk_node(Node1, Context1, Attr#{step => post}),
+                        astranaut_traverse_m:bind(
+                          astranaut_traverse:fun_return_to_monad(PostNode, Node1, #{with_state => true}),
+                          fun(Node2) ->
+                                  astranaut_traverse_m:return({continue, Node2})
+                          end)
+                end)
+      end)).

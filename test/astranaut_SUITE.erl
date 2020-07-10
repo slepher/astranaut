@@ -107,8 +107,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_ok_case, test_function_case, test_quote_case, 
-     test_unquote_splicing_case, test_pattern_case, test_other_case].
+    [test_reduce, test_reduce_attr, test_with_formatter].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -125,46 +124,51 @@ all() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_ok_case(_Config) -> 
-    ?assertEqual(ok, astranaut_macro_test:test_ok()).
-
-test_function_case(_Config) ->
-    ?assertEqual(ok, astranaut_macro_test:test_function(world)),
-    ?assertEqual({error, foo}, astranaut_macro_test:test_function(foo)),
+test_reduce(_Config) ->
+    Forms = astranaut_sample_0:forms(),
+    File = astranaut:file(Forms),
+    ReturnM =
+        astranaut_traverse:reduce(
+          fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
+                  astranaut_walk_return:new(#{warning => mark_1, state => Acc + 1, node => Node});
+             ({atom, _Line, mark_error_1}, _Acc, #{}) ->
+                  {error, mark_error_1};
+             (_Node, Acc, #{}) ->
+                  Acc
+          end, 0, Forms, #{formatter => ?MODULE, traverse => pre}),
+    #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
+    FileWarnings = #{File => [{26, ?MODULE, mark_1}]},
+    FileErrors = #{File => [{23, ?MODULE, mark_error_1}]},
+    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
     ok.
 
-test_quote_case(_Config) ->
-    ?assertEqual({ok, ok}, astranaut_macro_test:test_unquote()),
-    ?assertEqual({ok, ok}, astranaut_macro_test:test_binding()),
+test_reduce_attr(_Config) ->
+    Forms = astranaut_sample_0:forms(),
+    File = astranaut:file(Forms),
+    ReturnM =
+        astranaut_traverse:reduce(
+          fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
+                  astranaut_walk_return:new(#{warning => mark_0, state => Acc + 1, node => Node});
+             ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->
+                  {error, mark_error_0};
+             (_Node, Acc, #{}) ->
+                  Acc
+          end, 0, Forms, #{formatter => ?MODULE, traverse => list}),
+    #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
+    FileWarnings = #{File => [{17, ?MODULE, mark_0}]},
+    FileErrors = #{File => [{16, ?MODULE, mark_error_0}]},
+    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
     ok.
 
-test_unquote_splicing_case(_Config) ->
-    ?assertEqual({ok, {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing()),
-    ?assertEqual({ok, [hello, foo, bar, world], {hello, foo, bar, world}}, astranaut_macro_test:test_unquote_splicing_mix_1()),
-    ?assertEqual({error, foo, zaa}, astranaut_macro_test:test_unquote_splicing_mix_2()),
-    ok.
-
-test_pattern_case(_Config) ->
-    ?assertEqual({hello, world, foo, bar}, astranaut_macro_test:test_match_pattern()),
-    ?assertEqual({ok, {hello2, world, world, {hello, world}}}, astranaut_macro_test:test_function_pattern_1()),
-    ?assertEqual({error, {foo, bar}}, astranaut_macro_test:test_function_pattern_2()),
-    ?assertEqual({ok, 11}, astranaut_macro_test:test_case_pattern_1()),
-    ?assertEqual({ok, {hello, world, foo, bar}}, astranaut_macro_test:test_case_pattern_2()),
-    ?assertEqual({error, task}, astranaut_macro_test:test_case_pattern_3()),
-    ok.
-
-test_quote_code_case(_Config) ->
-    ?assertEqual(ok, astranaut_macro_test:test_quote_code()),
-    ?assertEqual({hello, ok}, astranaut_macro_test:test_quote_line_1()),
-    Ast = {tuple, 20, [{atom, 20, a}, {atom, 20, b}]},
-    NewAst = {tuple, 22, [{atom, 22, ok}, {tuple, 23, [{atom, 23, hello}, Ast]}]},
-    ?assertEqual(NewAst,astranaut_macro_example:quote_line_2(Ast)),
-    ok.
-
-test_other_case(_Config) ->
-    ?assertEqual(true, astranaut_macro_test:test_case()),
-    ?assertException(exit, throw, astranaut_macro_test:test_try_catch()),
-    ?assertEqual({hello, ok, world}, astranaut_macro_test:test_function()),
-    ?assertMatch({ok, {_, _, astranaut_macro_test}}, astranaut_macro_test:test_attributes()),
-    ?assertEqual({ok, {hello, world}}, astranaut_macro_test:test_group_args()),
+test_with_formatter(_Config) ->
+    MA =
+        astranaut_traverse_m:with_formatter(
+          formatter_1,
+          astranaut_traverse_m:update_line(
+            10,
+            astranaut_traverse_m:astranaut_traverse_m(
+              astranaut_walk_return:new(#{return => 10, error => error_0})
+             ))),
+    #{error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
+    ?assertMatch(#{errors := [{10, formatter_1, error_0}]}, Error),
     ok.

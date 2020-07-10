@@ -4,23 +4,26 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created :  2 Jul 2020 by Chen Slepher <slepheric@gmail.com>
+%%% Created :  9 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_do_transformer).
+-module(astranaut_sample_0).
+
+-include_lib("astranaut/include/compile_meta.hrl").
 
 %% API
--export([parse_transform/2]).
--export([format_error/1]).
+-export([warning_0/0, error_0/0]).
+
+-mark(mark_error_0).
+-mark(mark_0).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-parse_transform(Forms, _Opts) ->
-    TransformOpts = #{formatter => ?MODULE, traverse => post, parse_transform => true},
-    astranaut_traverse:map(fun walk_node/2, Forms, TransformOpts).
+error_0() ->
+    mark_error_1.
 
-format_error(Reason) ->
-    astranaut_do:format_error(Reason).
+warning_0() ->
+    mark_1.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -31,8 +34,3 @@ format_error(Reason) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_node({call, _Line, {atom, __Line1, do},
-           [{lc, _Line2, _Monad, _Comprehensions} = LCNode]}, #{}) ->
-    astranaut_do:do(LCNode, #{monad => astranaut_monad, monad_fail => astranaut_monad});
-walk_node(Node, _Attrs) ->
-    Node.

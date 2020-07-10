@@ -115,7 +115,7 @@ update_expression(Expression, Monad, #{monad := MonadClass, monad_fail := MonadF
               quote((unquote(MonadAtom)):return(unquote(Arg), unquote(Monad)), Line);
          (Node, _Attr) ->
               Node
-      end, Expression).
+      end, Expression, #{formatter => ?MODULE}).
 
 bind_expression(Line, {var, _Line, _Var} = Pattern, Exprs, Monad, Opts) ->
     bind(

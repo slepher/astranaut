@@ -77,21 +77,14 @@ with_scope_type(ScopeType, NodeMs) when is_list(NodeMs) ->
     NodesM = astranaut_traverse:deep_sequence_m(NodeMs),
     with_scope_type(ScopeType, NodesM);
 with_scope_type(ScopeType, NodeM) ->
-    astranaut_traverse_monad:then(
-      astranaut_traverse_monad:modify(fun(Context) -> entry_scope_type(ScopeType, Context) end),
-      astranaut_traverse_monad:bind(
+    astranaut_traverse_m:then(
+      astranaut_traverse_m:modify(fun(Context) -> entry_scope_type(ScopeType, Context) end),
+      astranaut_traverse_m:bind(
         NodeM,
         fun(Node) ->
-                case ScopeType of
-                    function_clause_pattern ->
-                        %% io:format("node is ~p~n", [Node]);
-                        ok;
-                    _ ->
-                        ok
-                end,
-                astranaut_traverse_monad:then(
-                  astranaut_traverse_monad:modify(fun(Context) -> exit_scope_type(ScopeType, Context) end),
-                  astranaut_traverse_monad:return(Node))
+                astranaut_traverse_m:then(
+                  astranaut_traverse_m:modify(fun(Context) -> exit_scope_type(ScopeType, Context) end),
+                  astranaut_traverse_m:return(Node))
         end)).
 
 rebind_var({var, Line, Varname} = Var, 
@@ -219,11 +212,9 @@ exit_shadowed(Context) ->
     pop_rename_stack(Context1).
 
 entry_pattern(PatternType, #{} = Context) ->
-    %% io:format("entry pattern ~p ~p~n", [PatternType, Context]),
     Context#{pattern => PatternType, pattern_varnames => ordsets:new()}.
 
 exit_pattern(PatternType, #{pattern := PatternType} = Context) ->
-    %% io:format("exit pattern ~p ~p~n", [PatternType, Context]),
     Context1 = maps:remove(pattern, Context),
     Context1#{pattern_varnames => ordsets:new()}.
 %%--------------------------------------------------------------------

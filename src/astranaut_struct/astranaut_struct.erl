@@ -122,8 +122,8 @@ do_struct_function(FunctionName, {atom, Line, StructName} = AtomStructName, Stru
             InitValue = astranaut_struct_record:init_values(StructDef),
             EnforceKeys = astranaut_struct_record:enforce_keys(StructDef),
             InitAbs = struct_init_abs(Line, InitValue),
-            FieldsAbs =  astranaut_quote:quote(Fields, #{quote_line => Line}),
-            EnforceKeysAbs = astranaut_quote:quote(EnforceKeys, #{quote_line => Line}),
+            FieldsAbs =  astranaut:replace_line(astranaut:abstract(Fields), Line),
+            EnforceKeysAbs = astranaut:replace_line(astranaut:abstract(EnforceKeys), Line),
             quote(astranaut_struct:(unquote(FunctionName))(
                     unquote(AtomStructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct)));
         {error, Reason} ->
