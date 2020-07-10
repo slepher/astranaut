@@ -227,7 +227,7 @@ SequenceChildren =
 
 ### astranaut\_base\_m
 
-&emsp;&emsp;a monad with errors and warnings.__
+&emsp;&emsp;a monad with errors and warnings.  
 &emsp;&emsp;you could just append errors or warnings to it.
 
 ```erlang
