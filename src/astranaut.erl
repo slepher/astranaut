@@ -99,7 +99,7 @@ attributes_with_line(Attribute, Forms) ->
                 Acc
         end, [], Forms)).
 
-attribute_node(Name, Line, Value) ->
+attribute_node(Name, Line, Value) when is_atom(Name), is_integer(Line) ->
     {attribute, Line, Name, Value}.
 
 is_mfa({Module, {Function, Arity}}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->

@@ -23,7 +23,7 @@
 -export([options/1]).
 -export([validate/3]).
 -export([attr_walk_return/1]).
--export([by_validator/2]).
+-export([by_validator/3]).
 
 %%%===================================================================
 %%% API
@@ -138,43 +138,55 @@ update_with_attribute_f(Fun) ->
 validate_1(ValidatorMap, ToValidate, _Options) when is_map(ValidatorMap) ->
     astranaut_monad:foldl_m(
       fun({Key, Validator}, Acc) ->
-              Value = maps:get(Key, ToValidate, undefined),
-              case by_validator(Validator, Value) of
-                  {ok, Value1} ->
-                      maps:put(Key, Value1, Acc);
-                  {error, Reason} ->
-                      {error, Acc, {Reason, Key, Value}};
-                  {warning, Reason} ->
-                      {warning, Acc, {Reason, Key, Value}}
+              case maps:find(Key, ToValidate) of
+                  {ok, Value} ->
+                      by_validator_acc(Validator, Key, Value, Acc, true);
+                  error ->
+                      by_validator_acc(Validator, Key, undefined, Acc, false)
               end
       end, maps:new(), maps:to_list(ValidatorMap), astranaut_base_m).
 
-by_validator(Validator, Value) ->
-    Return = by_validator_1(Validator, Value),
+by_validator_acc(Validator, Key, Value, Acc, IsKey) ->
+    case by_validator(Validator, Value, IsKey) of
+        {ok, Value1} ->
+            maps:put(Key, Value1, Acc);
+        {error, Reason} ->
+            {error, Acc, {Reason, Key, Value}};
+        {warning, Reason} ->
+            {warning, Acc, {Reason, Key, Value}};
+        skip ->
+            Acc
+    end.
+
+by_validator(Validator, Value, IsKey) ->
+    Return = by_validator_1(Validator, Value, IsKey),
     update_return(Value, Return, Validator).
 
-by_validator_1(required, Value) ->
-    astranaut_validator:required(Value);
-by_validator_1({defaut, Default}, Value) ->
-    astranaut_validator:defaut(Value, Default);
-by_validator_1(_Validator, undefined = Value) ->
-    {ok, Value};
-by_validator_1(Validator, Value) when is_atom(Validator) ->
-    astranaut_validator:Validator(Value);
-by_validator_1({Validator, Args}, Value) when is_atom(Validator) ->
-    astranaut_validator:Validator(Value, Args);
-by_validator_1(Validator, Value) when is_function(Validator, 1) ->
-    Validator(Value);
-by_validator_1([Validator|T], Value) ->
-    case by_validator(Validator, Value) of
+by_validator_1(required, Value, IsKey) ->
+    astranaut_validator:required(Value, IsKey);
+by_validator_1({default, Default}, Value, IsKey) ->
+    astranaut_validator:default(Value, Default, IsKey);
+by_validator_1([Validator|T], Value, IsKey) ->
+    case by_validator(Validator, Value, IsKey) of
         {ok, Value1} ->
-            by_validator(T, Value1);
+            by_validator(T, Value1, IsKey);
+        skip ->
+            by_validator(T, Value, IsKey);
         {warning, Reason} ->
             {warning, Reason};
         {error, Reason} ->
             {error, Reason}
     end;
-by_validator_1([], Value) ->
+by_validator_1(_Validator, _Value, false) ->
+    skip;
+by_validator_1(Validator, Value, _IsKey) when is_atom(Validator) ->
+    astranaut_validator:Validator(Value);
+by_validator_1({Validator, Args}, Value, _IsKey) when is_atom(Validator) ->
+    astranaut_validator:Validator(Value, Args);
+by_validator_1(Validator, Value, _IsKey) when is_function(Validator, 1) ->
+    Validator(Value);
+
+by_validator_1([], Value, _IsKey) ->
     {ok, Value}.
 
 update_return(Value, ok, _Validator) -> 
@@ -189,5 +201,7 @@ update_return(_Value, {warning, Reason}, _Validator) ->
     {warning, Reason};
 update_return(_Value, {error, Reason}, _Validator) -> 
     {error, Reason};
+update_return(_Value, skip, _Validator) ->
+    skip;
 update_return(Value, Other, Validator) -> 
     exit({invalid_validator_return_for, Validator, Value, Other}).

@@ -181,12 +181,13 @@ test_options(_Config) ->
     ok.
 
 test_validator(_Config) ->
-    Validator = #{a => is_boolean,
+    Validator = #{a => boolean,
+                  b => {list_of, atom},
                   c => fun is_boolean/1,
                   d => {default, 10}},
-    BaseM = astranaut_options:validate(Validator, [a, {b, c, d}, e], #{}),
-    Return = #{a => true, d => 10},
-    Warnings = [{invalid_option_value, {b, c, d}}, {invalid_value, c, undefined}],
+    BaseM = astranaut_options:validate(Validator, [a, {b,[c,d]}, {b, c, d}, e], #{}),
+    Return = #{a => true, b => [c, d], d => 10},
+    Warnings = [{invalid_option_value, {b, c, d}}],
     ?assertMatch(#{return := Return, warnings := Warnings}, BaseM),
     ok.
 

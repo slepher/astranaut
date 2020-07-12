@@ -19,20 +19,22 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
+    dbg:tracer(),
+    dbg:tpl(rebar_compiler_erl, err_tuple, cx),
+    dbg:p(all, [c]),
     Module = astranaut:module(Forms),
-    StateM = 
+    ReturnM =
         do([astranaut_return_m ||
                Forms <- astranaut_traverse:without_errors(Forms),
                RecordDefMap = init_records(Module, Forms),
-               #{struct_defs := StructInitMap, forms := Forms} <- 
+               {Forms, StructInitMap} <-
                    init_struct_defs(Forms, RecordDefMap),
-               Forms = lists:reverse(Forms),
                astranaut_traverse:map(
                  fun(Node, Attrs) ->
                          walk(Node, StructInitMap, Attrs)
                  end, Forms, #{traverse => pre, formatter => ?MODULE, simplify_return => false})
            ]),
-    astranaut_traverse:parse_transform_return(StateM).
+    astranaut_return_m:to_compiler(ReturnM).
 
 format_error({undefined_record, Record, Attribute}) ->
     io_lib:format("[~s]: record ~p in is not defined", [astranaut:to_string(Attribute), Record]);
@@ -241,88 +243,49 @@ append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
 init_struct_defs(Forms, RecordDefMap) ->
-    Opts = #{traverse => list, formatter => ?MODULE, simplify_return => false},
-    astranaut_traverse:reduce(
-      fun({attribute, Line, astranaut_struct, Struct} = Node, 
-          #{forms := FormsAcc, struct_defs := StructDefsAcc} = StateAcc, #{}) ->
-              #{return := StructDefMap, errors := Errors} = add_struct(Struct, Node, RecordDefMap),
-              FormsAcc2 =
-                  maps:fold(
-                    fun(_Struct, StructDef, FormsAcc1) ->
-                            Node1 = astranaut:attribute_node(astranaut_struct_def, Line, StructDef),
-                            [Node1|FormsAcc1]
-                    end, [Node|FormsAcc], StructDefMap),
-              StructDefsAcc1 = maps:merge(StructDefsAcc, StructDefMap),
-              StateAcc1 = StateAcc#{forms => FormsAcc2, struct_defs => StructDefsAcc1},
-              astranaut_walk_return:new(#{node => Node, state => StateAcc1, errors => Errors});
-         (Node, #{forms := FormsAcc} = StateAcc, #{}) ->
-              StateAcc#{forms => [Node|FormsAcc]}
-      end, #{forms => [], struct_defs => #{}}, Forms, Opts).
+    TraverseOpts = #{formatter => ?MODULE, simplify_return => false, deep_attr => true},
+    Validator = #{non_auto_fill => boolean,
+                  auto_fill => boolean,
+                  enforce_keys => {list_of, atom}},
+    astranaut_options:forms_with_attribute(
+      fun({Struct, Opts}, Acc, Attr) ->
+                  astranaut_base_m:bind(
+                    astranaut_options:validate(Validator, Opts, #{}),
+                    fun(Opts1) ->
+                            add_struct(Struct, Opts1, RecordDefMap, Acc, Attr)
+                    end);
+         (Struct, Acc, Attr) ->
+              add_struct(Struct, #{}, RecordDefMap, Acc, Attr)
+      end, maps:new(), Forms, astranaut_struct, TraverseOpts).
 
-add_struct({Structs, Opts} = Rec, Node, StructDefMap) ->
-    case astranaut:is_opts(Opts) of
-        true ->
-            add_struct_defs(Structs, Node, Opts, StructDefMap);
-        false ->
-            {error, {invalid_struct_def, Rec}}
+add_struct(Struct, Opts, RecordMap, StructDefs, #{line := Line}) ->
+    case new_struct(Struct, Opts, RecordMap) of
+        {ok, NewStruct} ->
+            Node = astranaut:attribute_node(astranaut_struct_def, Line, NewStruct),
+            {[Node], maps:put(Struct, NewStruct, StructDefs)};
+
+        {error, Reason} when is_list(Reason) ->
+            {errors, {[], StructDefs}, Reason};
+        {error, Reason} ->
+            {error, {[], StructDefs}, Reason}
+    end.
+
+new_struct(Struct, Opts, RecordMap) when is_atom(Struct) ->
+    case maps:find(Struct, RecordMap) of
+        {ok, RecordDef} ->
+            RecordDef1 = update_record_def(RecordDef, Opts),
+            FieldErrors = astranaut_struct_record:warnings(RecordDef1),
+            case FieldErrors of
+                [] ->
+                    {ok, RecordDef1};
+                FieldErrors ->
+                    {error, FieldErrors}
+            end;
+        error ->
+            {error, {undefined_record, Struct}}
     end;
-add_struct(Structs, Node, StructDefMap) ->
-    add_struct_defs(Structs, Node, [], StructDefMap).
-
-add_struct_defs(Structs, Node, Opts, StructDefMap) when is_list(Structs) ->
-    add_struct_defs_1(Structs, Node, Opts, StructDefMap);
-add_struct_defs(Struct, Node, Opts, StructDefMap) ->
-    add_struct_defs_1([Struct], Node, Opts, StructDefMap).
-
-add_struct_defs_1(Structs, Node, Opts, RecordDefMap) ->
-    {Opts1, Errors1} = astranaut:validate_options(fun struct_options_validator/2, Opts),
-    do([astranaut_base_m ||
-           astranaut_base_m:errors(Errors1),
-           astranaut_monad:foldl_m(
-             fun(Struct, StructDefs) when is_atom(Struct) ->
-                     case maps:find(Struct, RecordDefMap) of
-                         {ok, RecordDef} ->
-                             RecordDef1 = update_record_def(RecordDef, Opts1),
-                             FieldErrors = astranaut_struct_record:warnings(RecordDef1),
-                             case FieldErrors of
-                                 [] ->
-                                     astranaut_base_m:return(maps:put(Struct, RecordDef1, StructDefs));
-                                 FieldErrors ->
-                                     do([astranaut_base_m ||
-                                            astranaut_base_m:errors(FieldErrors),
-                                            astranaut_base_m:return(StructDefs)
-                                        ])
-                             end;
-                         error ->
-                             do([astranaut_base_m ||
-                                    astranaut_base_m:error({undefined_record, Struct, Node}),
-                                    astranaut_base_m:return(StructDefs)
-                                ])
-                     end;
-                (Struct, StructDefs) ->
-                     do([astranaut_base_m ||
-                            astranaut_base_m:error({invalid_struct_def, Struct, Node}),
-                            astranaut_base_m:return(StructDefs)
-                        ])
-             end, maps:new(), Structs, astranaut_base_m)
-       ]).
-
-struct_options_validator(non_auto_fill, Boolean) when is_boolean(Boolean) ->
-    ok;
-struct_options_validator(auto_fill, Boolean) when is_boolean(Boolean) ->
-    ok;
-struct_options_validator(enforce_keys, Keys) ->
-    case lists:filter(
-           fun(Key) ->
-                   not is_atom(Key)
-           end, Keys) of
-        [] ->
-            ok;
-        NonAtomKeys ->
-            {error, {invalid_enforce_keys, NonAtomKeys}}
-    end;
-struct_options_validator(_Key, _Value) ->
-    error.
+new_struct(Struct, _Opts, _RecordMap) ->
+    {error, {invalid_struct_name, Struct}}.
 
 init_records(Module, Forms) ->
     lists:foldl(

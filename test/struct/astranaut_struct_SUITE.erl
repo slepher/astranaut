@@ -211,5 +211,5 @@ test_compile_non_record_fail(_Config) ->
     Forms = astranaut_struct_fail_1:forms(),
     [{Line, other_test}] = astranaut:attributes_with_line(astranaut_struct, Forms),
     ?assertEqual("test_record_1.hrl", filename:basename(File)),
-    ?assertMatch({Line,astranaut_struct_transformer,{undefined_record,other_test, _}}, Error),
+    ?assertMatch({Line,astranaut_struct_transformer,{undefined_record,other_test}}, Error),
     ok.
