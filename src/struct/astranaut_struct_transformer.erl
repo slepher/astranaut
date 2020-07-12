@@ -263,8 +263,7 @@ add_struct(Struct, Opts, RecordMap, StructDefs, #{line := Line}) ->
         {ok, NewStruct} ->
             Node = astranaut:attribute_node(astranaut_struct_def, Line, NewStruct),
             {[Node], maps:put(Struct, NewStruct, StructDefs)};
-
-        {error, Reason} when is_list(Reason) ->
+        {errors, Reason} ->
             {errors, {[], StructDefs}, Reason};
         {error, Reason} ->
             {error, {[], StructDefs}, Reason}
@@ -279,7 +278,7 @@ new_struct(Struct, Opts, RecordMap) when is_atom(Struct) ->
                 [] ->
                     {ok, RecordDef1};
                 FieldErrors ->
-                    {error, FieldErrors}
+                    {errors, FieldErrors}
             end;
         error ->
             {error, {undefined_record, Struct}}
