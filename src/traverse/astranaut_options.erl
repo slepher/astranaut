@@ -23,6 +23,7 @@
 -export([options/1]).
 -export([validate/3]).
 -export([attr_walk_return/1]).
+-export([by_validator/2]).
 
 %%%===================================================================
 %%% API
@@ -152,6 +153,12 @@ by_validator(Validator, Value) ->
     Return = by_validator_1(Validator, Value),
     update_return(Value, Return, Validator).
 
+by_validator_1(required, Value) ->
+    astranaut_validator:required(Value);
+by_validator_1({defaut, Default}, Value) ->
+    astranaut_validator:defaut(Value, Default);
+by_validator_1(_Validator, undefined = Value) ->
+    {ok, Value};
 by_validator_1(Validator, Value) when is_atom(Validator) ->
     astranaut_validator:Validator(Value);
 by_validator_1({Validator, Args}, Value) when is_atom(Validator) ->
