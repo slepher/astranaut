@@ -107,7 +107,8 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_reduce, test_reduce_attr, test_with_formatter].
+    [test_reduce, test_reduce_attr, test_with_formatter, 
+     test_options, test_validator, test_with_attribute, test_forms_with_attribute].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -171,4 +172,46 @@ test_with_formatter(_Config) ->
              ))),
     #{error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
     ?assertMatch(#{errors := [{10, formatter_1, error_0}]}, Error),
+    ok.
+
+test_options(_Config) ->
+    Return = #{a => true, e => true},
+    Warnings = [{invalid_option_value, {b, c, d}}],
+    ?assertMatch(#{return := Return, warnings := Warnings}, astranaut_options:options([a, {b, c, d}, e])),
+    ok.
+
+test_validator(_Config) ->
+    Validator = #{a => is_boolean,
+                  c => fun is_boolean/1,
+                  d => {default, 10}},
+    BaseM = astranaut_options:validate(Validator, [a, {b, c, d}, e], #{}),
+    Return = #{a => true, d => 10},
+    Warnings = [{invalid_option_value, {b, c, d}}, {invalid_value, c, undefined}],
+    ?assertMatch(#{return := Return, warnings := Warnings}, BaseM),
+    ok.
+
+test_with_attribute(_Config) ->
+    Forms = astranaut_sample_0:forms(),
+    Marks =
+        astranaut_options:with_attribute(
+          fun(Attr, Acc) ->
+                  [Attr|Acc]
+          end, [], Forms, mark, #{simplify_return => true}),
+    ?assertEqual([mark_0, mark_error_0], Marks).
+
+test_forms_with_attribute(_Config) ->
+    Forms = astranaut_sample_0:forms(),
+    {Forms1, Marks} =
+        astranaut_options:forms_with_attribute(
+          fun(Attr, Acc, #{line := Line}) ->
+                  Node = astranaut:attribute_node(mark_1, Line, Attr),
+                  astranaut_options:attr_walk_return(#{node => Node, return => [Attr|Acc]})
+          end, [], Forms, mark, #{simplify_return => true}),
+    Marks1 =
+        astranaut_options:with_attribute(
+          fun(Attr, Acc) ->
+                  [Attr|Acc]
+          end, [], Forms1, mark_1, #{simplify_return => true}),
+    ?assertEqual([mark_0, mark_error_0], Marks1),
+    ?assertEqual([mark_0, mark_error_0], Marks),
     ok.

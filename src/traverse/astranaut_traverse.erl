@@ -21,6 +21,7 @@
 -export([format_error/1, parse_transform_return/1]).
 -export([deep_sequence_m/1, deep_r_sequence_m/1]).
 -export([fun_return_to_monad/2, fun_return_to_monad/3]).
+-export([transform_return_m/2]).
 
 -define(TRAVERSE_FUN_RETURN, traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
