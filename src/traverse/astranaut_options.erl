@@ -114,7 +114,7 @@ values_apply_fun(Fun, AttrValues, Acc, Opts) when is_list(AttrValues) ->
             astranaut_monad:foldl_m(
               fun(AttrValue, Acc1) ->
                       value_apply_fun(Fun, AttrValue, Acc1, Opts)
-              end, Acc, AttrValues, astranaut_traverse_m);
+              end, Acc, AttrValues, astranaut_base_m);
         false ->
             value_apply_fun(Fun, AttrValues, Acc, Opts)
     end;
