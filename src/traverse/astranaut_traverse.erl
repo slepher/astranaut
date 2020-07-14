@@ -221,8 +221,7 @@ map_m_1(F, NodeA, #{traverse := list} = Opts) ->
                 astranaut_traverse_m:update_file(File)
         end,
     astranaut_traverse_m:then(
-      MA,
-      astranaut_traverse_m:bind_node(NodeA, apply_f(F, NodeA, #{}, SyntaxLib), fun astranaut_traverse_m:return/1, pre));
+      MA, apply_f(F, NodeA, #{}, SyntaxLib));
 map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
@@ -244,34 +243,32 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
                     _Subtrees ->
                         pre
                 end,
-            astranaut_traverse_m:bind_node(
-              NodeA, apply_f(F, NodeA, Attr#{step => PreType, node => NodeType}, SyntaxLib),
+            astranaut_traverse_m:bind_continue(
+              apply_f(F, NodeA, Attr#{step => PreType, node => NodeType}, SyntaxLib),
               fun(NodeB) ->
                       case SyntaxLib:tps(NodeB, Opts) of
                           {_Type, _Pos, []} ->
                               %% astranaut_traverse_m:nodes([NodeB]);
                               astranaut_traverse_m:return(NodeB);
                           {Parent, _Pos, Subtrees} ->
-                              astranaut_traverse_m:bind_node(
-                                NodeB, map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
+                              astranaut_traverse_m:bind(
+                                map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
                                 fun(NodeC) ->
-                                        astranaut_traverse_m:bind_node(
-                                          NodeC, apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib),
-                                          fun astranaut_traverse_m:return/1, post)
-                                end, children)
+                                        apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib)
+                                end)
                       end
-              end, pre);
+              end);
         {file, File} ->
             astranaut_traverse_m:then(
               astranaut_traverse_m:update_file(File),
-              astranaut_traverse_m:bind_node(
-                NodeA, apply_f(F, NodeA, Attr#{step => leaf, node => file}, SyntaxLib), fun astranaut_traverse_m:return/1, leaf)
+              apply_f(F, NodeA, Attr#{step => leaf, node => file}, SyntaxLib)
              )
     end.
 
 apply_f(F, Node, Attr, SyntaxLib) ->
     Line = SyntaxLib:get_pos(Node),
-    astranaut_traverse_m:update_line(Line, F(Node, Attr)).
+    astranaut_traverse_m:updated_node(
+      Node, astranaut_traverse_m:update_line(Line, F(Node, Attr))).
 
 map_m_children(F, Node, Opts) ->
     SyntaxLib = syntax_lib(Opts),

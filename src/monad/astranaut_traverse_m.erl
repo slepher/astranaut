@@ -63,7 +63,7 @@
 -export([convertable_struct/1]).
 -export([run/3, eval/3, exec/3, enodes/3]).
 -export([bind/2, then/2, return/1]).
--export([bind_node/4]).
+-export([bind_continue/2, bind_node/4, updated_node/2]).
 -export(['>>='/3, return/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1, sequence_either/1]).
@@ -263,6 +263,15 @@ bind_node(NodeA, MB, BMC, pre) ->
       end);
 bind_node(NodeA, MB, BMC, _) ->
     bind(updated_node(NodeA, MB), BMC).
+
+bind_continue(MA, AMB) ->
+    bind(
+      listen_continue(MA),
+      fun({NodeA, true}) ->
+              return(NodeA);
+         ({NodeA, false}) ->
+              AMB(NodeA)
+      end).
 
 updated_node(NodeA, MB) ->
     map_m_state_ok(

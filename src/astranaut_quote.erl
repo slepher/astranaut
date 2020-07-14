@@ -32,9 +32,7 @@ parse_transform(Forms, _Options) ->
                   debug_forms(Forms1, QuoteAttr),
                   Forms1
           end),
-    Compiler = astranaut_return_m:to_compiler(Return),
-    io:format("compiler is ~p~n", [Compiler]),
-    Compiler.
+    astranaut_return_m:to_compiler(Return).
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
