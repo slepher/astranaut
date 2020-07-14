@@ -253,7 +253,7 @@ bind_node(NodeA, MB, BMC, pre) ->
     bind(
       listen_continue(updated_node(NodeA, MB)),
       fun({NodeB, true}) ->
-              astranaut_traverse_m_v3:return(NodeB);
+              return(NodeB);
          ({NodeB, false}) ->
               BMC(NodeB)
       end);
