@@ -368,14 +368,14 @@ fun_return_to_monad(continue, Node, Opts) ->
     fun_return_to_monad({continue, Node}, Node, Opts);
 fun_return_to_monad(Return, Node, Opts) ->
     WithState = maps:get(with_state, Opts, false),
-    case astranaut_walk_return:to_map(Node, Return) of
+    case astranaut_walk_return_v3:to_map(Return) of
         {ok, StructBase} ->
-            WalkReturn = astranaut_walk_return:new(StructBase),
+            WalkReturn = astranaut_walk_return_v3:new(StructBase),
             astranaut_traverse_m_v3:astranaut_traverse_m(WalkReturn);
         error ->
             case {Return, WithState} of
                 {{Node1, State}, true} ->
-                    WalkReturn = astranaut_walk_return:new(#{return => Node1, state => State}),
+                    WalkReturn = astranaut_walk_return_v3:new(#{return => Node1, state => State}),
                     astranaut_traverse_m_v3:astranaut_traverse_m(WalkReturn);
                 _ ->
                     astranaut_traverse_m_v3:to_monad(Node, Return)
