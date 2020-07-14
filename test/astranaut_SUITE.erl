@@ -139,9 +139,9 @@ test_reduce(_Config) ->
                   Acc
           end, 0, Forms, #{formatter => ?MODULE, traverse => pre}),
     #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
-    FileWarnings = #{File => [{26, ?MODULE, mark_1}]},
-    FileErrors = #{File => [{23, ?MODULE, mark_error_1}]},
-    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
+    FileWarnings = [{File, [{26, ?MODULE, mark_1}]}],
+    FileErrors = [{File, [{23, ?MODULE, mark_error_1}]}],
+    ?assertMatch({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
     ok.
 
 test_reduce_attr(_Config) ->
@@ -157,9 +157,9 @@ test_reduce_attr(_Config) ->
                   Acc
           end, 0, Forms, #{formatter => ?MODULE, traverse => list}),
     #{'__struct__' := ?RETURN_FAIL, error := Error} = ReturnM,
-    FileWarnings = #{File => [{17, ?MODULE, mark_0}]},
-    FileErrors = #{File => [{16, ?MODULE, mark_error_0}]},
-    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
+    FileWarnings = [{File, [{17, ?MODULE, mark_0}]}],
+    FileErrors = [{File, [{16, ?MODULE, mark_error_0}]}],
+    ?assertMatch({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
     ok.
 
 test_with_formatter(_Config) ->
@@ -172,7 +172,7 @@ test_with_formatter(_Config) ->
               astranaut_walk_return:new(#{return => 10, error => error_0})
              ))),
     #{error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
-    ?assertMatch(#{errors := [{10, formatter_1, error_0}]}, Error),
+    ?assertMatch([{10, formatter_1, error_0}], astranaut_error_state:errors(Error)),
     ok.
 
 test_options(_Config) ->

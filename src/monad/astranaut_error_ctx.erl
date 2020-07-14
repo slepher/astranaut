@@ -30,13 +30,15 @@ new(Errors, Warnings) ->
     new(undefined, Errors, Warnings).
 
 new(File, Errors, Warnings) ->
-    #{'__struct__' => ?MODULE, file => File, errors => Errors, warnings => Warnings}.
+    EndoErrors = astranaut_endo:endo(Errors),
+    EndoWarnings = astranaut_endo:endo(Warnings),
+    #{'__struct__' => ?MODULE, file => File, errors => EndoErrors, warnings => EndoWarnings}.
 
 errors(#{'__struct__' := ?MODULE, errors := Errors}) ->
-    lists:reverse(Errors).
+    run_endo(Errors).
 
 warnings(#{'__struct__' := ?MODULE, warnings := Warnings}) ->
-    lists:reverse(Warnings).
+    run_endo(Warnings).
 
 file(#{'__struct__' := ?MODULE, file := File}) ->
     File.
@@ -50,14 +52,14 @@ append_error(Error, Ctx) ->
     append_errors([Error], Ctx).
 
 append_errors(Errors1, #{errors := Errors0} = Ctx) when is_list(Errors1) ->
-    Errors2 = append(Errors0, Errors1),
+    Errors2 = astranaut_endo:append(Errors0, Errors1),
     Ctx#{errors => Errors2}.
 
 append_warning(Warning, Ctx) ->
     append_warnings([Warning], Ctx).
 
 append_warnings(Warnings1, #{warnings := Warnings0} = Ctx) when is_list(Warnings1) ->
-    Warnings2 = append(Warnings0, Warnings1),
+    Warnings2 = astranaut_endo:append(Warnings0, Warnings1),
     Ctx#{warnings => Warnings2}.
 
 update_file(File, Ctx) ->
@@ -71,8 +73,7 @@ update_file(File, Ctx) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-append(Errors0, Errors1) ->
-    lists:foldl(
-      fun(Error, Acc) ->
-              [Error|Acc]
-      end, Errors0, Errors1).
+run_endo(List) when is_list(List) ->
+    List;
+run_endo(List) ->
+    astranaut_endo:run(List).

@@ -184,10 +184,9 @@ test_line(_Config) ->
                          {A + 10, A + 20}
                  end)
            ]),
-    ErrorState = astranaut_error_state:new(),
-    ErrorState1 = astranaut_error_state:append_errors([{20, formatter_0, error_0}], ErrorState),
-    Result = astranaut_return_m:return_ok({20, 30}, ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MA, formatter_0, ok)),
+    Errors = [{20, formatter_0, error_0}], 
+    #{return := Return, error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
+    ?assertEqual({{20, 30}, Errors}, {Return, astranaut_error_state:errors(Error)}),
     ok.
 
 
@@ -198,10 +197,9 @@ test_line_2(_Config) ->
                  20, astranaut_traverse_m:error(error_0)),
                return(10)
            ]),
-    ErrorState = astranaut_error_state:new(),
-    ErrorState1 = ErrorState#{errors => [{20, formatter_0, error_0}]},
-    Result = astranaut_return_m:return_ok({10, ok}, ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MA, formatter_0, ok)),
+    Errors = [{20, formatter_0, error_0}],
+    #{return := Return, error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
+    ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error_state:errors(Error)}),
     ok.
 
 test_file_line(_Config) ->
@@ -225,13 +223,10 @@ test_file_line(_Config) ->
                astranaut_traverse_m:eof(),
                return(B + 10)
            ]),
-    ErrorState = astranaut_error_state:new(),
-    ErrorState1 = ErrorState#{file => undefined,
-                              file_errors => #{?FILE => [{20, astranaut_traverse_m, error_0}]},
-                              file_warnings => #{?FILE => [{25, ?MODULE, warning_0}]}
-                             },
-    Result = astranaut_return_m:return_ok({20, 30}, ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MA, ?MODULE, ok)),
+    FileErrors = [{?FILE, [{20, astranaut_traverse_m, error_0}]}],
+    FileWarnings = [{?FILE, [{25, ?MODULE, warning_0}]}],
+    #{return := Result, error := Error} = astranaut_traverse_m:run(MA, ?MODULE, ok),
+    ?assertEqual({{20, 30}, {FileErrors, FileWarnings}}, {Result, astranaut_error_state:realize(Error)}),
     ok.
 
 test_fail(_Config) ->
@@ -259,12 +254,10 @@ test_fail(_Config) ->
                 astranaut_traverse_m:update_line(
                   30, astranaut_traverse_m:error(error_1))
             ]),
-    ErrorState = astranaut_error_state:new(),
-    ErrorState1 = ErrorState#{errors => [{20, astranaut_traverse_m, error_0}],
-                              warnings => [{25, ?MODULE, warning_0}]
-                             },
-    Result = astranaut_return_m:return_fail(ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MB, ?MODULE, ok)),
+    Errors = [{20, astranaut_traverse_m, error_0}],
+    Warnings = [{25, ?MODULE, warning_0}],
+    #{error := Error} = astranaut_traverse_m:run(MB, ?MODULE, ok),
+    ?assertEqual({Errors, Warnings}, {astranaut_error_state:errors(Error), astranaut_error_state:warnings(Error)}),
     ok.
 
 test_sequence_either(_Config) ->
@@ -296,12 +289,10 @@ test_sequence_either(_Config) ->
     MA5 = astranaut_traverse_m:eof(),
     MAS0 = astranaut_traverse_m:sequence_either([MA1, MA2, MA3]),
     MAS1 = astranaut_traverse_m:sequence_either([MA4, MAS0, MA5]),
-    ErrorState = astranaut_error_state:new(),
-    ErrorState1 = ErrorState#{file_errors => #{?FILE => [{20, ?MODULE, error_0}, {30, ?MODULE, error_1}]},
-                              file_warnings => #{?FILE =>  [{25, ?MODULE, warning_0}]},
-                              file => undefined},
-    Result = astranaut_return_m:return_fail(ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MAS1, ?MODULE, 0)),
+    FileErrors = [{?FILE, [{20, ?MODULE, error_0}, {30, ?MODULE, error_1}]}],
+    FileWarnings = [{?FILE,[{25, ?MODULE, warning_0}]}],
+    #{error := Error} = astranaut_traverse_m:run(MAS1, ?MODULE, 0),
+    ?assertEqual({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
     ok.
 
 test_bind_node(_Config) -> 

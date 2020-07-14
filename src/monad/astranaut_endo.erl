@@ -11,8 +11,9 @@
 -include_lib("astranaut/include/astranaut_struct_name.hrl").
 
 %% API
--export([endo/1, run/1]).
+-export([endo/1, empty/0, run/1]).
 -export([append/2]).
+-export([map/2]).
 -export([is_empty/1]).
 
 -export_type([endo/1]).
@@ -34,7 +35,17 @@ run(#{?STRUCT_KEY := ?ENDO, is_empty := true}) ->
 run(#{?STRUCT_KEY := ?ENDO, list := EndoList}) ->
     EndoList([]).
 
+map(_Fun, #{?STRUCT_KEY := ?ENDO, is_empty := true} = Endo) ->
+    Endo;
+map(Fun, #{?STRUCT_KEY := ?ENDO, list := EndoList}) ->
+    new(fun(List) -> lists:map(Fun, EndoList(List)) end).
+
+
 -spec append(endo(A), endo(A)) -> endo(A).
+append(List1, List2) when is_list(List1) ->
+    append(astranaut_endo:endo(List1), List2);
+append(List1, List2) when is_list(List2) ->
+    append(List1, astranaut_endo:endo(List2));
 append(#{?STRUCT_KEY := ?ENDO} = Endo1, #{?STRUCT_KEY := ?ENDO} = Endo2) ->
     do_append(Endo1, Endo2).
 
