@@ -5,6 +5,8 @@
 -define(STRUCT_KEY, '__struct__').
 %% for astranaut_walk_return.
 -define(WALK_RETURN, astranaut_walk_return).
+%% for endo
+-define(ENDO, astranaut_endo).
 %% for astranaut_base_m.
 -define(BASE_M, astranaut_base_m).
 %% for astranaut_return_m.

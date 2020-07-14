@@ -1,18 +1,18 @@
 %%%-------------------------------------------------------------------
 %%% @author Chen Slepher <slepheric@gmail.com>
-%%% @copyright (C) 2018, Chen Slepher
+%%% @copyright (C) 2020, Chen Slepher
 %%% @doc
 %%%
 %%% @end
-%%% Created :  8 Dec 2018 by Chen Slepher <slepheric@gmail.com>
+%%% Created : 14 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_SUITE).
+-module(astranaut_traverse_v3_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include_lib("astranaut/include/astranaut_struct_name.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -108,14 +108,15 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_reduce, test_reduce_attr, test_with_formatter, 
-     test_options, test_validator, test_with_attribute, test_forms_with_attribute].
+    [test_bind, test_bind_continue, test_bind_update].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
+my_test_case() -> 
+    [].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
@@ -126,94 +127,88 @@ all() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_reduce(_Config) ->
-    Forms = astranaut_sample_0:forms(),
-    File = astranaut:file(Forms),
-    ReturnM =
-        astranaut_traverse_v3:reduce(
-          fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
-                  astranaut_walk_return_v3:new(#{warning => mark_1, state => Acc + 1, node => Node});
-             ({atom, _Line, mark_error_1}, _Acc, #{}) ->
-                  {error, mark_error_1};
-             (_Node, Acc, #{}) ->
-                  Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => pre}),
-    #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
-    FileWarnings = #{File => [{26, ?MODULE, mark_1}]},
-    FileErrors = #{File => [{23, ?MODULE, mark_error_1}]},
-    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
+test_bind(_Config) -> 
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodeC = {atom, 20, A},
+                         astranaut_walk_return_v3:new(#{node => NodeC})
+                 end),
+    ?assertEqual({atom, 20, 'A'}, Return),
     ok.
 
-test_reduce_attr(_Config) ->
-    Forms = astranaut_sample_0:forms(),
-    File = astranaut:file(Forms),
-    ReturnM =
-        astranaut_traverse_v3:reduce(
-          fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
-                  astranaut_walk_return_v3:new(#{warning => mark_0, state => Acc + 1, node => Node});
-             ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->
-                  {error, mark_error_0};
-             (_Node, Acc, #{}) ->
-                  Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => list}),
-    #{'__struct__' := ?RETURN_FAIL, error := Error} = ReturnM,
-    FileWarnings = #{File => [{17, ?MODULE, mark_0}]},
-    FileErrors = #{File => [{16, ?MODULE, mark_error_0}]},
-    ?assertMatch(#{file_warnings := FileWarnings, file_errors := FileErrors}, Error),
+test_bind_continue(_Config) -> 
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{continue => true, node => {atom, 10, 'B'}}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodeC = {atom, 20, A},
+                         astranaut_walk_return_v3:new(#{node => NodeC})
+                 end),
+    ?assertEqual({atom, 10, 'B'}, Return),
     ok.
 
-test_with_formatter(_Config) ->
-    MA =
-        astranaut_traverse_m:with_formatter(
-          formatter_1,
-          astranaut_traverse_m:update_line(
-            10,
-            astranaut_traverse_m:astranaut_traverse_m(
-              astranaut_walk_return:new(#{return => 10, error => error_0})
-             ))),
-    #{error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
-    ?assertMatch(#{errors := [{10, formatter_1, error_0}]}, Error),
+test_bind_update(_Config) ->
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{node => {atom, 10, 'B'}}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodeC = {atom, 20, A},
+                         astranaut_walk_return_v3:new(#{node => NodeC})
+                 end),
+    ?assertEqual({atom, 20, 'B'}, Return),
     ok.
 
-test_options(_Config) ->
-    Return = #{a => true, e => true},
-    Warnings = [{invalid_option_value, {b, c, d}}],
-    ?assertMatch(#{return := Return, warnings := Warnings}, astranaut_options:options([a, {b, c, d}, e])),
+test_bind_2(_Config) -> 
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodesC = [{atom, 20, A}, {atom, 30, A}],
+                         astranaut_walk_return_v3:new(#{nodes => NodesC})
+                 end),
+    ?assertEqual([{atom, 20, 'A'}, {atom, 30, 'A'}], Return),
     ok.
 
-test_validator(_Config) ->
-    Validator = #{a => boolean,
-                  b => {list_of, atom},
-                  c => fun is_boolean/1,
-                  d => {default, 10}},
-    BaseM = astranaut_options:validate(Validator, [a, {b,[c,d]}, {b, c, d}, e], #{}),
-    Return = #{a => true, b => [c, d], d => 10},
-    Warnings = [{invalid_option_value, {b, c, d}}],
-    ?assertMatch(#{return := Return, warnings := Warnings}, BaseM),
+test_bind_continue_2(_Config) -> 
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{continue => true, nodes => [{atom, 10, 'B'}, {atom, 10, 'C'}]}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodeC = {atom, 20, A},
+                         astranaut_walk_return_v3:new(#{node => NodeC})
+                 end),
+    ?assertEqual([{atom, 10, 'B'}, {atom, 10, 'C'}], Return),
     ok.
 
-test_with_attribute(_Config) ->
-    Forms = astranaut_sample_0:forms(),
-    Marks =
-        astranaut_options:with_attribute(
-          fun(Attr, Acc) ->
-                  [Attr|Acc]
-          end, [], Forms, mark, #{simplify_return => true}),
-    ?assertEqual([mark_0, mark_error_0], Marks).
-
-test_forms_with_attribute(_Config) ->
-    Forms = astranaut_sample_0:forms(),
-    {Forms1, Marks} =
-        astranaut_options:forms_with_attribute(
-          fun(Attr, Acc, #{line := Line}) ->
-                  Node = astranaut:attribute_node(mark_1, Line, Attr),
-                  astranaut_options:attr_walk_return(#{node => Node, return => [Attr|Acc]})
-          end, [], Forms, mark, #{simplify_return => true}),
-    Marks1 =
-        astranaut_options:with_attribute(
-          fun(Attr, Acc) ->
-                  [Attr|Acc]
-          end, [], Forms1, mark_1, #{simplify_return => true}),
-    ?assertEqual([mark_0, mark_error_0], Marks1),
-    ?assertEqual([mark_0, mark_error_0], Marks),
+test_bind_update_2(_Config) ->
+    NodeA = {atom, 10, 'A'},
+    Walk = astranaut_walk_return_v3:new(#{nodes => [{atom, 10, 'B'}, {atom, 10, 'C'}]}),
+    Return = 
+        bind_pre(NodeA, Walk,
+                 fun({atom, _Line, A}) ->
+                         NodesC = [{atom, 20, A}, {atom, 30, A}],
+                         astranaut_walk_return_v3:new(#{nodes => NodesC})
+                 end),
+    ?assertEqual([{atom, 20, 'B'}, {atom, 30, 'B'}, {atom, 20, 'C'}, {atom, 30, 'C'}], Return),
     ok.
+
+bind_pre(NodeA, Walk, BWC) ->
+    MNodeB = astranaut_traverse_m_v3:astranaut_traverse_m(Walk),
+    MNodeC = 
+        astranaut_traverse_m_v3:bind_node(
+          NodeA, MNodeB, 
+          fun(NodeB) ->
+                  Walk2 = BWC(NodeB),
+                  MNodeC = astranaut_traverse_m_v3:astranaut_traverse_m(Walk2),
+                  astranaut_traverse_m_v3:bind_node(NodeB, MNodeC, fun astranaut_traverse_m_v3:return/1, post)
+          end, pre),
+    io:format("new node is ~p~n", [MNodeC]),
+    #{return := Return} = astranaut_traverse_m_v3:eval(MNodeC, hello, ok),
+    Return.

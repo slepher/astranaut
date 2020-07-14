@@ -24,10 +24,24 @@
 -export([validate/3]).
 -export([attr_walk_return/1]).
 -export([by_validator/3]).
+-export([get_boolean/4]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+get_boolean(Key, ReverseKey, Map, Default) ->
+    case maps:find(Key, Map) of
+        {ok, Value} when is_boolean(Value) ->
+            Value;
+        error ->
+            case maps:find(ReverseKey, Map) of
+                {ok, RValue} when is_boolean(RValue) ->
+                    not RValue;
+                error ->
+                    Default
+            end
+    end.
+
 with_attribute(Fun, Init, Forms, Attr, Opts) ->
     astranaut_traverse:reduce(
       fun({attribute, Line, Attr1, AttrValue}, Acc, #{}) when Attr1 == Attr ->

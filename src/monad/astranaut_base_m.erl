@@ -22,6 +22,7 @@
 -export([new/0, run/1]).
 -export([bind/2, then/2, return/1]).
 -export(['>>='/3, return/2]).
+-export([warning_as_error/1]).
 -export([error/1, warning/1, errors/1, warnings/1]).
 
 %%%===================================================================
@@ -87,6 +88,11 @@ return(A) ->
 
 return(A, ?MODULE) ->
     return(A).
+
+warning_as_error(#{'__struct__' := ?MODULE, warnings := Warnings} = MA) ->
+    astranaut_base_m:bind(
+      errors(Warnings),
+      MA#{warnings => []}).
 
 error(Error) ->
     errors([Error]).

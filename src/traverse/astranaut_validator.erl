@@ -11,7 +11,7 @@
 %% API
 -export([boolean/1, number/1, atom/1]).
 -export([list_of/2]).
--export([default/3, required/2, force_required/1]).
+-export([default/3, required/2]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -47,15 +47,9 @@ default(Value, _Default, true) ->
     {ok, Value}.
 
 required(_Value, false) ->
-    {warning, required};
+    {error, required};
 required(Value, true) ->
     {ok, Value}.
-
-force_required(undefined) ->
-    {error, required};
-force_required(Value) ->
-    {ok, Value}.
-
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

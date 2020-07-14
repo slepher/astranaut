@@ -13,6 +13,7 @@
 %% API
 -export([type/1]).
 -export([subtrees/2]).
+-export([tps/2]).
 -export([update_subtrees/2]).
 -export([get_pos/1]).
 -export([node_type/2]).
@@ -21,22 +22,39 @@
 %%% API
 %%%===================================================================
 type(Node) ->
-    erl_syntax:type(Node).
-
-get_pos(Node) ->
-    erl_syntax:get_pos(Node).
-
-subtrees(Node, Opts) ->
     try erl_syntax:type(Node) of
         Type ->
-            Subtrees = erl_syntax:subtrees(Node),
+            Type
+    catch
+        _:{badarg, _}?CAPTURE_STACKTRACE ->
+            erlang:exit({invalid_erl_syntax_node, Node})
+    end.
+
+get_pos(Node) ->
+    case erl_syntax:get_pos(Node) of
+        Pos when is_integer(Pos) ->
+            Pos;
+        Pos ->
+            erlang:exit({invalid_erl_syntax_node_pos, Node, Pos})
+    end.
+
+tps(Node, Opts) ->
+    Type = type(Node),
+    Pos = get_pos(Node),
+    Subtrees = subtrees(Node, Opts#{type => Type}),
+    {Type, Pos, Subtrees}.
+
+subtrees(Node, #{type := Type} = Opts) ->
+    try erl_syntax:subtrees(Node) of
+        Subtrees ->
             up_subtrees(Subtrees, Opts#{parent => Type})
     catch
         EType:{badarg, _}?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {invalid_node, Node, Opts}, ?GET_STACKTRACE);
-        EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, Exception, ?GET_STACKTRACE)
-    end.
+            erlang:raise(EType, {invalid_node, Node, Opts}, ?GET_STACKTRACE)
+    end;
+subtrees(Node, #{} = Opts) ->
+    Type = erl_syntax:type(Node),
+    subtrees(Node, Opts#{type => Type}).
 
 update_subtrees(Node, Subtrees) ->
     revert_root(erl_syntax:update_tree(Node, Subtrees)).

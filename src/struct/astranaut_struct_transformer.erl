@@ -19,9 +19,6 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    dbg:tracer(),
-    dbg:tpl(rebar_compiler_erl, err_tuple, cx),
-    dbg:p(all, [c]),
     Module = astranaut:module(Forms),
     ReturnM =
         do([astranaut_return_m ||
@@ -36,10 +33,10 @@ parse_transform(Forms, _Options) ->
            ]),
     astranaut_return_m:to_compiler(ReturnM).
 
-format_error({undefined_record, Record, Attribute}) ->
-    io_lib:format("[~s]: record ~p in is not defined", [astranaut:to_string(Attribute), Record]);
-format_error({invalid_struct_def, Struct, Attribute}) ->
-    io_lib:format("[~s]: ~p is not a valid struct name in", [astranaut:to_string(Attribute), Struct]);
+format_error({undefined_record, Record}) ->
+    io_lib:format("record ~p in is not defined", [Record]);
+format_error({invalid_struct_name, Struct}) ->
+    io_lib:format("~p is not a valid struct name", [Struct]);
 format_error({enforce_keys_not_in_struct, RecordName, Keys}) ->
     io_lib:format("the enforce keys must be defined in record ~p: ~p", [RecordName, Keys]);
 format_error({missing_enforce_keys, RecordName, Keys}) ->
@@ -242,6 +239,9 @@ update_record_field_types(RecordName, Line, Fields, StructDef) ->
 append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
 
+%%%===================================================================
+%%% Initialize Structs with attribute astranaut_struct.
+%%%===================================================================
 init_struct_defs(Forms, RecordDefMap) ->
     TraverseOpts = #{formatter => ?MODULE, simplify_return => false, deep_attr => true},
     Validator = #{non_auto_fill => boolean,
@@ -249,11 +249,10 @@ init_struct_defs(Forms, RecordDefMap) ->
                   enforce_keys => {list_of, atom}},
     astranaut_options:forms_with_attribute(
       fun({Struct, Opts}, Acc, Attr) ->
-                  astranaut_base_m:bind(
-                    astranaut_options:validate(Validator, Opts, #{}),
-                    fun(Opts1) ->
-                            add_struct(Struct, Opts1, RecordDefMap, Acc, Attr)
-                    end);
+              do([astranaut_base_m ||
+                     Opts1 <- astranaut_options:validate(Validator, Opts, #{}),
+                     add_struct(Struct, Opts1, RecordDefMap, Acc, Attr)
+                 ]);
          (Struct, Acc, Attr) ->
               add_struct(Struct, #{}, RecordDefMap, Acc, Attr)
       end, maps:new(), Forms, astranaut_struct, TraverseOpts).
@@ -296,7 +295,7 @@ init_records(Module, Forms) ->
       end, maps:new(), Forms).
 
 update_record_def(RecordDef, #{} = StructDef) ->
-    AutoFill = not maps:get(non_auto_fill, StructDef, false),
+    AutoFill = astranaut_options:get_boolean(auto_fill, non_auto_fill, StructDef, true),
     EnforceKeys = maps:get(enforce_keys, StructDef, []),
     RecordDef1 = astranaut_struct_record:set_auto_fill(AutoFill, RecordDef),
     RecordDef2 = astranaut_struct_record:update_enforce_keys(EnforceKeys, RecordDef1),
