@@ -14,7 +14,7 @@
 
 %% API
 -export([new/0, new/1, new/2, new/3]).
--export([errors/1, warnings/1, file/1]).
+-export([errors/1, warnings/1, file/1, set_empty/1]).
 -export([append/3, append_error/2, append_errors/2, append_warning/2, append_warnings/2, update_file/2]).
 
 %%%===================================================================
@@ -47,6 +47,9 @@ append(Errors, Warnings, Ctx) ->
     Ctx1 = append_errors(Errors, Ctx),
     Ctx2 = append_warnings(Warnings, Ctx1),
     Ctx2.
+
+set_empty(Ctx) ->
+    Ctx#{errors => astranaut_endo:empty(), warnings => astranaut_endo:empty()}.
     
 append_error(Error, Ctx) ->
     append_errors([Error], Ctx).

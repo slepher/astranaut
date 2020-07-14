@@ -45,14 +45,21 @@ from_compiler(Forms) when is_list(Forms) ->
     {ok, return_ok(Forms)};
 from_compiler({warning, Forms, Warnings}) ->
     Error = astranaut_error_state:new(),
-    Error1 = Error#{file_warnings => maps:from_list(Warnings)},
+    Error1 = Error#{file_warnings => from_compiler_errors(Warnings)},
     {ok, return_ok(Forms, Error1)};
 from_compiler({error, Errors, Warnings}) ->
     Error = astranaut_error_state:new(),
-    Error1 = Error#{file_warnings => maps:from_list(Warnings), file_errors => maps:from_list(Errors)},
+    Error1 = Error#{file_warnings => from_compiler_errors(Warnings), file_errors => from_compiler_errors(Errors)},
     {ok, return_fail(Error1)};
 from_compiler(_Other) ->
     error.
+
+from_compiler_errors(CompilerFileErrors) ->
+    maps:from_list(
+      lists:map(
+        fun({File, Errors}) ->
+                {File, astranaut_endo:endo(Errors)}
+        end, CompilerFileErrors)).
 
 from_return(#{?STRUCT_KEY := ?RETURN_OK} = MA) ->
     {ok, MA};

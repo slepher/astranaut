@@ -132,7 +132,7 @@ test_reduce(_Config) ->
     ReturnM =
         astranaut_traverse:reduce(
           fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
-                  astranaut_walk_return_v3:new(#{warning => mark_1, state => Acc + 1, node => Node});
+                  astranaut_walk_return:new(#{warning => mark_1, state => Acc + 1, node => Node});
              ({atom, _Line, mark_error_1}, _Acc, #{}) ->
                   {error, mark_error_1};
              (_Node, Acc, #{}) ->
@@ -150,7 +150,7 @@ test_reduce_attr(_Config) ->
     ReturnM =
         astranaut_traverse:reduce(
           fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
-                  astranaut_walk_return_v3:new(#{warning => mark_0, state => Acc + 1, node => Node});
+                  astranaut_walk_return:new(#{warning => mark_0, state => Acc + 1, node => Node});
              ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->

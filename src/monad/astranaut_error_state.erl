@@ -82,7 +82,7 @@ merge(#{} = State1, #{} = State2) ->
     State3 = merge_file(State1, State2),
     State4 = merge_file_ews(State3, State2),
     State5 = merge_ews(State4, State2),
-    State5.    
+    State5.
 
 errors(#{errors := Errors}) ->
     astranaut_endo:run(Errors).
@@ -122,7 +122,7 @@ update_file(File0, File1, #{errors := Errors, warnings := Warnings,
         false ->
             ErrorsWithFile1 = add_file_errors(File0, Errors, ErrorsWithFile),
             WarningsWithFile1 = add_file_errors(File0, Warnings, WarningsWithFile),
-            State#{errors => astranaut_endo:endo([]), warnings => astranaut_endo:endo([]), 
+            State#{errors => astranaut_endo:empty(), warnings => astranaut_endo:empty(), 
                    file_errors => ErrorsWithFile1, 
                    file_warnings => WarningsWithFile1,
                    file => File1}

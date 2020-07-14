@@ -22,7 +22,7 @@
 -erlando_type(?MODULE).
 -erlando_future_behaviour(monad).
 
--compile({no_auto_import, [error/1, get/0, put/1]}).
+-compile({no_auto_import, [error/1, get/0, put/1, node/1, nodes/1]}).
 
 %%%===================================================================
 %%% types
@@ -71,7 +71,7 @@
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
 -export([set_continue/1, listen_continue/1, listen_updated/1]).
--export([listen/1, pop_nodes/1, nodes/1]).
+-export([listen/1, set_updated/1, pop_nodes/1, node/1, nodes/1]).
 -export([with_formatter/2]).
 -export([modify_ctx/1]).
 -export([tell/1]).
@@ -220,7 +220,7 @@ then(MA, MB) ->
 return(A) ->
     Inner = 
         fun(_Formatter, State, Ctx) ->
-                state_ok(#{return => A, state => State, ctx => Ctx, updated => true})
+                state_ok(#{return => A, state => State, ctx => Ctx})
         end,
     new(Inner).
 
@@ -232,6 +232,10 @@ return(A) ->
 return(A, ?TRAVERSE_M) ->
     return(A).
 
+node(Node) ->
+    bind(
+      nodes([Node]),
+      return(Node)).
 %% bind_node(NodeA, MB, BMC, pre) ->
 %%     bind(
 %%       listen_continue(pop_nodes(updated_node(NodeA, MB))),
@@ -354,6 +358,13 @@ set_continue(MA) ->
               update_m_state(StateM, #{continue => true})
       end, MA).
 
+
+set_updated(MA) ->
+    map_m_state_ok(
+      fun(#{} = StateM) ->
+              update_m_state(StateM, #{updated => true})
+      end, MA).
+
 listen_continue(MA) ->
     map_m_state_ok(
       fun(#{return := Return, continue := Continue} = StateM) ->
@@ -375,7 +386,7 @@ pop_nodes(MA) ->
 nodes(Nodes) ->
     Inner =
         fun(_Formatter, State0, Ctx) ->
-                state_ok(#{return => ok, state => State0, ctx => Ctx, nodes => astranaut_endo:endo(Nodes)})
+                state_ok(#{return => ok, state => State0, ctx => Ctx, nodes => astranaut_endo:endo(Nodes), updated => true})
         end,
     new(Inner).
 
@@ -463,7 +474,7 @@ update_line(Line, MA) ->
                       MState;
                   #{?STRUCT_KEY := ?ERROR_CTX} ->
                       Error1 = astranaut_error_state:update_ctx(Line, Formatter, Ctx1, Error0),
-                      Ctx2 = Ctx1#{errors => [], warnings => []},
+                      Ctx2 = astranaut_error_ctx:set_empty(Ctx1),
                       MState#{error => Error1, ctx => Ctx2}
               end
         end, MA).

@@ -32,7 +32,9 @@ parse_transform(Forms, _Options) ->
                   debug_forms(Forms1, QuoteAttr),
                   Forms1
           end),
-    astranaut_return_m:to_compiler(Return).
+    Compiler = astranaut_return_m:to_compiler(Return),
+    io:format("compiler is ~p~n", [Compiler]),
+    Compiler.
 
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
@@ -112,15 +114,16 @@ walk({match, _Line1, {atom, _Line2, quote_code}, Code} = Node, #{node := pattern
     %% transform quote_code = Code in pattern match
     Forms = astranaut_code:quote_codes([Code]),
     quote(Forms, #{}, Node, Attr, WalkOpts);
-walk(Node, _Attr, _File) ->
-    Node.
+walk(_Node, _Attr, _File) ->
+    astranaut_walk_return:new(#{}).
+    %% Node.
 
 quote(Value, Options, Node, Attr, #{file := File, module := Module}) ->
     QuoteLine = erl_syntax:get_pos(Node),
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, 
                             file => File, module => Module}, Options),
-    quote_0(Value, Options1).
+    astranaut_traverse_m:set_updated(quote_0(Value, Options1)).
 
 quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
     astranaut_monad:lift_m(

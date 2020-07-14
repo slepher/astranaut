@@ -222,7 +222,7 @@ map_m_1(F, NodeA, #{traverse := list} = Opts) ->
         end,
     astranaut_traverse_m:then(
       MA,
-      apply_f(F, NodeA, #{}, SyntaxLib));
+      astranaut_traverse_m:bind_node(NodeA, apply_f(F, NodeA, #{}, SyntaxLib), fun astranaut_traverse_m:return/1, pre));
 map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
@@ -264,7 +264,8 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
         {file, File} ->
             astranaut_traverse_m:then(
               astranaut_traverse_m:update_file(File),
-              F(NodeA, Attr#{step => leaf, node => file})
+              astranaut_traverse_m:bind_node(
+                NodeA, apply_f(F, NodeA, Attr#{step => leaf, node => file}, SyntaxLib), fun astranaut_traverse_m:return/1, leaf)
              )
     end.
 
