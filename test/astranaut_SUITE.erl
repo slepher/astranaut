@@ -130,7 +130,7 @@ test_reduce(_Config) ->
     Forms = astranaut_sample_0:forms(),
     File = astranaut:file(Forms),
     ReturnM =
-        astranaut_traverse_v3:reduce(
+        astranaut_traverse:reduce(
           fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
                   astranaut_walk_return_v3:new(#{warning => mark_1, state => Acc + 1, node => Node});
              ({atom, _Line, mark_error_1}, _Acc, #{}) ->
@@ -148,7 +148,7 @@ test_reduce_attr(_Config) ->
     Forms = astranaut_sample_0:forms(),
     File = astranaut:file(Forms),
     ReturnM =
-        astranaut_traverse_v3:reduce(
+        astranaut_traverse:reduce(
           fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
                   astranaut_walk_return_v3:new(#{warning => mark_0, state => Acc + 1, node => Node});
              ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->

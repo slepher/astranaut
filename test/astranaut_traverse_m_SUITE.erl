@@ -377,15 +377,15 @@ test_bind_update_2(_Config) ->
     ok.
 
 bind_pre(NodeA, Walk, BWC) ->
-    MNodeB = astranaut_traverse_m_v3:astranaut_traverse_m(Walk),
+    MNodeB = astranaut_traverse_m:astranaut_traverse_m(Walk),
     MNodeC = 
-        astranaut_traverse_m_v3:bind_node(
+        astranaut_traverse_m:bind_node(
           NodeA, MNodeB, 
           fun(NodeB) ->
                   Walk2 = BWC(NodeB),
-                  MNodeC = astranaut_traverse_m_v3:astranaut_traverse_m(Walk2),
-                  astranaut_traverse_m_v3:bind_node(NodeB, MNodeC, fun astranaut_traverse_m_v3:return/1, post)
+                  MNodeC = astranaut_traverse_m:astranaut_traverse_m(Walk2),
+                  astranaut_traverse_m:bind_node(NodeB, MNodeC, fun astranaut_traverse_m:return/1, post)
           end, pre),
     io:format("new node is ~p~n", [MNodeC]),
-    #{return := Return} = astranaut_traverse_m_v3:eval(MNodeC, hello, ok),
+    #{return := Return} = astranaut_traverse_m:eval(MNodeC, hello, ok),
     Return.
