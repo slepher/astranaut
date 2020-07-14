@@ -11,7 +11,7 @@
 %%%===================================================================
 %%% macros
 %%%===================================================================
--include("astranaut_struct_name.hrl").
+-include_lib("astranaut/include/astranaut_struct_name.hrl").
 -define(STATE_OK, astranaut_traverse_m_state_ok).
 -define(STATE_FAIL, astranaut_traverse_m_state_fail).
 
@@ -39,6 +39,9 @@
 -type astranaut_traverse_m_state(S, A) :: 
         #{?STRUCT_KEY => ?STATE_OK,
           return => A,
+          nodes => syntax_nodes(),
+          updated => boolean(),
+          continue => boolean(),
           state => S, 
           ctx => astranaut_error_ctx:astranaut_error_ctx(),
           error => astranaut_error_state:astranaut_error_state()} |
@@ -49,20 +52,26 @@
 
 -type formatter() :: module().
 -type line() :: integer().
+-type syntax_node() :: erl_syntax:syntax_tree().
+-type syntax_nodes() :: endo(syntax_node()).
+-type endo(A) :: astranaut_endo:endo(A).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 -export([astranaut_traverse_m/1, to_monad/1, to_monad/2]).
 -export([convertable_struct/1]).
--export([run/3, eval/3, exec/3]).
+-export([run/3, eval/3, exec/3, enodes/3]).
 -export([bind/2, then/2, return/1]).
+-export([bind_node/4]).
 -export(['>>='/3, return/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1, sequence_either/1]).
 -export([state/1]).
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
+-export([set_continue/1, listen_continue/1, listen_updated/1]).
+-export([listen/1, pop_nodes/1, nodes/1]).
 -export([with_formatter/2]).
 -export([modify_ctx/1]).
 -export([tell/1]).
@@ -81,14 +90,18 @@ astranaut_traverse_m(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
     Inner =
         fun(_Formatter, State, Ctx0) ->
                 State1 = maps:get(state, Map, State),
+                Continue = maps:get(continue, Map, false),
+                Updated = maps:is_key(return, Map),
+                Nodes = maps:get(nodes, Map, []),
+                Return = maps:get(return, Map, ok),
                 #{errors := Errors, warnings := Warnings} = Map,
                 Ctx1 = astranaut_error_ctx:append(Errors, Warnings, Ctx0),
-                case Map of
-                    #{return := Return} ->
-                        Return1 = update_return_continue(Return, Map),
-                        state_ok(Return1, State1, Ctx1);
-                    #{} ->
-                        state_fail(State1, Ctx1)
+                case Errors of
+                    [] ->
+                        state_ok(#{return => Return, state => State1, nodes => astranaut_endo:endo(Nodes),
+                                             ctx => Ctx1, continue => Continue, updated => Updated});
+                    _ ->
+                        state_fail(#{state => State1, ctx => Ctx1})
                 end
         end,
     new(Inner);
@@ -97,21 +110,21 @@ astranaut_traverse_m(#{?STRUCT_KEY := ?BASE_M, return := Return, errors := Error
         fun(_Formatter, State, Ctx0) ->
                 Ctx1 = astranaut_error_ctx:append_errors(Errors, Ctx0),
                 Ctx2 = astranaut_error_ctx:append_warnings(Warnings, Ctx1),
-                state_ok(Return, State, Ctx2)
+                state_ok(#{return => Return, state => State, ctx => Ctx2, updated => true})
         end,
     new(Inner);
 astranaut_traverse_m(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := Error1}) ->
     Inner =
         fun(_Formatter, State, #{file := File} = Ctx) ->
                 Error2 = astranaut_error_state:update_file(File, Error1),
-                state_ok(Return, State, Ctx, Error2)
+                state_ok(#{return => Return, state => State, ctx => Ctx, error => Error2, updated => true})
         end,
     new(Inner);
 astranaut_traverse_m(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error1}) ->
     Inner =
         fun(_Formatter, State, #{file := File} = Ctx) ->
                 Error2 = astranaut_error_state:update_file(File, Error1),
-                state_fail(State, Ctx, Error2)
+                state_fail(#{state => State, ctx => Ctx, error => Error2})
         end,
     new(Inner);
 astranaut_traverse_m(#{?STRUCT_KEY := ?TRAVERSE_M} = MA) ->
@@ -146,71 +159,58 @@ to_monad(A, Return) ->
 new(Inner) when is_function(Inner, 3) ->
     #{?STRUCT_KEY => ?TRAVERSE_M, inner => Inner}.
 
--spec state_ok(A, S, astranaut_error_ctx:astranaut_error_ctx())
-              -> astranaut_traverse_m(S, A).
-state_ok(Return, State, Ctx) ->
-    state_ok(Return, State, Ctx, astranaut_error_state:new(Ctx)).
+state_ok(Map) ->
+    update_m_state(#{?STRUCT_KEY => ?STATE_OK}, Map).
 
--spec state_ok(A, S, astranaut_error_ctx:astranaut_error_ctx(),
-               astranaut_error_state:astranaut_error_state())
-              -> astranaut_traverse_m(S, A).
-state_ok(Return, State, #{?STRUCT_KEY := ?ERROR_CTX} = Ctx, #{?STRUCT_KEY := ?ERROR_STATE} = Error) ->
-    #{?STRUCT_KEY => ?STATE_OK,
-      return => Return,
-      state => State,
-      ctx => Ctx,
-      error => Error}.
-
--spec state_fail(S, astranaut_error_ctx:astranaut_error_ctx())
-                -> astranaut_traverse_m(S, any()).
-state_fail(State, #{?STRUCT_KEY := ?ERROR_CTX} = Ctx) ->
-    state_fail(State, Ctx, astranaut_error_state:new(Ctx)).
-
--spec state_fail(S, 
-                 astranaut_error_ctx:astranaut_error_ctx(),
-                 astranaut_error_state:astranaut_error_state())
-                -> astranaut_traverse_m(S, any()).
-state_fail(State,
-           #{?STRUCT_KEY := ?ERROR_CTX} = Ctx,
-           #{?STRUCT_KEY := ?ERROR_STATE} = Error) ->
-    #{?STRUCT_KEY => ?STATE_FAIL, state => State, ctx => Ctx, error => Error}.
+state_fail(Map) ->
+    update_m_state(#{?STRUCT_KEY => ?STATE_FAIL}, Map).
 
 -spec run(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m({A, S}).
 run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
+    astranaut_monad:lift_m(fun({A, State1, _Nodes}) -> {A, State1} end, run_1(MA, Formatter, State), astranaut_return_m).
+
+-spec run_1(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m({A, S}).
+run_1(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     case run_0(MA, Formatter, State, astranaut_error_ctx:new()) of
-        #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1, error := Error} ->
-            astranaut_return_m:return_ok({Return, State1}, Error);
+        #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1, nodes := Nodes, error := Error} ->
+            astranaut_return_m:return_ok({Return, State1, Nodes}, Error);
         #{?STRUCT_KEY := ?STATE_FAIL, error := Error} ->
             astranaut_return_m:return_fail(Error)
     end.
 
+
 -spec eval(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m(A).
 eval(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
-    astranaut_monad:lift_m(fun({A, _State}) -> A end, run(MA, Formatter, State), astranaut_return_m).
+    astranaut_monad:lift_m(fun({A, _State, _Nodes}) -> A end, run_1(MA, Formatter, State), astranaut_return_m).
 
 -spec exec(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_base_m:astranaut_base_m(S).
 exec(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
-    astranaut_monad:lift_m(fun({_A, State1}) -> State1 end, run(MA, Formatter, State), astranaut_return_m).
+    astranaut_monad:lift_m(fun({_A, State1, _Nodes}) -> State1 end, run_1(MA, Formatter, State), astranaut_return_m).
+
+-spec enodes(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_base_m:astranaut_base_m(syntax_nodes()).
+enodes(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
+    F = fun({_A, _State1, Nodes}) -> astranaut_endo:run(Nodes) end,
+    astranaut_monad:lift_m(F, run_1(MA, Formatter, State), astranaut_return_m).
 
 -spec bind(astranaut_traverse_m(S, A), fun((A) -> astranaut_traverse_m(S, B))) -> astranaut_traverse_m(S, B).
 bind(MA, KMB) ->
-    Inner = 
-        fun(Formatter, State, Ctx0) ->
-                with_state_ok(
-                  run_0(MA, Formatter, State, Ctx0),
-                  fun(#{return := A, state := State1, ctx := Ctx1, error := Error1}) ->
-                          #{state := State2, error := Error2, ctx := Ctx2} = MB =
-                              run_0(KMB(A), Formatter, State1, Ctx1),
-                          Error3 = astranaut_error_state:merge(Error1, Error2),
-                          case MB of
-                              #{?STRUCT_KEY := ?STATE_OK, return := B} ->
-                                  state_ok(B, State2, Ctx2, Error3);
-                              #{?STRUCT_KEY := ?STATE_FAIL} ->
-                                  state_fail(State2, Ctx2, Error3)
-                          end
-                  end)
-        end,
-    new(Inner).
+    map_m_state_ok(
+      fun(Formatter, #{return := A, state := State1,
+                       updated := Updated1, continue := Continue1,
+                       nodes := Nodes1, ctx := Ctx1, error := Error1}) ->
+              #{error := Error2} = MB = run_0(KMB(A), Formatter, State1, Ctx1),
+              Error3 = astranaut_error_state:merge(Error1, Error2),
+              case MB of
+                  #{?STRUCT_KEY := ?STATE_OK, updated := Updated2, continue := Continue2, nodes := Nodes2} ->
+                      Nodes3 = astranaut_endo:append(Nodes1, Nodes2),
+                      Updated3 = Updated1 or Updated2,
+                      Continue3 = Continue1 or Continue2,
+                      update_m_state(MB, #{error => Error3, nodes => Nodes3,
+                                           updated => Updated3, continue => Continue3});
+                  #{?STRUCT_KEY := ?STATE_FAIL} ->
+                      update_m_state(MB, #{error => Error3})
+              end
+      end, MA).
 
 -spec then(astranaut_traverse_m(S, _A), astranaut_traverse_m(S, B)) -> astranaut_traverse_m(S, B).
 then(MA, MB) ->
@@ -220,7 +220,7 @@ then(MA, MB) ->
 return(A) ->
     Inner = 
         fun(_Formatter, State, Ctx) ->
-                state_ok(A, State, Ctx)
+                state_ok(#{return => A, state => State, ctx => Ctx, updated => true})
         end,
     new(Inner).
 
@@ -232,40 +232,70 @@ return(A) ->
 return(A, ?TRAVERSE_M) ->
     return(A).
 
+%% bind_node(NodeA, MB, BMC, pre) ->
+%%     bind(
+%%       listen_continue(pop_nodes(updated_node(NodeA, MB))),
+%%       fun({NodeBs, true}) ->
+%%               astranaut_traverse_m_v3:nodes(NodeBs);
+%%          ({NodeBs, false}) ->
+%%               astranaut_monad:map_m(BMC, NodeBs, ?MODULE)
+%%       end);
+%% bind_node(NodeA, MB, BMC, _) ->
+%%     bind(updated_node(NodeA, MB), BMC).
+%% updated_node(NodeA, MB) ->
+%%     map_m_state_ok(
+%%       fun(#{updated := false} = MState) ->
+%%               update_m_state(MState, #{nodes => astranaut_endo:endo([NodeA])});
+%%          (MState) ->
+%%               MState
+%%       end, MB).
+bind_node(NodeA, MB, BMC, pre) ->
+    bind(
+      listen_continue(updated_node(NodeA, MB)),
+      fun({NodeB, true}) ->
+              astranaut_traverse_m_v3:return(NodeB);
+         ({NodeB, false}) ->
+              BMC(NodeB)
+      end);
+bind_node(NodeA, MB, BMC, _) ->
+    bind(updated_node(NodeA, MB), BMC).
+
+updated_node(NodeA, MB) ->
+    map_m_state_ok(
+      fun(#{updated := false} = MState) ->
+              update_m_state(MState, #{return => NodeA});
+         (MState) ->
+              MState
+      end, MB).
+
 -spec fail_on_error(astranaut_traverse_m(S, A)) -> astranaut_traverse_m(S, A).
 fail_on_error(MA) ->
-    Inner =
-        fun(Formatter, State0, Ctx0) ->
-                with_state_ok(
-                  run_0(MA, Formatter, State0, Ctx0),
-                  fun(#{state := State1, ctx := Ctx1, error := Error} = StateOk) ->
-                          case astranaut_error_state:is_empty_error(Error) of
-                              true ->
-                                  StateOk;
-                              false ->
-                                  state_fail(State1, Ctx1, Error)
-                          end
-                  end)
-        end,
-    new(Inner).
+    map_m_state_ok(
+      fun(#{state := State1, ctx := Ctx1, error := Error} = StateOk) ->
+              case astranaut_error_state:is_empty_error(Error) of
+                  true ->
+                      StateOk;
+                  false ->
+                      state_fail(#{state => State1, ctx => Ctx1, error => Error})
+              end
+        end, MA).
 
 -spec sequence_either([astranaut_traverse_m(S, A)]) -> astranaut_traverse_m(S, [A]).
 sequence_either([MA|MAs]) ->
-    Inner =
-        fun(Formatter, State0, Ctx0) ->
-                #{state := State1, ctx := Ctx1, error := Error1} = MState1 = 
-                    run_0(MA, Formatter, State0, Ctx0),
-                #{state := State2, ctx := Ctx2, error := Error2} = MState2 = 
-                    run_0(sequence_either(MAs), Formatter, State1, Ctx1),
-                Error3 = astranaut_error_state:merge(Error1, Error2),
+    map_m_state(
+      fun(Formatter, #{state := State1, ctx := Ctx1, error := Error1} = MState1) ->
+              #{state := State2, ctx := Ctx2, error := Error2} = MState2 = 
+                  run_0(sequence_either(MAs), Formatter, State1, Ctx1),
+              Error3 = astranaut_error_state:merge(Error1, Error2),
                 case {MState1, MState2} of
-                    {#{?STRUCT_KEY := ?STATE_OK, return := A}, #{?STRUCT_KEY := ?STATE_OK, return := As}} ->
-                        state_ok([A|As], State2, Ctx2, Error3);
+                    {#{?STRUCT_KEY := ?STATE_OK, return := A,  nodes := Nodes1},
+                     #{?STRUCT_KEY := ?STATE_OK, return := As, nodes := Nodes2}} ->
+                        Nodes3 = astranaut_endo:append(Nodes1, Nodes2),
+                        update_m_state(MState2, #{return => [A|As], nodes => Nodes3, error => Error3});
                     _ ->
-                        state_fail(State2, Ctx2, Error3)
+                        state_fail(#{state => State2, ctx => Ctx2, error => Error3})
                 end
-        end,
-    new(Inner);
+        end, MA);
 sequence_either([]) ->
     astranaut_traverse_m:return([]).
 
@@ -282,7 +312,7 @@ fails(Es) ->
     Inner =
         fun(_Formatter, State, Ctx) ->
                 Ctx1 = astranaut_error_ctx:append_errors(Es, Ctx),
-                state_fail(State, Ctx1)
+                state_fail(#{state => State, ctx => Ctx1})
         end,
     new(Inner).
 %%%===================================================================
@@ -293,7 +323,7 @@ state(F) ->
     Inner = 
         fun(_Formatter, State0, Ctx) ->
                 {A, State1} = F(State0),
-                state_ok(A, State1, Ctx)
+                state_ok(#{return => A, state => State1, ctx => Ctx})
         end,
     new(Inner).
 
@@ -312,24 +342,53 @@ put(State) ->
 %%%===================================================================
 %%% error_state related functions
 %%%===================================================================
+listen(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, nodes := Nodes} = StateM) ->
+              update_m_state(StateM, #{return => {Return, Nodes}})
+      end, MA).
+
+set_continue(MA) ->
+    map_m_state_ok(
+      fun(#{} = StateM) ->
+              update_m_state(StateM, #{continue => true})
+      end, MA).
+
+listen_continue(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, continue := Continue} = StateM) ->
+              update_m_state(StateM, #{return => {Return, Continue}, continue => false})
+      end, MA).
+
+listen_updated(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, updated := Updated} = StateM) ->
+              update_m_state(StateM, #{return => {Return, Updated}})
+      end, MA).
+
+pop_nodes(MA) ->
+    map_m_state_ok(
+      fun(#{nodes := Nodes} = StateM) ->
+              update_m_state(StateM, #{return => astranaut_endo:run(Nodes), nodes => astranaut_endo:endo([])})
+      end, MA).
+
+nodes(Nodes) ->
+    Inner =
+        fun(_Formatter, State0, Ctx) ->
+                state_ok(#{return => ok, state => State0, ctx => Ctx, nodes => astranaut_endo:endo(Nodes)})
+        end,
+    new(Inner).
 
 -spec with_error(fun((astranaut_error_state:astranaut_error_state())
                      -> astranaut_error_state:astranaut_error_state()),
                  astranaut_traverse_m(S, A))
                 -> astranaut_traverse_m(S, A).
 with_error(F, MA) ->
-    Inner = 
-        fun(Formatter, State, Ctx) ->
-                #{error := Error1} = MState = run_0(MA, Formatter, State, Ctx),
-                Error2 = F(Error1),
-                case MState of
-                    #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1} ->
-                        state_ok(Return, State1, Ctx, Error2);
-                    #{?STRUCT_KEY := ?STATE_FAIL, state := State1} ->
-                        state_fail(State1, Ctx, Error2)
-                end
-        end,
-    new(Inner).
+    map_m_state(
+      fun(#{error := Error1} = MState) ->
+              Error2 = F(Error1),
+              update_m_state(MState, #{error => Error2})
+        end, MA).
 
 -spec with_formatter(fun((formatter()) -> formatter()), astranaut_traverse_m(S, A)) -> astranaut_traverse_m(S, A).
 with_formatter(Formatter, MA) ->
@@ -346,7 +405,7 @@ modify_ctx(F) ->
     Inner = 
         fun(_Formatter, State, Ctx) ->
                 Ctx1 = F(Ctx),
-                state_ok(ok, State, Ctx1)
+                state_ok(#{return => ok, state => State, ctx => Ctx1})
         end,
     new(Inner).
 
@@ -397,25 +456,23 @@ eof() ->
 
 -spec update_line(line(), astranaut_traverse_m(S, A)) -> astranaut_traverse_m(S, A).
 update_line(Line, MA) ->
-    Inner = 
-        fun(Formatter, State, #{?STRUCT_KEY := ?ERROR_CTX} = Ctx0) ->
-                #{error := Error0, ctx := Ctx1} = MState = run_0(MA, Formatter, State, Ctx0), 
-                case Ctx1 of
-                    #{?STRUCT_KEY := ?ERROR_CTX, errors := [], warnings := []} ->
-                        MState;
-                    #{?STRUCT_KEY := ?ERROR_CTX} ->
-                        Error1 = astranaut_error_state:update_ctx(Line, Formatter, Ctx1, Error0),
-                        Ctx2 = Ctx1#{errors => [], warnings => []},
-                        MState#{error => Error1, ctx => Ctx2}
-                end
-        end,
-    new(Inner).
+    map_m_state(
+      fun(Formatter, #{error := Error0, ctx := Ctx1} = MState) ->
+              case Ctx1 of
+                  #{?STRUCT_KEY := ?ERROR_CTX, errors := [], warnings := []} ->
+                      MState;
+                  #{?STRUCT_KEY := ?ERROR_CTX} ->
+                      Error1 = astranaut_error_state:update_ctx(Line, Formatter, Ctx1, Error0),
+                      Ctx2 = Ctx1#{errors => [], warnings => []},
+                      MState#{error => Error1, ctx => Ctx2}
+              end
+        end, MA).
 
 -spec tell(astranaut_error_state:astranaut_error_state()) -> astranaut_traverse_m(_S, _A).
 tell(Error) ->
     Inner = 
         fun(_Formatter, State, Ctx) ->
-                state_ok(ok, State, Ctx, Error)
+                state_ok(#{return => ok, state => State, ctx => Ctx, error => Error})
         end,
     new(Inner).
 %%--------------------------------------------------------------------
@@ -427,20 +484,10 @@ tell(Error) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-update_return_continue(Return, #{continue := true}) ->
-    {continue, Return};
-update_return_continue(Return, #{}) ->
-    Return.
-
 run_0(#{?STRUCT_KEY := ?TRAVERSE_M, inner := Inner},
       Formatter, State,
       #{?STRUCT_KEY := ?ERROR_CTX} = Ctx) ->
     Inner(Formatter, State, Ctx).
-
-with_state_ok(#{'__struct__' := ?STATE_OK} = State, Fun) ->
-    Fun(State);
-with_state_ok(#{'__struct__' := ?STATE_FAIL} = State, _Fun) ->
-    State.
 
 convertable_struct_key(?RETURN_OK) ->
     true;
@@ -455,3 +502,101 @@ convertable_struct_key(?BASE_M) ->
 convertable_struct_key(_) ->
     false.
 
+map_m_state(F, MA) ->
+    Inner = 
+        fun(Formatter, State, #{?STRUCT_KEY := ?ERROR_CTX} = Ctx0) ->
+                MState1 = run_0(MA, Formatter, State, Ctx0), 
+                MState2 = apply_map_state_m_f(F, Formatter, MState1),
+                case MState2 of
+                    #{?STRUCT_KEY := ?STATE_OK} ->
+                        MState2;
+                    #{?STRUCT_KEY := ?STATE_FAIL} ->
+                        MState2;
+                    _ ->
+                        exit({invalid_m_state_after_map, MState1, MState2})
+                end
+        end,
+    new(Inner).
+
+map_m_state_ok(F, MA) ->
+    map_m_state(
+      fun(Formatter, #{?STRUCT_KEY := ?STATE_OK} = StateM) ->
+              apply_map_state_m_f(F, Formatter, StateM);
+         (_Formatter, #{?STRUCT_KEY := ?STATE_FAIL} = StateM) ->
+              StateM
+      end, MA).
+
+apply_map_state_m_f(F, _Formatter, MState) when is_function(F, 1) ->
+    F(MState);
+apply_map_state_m_f(F, Formatter, MState) when is_function(F, 2) ->
+    F(Formatter, MState).
+
+update_m_state(#{} = State, #{} = Map) ->
+    merge_struct(State, Map, #{?STATE_OK => [return, nodes, state, ctx, error, updated, continue],
+                               ?STATE_FAIL => {[state, ctx, error], [return, nodes, updated, continue]}}).
+
+merge_struct(#{?STRUCT_KEY := StructName} = Struct, Map, KeyMap) when is_map(KeyMap)->
+    case maps:find(StructName, KeyMap) of
+        {ok, {Keys, OptionalKeys}} ->
+            merge_struct(Struct, Map, Keys, OptionalKeys);
+        {ok, Keys} ->
+            merge_struct(Struct, Map, Keys, []);
+        error ->
+            erlang:error({invalid_struct, StructName})
+    end.
+merge_struct(#{?STRUCT_KEY := StructName} = Struct, Map, Keys, OptionalKeys) when is_list(Keys), is_list(OptionalKeys) ->
+    RestKeys = maps:keys(Map) -- Keys -- OptionalKeys -- [?STRUCT_KEY],
+    case RestKeys of
+        [] ->
+            lists:foldl(
+              fun(Key, Acc) ->
+                      case maps:find(Key, Map) of
+                          {ok, Value} ->
+                              case validate_struct_value(Key, Value) of
+                                  true ->
+                                      maps:put(Key, Value, Acc);
+                                  false ->
+                                      erlang:error({invalid_struct_value, StructName, Key, Value})
+                              end;
+                          error ->
+                              case maps:is_key(Key, Acc) of
+                                  true ->
+                                      Acc;
+                                  false ->
+                                      init_struct_value(Acc, Key)
+                              end
+                      end
+              end, Struct, Keys);
+        false ->
+            erlang:error({invalid_merge_keys, StructName, RestKeys, Map})
+    end.
+
+validate_struct_value(return, _Return) ->
+    true;
+validate_struct_value(nodes, #{?STRUCT_KEY := ?ENDO}) ->
+    true;
+validate_struct_value(state, _State) ->
+    true;
+validate_struct_value(ctx, #{?STRUCT_KEY := ?ERROR_CTX}) ->
+    true;
+validate_struct_value(error, #{?STRUCT_KEY := ?ERROR_STATE}) ->
+    true;
+validate_struct_value(updated, Updated) when is_boolean(Updated) ->
+    true;
+validate_struct_value(continue, Continue) when is_boolean(Continue) ->
+    true;
+validate_struct_value(_Key, _Value) ->
+    false.
+
+init_struct_value(#{} = Struct, nodes) ->
+    Struct#{nodes => astranaut_endo:endo([])};
+init_struct_value(#{} = Struct, ctx) ->
+    Struct#{ctx => astranaut_error_ctx:new()};
+init_struct_value(#{ctx := Ctx} = Struct, error) ->
+    Struct#{error => astranaut_error_state:new(Ctx)};
+init_struct_value(#{} = Struct, updated) ->
+    Struct#{updated => false};
+init_struct_value(#{} = Struct, continue) ->
+    Struct#{continue => false};
+init_struct_value(#{?STRUCT_KEY := StructName}, Key) ->
+    erlang:error({struct_value_required, StructName, Key}).

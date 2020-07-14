@@ -228,6 +228,9 @@ map_m_1(F, NodeA, #{} = Opts) ->
     map_m_tree(F, NodeA, Opts, SyntaxLib).
 
 map_m_tree(_F, {error, Reason}, _Opts, _SyntaxLib) ->
+    %% astranaut_traverse_m:bind(
+    %%   astranaut_traverse_m:error(Reason),
+    %%   astranaut_traverse_m:nodes([]));
     astranaut_traverse_m:return({error, Reason});
 map_m_tree(F, NodeA, Opts, SyntaxLib) ->
     Attr = maps:without([traverse, parse_transform, monad, monad_class, formatter], Opts),
@@ -241,27 +244,23 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
                     _Subtrees ->
                         pre
                 end,
-              bind_with_continue(
-                NodeA, 
-                apply_f(F, NodeA, Attr#{step => PreType, node => NodeType}, SyntaxLib),
-                fun(NodeB) ->
-                        case SyntaxLib:subtrees(NodeB, Opts) of
-                            [] ->
-                                astranaut_traverse_m:return(NodeB);
-                            Subtrees ->
-                                Parent = SyntaxLib:type(NodeB),
-                                astranaut_traverse_m:bind(
-                                  map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
-                                  fun(NodeC) ->
-                                          bind_with_continue(
-                                            NodeC, 
-                                            apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib),
-                                            fun(NodeD) ->
-                                                    astranaut_traverse_m:return(NodeD)
-                                            end)
-                                  end)
-                        end
-                end);
+            astranaut_traverse_m:bind_node(
+              NodeA, apply_f(F, NodeA, Attr#{step => PreType, node => NodeType}, SyntaxLib),
+              fun(NodeB) ->
+                      case SyntaxLib:tps(NodeB, Opts) of
+                          {_Type, _Pos, []} ->
+                              %% astranaut_traverse_m:nodes([NodeB]);
+                              astranaut_traverse_m:return(NodeB);
+                          {Parent, _Pos, Subtrees} ->
+                              astranaut_traverse_m:bind_node(
+                                NodeB, map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
+                                fun(NodeC) ->
+                                        astranaut_traverse_m:bind_node(
+                                          NodeC, apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib),
+                                          fun astranaut_traverse_m:return/1, post)
+                                end, children)
+                      end
+              end, pre);
         {file, File} ->
             astranaut_traverse_m:then(
               astranaut_traverse_m:update_file(File),
@@ -272,17 +271,6 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
 apply_f(F, Node, Attr, SyntaxLib) ->
     Line = SyntaxLib:get_pos(Node),
     astranaut_traverse_m:update_line(Line, F(Node, Attr)).
-    
-bind_with_continue(NodeA, MNodeB, BMC) ->
-    astranaut_traverse_m:bind(
-      MNodeB,
-      fun(continue) ->
-              astranaut_traverse_m:return(NodeA);
-         ({continue, NodeB}) ->
-              astranaut_traverse_m:return(NodeB);
-         (NodeB) ->
-              BMC(NodeB)
-      end).
 
 map_m_children(F, Node, Opts) ->
     SyntaxLib = syntax_lib(Opts),
@@ -295,8 +283,10 @@ map_m_children(_F, Node, [], _Opts, _SyntaxLib) ->
 map_m_children(F, Node, Subtrees, Opts, SyntaxLib) ->
     SyntaxType = SyntaxLib:type(Node),
     astranaut_traverse_m:bind(
-      map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType}),
-      fun(Subtrees1) ->
+      astranaut_traverse_m:listen_updated(map_m_subtrees(F, Subtrees, Opts#{parent => SyntaxType})),
+      fun({_Subtrees1, false}) ->
+              astranaut_traverse_m:return(Node);
+         ({Subtrees1, true}) ->
               Node1 = SyntaxLib:update_subtrees(Node, Subtrees1),
               astranaut_traverse_m:return(Node1)
       end).
@@ -380,7 +370,7 @@ fun_return_to_monad(continue, Node, Opts) ->
     fun_return_to_monad({continue, Node}, Node, Opts);
 fun_return_to_monad(Return, Node, Opts) ->
     WithState = maps:get(with_state, Opts, false),
-    case astranaut_walk_return:to_map(Node, Return) of
+    case astranaut_walk_return:to_map(Return) of
         {ok, StructBase} ->
             WalkReturn = astranaut_walk_return:new(StructBase),
             astranaut_traverse_m:astranaut_traverse_m(WalkReturn);

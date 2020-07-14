@@ -386,7 +386,7 @@ continue_node_m(NodeM, Context, Attr) ->
                         astranaut_traverse_m:bind(
                           astranaut_traverse:fun_return_to_monad(PostNode, Node1, #{with_state => true}),
                           fun(Node2) ->
-                                  astranaut_traverse_m:return({continue, Node2})
+                                  astranaut_traverse_m:set_continue(astranaut_traverse_m:return(Node2))
                           end)
                 end)
       end)).

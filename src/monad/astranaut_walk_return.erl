@@ -27,9 +27,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-new(#{node := Node} = Map) ->
-    Map1 = maps:remove(node, Map#{return => Node}),
-    new(Map1);
 new(#{} = Map) ->
     Map1 = up_map(Map),
     default(Map1);
@@ -38,7 +35,7 @@ new(Return) ->
         {ok, Map} ->
             new(Map);
         error ->
-            new(#{return => Return})
+            new(#{node => Return})
     end.
 
 to_map({warning, Warning}) ->
@@ -46,19 +43,19 @@ to_map({warning, Warning}) ->
 to_map({warnings, Warnings}) ->
     {ok, #{warnings => Warnings}};
 to_map({warning, B, Warning}) ->
-    {ok, #{return => B, warnings => [Warning]}};
+    {ok, #{node => B, warnings => [Warning]}};
 to_map({warnings, B, Warnings}) ->
-    {ok, #{return => B, warnings => Warnings}};
+    {ok, #{node => B, warnings => Warnings}};
 to_map({error, Error}) ->
     {ok, #{errors => [Error]}};
 to_map({errors, Errors}) when is_list(Errors) ->
     {ok, #{errors => Errors}};
 to_map({error, B, Error}) ->
-    {ok, #{return => B, errors => [Error]}};
+    {ok, #{node => B, errors => [Error]}};
 to_map({errors, B, Errors}) when is_list(Errors) ->
-    {ok, #{return => B, errors => Errors}};
+    {ok, #{node => B, errors => Errors}};
 to_map({ok, B}) ->
-    {ok, #{return => B}};
+    {ok, #{node => B}};
 to_map(continue) ->
     {ok, #{continue => true}};
 to_map({continue, B}) ->
@@ -75,6 +72,7 @@ to_map(A, Return) ->
         error ->
             error
     end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -100,21 +98,20 @@ up_map(#{warning := Warning} = Map) ->
     Map1#{warnings => [Warning|Warnings]};
 up_map(#{error := Error} = Map) ->
     Map1 = maps:remove(error, Map),
-    Errors = maps:get(warnings, Map, []),
+    Errors = maps:get(errors, Map, []),
     Map1#{errors => [Error|Errors]};
+%% up_map(#{node := Node} = Map) ->
+%%     Map1 = maps:remove(node, Map),
+%%     Nodes = maps:get(nodes, Map, []),
+%%     Map1#{nodes => [Node|Nodes]};
+up_map(#{node := Node} = Map) ->
+    Map1 = maps:remove(node, Map),
+    Map1#{return => Node};
 up_map(#{errors := Errors}) when not is_list(Errors) ->
     exit({errors_should_be_list, Errors});
 up_map(#{warnings := Warnings}) when not is_list(Warnings) ->
     exit({warnings_should_be_list, Warnings});
+up_map(#{nodes := Nodes}) when not is_list(Nodes) ->
+    exit({nodes_should_be_list, Nodes});
 up_map(#{} = Map) ->
-    case maps:get(errors, Map, []) of
-        [] ->
-            case maps:is_key(return, Map) of
-                false ->
-                    exit({no_return_without_errors, Map});
-                true ->
-                    Map
-            end;
-        _ ->
-            Map
-    end.
+    Map.
