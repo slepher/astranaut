@@ -52,25 +52,20 @@ with_attribute(Fun, Init, Forms, Attr, Opts) ->
 
 forms_with_attribute(Fun, Init, Forms, Attr, Opts) ->
     Fun1 = update_with_attribute_f(Fun),
-    ReturnM = 
-        astranaut_traverse:reduce(
-          fun({attribute, Line, Attr1, AttrValue} = Node, {FormsAcc, Acc}, #{}) when Attr1 == Attr ->
-                  %% it's too complex, try simplify it.
-                  astranaut_traverse_m:bind(
-                    astranaut_traverse_m:astranaut_traverse_m(
-                      astranaut_base_m:bind(
-                        values_apply_fun(Fun1, AttrValue, {[], Acc}, #{line => Line}),
-                        fun({Nodes, Acc1}) ->
-                                astranaut_base_m:return({Nodes ++ [Node|FormsAcc], Acc1})
-                        end)),
-                    fun(State) ->
-                            astranaut_traverse_m:put(State)
-                    end);
-             (Node, {FormsAcc, Acc}, #{}) ->
-                  {[Node|FormsAcc], Acc}
-          end, {[], Init}, Forms, Opts#{traverse => list, simplify_return => false}),
-    LiftFun = fun({Forms1, Final}) -> {lists:reverse(Forms1), Final} end,
-    astranaut_traverse:transform_return_m(astranaut_monad:lift_m(LiftFun, ReturnM, astranaut_return_m), Opts).
+    astranaut_traverse:mapfold(
+      fun({attribute, Line, Attr1, AttrValue} = Node, Acc, #{}) when Attr1 == Attr ->
+              %% it's too complex, try simplify it.
+              astranaut_traverse_m:bind(
+                astranaut_traverse_m:astranaut_traverse_m(
+                  values_apply_fun(Fun1, AttrValue, {[], Acc}, #{line => Line})),
+                fun({Nodes, State}) ->
+                        astranaut_traverse_m:then(
+                          astranaut_traverse_m:nodes([Node|Nodes]),
+                          astranaut_traverse_m:put(State))
+                end);
+         (Node, Acc, #{}) ->
+              {Node, Acc}
+      end, Init, Forms, Opts#{traverse => list}).
 
 -spec options(options()) -> astranaut_base_m:astranaut_base_m(option_map()).
 options(Atom) when is_atom(Atom) ->
@@ -105,7 +100,8 @@ attr_walk_return(#{node := Node} = Map) ->
 attr_walk_return(#{} = Map) ->
     Nodes = maps:get(nodes, Map, []),
     A = maps:get(return, Map, ok),
-    astranaut_walk_return:new(Map#{return => {Nodes, A}});
+    Map1 = maps:remove(nodes, Map),
+    astranaut_walk_return:new(Map1#{return => {Nodes, A}});
 attr_walk_return(Return) ->
     case astranaut_walk_return:to_map(Return) of
         {ok, Map} ->
