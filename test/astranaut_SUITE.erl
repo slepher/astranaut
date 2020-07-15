@@ -108,7 +108,8 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_reduce, test_reduce_attr, test_with_formatter, 
+    [test_reduce, test_map_with_state_node, test_map_with_state, test_map_spec, test_map_type,
+     test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_with_attribute, test_forms_with_attribute].
 
 %%--------------------------------------------------------------------
@@ -142,6 +143,60 @@ test_reduce(_Config) ->
     FileWarnings = [{File, [{26, ?MODULE, mark_1}]}],
     FileErrors = [{File, [{23, ?MODULE, mark_error_1}]}],
     ?assertMatch({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
+    ok.
+
+test_map_with_state_node(_Config) ->
+    NodeA = {match, 10, {var, 10, 'A'}, {atom, 10, a}},
+    Return =
+        astranaut_traverse:map_with_state(
+          fun({var, Line, 'A'}, Acc, #{}) ->
+                  Node1 = {var, Line, 'B'},
+                  astranaut_walk_return:new(#{state => Acc + 1, node => Node1});
+             (Node, Acc, #{}) ->
+                  {Node, Acc}
+          end, 0, NodeA, #{formatter => ?MODULE, traverse => pre}),
+    ?assertEqual({match, 10, {var, 10, 'B'}, {atom, 10, a}}, Return),
+    ok.
+
+test_map_with_state(_Config) ->
+    Forms = astranaut_sample_0:forms(),
+    File = astranaut:file(Forms),
+    ReturnM =
+        astranaut_traverse:map_with_state(
+          fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
+                  io:format("Acc is ~p~n", [Acc]),
+                  astranaut_walk_return:new(#{warning => mark_1, state => Acc + 1, node => Node});
+             ({atom, _Line, mark_error_1}, Acc, #{}) ->
+                  {{atom, _Line, mark_error_2}, Acc};
+             (Node, Acc, #{}) ->
+                  {Node, Acc}
+          end, 0, Forms, #{formatter => ?MODULE, traverse => pre}),
+    FileWarnings = [{File, [{26, ?MODULE, mark_1}]}],
+    #{'__struct__' := astranaut_return_ok, error := Error, return := Return} = ReturnM,
+    io:format("return is ~p~n", [Return]),
+    ?assertMatch({[], FileWarnings}, astranaut_error_state:realize(Error)),
+    ok.
+
+test_map_spec(_Config) ->
+    Nodes = {attribute,56,spec,
+             {{test_ok,0},[{type,56,'fun',[{type,56,product,[]},{atom,56,ok}]}]}},
+    Nodes1 =
+        astranaut_traverse:map(
+          fun(Node, #{}) ->
+                  Node
+          end, Nodes, #{traverse => post}),
+    ?assertEqual(Nodes, Nodes1),
+    ok.
+
+test_map_type(_Config) ->
+    Nodes = {attribute,21,type,{test,{type,21,record,[{atom,21,test}]},[{var, 21, 'A'}]}},
+    Nodes1 =
+        astranaut_traverse:map(
+          fun(Node, #{} = Attr) ->
+                  io:format("node is ~p ~p~n", [Node, Attr]),
+                  Node
+          end, Nodes, #{traverse => post}),
+    ?assertEqual(Nodes, Nodes1),
     ok.
 
 test_reduce_attr(_Config) ->

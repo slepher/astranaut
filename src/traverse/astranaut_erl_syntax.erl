@@ -57,7 +57,14 @@ subtrees(Node, #{} = Opts) ->
     subtrees(Node, Opts#{type => Type}).
 
 update_subtrees(Node, Subtrees) ->
-    revert_root(erl_syntax:update_tree(Node, Subtrees)).
+    try
+        revert_root(erl_syntax:update_tree(Node, Subtrees)) of
+        Node1 ->
+            Node1
+    catch
+        Type:Exception?CAPTURE_STACKTRACE ->
+            erlang:raise(Type, {update_subtress_failed, Node, Subtrees, Exception}, ?GET_STACKTRACE)
+    end.
 
 node_type(_Node, #{node := NodeType}) ->
     NodeType;

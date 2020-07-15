@@ -74,13 +74,13 @@ walk_form(Form, _RebindingOptionsRec) ->
 
 walk_function_clause(Clause, RebindingOptions) ->
     Context0 = astranaut_rebinding_scope:new_context(),
-    astranaut_traverse:map_with_state(
+    astranaut_traverse:mapfold(
         fun(Node, Acc, Attr) ->
                 Attr1 = maps:merge(Attr, maps:with(astranaut_rebinding_options:keys(), RebindingOptions)),
                 walk_node(Node, Acc, Attr1)
         end, Context0, Clause, #{node => form, traverse => all, match_right_first => true, parent => fun_expr}).
 
-walk_node(Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
+walk_node( Node, #{} = Context, #{step := pre, node := expression} = Attr) ->
     NodeType = erl_syntax:type(Node),
     case is_scope_group(NodeType, Attr) of
         true ->
@@ -313,7 +313,7 @@ walk_record(Node, Context, Attr) ->
 
 walk_match(Node, Context, Attr) ->
     Sequence = fun([PatternMs, ExpressionM]) ->
-                       PatternsM = astranaut_traverse:deep_sequence_m(PatternMs),
+                       PatternsM = astranaut_monad:sequence_m(PatternMs, astranaut_traverse_m),
                        PatternsM1 = astranaut_rebinding_scope:with_match_left_pattern(PatternsM),
                        %% walk expression first
                        astranaut_traverse:deep_r_sequence_m([PatternsM1, ExpressionM])
@@ -376,17 +376,14 @@ walk_sequence_children(Sequence, FNode, Node, Context, #{} = Opts0, Attr) ->
 continue_node_m(NodeM, Context, Attr) ->
     astranaut_traverse_m:then(
       astranaut_traverse_m:put(Context),
-    astranaut_traverse_m:bind(
-      NodeM,
-      fun(Node1) ->
-              astranaut_traverse_m:bind(
-               astranaut_traverse_m:get(),
-                fun(Context1) ->
-                        PostNode = walk_node(Node1, Context1, Attr#{step => post}),
-                        astranaut_traverse_m:bind(
-                          astranaut_traverse:fun_return_to_monad(PostNode, Node1, #{with_state => true}),
-                          fun(Node2) ->
-                                  astranaut_traverse_m:set_continue(astranaut_traverse_m:return(Node2))
-                          end)
-                end)
-      end)).
+      astranaut_traverse_m:bind(
+        NodeM,
+        fun(Node1) ->
+                astranaut_traverse_m:bind(
+                  astranaut_traverse_m:get(),
+                  fun(Context1) ->
+                          PostNode = walk_node(Node1, Context1, Attr#{step => post}),
+                          NodeM1 = astranaut_traverse:fun_return_to_monad(PostNode, Node1, #{with_state => true}),
+                          astranaut_traverse_m:set_continue(NodeM1)
+                  end)
+        end)).

@@ -295,43 +295,43 @@ test_sequence_either(_Config) ->
     ?assertEqual({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
     ok.
 
+%% test_bind_node(_Config) -> 
+%%     NodeA = {atom, 10, 'A'},
+%%     Walk = astranaut_walk_return:new(#{}),
+%%     Return = 
+%%         bind_pre(NodeA, Walk,
+%%                  fun({atom, _Line, A}) ->
+%%                          NodeC = {atom, 20, A},
+%%                          astranaut_walk_return:new(#{node => NodeC})
+%%                  end),
+%%     ?assertEqual({atom, 20, 'A'}, Return),
+%%     ok.
+
+%% test_bind_node_continue(_Config) -> 
+%%     NodeA = {atom, 10, 'A'},
+%%     Walk = astranaut_walk_return:new(#{continue => true, node => {atom, 10, 'B'}}),
+%%     Return = 
+%%         bind_pre(NodeA, Walk,
+%%                  fun({atom, _Line, A}) ->
+%%                          NodeC = {atom, 20, A},
+%%                          astranaut_walk_return:new(#{node => NodeC})
+%%                  end),
+%%     ?assertEqual({atom, 10, 'B'}, Return),
+%%     ok.
+
+%% test_bind_node_update(_Config) ->
+%%     NodeA = {atom, 10, 'A'},
+%%     Walk = astranaut_walk_return:new(#{node => {atom, 10, 'B'}}),
+%%     Return = 
+%%         bind_pre(NodeA, Walk,
+%%                  fun({atom, _Line, A}) ->
+%%                          NodeC = {atom, 20, A},
+%%                          astranaut_walk_return:new(#{node => NodeC})
+%%                  end),
+%%     ?assertEqual({atom, 20, 'B'}, Return),
+%%     ok.
+
 test_bind_node(_Config) -> 
-    NodeA = {atom, 10, 'A'},
-    Walk = astranaut_walk_return:new(#{}),
-    Return = 
-        bind_pre(NodeA, Walk,
-                 fun({atom, _Line, A}) ->
-                         NodeC = {atom, 20, A},
-                         astranaut_walk_return:new(#{node => NodeC})
-                 end),
-    ?assertEqual({atom, 20, 'A'}, Return),
-    ok.
-
-test_bind_node_continue(_Config) -> 
-    NodeA = {atom, 10, 'A'},
-    Walk = astranaut_walk_return:new(#{continue => true, node => {atom, 10, 'B'}}),
-    Return = 
-        bind_pre(NodeA, Walk,
-                 fun({atom, _Line, A}) ->
-                         NodeC = {atom, 20, A},
-                         astranaut_walk_return:new(#{node => NodeC})
-                 end),
-    ?assertEqual({atom, 10, 'B'}, Return),
-    ok.
-
-test_bind_node_update(_Config) ->
-    NodeA = {atom, 10, 'A'},
-    Walk = astranaut_walk_return:new(#{node => {atom, 10, 'B'}}),
-    Return = 
-        bind_pre(NodeA, Walk,
-                 fun({atom, _Line, A}) ->
-                         NodeC = {atom, 20, A},
-                         astranaut_walk_return:new(#{node => NodeC})
-                 end),
-    ?assertEqual({atom, 20, 'B'}, Return),
-    ok.
-
-test_bind_2(_Config) -> 
     NodeA = {atom, 10, 'A'},
     Walk = astranaut_walk_return:new(#{}),
     Return = 
@@ -343,7 +343,7 @@ test_bind_2(_Config) ->
     ?assertEqual([{atom, 20, 'A'}, {atom, 30, 'A'}], Return),
     ok.
 
-test_bind_continue_2(_Config) -> 
+test_bind_node_continue(_Config) -> 
     NodeA = {atom, 10, 'A'},
     Walk = astranaut_walk_return:new(#{continue => true, nodes => [{atom, 10, 'B'}, {atom, 10, 'C'}]}),
     Return = 
@@ -355,7 +355,7 @@ test_bind_continue_2(_Config) ->
     ?assertEqual([{atom, 10, 'B'}, {atom, 10, 'C'}], Return),
     ok.
 
-test_bind_update_2(_Config) ->
+test_bind_node_update(_Config) ->
     NodeA = {atom, 10, 'A'},
     Walk = astranaut_walk_return:new(#{nodes => [{atom, 10, 'B'}, {atom, 10, 'C'}]}),
     Return = 
@@ -370,13 +370,14 @@ test_bind_update_2(_Config) ->
 bind_pre(NodeA, Walk, BWC) ->
     MNodeB = astranaut_traverse_m:astranaut_traverse_m(Walk),
     MNodeC = 
-        astranaut_traverse_m:bind_node(
-          NodeA, MNodeB, 
-          fun(NodeB) ->
-                  Walk2 = BWC(NodeB),
-                  MNodeC = astranaut_traverse_m:astranaut_traverse_m(Walk2),
-                  astranaut_traverse_m:bind_node(NodeB, MNodeC, fun astranaut_traverse_m:return/1, post)
-          end, pre),
+        astranaut_traverse_m:pop_nodes(
+          astranaut_traverse_m:bind_continue_nodes(
+            astranaut_traverse_m:updated_node(NodeA, MNodeB),
+            fun(NodeB) ->
+                    Walk2 = BWC(NodeB),
+                    MNodeC = astranaut_traverse_m:astranaut_traverse_m(Walk2),
+                  astranaut_traverse_m:updated_node(NodeB, MNodeC)
+            end)),
     io:format("new node is ~p~n", [MNodeC]),
     #{return := Return} = astranaut_traverse_m:eval(MNodeC, hello, ok),
     Return.

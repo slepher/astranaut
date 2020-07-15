@@ -61,9 +61,9 @@
 %%%===================================================================
 -export([astranaut_traverse_m/1, to_monad/1, to_monad/2]).
 -export([convertable_struct/1]).
--export([run/3, eval/3, exec/3, enodes/3]).
+-export([run/3, run_1/3, eval/3, exec/3, enodes/3]).
 -export([bind/2, then/2, return/1]).
--export([bind_continue/2, bind_node/4, updated_node/2]).
+-export([bind_continue/2, bind_continue_nodes/2, updated_node/2]).
 -export(['>>='/3, return/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1, sequence_either/1]).
@@ -71,7 +71,7 @@
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
 -export([set_continue/1, set_continue/2, listen_continue/1, listen_updated/1]).
--export([listen/1, set_updated/1, pop_nodes/1, node/1, nodes/1]).
+-export([listen/1, set_updated/1, pop_nodes/1, as_node/1, node/1, nodes/1]).
 -export([with_formatter/2]).
 -export([modify_ctx/1]).
 -export([tell/1]).
@@ -91,7 +91,7 @@ astranaut_traverse_m(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
         fun(_Formatter, State, Ctx0) ->
                 State1 = maps:get(state, Map, State),
                 Continue = maps:get(continue, Map, false),
-                Updated = maps:is_key(return, Map),
+                Updated = maps:is_key(nodes, Map),
                 Nodes = maps:get(nodes, Map, []),
                 Return = maps:get(return, Map, ok),
                 #{errors := Errors, warnings := Warnings} = Map,
@@ -117,7 +117,7 @@ astranaut_traverse_m(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := Err
     Inner =
         fun(_Formatter, State, #{file := File} = Ctx) ->
                 Error2 = astranaut_error_state:update_file(File, Error1),
-                state_ok(#{return => Return, state => State, ctx => Ctx, error => Error2, updated => true})
+                state_ok(#{return => Return, state => State, ctx => Ctx, error => Error2})
         end,
     new(Inner);
 astranaut_traverse_m(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error1}) ->
@@ -173,11 +173,10 @@ run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
 run_1(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     case run_0(MA, Formatter, State, astranaut_error_ctx:new()) of
         #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1, nodes := Nodes, error := Error} ->
-            astranaut_return_m:return_ok({Return, State1, Nodes}, Error);
+            astranaut_return_m:return_ok({Return, State1, astranaut_endo:run(Nodes)}, Error);
         #{?STRUCT_KEY := ?STATE_FAIL, error := Error} ->
             astranaut_return_m:return_fail(Error)
     end.
-
 
 -spec eval(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m(A).
 eval(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
@@ -189,11 +188,11 @@ exec(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
 
 -spec enodes(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_base_m:astranaut_base_m(syntax_nodes()).
 enodes(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
-    F = fun({_A, _State1, Nodes}) -> astranaut_endo:run(Nodes) end,
+    F = fun({_A, _State1, Nodes}) -> Nodes end,
     astranaut_monad:lift_m(F, run_1(MA, Formatter, State), astranaut_return_m).
 
 -spec bind(astranaut_traverse_m(S, A), fun((A) -> astranaut_traverse_m(S, B))) -> astranaut_traverse_m(S, B).
-bind(MA, KMB) ->
+bind(MA, KMB) when is_function(KMB, 1) ->
     map_m_state_ok(
       fun(Formatter, #{return := A, state := State1,
                        updated := Updated1, continue := Continue1,
@@ -232,20 +231,15 @@ return(A) ->
 return(A, ?TRAVERSE_M) ->
     return(A).
 
-node(Node) ->
+bind_continue_nodes(MA, AMB) ->
     bind(
-      nodes([Node]),
-      return(Node)).
-%% bind_node(NodeA, MB, BMC, pre) ->
-%%     bind(
-%%       listen_continue(pop_nodes(updated_node(NodeA, MB))),
-%%       fun({NodeBs, true}) ->
-%%               astranaut_traverse_m_v3:nodes(NodeBs);
-%%          ({NodeBs, false}) ->
-%%               astranaut_monad:map_m(BMC, NodeBs, ?MODULE)
-%%       end);
-%% bind_node(NodeA, MB, BMC, _) ->
-%%     bind(updated_node(NodeA, MB), BMC).
+      listen_continue(pop_nodes(MA)),
+      fun({NodeAs, true}) ->
+              nodes(NodeAs);
+         ({NodeAs, false}) ->
+              astranaut_monad:map_m(AMB, NodeAs, ?MODULE)
+      end).
+
 %% updated_node(NodeA, MB) ->
 %%     map_m_state_ok(
 %%       fun(#{updated := false} = MState) ->
@@ -253,16 +247,17 @@ node(Node) ->
 %%          (MState) ->
 %%               MState
 %%       end, MB).
-bind_node(NodeA, MB, BMC, pre) ->
-    bind(
-      listen_continue(updated_node(NodeA, MB)),
-      fun({NodeB, true}) ->
-              return(NodeB);
-         ({NodeB, false}) ->
-              BMC(NodeB)
-      end);
-bind_node(NodeA, MB, BMC, _) ->
-    bind(updated_node(NodeA, MB), BMC).
+
+%% bind_node(NodeA, MB, BMC, pre) ->
+%%     bind(
+%%       listen_continue(updated_node(NodeA, MB)),
+%%       fun({NodeB, true}) ->
+%%               return(NodeB);
+%%          ({NodeB, false}) ->
+%%               BMC(NodeB)
+%%       end);
+%% bind_node(NodeA, MB, BMC, _) ->
+%%     bind(updated_node(NodeA, MB), BMC).
 
 bind_continue(MA, AMB) ->
     bind(
@@ -276,7 +271,7 @@ bind_continue(MA, AMB) ->
 updated_node(NodeA, MB) ->
     map_m_state_ok(
       fun(#{updated := false} = MState) ->
-              update_m_state(MState, #{return => NodeA});
+              update_m_state(MState, #{return => NodeA, nodes => astranaut_endo:endo([NodeA])});
          (MState) ->
               MState
       end, MB).
@@ -358,7 +353,7 @@ put(State) ->
 listen(MA) ->
     map_m_state_ok(
       fun(#{return := Return, nodes := Nodes} = StateM) ->
-              update_m_state(StateM, #{return => {Return, Nodes}})
+              update_m_state(StateM, #{return => {Return, astranaut_endo:run(Nodes)}})
       end, MA).
 
 set_continue(MA) ->
@@ -388,6 +383,19 @@ listen_updated(MA) ->
               update_m_state(StateM, #{return => {Return, Updated}})
       end, MA).
 
+as_node(MA) ->
+    bind(MA,
+         fun(Node) ->
+                 then(
+                   node(Node),
+                   return(Node))
+         end).
+
+node(Node) ->
+    then(
+      nodes([Node]),
+      return(Node)).
+
 pop_nodes(MA) ->
     map_m_state_ok(
       fun(#{nodes := Nodes} = StateM) ->
@@ -400,7 +408,6 @@ nodes(Nodes) ->
                 state_ok(#{return => ok, state => State0, ctx => Ctx, nodes => astranaut_endo:endo(Nodes), updated => true})
         end,
     new(Inner).
-
 %%%===================================================================
 %%% error_state related functions
 %%%===================================================================

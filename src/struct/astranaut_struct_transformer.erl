@@ -61,7 +61,7 @@ format_error(Message) ->
 %% Record abstract format is transformed to Map abstract format when RecordName is mentioned in -astranaut_struct([RecordName...]).
 
 walk({call, _Line1, {remote, _Line2, {atom, _Line2, astranaut_struct}, {atom, _Line3, record}, [Node]}}, _StructInitMap, #{}) ->
-    #{node => Node, continue => true};
+    astranaut_walk_return:new(#{node => Node, continue => true});
 
 %% transform record creation like #RecordName{Field1 = Value1, Field2 = Value2...} in pattern and expression
 %% if record creation is in pattern, transformed to #{'__struct__' := RecordName, Field1 := Value1, Field2 := Value2}.
@@ -125,11 +125,12 @@ walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field}
 walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInitMap, #{}) ->
     case maps:find(RecordName, StructInitMap) of
         {ok, StructDef} ->
-            FieldTypes = update_record_field_types(RecordName, Line, Fields, StructDef),
+            FieldTypes = astranaut_traverse_m:astranaut_traverse_m(
+                           update_record_field_types(RecordName, Line, Fields, StructDef)),
             astranaut_monad:lift_m(
               fun(FieldTypes1) ->
                       {type, Line, map, FieldTypes1}
-              end, FieldTypes, astranaut_return_m);
+              end, FieldTypes, astranaut_traverse_m);
         error ->
             Node
     end;
@@ -153,10 +154,11 @@ update_record(Name, Line, Fields, RecordInitMap, #{node := Node} = Opts) ->
     case maps:find(Name, RecordInitMap) of
         {ok, SturctDef} ->
             ReturnFields = update_record_fields(Name, Line, Fields, SturctDef, RecordOpts),
-            astranaut_monad:lift_m(
-              fun(Fields1) ->
-                      update_record_main(Line, Fields1, RecordOpts)
-              end, ReturnFields, astranaut_traverse_m);
+              astranaut_traverse_m:bind(
+                ReturnFields,
+                fun(Fields1) ->
+                        astranaut_traverse_m:node(update_record_main(Line, Fields1, RecordOpts))
+                end);
         error ->
             Node
     end.

@@ -298,14 +298,14 @@ do_apply_macro(NodeA, #{module := Module, function := Function,
             NodeC = update_with_counter(NodeB, MacroNameStr, integer_to_list(Counter)),
             NodeD = astranaut:replace_line_zero(NodeC, Line),
             format_node(NodeD, Opts),
-            MacroReturnStruct#{return => NodeD, state => Counter + 1};
+            MacroReturnStruct1 = maps:without([return, node, nodes], MacroReturnStruct),
+            astranaut_walk_return:new(MacroReturnStruct1#{node => NodeD, state => Counter + 1});
         #{} = MacroReturnStruct ->
-            MacroReturnStruct#{return => NodeA, state => Counter}
+            MacroReturnStruct#{node => NodeA, state => Counter}
     end.
 
 macro_name_str(#{module := Module, function := _Function, arity := _Arity}) ->
     atom_to_list(Module).
-
 
 group_arguments(Arguments, #{group_args := true}) ->
     [Arguments];

@@ -121,7 +121,7 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module}) ->
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_line => QuoteLine, quote_type => QuoteType, 
                             file => File, module => Module}, Options),
-    astranaut_traverse_m:set_updated(quote_0(Value, Options1)).
+    astranaut_traverse_m:as_node(quote_0(Value, Options1)).
 
 quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options) ->
     astranaut_monad:lift_m(
