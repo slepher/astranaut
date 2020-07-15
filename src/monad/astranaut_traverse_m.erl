@@ -70,7 +70,7 @@
 -export([state/1]).
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
--export([set_continue/1, listen_continue/1, listen_updated/1]).
+-export([set_continue/1, set_continue/2, listen_continue/1, listen_updated/1]).
 -export([listen/1, set_updated/1, pop_nodes/1, node/1, nodes/1]).
 -export([with_formatter/2]).
 -export([modify_ctx/1]).
@@ -353,7 +353,7 @@ put(State) ->
     state(fun(_State) -> {ok, State} end).
 
 %%%===================================================================
-%%% error_state related functions
+%%% nodes updated continue related functions
 %%%===================================================================
 listen(MA) ->
     map_m_state_ok(
@@ -362,11 +362,13 @@ listen(MA) ->
       end, MA).
 
 set_continue(MA) ->
+    set_continue(MA, true).
+
+set_continue(MA, Continue) when is_boolean(Continue) ->
     map_m_state_ok(
       fun(#{} = StateM) ->
               update_m_state(StateM, #{continue => true})
       end, MA).
-
 
 set_updated(MA) ->
     map_m_state_ok(
@@ -398,6 +400,10 @@ nodes(Nodes) ->
                 state_ok(#{return => ok, state => State0, ctx => Ctx, nodes => astranaut_endo:endo(Nodes), updated => true})
         end,
     new(Inner).
+
+%%%===================================================================
+%%% error_state related functions
+%%%===================================================================
 
 -spec with_error(fun((astranaut_error_state:astranaut_error_state())
                      -> astranaut_error_state:astranaut_error_state()),

@@ -254,7 +254,8 @@ map_m_tree(F, NodeA, Opts, SyntaxLib) ->
                               astranaut_traverse_m:bind(
                                 map_m_children(F, NodeB, Subtrees, Opts#{parent => Parent}, SyntaxLib),
                                 fun(NodeC) ->
-                                        apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib)
+                                        astranaut_traverse_m:set_continue(
+                                          apply_f(F, NodeC, Attr#{step => post, node => NodeType}, SyntaxLib), false)
                                 end)
                       end
               end);
