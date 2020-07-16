@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_rebinding_options).
 
+-include_lib("astranaut/include/astranaut_do.hrl").
+
 %% API
 -export([rebinding_options/1]).
 -export([match_rebinding/3]).
@@ -19,16 +21,62 @@
 %%% API
 %%%===================================================================
 rebinding_options(Forms) ->
-    BFunAttrs = astranaut:attributes_with_line(rebinding_fun, Forms),
-    BAllAttrs = astranaut:attributes_with_line(rebinding_all, Forms),
-    case {BFunAttrs, BAllAttrs} of
-        {[], []} ->
-            {#rebinding_options{all_options = #{}, fun_options = #{}}, []};
-        _ ->
-            {BFunOptions, Warnings2} = binding_fun_options(BFunAttrs),
-            {BAllOptions, Warnings1} = binding_all_options(BAllAttrs),
-            {#rebinding_options{fun_options = BFunOptions, all_options = BAllOptions}, Warnings1 ++ Warnings2}
-    end.
+    do([astranaut_return_m ||
+           AllOptions <- rebinding_all_options(Forms),
+           FunOptions <- rebinding_fun_options(Forms),
+           return(#rebinding_options{fun_options = FunOptions, all_options = AllOptions})
+       ]).
+
+rebinding_fun_options(Forms) ->
+    astranaut_options:with_attribute(
+      fun(Attr, Acc) ->
+              add_fun_options(Attr, Acc)
+      end, #{}, Forms, rebinding_fun, #{simplify_return => false}).
+
+rebinding_all_options(Forms) ->
+    astranaut_options:with_attribute(
+      fun(Attr, Acc) ->
+              add_all_options(Attr, Acc)
+      end, #{}, Forms, rebinding_all, #{simplify_return => false}).
+
+add_all_options(Options, Acc) ->
+    do([astranaut_base_m ||
+           Options1 <- validate_options(Options),
+           maps:merge(Acc, Options1)
+       ]).
+
+add_fun_options({FName, Arity}, Acc) when is_atom(FName), is_integer(Arity) ->
+    add_fun_options({FName, Arity}, #{}, Acc);
+add_fun_options({FName, Options}, Acc) ->
+    do([astranaut_base_m ||
+           Options1 <- validate_options(Options),
+           add_fun_options(FName, Options1, Acc)
+       ]);
+add_fun_options(FName, Acc) ->
+    add_fun_options(FName, #{}, Acc).
+
+add_fun_options(Functions, Options, Acc) when is_list(Functions) ->
+    astranaut_monad:foldl_m(
+      fun(Function, Acc1) ->
+              add_fun_options(Function, Options, Acc1)
+      end, Acc, Functions, astranaut_base_m);
+add_fun_options({FName, Arity}, Options, Acc) when is_atom(FName), is_integer(Arity) ->
+    merge_fun_options({FName, Arity}, Options, Acc);
+add_fun_options(FName, Options, Acc) when is_atom(FName) ->
+    merge_fun_options(FName, Options, Acc);
+add_fun_options(Other, _Options, Acc) ->
+    do([astranaut_base_m ||
+           astranaut_base_m:warning({invalid_rebinding_fun, Other}),
+           astranaut_base_m:return(Acc)
+       ]).
+
+merge_fun_options(Function, Options, Acc) ->
+    FAcc = maps:get(Function, Acc, #{}),
+    astranaut_base_m:return(maps:merge(FAcc, Options)).
+
+validate_options(Options) ->
+    Validator = #{clause_pinned => boolean, strict => boolean, debug => boolean, non_rebinding => boolean},
+    astranaut_options:validate(Validator, Options).
 
 match_rebinding(Name, Arity, RebindingOptionsRec) ->
     case find_rebinding_options(Name, Arity, RebindingOptionsRec) of
@@ -54,7 +102,6 @@ keys() ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
 find_rebinding_options(Name, Arity, #rebinding_options{fun_options = FunOptions, all_options = AllOptions}) ->
     case maps:find(Name, FunOptions) of
         {ok, Options} ->
@@ -64,74 +111,11 @@ find_rebinding_options(Name, Arity, #rebinding_options{fun_options = FunOptions,
                 {ok, Options} ->
                     {ok, Options};
                 error ->
-                    case AllOptions of
-                        none ->
+                    case maps:size(AllOptions) of
+                        0 ->
                             error;
                         #{} ->
                             {ok, AllOptions}
                     end
             end
     end.
-
-binding_all_options([]) ->
-    {none, []};
-binding_all_options([{Line, Options}|_T]) ->
-    {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
-    Warnings2 = 
-        lists:map(
-          fun(Warning) ->
-                  {Line, astranaut_macro, Warning}
-          end, Warnings1),
-    {Options1, Warnings2}.
-
-binding_fun_options(BindingAttributes) ->
-    lists:foldl(
-      fun({Line, FunName}, Acc) when is_atom(FunName) ->
-              add_binding_options(FunName, #{}, Line, Acc);
-         ({Line, {FunName, Arity}}, Acc) when is_atom(FunName), is_integer(Arity) ->
-              add_binding_options({FunName, Arity}, #{}, Line, Acc);
-         ({Line, {FunName, Opts}}, Acc) ->
-              add_binding_options(FunName, Opts, Line, Acc)
-      end, {maps:new(), []}, BindingAttributes).
-
-add_binding_options(Funs, Options, Line, {Acc, Warnings}) when is_list(Funs) ->
-    lists:foldl(
-      fun(Fun, {Acc1, Warnings1}) ->
-              add_binding_options(Fun, Options, Line, {Acc1, Warnings1})
-      end, {Acc, Warnings}, Funs);
-
-add_binding_options(Fun, Options, Line, {Acc, Warnings}) ->
-    {Options1, Warnings1} = astranaut:validate_options(fun validate_option_key/2, Options),
-    Warnings2 = 
-        lists:map(
-          fun(Warning) ->
-                  {Line, astranaut_rebinding, Warning}
-          end, Warnings1),
-    {maps:put(Fun, Options1, Acc), Warnings ++ Warnings2}.
-
-validate_option_key(debug, true) ->
-    ok;
-validate_option_key(debug, false) ->
-    ok;
-validate_option_key(non_rebinding, true) ->
-    ok;
-validate_option_key(non_rebinding, false) ->
-    ok;
-validate_option_key(non_rebinding, _NoRebinding) ->
-    error;
-validate_option_key(clause_pinned, true) ->
-    ok;
-validate_option_key(clause_pinned, false) ->
-    ok;
-validate_option_key(clause_pinned, _ClausePinned) ->
-    error;
-validate_option_key(strict, true) ->
-    ok;
-validate_option_key(strict, false) ->
-    ok;
-validate_option_key(strict, _Strict) ->
-    error;
-validate_option_key(debug, _Debug) ->
-    error;
-validate_option_key(_Key, _Value) ->
-    error.

@@ -11,7 +11,7 @@
 %% API
 -export([new/0]).
 -export([run/1]).
--export([bind/2, return/1]).
+-export([bind/2, '>>='/3, return/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -23,6 +23,9 @@ run({?MODULE, A}) ->
 
 bind({?MODULE, IA}, KIB) ->
     KIB(IA).
+
+'>>='(IA, KIB, ?MODULE) ->
+    bind(IA, KIB).
 
 return(A) ->
     {?MODULE, A}.

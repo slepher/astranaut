@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_rebinding).
 
+-include_lib("astranaut/include/astranaut_do.hrl").
+
 %% API
 -export([parse_transform/2, format_error/1]).
 
@@ -15,21 +17,16 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Options) ->
-    {RebindingOptionsRec, Warnings} = 
-        astranaut_rebinding_options:rebinding_options(Forms),
-    FormsMonad = 
-        astranaut_traverse_m:then(
-          astranaut_traverse_m:warnings(Warnings),
-          astranaut_monad:map_m(
-            fun(Form) ->
-                    walk_form(Form, RebindingOptionsRec)
-            end, Forms, astranaut_traverse_m)),
-    Return = astranaut_traverse_m:run(FormsMonad, ?MODULE, #{}),
-    Return1 = astranaut_monad:lift_m(
-                fun({Forms1, _}) ->
-                        Forms1
-                end, Return, astranaut_return_m),
-    astranaut_traverse:parse_transform_return(Return1).
+    Return = 
+        do([astranaut_return_m ||
+               RebindingOptionsRec <- astranaut_rebinding_options:rebinding_options(Forms),
+               astranaut_traverse_m:eval(
+                 astranaut_monad:map_m(
+                   fun(Form) ->
+                           walk_form(Form, RebindingOptionsRec)
+                   end, Forms, astranaut_traverse_m), ?MODULE, #{})
+           ]),
+    astranaut_return_m:to_compiler(Return).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of

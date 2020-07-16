@@ -21,7 +21,7 @@
 -export([with_attribute/5]).
 -export([forms_with_attribute/5]).
 -export([options/1]).
--export([validate/3]).
+-export([validate/2, validate/3]).
 -export([attr_walk_return/1]).
 -export([by_validator/3]).
 -export([get_boolean/4]).
@@ -44,8 +44,12 @@ get_boolean(Key, ReverseKey, Map, Default) ->
 
 with_attribute(Fun, Init, Forms, Attr, Opts) ->
     astranaut_traverse:reduce(
-      fun({attribute, Line, Attr1, AttrValue}, Acc, #{}) when Attr1 == Attr ->
-              values_apply_fun(Fun, AttrValue, Acc, #{line => Line});
+      fun({attribute, Line, Attr1, AttrValue} = Node, Acc, #{}) when Attr1 == Attr ->
+              astranaut_traverse_m:bind(
+                    values_apply_fun_m(Node, Fun, AttrValue, Acc, #{line => Line}),
+                fun(Acc1) ->
+                        astranaut_traverse_m:put(Acc1)
+                end);
          (_Node, Acc, #{}) ->
               Acc
       end, Init, Forms, Opts#{traverse => list}).
@@ -54,10 +58,8 @@ forms_with_attribute(Fun, Init, Forms, Attr, Opts) ->
     Fun1 = update_with_attribute_f(Fun),
     astranaut_traverse:mapfold(
       fun({attribute, Line, Attr1, AttrValue} = Node, Acc, #{}) when Attr1 == Attr ->
-              %% it's too complex, try simplify it.
               astranaut_traverse_m:bind(
-                astranaut_traverse_m:astranaut_traverse_m(
-                  values_apply_fun(Fun1, AttrValue, {[], Acc}, #{line => Line})),
+                values_apply_fun_m(Node, Fun1, AttrValue, {[], Acc}, #{line => Line}),
                 fun({Nodes, State}) ->
                         astranaut_traverse_m:then(
                           astranaut_traverse_m:nodes([Node|Nodes]),
@@ -87,6 +89,9 @@ options(Options) ->
     astranaut_base_m:to_monad({warning, #{}, {invalid_option_value, Options}}).
 
 -spec validate(#{atom() => validators()}, options(), #{}) -> astranaut_base_m:astranaut_base_m(option_map()).
+validate(Validator, ToValidate) ->
+    validate(Validator, ToValidate, #{}).
+
 validate(Validator, ToValidate, Options) ->
     astranaut_base_m:bind(
       options(ToValidate),
@@ -118,6 +123,11 @@ attr_walk_return(Return) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+values_apply_fun_m(Node, Fun, AttrValues, Acc, Opts) ->
+    astranaut_traverse_m:astranaut_traverse_m(
+      astranaut_traverse:fun_return_to_monad(
+        values_apply_fun(Fun, AttrValues, Acc, Opts), Node)).
+
 values_apply_fun(Fun, AttrValues, Acc, Opts) when is_list(AttrValues) ->
     case maps:get(deep_attr, Opts, true) of
         true ->

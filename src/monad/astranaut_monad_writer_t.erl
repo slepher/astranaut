@@ -11,7 +11,7 @@
 %% API
 -export([writer_t/1]).
 -export([run/1]).
--export([bind/3, return/2]).
+-export([bind/3, '>>='/3, return/2]).
 -export([fail/2]).
 -export([lift/2]).
 -export([tell/2]).
@@ -36,6 +36,9 @@ bind({?MODULE, WTA}, KWTB, {?MODULE, IM}) ->
                           astranaut_monad:return({B, LogsA ++ LogsB}, IM)
                   end, IM)
         end, IM)).
+
+'>>='(WTA, KWTB, W) ->
+    bind(WTA, KWTB, W).
 
 return(A, {?MODULE, IM}) ->
     writer_t(astranaut_monad:return({A, []}, IM)).

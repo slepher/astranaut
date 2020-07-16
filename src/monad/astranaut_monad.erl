@@ -58,9 +58,9 @@ foldl_m(_F, Acc, [], Monad) ->
 
 %% same as monad:bind/3
 bind(X, F, {T, _IM} = M) ->
-    T:bind(X, F, M);
+    T:'>>='(X, F, M);
 bind(X, F, M) ->
-    M:bind(X, F).
+    M:'>>='(X, F, M).
 
 '>>='(X, F, M) ->
     bind(X, F, M).
