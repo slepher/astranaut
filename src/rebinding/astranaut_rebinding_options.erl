@@ -61,7 +61,6 @@ format_error(Other) ->
 rebinding_fun_options(Forms) ->
     astranaut_options:with_attribute(
       fun(Attr, Acc) ->
-              io:format("~p get attr ~p~n", [?MODULE, Attr]),
               add_fun_options(Attr, Acc)
       end, #{}, Forms, rebinding_fun, #{formatter => ?MODULE, simplify_return => false, deep_attr => true}).
 
@@ -80,21 +79,16 @@ add_all_options(Options, Acc) ->
 add_fun_options({FName, Arity}, Acc) when is_atom(FName), is_integer(Arity) ->
     add_fun_options({FName, Arity}, #{}, Acc);
 add_fun_options({Function, Options}, Acc) ->
-    io:format("get functions ~p ~p~n", [Function, Options]),
     do([astranaut_base_m ||
            Options1 <- validate_options(Options),
-           io:format("get functions options ~p ~p~n", [Function, Options1]),
-
            add_fun_options(Function, Options1, Acc)
        ]);
 add_fun_options(Function, Acc) ->
     add_fun_options(Function, #{}, Acc).
 
 add_fun_options(Functions, Options, Acc) when is_list(Functions) ->
-    io:format("~p get funs ~p~n", [?MODULE, Functions]),
     astranaut_monad:foldl_m(
       fun(Function, Acc1) ->
-              io:format("~p get fun ~p~n", [?MODULE, Function]),
               add_fun_options(Function, Options, Acc1)
       end, Acc, Functions, astranaut_base_m);
 add_fun_options({FName, Arity}, Options, Acc) when is_atom(FName), is_integer(Arity) ->
@@ -108,7 +102,6 @@ add_fun_options(Other, _Options, Acc) ->
        ]).
 
 merge_fun_options(Function, Options, Acc) ->
-    io:format("merge fun options ~p ~p~n", [Function, Options]),
     FAcc = maps:get(Function, Acc, #{}),
     astranaut_base_m:return(maps:put(Function, maps:merge(FAcc, Options), Acc)).
 
