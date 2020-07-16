@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_error_state).
 
+-include_lib("astranaut/include/astranaut_struct_name.hrl").
+
 -export_type([astranaut_error/0]).
 
 -opaque astranaut_error() :: #{'__struct__' => ?MODULE,
@@ -25,6 +27,7 @@
 %% API
 -export([new/0, new/1, update_ctx/4, update_file/2, eof/1, merge/2]).
 -export([realize/1, is_empty/1, is_empty_error/1]).
+-export([run_endo/1]).
 -export([errors/1, warnings/1]).
 -export([append_errors/2, append_warnings/2]).
 -export([file_errors/1, file_warnings/1]).
@@ -56,7 +59,7 @@ update_file(File, #{file := File0} = State) ->
     update_file(File0, File, State).
 
 eof(State) ->
-    update_file(undefined, State).
+    update_file(eof, State).
 
 is_empty(#{errors := Errors, warnings := Warnings, 
            file_errors := FErrors, file_warnings := FWarnings}) 
@@ -72,11 +75,17 @@ is_empty_error(#{errors := Errors,
 is_empty_error(_ErrorState) ->
     false.
 
-realize(#{'__struct__' := ?MODULE, file_errors := FileErrors, file_warnings := FileWarnings}) ->
+realize(#{'__struct__' := ?MODULE} = State) ->
+    #{file_errors := FileErrors, file_warnings := FileWarnings} = eof(State),
     {realize_errors(FileErrors), realize_errors(FileWarnings)}.
 
 realize_errors(FileErrors) ->
     lists:map(fun({File, Errors}) -> {File, astranaut_endo:run(Errors)} end, maps:to_list(FileErrors)).
+
+run_endo(#{?STRUCT_KEY := ?ERROR_STATE, errors := Errors, warnings := Warnings,
+           file_errors := FileErrors, file_warnings := FileWarnings} = State) ->
+    State#{errors => astranaut_endo:run(Errors), warnings => astranaut_endo:run(Warnings),
+           file_errors => realize_errors(FileErrors), file_warnings => realize_errors(FileWarnings)}.
 
 merge(#{} = State1, #{} = State2) ->
     State3 = merge_file(State1, State2),
@@ -113,6 +122,13 @@ append_warnings(Warnings1, #{errors := Warnings0} = State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+update_file(undefined, eof, #{errors := Errors, warnings := Warnings} = State) ->
+    case is_empty(Errors) and is_empty(Warnings) of
+        true ->
+            State;
+        false ->
+            erlang:error({match_eof_without_file, State})
+    end;
 update_file(File0, File1, #{errors := Errors, warnings := Warnings, 
                             file_errors := ErrorsWithFile, 
                             file_warnings := WarningsWithFile} = State) ->
@@ -120,20 +136,27 @@ update_file(File0, File1, #{errors := Errors, warnings := Warnings,
         true ->
             State#{file => File1};
         false ->
+            File2 = 
+                case File1 of
+                    eof ->
+                        undefined;
+                    _ ->
+                        File1
+                end,
             ErrorsWithFile1 = add_file_errors(File0, Errors, ErrorsWithFile),
             WarningsWithFile1 = add_file_errors(File0, Warnings, WarningsWithFile),
             State#{errors => astranaut_endo:empty(), warnings => astranaut_endo:empty(), 
                    file_errors => ErrorsWithFile1, 
                    file_warnings => WarningsWithFile1,
-                   file => File1}
+                   file => File2}
     end.
 
-merge_file(#{file := File1} = State1, #{file := File2}) ->
-    update_file(File1, File2, State1);
-merge_file(#{} = State1, #{file := File}) ->
+merge_file(#{file := undefined} = State1, #{file := File}) ->
     State1#{file => File};
-merge_file(#{} = State1, #{}) ->
-    State1.
+merge_file(#{} = State1, #{file := undefined}) ->
+    State1;
+merge_file(#{file := File1} = State1, #{file := File2}) ->
+    update_file(File1, File2, State1).
 
 merge_file_ews(#{file_errors := FileErrors1, file_warnings := FileWarnings1} = ErrorState,
                #{file_errors := FileErrors2, file_warnings := FileWarnings2}) ->

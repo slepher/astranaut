@@ -14,7 +14,8 @@
 
 %% API
 -export([new/0, new/1, new/2, new/3]).
--export([errors/1, warnings/1, file/1, set_empty/1]).
+-export([is_empty/1, set_empty/1]).
+-export([errors/1, warnings/1, file/1]).
 -export([append/3, append_error/2, append_errors/2, append_warning/2, append_warnings/2, update_file/2]).
 
 %%%===================================================================
@@ -33,6 +34,9 @@ new(File, Errors, Warnings) ->
     EndoErrors = astranaut_endo:endo(Errors),
     EndoWarnings = astranaut_endo:endo(Warnings),
     #{'__struct__' => ?MODULE, file => File, errors => EndoErrors, warnings => EndoWarnings}.
+
+is_empty(#{errors := Errors, warnings := Warnings}) ->
+    astranaut_endo:is_empty(Errors) and astranaut_endo:is_empty(Warnings).
 
 errors(#{'__struct__' := ?MODULE, errors := Errors}) ->
     run_endo(Errors).

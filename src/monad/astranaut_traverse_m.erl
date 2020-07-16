@@ -295,15 +295,15 @@ sequence_either([MA|MAs]) ->
               #{state := State2, ctx := Ctx2, error := Error2} = MState2 = 
                   run_0(sequence_either(MAs), Formatter, State1, Ctx1),
               Error3 = astranaut_error_state:merge(Error1, Error2),
-                case {MState1, MState2} of
-                    {#{?STRUCT_KEY := ?STATE_OK, return := A,  nodes := Nodes1},
-                     #{?STRUCT_KEY := ?STATE_OK, return := As, nodes := Nodes2}} ->
-                        Nodes3 = astranaut_endo:append(Nodes1, Nodes2),
-                        update_m_state(MState2, #{return => [A|As], nodes => Nodes3, error => Error3});
-                    _ ->
-                        state_fail(#{state => State2, ctx => Ctx2, error => Error3})
-                end
-        end, MA);
+              case {MState1, MState2} of
+                  {#{?STRUCT_KEY := ?STATE_OK, return := A,  nodes := Nodes1},
+                   #{?STRUCT_KEY := ?STATE_OK, return := As, nodes := Nodes2}} ->
+                      Nodes3 = astranaut_endo:append(Nodes1, Nodes2),
+                      update_m_state(MState2, #{return => [A|As], nodes => Nodes3, error => Error3});
+                  _ ->
+                      state_fail(#{state => State2, ctx => Ctx2, error => Error3})
+              end
+      end, MA);
 sequence_either([]) ->
     astranaut_traverse_m:return([]).
 
@@ -479,22 +479,22 @@ formatted_errors(Errors) ->
 -spec update_file(file:filename()) -> astranaut_traverse_m(_S, _A).
 update_file(File) ->
     modify_ctx(
-      fun(Ctx) ->
-              astranaut_error_ctx:update_file(File, Ctx)
+      fun(Ctx0) ->
+              astranaut_error_ctx:update_file(File, Ctx0)
       end).
 
 -spec eof() -> astranaut_traverse_m(_S, _A).
 eof() ->
-    update_file(undefined).
+    update_file(eof).
 
 -spec update_line(line(), astranaut_traverse_m(S, A)) -> astranaut_traverse_m(S, A).
 update_line(Line, MA) ->
     map_m_state(
       fun(Formatter, #{error := Error0, ctx := Ctx1} = MState) ->
-              case Ctx1 of
-                  #{?STRUCT_KEY := ?ERROR_CTX, errors := [], warnings := []} ->
+              case astranaut_error_ctx:is_empty(Ctx1) of
+                  true ->
                       MState;
-                  #{?STRUCT_KEY := ?ERROR_CTX} ->
+                  false ->
                       Error1 = astranaut_error_state:update_ctx(Line, Formatter, Ctx1, Error0),
                       Ctx2 = astranaut_error_ctx:set_empty(Ctx1),
                       MState#{error => Error1, ctx => Ctx2}
@@ -600,7 +600,7 @@ merge_struct(#{?STRUCT_KEY := StructName} = Struct, Map, Keys, OptionalKeys) whe
                               end
                       end
               end, Struct, Keys);
-        false ->
+        _ ->
             erlang:error({invalid_merge_keys, StructName, RestKeys, Map})
     end.
 

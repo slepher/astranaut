@@ -16,8 +16,9 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Opts) ->
-    TransformOpts = #{formatter => ?MODULE, traverse => post, parse_transform => true},
-    astranaut_traverse:map(fun walk_node/2, Forms, TransformOpts).
+    TransformOpts = #{formatter => ?MODULE, traverse => post, simplify_return => false},
+    Return = astranaut_traverse:map(fun walk_node/2, Forms, TransformOpts),
+    astranaut_return_m:to_compiler(Return).
 
 format_error(Reason) ->
     astranaut_do:format_error(Reason).

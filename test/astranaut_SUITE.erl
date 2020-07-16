@@ -142,7 +142,8 @@ test_reduce(_Config) ->
     #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
     FileWarnings = [{File, [{26, ?MODULE, mark_1}]}],
     FileErrors = [{File, [{23, ?MODULE, mark_error_1}]}],
-    ?assertMatch({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),
+    ?assertMatch({FileErrors, FileWarnings},
+                 astranaut_error_state:realize(Error)),
     ok.
 
 test_map_with_state_node(_Config) ->

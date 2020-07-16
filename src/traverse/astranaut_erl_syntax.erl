@@ -78,7 +78,7 @@ node_type(_Node, #{}) ->
 is_file({attribute, _Line1, file, {File, _Line2}}) ->
     {file, File};
 is_file({eof, _Line}) ->
-    {file, undefined};
+    {file, eof};
 is_file(_Node) ->
     false.
 

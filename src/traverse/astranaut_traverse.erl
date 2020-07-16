@@ -237,10 +237,9 @@ map_m_1(F, NodeA, #{} = Opts) ->
     map_m_tree(F, NodeA, Opts, SyntaxLib).
 
 map_m_tree(_F, {error, Reason}, _Opts, _SyntaxLib) ->
-    astranaut_traverse_m:bind(
-      astranaut_traverse_m:error(Reason),
+    astranaut_traverse_m:then(
+      astranaut_traverse_m:formatted_errors([Reason]),
       astranaut_traverse_m:nodes([]));
-    %% astranaut_traverse_m:return({error, Reason});
 map_m_tree(F, NodeA, Opts, SyntaxLib) ->
     Attr = maps:without([traverse, parse_transform, monad, monad_class, formatter], Opts),
     case SyntaxLib:is_file(NodeA) of
@@ -337,14 +336,6 @@ m_subtrees(F, {up_node, Node, Subtree}, Opts) when is_atom(Node) ->
 m_subtrees(F, Subtree, Opts) ->
     map_m_1(F, Subtree, Opts).
 
-%% deep_return(Nodes) when is_list(Nodes) ->
-%%     lists:map(
-%%       fun(Node) ->
-%%               astranaut_traverse_m:return(Node)
-%%       end, Nodes);
-%% deep_return(Node) ->
-%%     astranaut_traverse_m:return(Node).
-
 deep_node(Nodes) when is_list(Nodes) ->
     lists:map(
       fun(Node) ->
@@ -352,21 +343,6 @@ deep_node(Nodes) when is_list(Nodes) ->
       end, Nodes);
 deep_node(Node) ->
     astranaut_traverse_m:node(Node).
-
-%% deep_sequence_m([MA|MAs]) -> 
-%%     astranaut_traverse_m:bind(
-%%       deep_sequence_m(MA),
-%%       fun(A) ->
-%%               astranaut_traverse_m:bind(
-%%                 deep_sequence_m(MAs),
-%%                 fun(As) ->
-%%                         astranaut_traverse_m:return([A|As])
-%%                 end)
-%%       end);
-%% deep_sequence_m([]) -> 
-%%     astranaut_traverse_m:return([]);
-%% deep_sequence_m(MA) -> 
-%%     MA.
 
 deep_sequence_m(MAss) ->
     astranaut_monad:map_m(fun deep_sequence_m_1/1, MAss, astranaut_traverse_m).

@@ -19,7 +19,8 @@
 parse_transform(Forms, _Options) ->
     Return = 
         do([astranaut_return_m ||
-               RebindingOptionsRec <- astranaut_rebinding_options:rebinding_options(Forms),
+               Return = astranaut_rebinding_options:rebinding_options(Forms),
+               RebindingOptionsRec <- Return,
                astranaut_traverse_m:eval(
                  astranaut_monad:map_m(
                    fun(Form) ->

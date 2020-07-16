@@ -17,7 +17,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-do(Ast, #{monad := MonadClass, monad_fail := MonadFailClass} = Opts) when is_atom(MonadClass), is_atom(MonadFailClass) ->
+do(Ast, #{monad := MonadClass, monad_fail := MonadFailClass} = Opts) 
+  when is_atom(MonadClass), is_atom(MonadFailClass) ->
     do_1(Ast, Opts);
 do(_Ast, Opts) ->
     {error, {invalid_options, Opts}}.
