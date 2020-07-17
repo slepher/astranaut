@@ -10,11 +10,13 @@
 
 -include("quote.hrl").
 -include("macro.hrl").
+-include("astranaut_struct_name.hrl").
 
 -export_macro({[from_record/2, to_record/2], []}).
 -export_macro({[from_map/3, update/3], [{attrs, [astranaut_struct_def]}]}).
 
 %% API
+-export([to_map/2]).
 -export([from_record/2, to_record/2, update/3, from_map/3]).
 -export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5]).
 %%%===================================================================
@@ -31,6 +33,9 @@ from_map(StructName, Struct, #{} = Attrs) ->
 
 update(StructName, Struct, Attrs) ->
     do_struct_function(quote(update_impl), StructName, Struct, Attrs).
+
+to_map(StructName, #{?STRUCT_KEY := StructName} = Struct) ->
+    maps:remove(?STRUCT_KEY, Struct).
 
 from_record_impl(RecordName, RecordFields, Record) when is_tuple(Record) ->
     StructSize = length(RecordFields) + 1,
