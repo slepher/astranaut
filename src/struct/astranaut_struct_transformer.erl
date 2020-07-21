@@ -108,7 +108,7 @@ walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field}
                         true ->
                             quote(maps:get(unquote(Field), unquote(Struct)));
                         false ->
-                            FieldInit = maps:get(FieldName, FieldInitValues, astranaut_quote:quote(undefined)),
+                            FieldInit = maps:get(FieldName, FieldInitValues, astranaut:abstract(undefined)),
                             Init = astranaut:replace_line(FieldInit, Line),
                             quote(maps:get(unquote(Field), unquote(Struct), unquote(Init)))
                     end;

@@ -10,7 +10,6 @@
 
 %% API
 -export([parse_transform/2, format_error/1]).
--export([quote/1, quote/2]).
 -export([uncons/2, cons/2]).
 
 %%%===================================================================
@@ -52,13 +51,6 @@ debug_forms(Forms1, QuoteAttr) ->
         _ ->
             ok
     end.
-
-quote(Value) ->
-    quote(Value, #{code_line => true}).
-
-quote(Node, #{} = Options) ->
-    Options1 = maps:merge(#{quote_line => 0, quote_type => expression}, Options),
-    quote_0(Node, Options1).
 
 uncons(Cons, []) ->
     uncons_1(Cons);
