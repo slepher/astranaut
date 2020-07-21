@@ -155,9 +155,11 @@ test_error_0(_Config) ->
                return(A + 10)
            ]),
     ErrorState = astranaut_error_state:new(),
-    ErrorState1 = astranaut_error_state:append_errors([{10, formatter_0, error_0}], ErrorState),
-    Result = astranaut_return_m:return_ok({20, ok}, ErrorState1),
-    ?assertEqual(Result, astranaut_traverse_m:run(MA, formatter_0, ok)),
+    ErrorState1 = astranaut_error_state:append_formatted_errors([{10, formatter_0, error_0}], ErrorState),
+    ErrorState2 = astranaut_error_state:run_endo(ErrorState1),
+    ErrorStateM0 = astranaut_return_m:run_error(astranaut_traverse_m:run(MA, formatter_0, ok)),
+    ErrorStateM1 = astranaut_error_state:run_endo(ErrorStateM0),
+    ?assertEqual(ErrorState2, ErrorStateM1),
     ok.
 
 test_state(_Config) ->
@@ -186,7 +188,7 @@ test_line(_Config) ->
            ]),
     Errors = [{20, formatter_0, error_0}], 
     #{return := Return, error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
-    ?assertEqual({{20, 30}, Errors}, {Return, astranaut_error_state:errors(Error)}),
+    ?assertEqual({{20, 30}, Errors}, {Return, astranaut_error_state:formatted_errors(Error)}),
     ok.
 
 
@@ -199,7 +201,7 @@ test_line_2(_Config) ->
            ]),
     Errors = [{20, formatter_0, error_0}],
     #{return := Return, error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
-    ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error_state:errors(Error)}),
+    ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error_state:formatted_errors(Error)}),
     ok.
 
 test_file_line(_Config) ->
@@ -257,7 +259,8 @@ test_fail(_Config) ->
     Errors = [{20, astranaut_traverse_m, error_0}],
     Warnings = [{25, ?MODULE, warning_0}],
     #{error := Error} = astranaut_traverse_m:run(MB, ?MODULE, ok),
-    ?assertEqual({Errors, Warnings}, {astranaut_error_state:errors(Error), astranaut_error_state:warnings(Error)}),
+    ?assertEqual({Errors, Warnings}, {astranaut_error_state:formatted_errors(Error),
+                                      astranaut_error_state:formatted_warnings(Error)}),
     ok.
 
 test_sequence_either(_Config) ->

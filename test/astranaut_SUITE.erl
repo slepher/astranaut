@@ -142,6 +142,7 @@ test_reduce(_Config) ->
     #{'__struct__' := astranaut_return_fail, error := Error} = ReturnM,
     FileWarnings = [{File, [{26, ?MODULE, mark_1}]}],
     FileErrors = [{File, [{23, ?MODULE, mark_error_1}]}],
+    io:format("errors is ~p~n", [astranaut_error_state:run_endo(Error)]),
     ?assertMatch({FileErrors, FileWarnings},
                  astranaut_error_state:realize(Error)),
     ok.
@@ -228,7 +229,7 @@ test_with_formatter(_Config) ->
               astranaut_walk_return:new(#{return => 10, error => error_0})
              ))),
     #{error := Error} = astranaut_traverse_m:run(MA, formatter_0, ok),
-    ?assertMatch([{10, formatter_1, error_0}], astranaut_error_state:errors(Error)),
+    ?assertMatch([{10, formatter_1, error_0}], astranaut_error_state:formatted_errors(Error)),
     ok.
 
 test_options(_Config) ->

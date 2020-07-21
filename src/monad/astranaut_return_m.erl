@@ -21,6 +21,7 @@
 
 %% API
 -export([return_ok/1, return_ok/2, return_fail/1]).
+-export([run/1, run_error/1]).
 -export([from_compiler/1]).
 -export([to_monad/1]).
 -export([to_compiler/1]).
@@ -40,6 +41,15 @@ return_ok(Return, #{?STRUCT_KEY := ?ERROR_STATE} = Error) ->
 
 return_fail(#{?STRUCT_KEY := ?ERROR_STATE} = Error) ->
     #{?STRUCT_KEY => ?RETURN_FAIL, error => Error}.
+
+run(#{?STRUCT_KEY := ?RETURN_OK, return := Return}) ->
+    {just, Return};
+run(#{?STRUCT_KEY := ?RETURN_FAIL}) ->
+    nothing.
+
+run_error(#{?STRUCT_KEY := StructKey, error := Error})
+  when (StructKey == ?RETURN_OK); (StructKey == ?RETURN_FAIL) ->
+    Error.
 
 from_compiler(Forms) when is_list(Forms) ->
     {ok, return_ok(Forms)};

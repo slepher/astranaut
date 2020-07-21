@@ -14,77 +14,93 @@
 
 -opaque astranaut_error() :: #{'__struct__' => ?MODULE,
                                file => file(),
-                               errors => astranaut_endo:endo(formatted_error()),
-                               warnings => astranaut_endo:endo(formatted_error()),
+                               errors => astranaut_endo:endo(error()),
+                               warnings => astranaut_endo:endo(error()),
+                               formatted_errors => astranaut_endo:endo(formatted_error()),
+                               formatted_warnings => astranaut_endo:endo(formatted_error()),
                                file_errors => #{file() => astranaut_endo:endo(formatted_error())},
                                file_warnings => #{file() => astranaut_endo:endo(formatted_error())}
                               }.
 -type file() :: string().
 -type formatter() :: atom().
 -type line() :: integer().
--type formatted_error() :: {line(), formatter(), any()}.
+-type formatted_error() :: {line(), formatter(), error()}.
+-type error() :: any().
 
 %% API
--export([new/0, new/1, update_ctx/4, update_file/2, eof/1, merge/2]).
--export([realize/1, is_empty/1, is_empty_error/1]).
+-export([new/0, new/1, update_line/3, update_file/2, eof/1, merge/2]).
+-export([realize/1, no_pending/1, is_empty/1, is_empty_error/1]).
 -export([run_endo/1]).
 -export([errors/1, warnings/1]).
--export([append_errors/2, append_warnings/2]).
+-export([formatted_errors/1, formatted_warnings/1]).
+-export([append_ews/3, append_error/2, append_warning/2, append_errors/2, append_warnings/2]).
+-export([append_formatted_errors/2, append_formatted_warnings/2]).
 -export([file_errors/1, file_warnings/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 new() ->
-    new(astranaut_error_ctx:new()).
+    new(undefined).
 
-new(Ctx) ->
-    File = astranaut_error_ctx:file(Ctx),
-    #{'__struct__' => ?MODULE, file => File, 
+new(File) ->
+    #{?STRUCT_KEY => ?MODULE, file => File,
       errors => astranaut_endo:empty(), warnings => astranaut_endo:empty(),
+      formatted_errors => astranaut_endo:empty(), formatted_warnings => astranaut_endo:empty(),
       file_errors => #{}, file_warnings => #{}}.
 
-update_ctx(Line, Formatter, Ctx, #{errors := Errors0, warnings := Warnings0} = AstranautError) ->
-    Errors = astranaut_error_ctx:errors(Ctx),
-    Warnings = astranaut_error_ctx:warnings(Ctx),
-    Errors1 = format_errors(Line, Formatter, Errors),
-    Warnings1 = format_errors(Line, Formatter, Warnings),
-    Errors2 = astranaut_endo:append(Errors0, Errors1),
-    Warnings2 = astranaut_endo:append(Warnings0, Warnings1),
-    AstranautError#{errors => Errors2, warnings => Warnings2}.
+update_line(Line, Formatter, #{?STRUCT_KEY := ?MODULE,
+                               errors := Errors0, warnings := Warnings0,
+                               formatted_errors := FormattedErrors0,
+                               formatted_warnings := FormattedWarnings0} = AstranautError) ->
+    FormattedErrors1 = format_errors(Line, Formatter, Errors0),
+    FormattedWarnings1 = format_errors(Line, Formatter, Warnings0),
+    FormattedErrors2 = astranaut_endo:append(FormattedErrors0, FormattedErrors1),
+    FormattedWarnings2 = astranaut_endo:append(FormattedWarnings0, FormattedWarnings1),
+    AstranautError#{formatted_errors => FormattedErrors2, formatted_warnings => FormattedWarnings2,
+                    errors => astranaut_endo:empty(), warnings => astranaut_endo:empty()}.
 
-update_file(File, #{file := undefined} = State) ->
+update_file(File, #{?STRUCT_KEY := ?ERROR_STATE, file := undefined} = State) ->
     update_file(File, File, State);
-update_file(File, #{file := File0} = State) ->
+update_file(File, #{?STRUCT_KEY := ?ERROR_STATE, file := File0} = State) ->
     update_file(File0, File, State).
 
 eof(State) ->
     update_file(eof, State).
 
-is_empty(#{errors := Errors, warnings := Warnings, 
+no_pending(#{?STRUCT_KEY := ?ERROR_STATE, errors := Errors, warnings := Warnings}) ->
+    is_empty(Errors) and is_empty(Warnings).
+
+is_empty(#{?STRUCT_KEY := ?ERROR_STATE,
+           errors := Errors, warnings := Warnings,
+           formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings,
            file_errors := FErrors, file_warnings := FWarnings}) 
   when (map_size(FErrors) == 0) and (map_size(FWarnings) == 0) ->
-    astranaut_endo:is_empty(Errors) and astranaut_endo:is_empty(Warnings);
+    astranaut_endo:is_empty(Errors) and astranaut_endo:is_empty(Warnings)
+        and astranaut_endo:is_empty(FormattedErrors) and astranaut_endo:is_empty(FormattedWarnings);
 is_empty(_ErrorState) ->
     false.
 
 is_empty_error(#{errors := Errors,
+                 formatted_errors := FormattedErrors,
                  file_errors := FErrors}) 
   when (map_size(FErrors) == 0) ->
-    astranaut_endo:is_empty(Errors);
+    astranaut_endo:is_empty(Errors) and astranaut_endo:is_empty(FormattedErrors);
 is_empty_error(_ErrorState) ->
     false.
 
-realize(#{'__struct__' := ?MODULE} = State) ->
-    #{file_errors := FileErrors, file_warnings := FileWarnings} = eof(State),
+realize(#{?STRUCT_KEY := ?MODULE, file_errors := FileErrors, file_warnings := FileWarnings}) ->
     {realize_errors(FileErrors), realize_errors(FileWarnings)}.
 
 realize_errors(FileErrors) ->
     lists:map(fun({File, Errors}) -> {File, astranaut_endo:run(Errors)} end, maps:to_list(FileErrors)).
 
-run_endo(#{?STRUCT_KEY := ?ERROR_STATE, errors := Errors, warnings := Warnings,
+run_endo(#{?STRUCT_KEY := ?ERROR_STATE,
+           errors := Errors, warnings := Warnings,
+           formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings,
            file_errors := FileErrors, file_warnings := FileWarnings} = State) ->
     State#{errors => astranaut_endo:run(Errors), warnings => astranaut_endo:run(Warnings),
+           formatted_errors => astranaut_endo:run(FormattedErrors), formatted_warnings => astranaut_endo:run(FormattedWarnings),
            file_errors => realize_errors(FileErrors), file_warnings => realize_errors(FileWarnings)}.
 
 merge(#{} = State1, #{} = State2) ->
@@ -93,10 +109,17 @@ merge(#{} = State1, #{} = State2) ->
     State5 = merge_ews(State4, State2),
     State5.
 
+
 errors(#{errors := Errors}) ->
     astranaut_endo:run(Errors).
 
 warnings(#{warnings := Warnings}) ->
+    astranaut_endo:run(Warnings).
+
+formatted_errors(#{formatted_errors := Errors}) ->
+    astranaut_endo:run(Errors).
+
+formatted_warnings(#{formatted_warnings := Warnings}) ->
     astranaut_endo:run(Warnings).
 
 file_errors(#{file_errors := FileErrors}) ->
@@ -105,14 +128,32 @@ file_errors(#{file_errors := FileErrors}) ->
 file_warnings(#{file_warnings := FileWarnings}) ->
     realize_errors(FileWarnings).
 
+append_ews(Errors, Warnings, State0) ->
+    State1 = append_errors(Errors, State0),
+    State2 = append_warnings(Warnings, State1),
+    State2.
+
+append_error(Error, State) ->
+    append_errors([Error], State).
+
+append_warning(Warning, State) ->
+    append_warnings([Warning], State).
+
 append_errors(Errors1, #{errors := Errors0} = State) ->
     Errors2 = append(Errors0, Errors1),
     State#{errors => Errors2}.
 
-append_warnings(Warnings1, #{errors := Warnings0} = State) ->
+append_warnings(Warnings1, #{warnings := Warnings0} = State) ->
     Warnings2 = append(Warnings0, Warnings1),
-    State#{warnings2 => Warnings2}.
+    State#{warnings => Warnings2}.
 
+append_formatted_errors(Errors1, #{formatted_errors := Errors0} = State) ->
+    Errors2 = append(Errors0, Errors1),
+    State#{formatted_errors => Errors2}.
+
+append_formatted_warnings(Warnings1, #{formatted_warnings := Warnings0} = State) ->
+    Warnings2 = append(Warnings0, Warnings1),
+    State#{formatted_warnings => Warnings2}.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -122,15 +163,17 @@ append_warnings(Warnings1, #{errors := Warnings0} = State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-update_file(undefined, eof, #{errors := Errors, warnings := Warnings} = State) ->
+update_file(undefined, eof, #{formatted_errors := Errors, formatted_warnings := Warnings} = State) ->
     case is_empty(Errors) and is_empty(Warnings) of
         true ->
             State;
         false ->
             erlang:error({match_eof_without_file, State})
     end;
-update_file(File0, File1, #{errors := Errors, warnings := Warnings, 
-                            file_errors := ErrorsWithFile, 
+update_file(File0, File1, #{?STRUCT_KEY := ?ERROR_STATE,
+                            formatted_errors := Errors,
+                            formatted_warnings := Warnings,
+                            file_errors := ErrorsWithFile,
                             file_warnings := WarningsWithFile} = State) ->
     case File0 == File1 of
         true ->
@@ -145,7 +188,8 @@ update_file(File0, File1, #{errors := Errors, warnings := Warnings,
                 end,
             ErrorsWithFile1 = add_file_errors(File0, Errors, ErrorsWithFile),
             WarningsWithFile1 = add_file_errors(File0, Warnings, WarningsWithFile),
-            State#{errors => astranaut_endo:empty(), warnings => astranaut_endo:empty(), 
+            State#{formatted_errors => astranaut_endo:empty(),
+                   formatted_warnings => astranaut_endo:empty(),
                    file_errors => ErrorsWithFile1, 
                    file_warnings => WarningsWithFile1,
                    file => File2}
@@ -193,4 +237,4 @@ append(Errors0, Errors1) ->
     astranaut_endo:append(Errors0, Errors1).
 
 format_errors(Line, Formatter, Errors) ->
-    lists:map(fun(Error) -> {Line, Formatter, Error} end, Errors).
+    lists:map(fun(Error) -> {Line, Formatter, Error} end, astranaut_endo:run(Errors)).

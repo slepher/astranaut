@@ -112,7 +112,7 @@ all() ->
     [test_struct_new, test_struct_update, test_struct_test,
      test_from_record, test_to_record, test_from_map, test_update_struct,
      test_from_map_missing_name, test_update_missing_name, test_update_fail,
-     test_compile_enforece_fail, test_compile_non_record_fail].
+     test_compile_enforce_fail, test_compile_non_record_fail].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -198,7 +198,7 @@ test_update_fail(_Config) ->
     ?assertException(exit, {invalid_struct, test, Test}, astranaut_struct_test:update(Test)),
     ok.
 
-test_compile_enforece_fail(_Config) ->
+test_compile_enforce_fail(_Config) ->
     [{File, [Error]}] = astranaut_struct_fail_0:errors(),
     Forms = astranaut_struct_fail_0:forms(),
     [{Line, {test, _Opts}}] = astranaut:attributes_with_line(astranaut_struct, Forms),
