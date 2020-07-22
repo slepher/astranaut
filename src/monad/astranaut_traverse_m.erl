@@ -160,11 +160,11 @@ state_ok(Map) ->
 state_fail(Map) ->
     update_m_state(#{?STRUCT_KEY => ?STATE_FAIL}, Map).
 
--spec run(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m({A, S}).
+-spec run(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_return_m:astranaut_return_m({A, S}).
 run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     astranaut_monad:lift_m(fun({A, State1, _Nodes}) -> {A, State1} end, run_1(MA, Formatter, State), astranaut_return_m).
 
--spec run_1(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m({A, S}).
+-spec run_1(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_return_m:astranaut_return_m({A, S, [any()]}).
 run_1(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     case run_0(MA, Formatter, State, astranaut_error_state:new()) of
         #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1, nodes := Nodes, error := Error} ->
@@ -173,15 +173,15 @@ run_1(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
             astranaut_return_m:return_fail(Error)
     end.
 
--spec eval(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_base_m:astranaut_base_m(A).
+-spec eval(astranaut_traverse_m(S, A), formatter(), S) -> astranaut_return_m:astranaut_return_m(A).
 eval(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     astranaut_monad:lift_m(fun({A, _State, _Nodes}) -> A end, run_1(MA, Formatter, State), astranaut_return_m).
 
--spec exec(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_base_m:astranaut_base_m(S).
+-spec exec(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_return_m:astranaut_return_m(S).
 exec(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     astranaut_monad:lift_m(fun({_A, State1, _Nodes}) -> State1 end, run_1(MA, Formatter, State), astranaut_return_m).
 
--spec enodes(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_base_m:astranaut_base_m(syntax_nodes()).
+-spec enodes(astranaut_traverse_m(S, _A), formatter(), S) -> astranaut_return_m:astranaut_return_m(syntax_nodes()).
 enodes(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, State) ->
     F = fun({_A, _State1, Nodes}) -> Nodes end,
     astranaut_monad:lift_m(F, run_1(MA, Formatter, State), astranaut_return_m).

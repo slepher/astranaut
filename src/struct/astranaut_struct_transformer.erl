@@ -115,7 +115,7 @@ walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field}
                             Init = astranaut:replace_line(FieldInit, Line),
                             quote(maps:get(unquote(Field), unquote(Struct), unquote(Init)))
                     end;
-                error ->
+                false ->
                     Error = {undefined_record_field, RecordName, FieldName},
                     {error, Error}
             end;
@@ -128,7 +128,11 @@ walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field}
 walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInitMap, #{}) ->
     case maps:find(RecordName, StructInitMap) of
         {ok, StructDef} ->
-            update_record_field_types(RecordName, Line, Fields, StructDef);
+            do([astranaut_traverse_m ||
+                   FieldTypes <-
+                       astranaut_traverse_m:pop_nodes(record_field_types(RecordName, Line, Fields, StructDef)),
+                   astranaut_traverse_m:node({type, Line, map, FieldTypes})
+               ]);
         error ->
             Node
     end;
@@ -147,13 +151,15 @@ record_opts(#{type := pattern}) ->
 record_opts(#{}) ->
     #{append_struct => true, append_init => true, field_type => map_field_assoc}.
 
-update_record(Name, Line, Fields, RecordInitMap, #{node := Node} = Opts) ->
+update_record(Name, Line, RecordFields, RecordInitMap, #{node := Node} = Opts) ->
     RecordOpts = record_opts(Opts),
     case maps:find(Name, RecordInitMap) of
         {ok, SturctDef} ->
             do([astranaut_traverse_m ||
-                   Fields1 <- update_record_fields(Name, Line, Fields, SturctDef, RecordOpts),
-                   astranaut_traverse_m:node(update_record_main(Line, Fields1, RecordOpts))
+                   StructFields <-
+                       astranaut_traverse_m:pop_nodes(
+                         update_record_fields(Name, Line, RecordFields, SturctDef, RecordOpts)),
+                   astranaut_traverse_m:node(update_record_main(Line, StructFields, RecordOpts))
                ]);
         error ->
             Node
@@ -167,79 +173,110 @@ update_record_main(Line, Fields, #{}) ->
 update_record_fields(RecordName, Line, Fields, StructDef, #{field_type := MapFieldType} = Opts) ->
     StructDefFields = astranaut_struct_record:fields(StructDef),
     do([astranaut_traverse_m ||
-           {FieldNames, Fields} <-
-               astranaut_traverse_m:listen_nodes(
-                 astranaut_monad:foldl_m(
-                 fun({record_field, Line1, {atom, _Line2, FieldName} = FieldNameAtom, FieldValue}, Acc) ->
-                         MapFieldNode = {MapFieldType, Line1, FieldNameAtom, FieldValue},
-                         case lists:member(FieldName, StructDefFields) of
-                             true ->
-                                 do([astranaut_traverse_m ||
-                                        astranaut_traverse_m:node(MapFieldNode),
-                                        return([FieldName|Acc])
-                                    ]);
-                             false ->
-                                 do([astranaut_traverse_m ||
-                                        astranaut_traverse_m:error({undefined_record_field, RecordName, FieldName}),
-                                        return(Acc)
-                                    ])
-                         end
-                 end, [], Fields, astranaut_traverse_m)),
-           Fields2 <- append_init(RecordName, FieldNames, StructDef, Fields, Line, Opts),
-           append_struct(RecordName, Fields2, Line, Opts)
+           append_struct_name(RecordName, Line, Opts),
+           FieldNames <-
+               traverse_fields(
+                 fun(Line, FieldName, FieldValue) ->
+                         {MapFieldType, Line, FieldName, FieldValue}
+                 end, RecordName, Fields, StructDefFields),
+           append_init(RecordName, FieldNames, StructDef, Line, Opts)
        ]).
 
-append_init(RecordName, FieldNames, StructDef, Fields, Line, #{append_init := true, field_type := MapFieldType}) ->
+append_init(RecordName, FieldNames, StructDef, Line, #{append_init := true, field_type := MapFieldType}) ->
     EnforceKeys = astranaut_struct_record:enforce_keys(StructDef),
     MissingKeys = EnforceKeys -- FieldNames,
     FieldInitValues = astranaut_struct_record:init_values(StructDef),
     FieldInitValues1 = maps:without(FieldNames, FieldInitValues),
-    Fields1 =
-        lists:reverse(
-          maps:fold(
-            fun(FieldName, FieldInit, Acc) ->
-                [{MapFieldType, Line, {atom, Line, FieldName}, astranaut:replace_line(FieldInit, Line)}|Acc]
-            end, Fields, FieldInitValues1)),
+    Fields =
+        lists:map(
+          fun({FieldName, FieldInit}) ->
+                  {MapFieldType, Line, {atom, Line, FieldName}, astranaut:replace_line(FieldInit, Line)}
+          end, maps:to_list(FieldInitValues1)),
     do([astranaut_traverse_m ||
            check_missing_keys(RecordName, MissingKeys),
-           return(Fields1)
+           astranaut_traverse_m:nodes(Fields)
        ]);
-append_init(_RecordName, _FieldNames, _FieldInitValues, Fields, _Line, _Opts) ->
-    astranaut_traverse_m:return(Fields).
+append_init(_RecordName, _FieldNames, _FieldInitValues, _Line, _Opts) ->
+    astranaut_traverse_m:return(ok).
 
 check_missing_keys(_RecordName, []) ->
     astranaut_traverse_m:return(ok);
 check_missing_keys(RecordName, MissingKeys) ->
     astranaut_traverse_m:error({missing_enforce_keys, RecordName, MissingKeys}).
 
-append_struct(RecordName, Fields, Line, #{append_struct := true, field_type := MapFieldType}) ->
-    astranaut_traverse_m:return(
-      [{MapFieldType, Line, {atom, Line, '__struct__'}, {atom, Line, RecordName}}|Fields]);
-append_struct(_RecordName, Fields, _Line, #{}) ->
-    astranaut_traverse_m:return(Fields).
+append_struct_name(RecordName, Line, #{append_struct := true, field_type := MapFieldType}) ->
+    astranaut_traverse_m:node({MapFieldType, Line, {atom, Line, '__struct__'}, {atom, Line, RecordName}});
+append_struct_name(_RecordName, _Line, #{}) ->
+    astranaut_traverse_m:return(ok).
 
-update_record_field_types(RecordName, Line, Fields, StructDef) ->
+record_field_types(RecordName, Line, Fields, StructDef) ->
     StructDefFields = astranaut_struct_record:fields(StructDef),
     do([astranaut_traverse_m ||
-           Fields <- 
-               astranaut_traverse_m:pop_nodes(
-                 astranaut_monad:map_m(
-                   fun({type, Line1, field_type, [{atom, _Line2, AtomFieldName} = FieldName, FieldType]}) ->
-                           case lists:member(AtomFieldName, StructDefFields) of
-                               true ->
-                                   MapFieldTypeNode = {type, Line1, map_field_exact, [FieldName, FieldType]},
-                                   astranaut_traverse_m:node(MapFieldTypeNode);
-                               false ->
-                                   astranaut_traverse_m:error({undefined_recorid_field, RecordName, FieldName})
-                           end
-                   end, Fields, astranaut_traverse_m)),
-           FieldTypes = append_struct_type(RecordName, Fields, Line),
-           StructType = {type, Line, map, FieldTypes},
-           astranaut_traverse_m:node(StructType)
-       ]).
+           astranaut_traverse_m:node({type, Line, map_field_exact, struct_name_field(RecordName, Line)}),
+           FieldNames <- traverse_fields(
+                           fun(Line, FieldName, FieldType) ->
+                                   IsMandatory = astranaut_struct_record:mandatory_field(FieldName, StructDef),
+                                   AssocType = struct_field_assoc_type(IsMandatory),
+                                   struct_field_type(AssocType, Line, FieldName, FieldType)
+                           end, RecordName, Fields, StructDefFields),
+           append_init_types(FieldNames, StructDef, Line)
+      ]).
 
-append_struct_type(RecordName, Fields, Line) ->
-    [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
+append_init_types(FieldNames, StructDef, Line) ->
+    StructFields = astranaut_struct_record:fields(StructDef),
+    FieldInitTypes = astranaut_struct_record:types(StructDef),
+    FieldInitTypes = maps:without(FieldNames, FieldInitTypes),
+    Fields =
+        lists:reverse(
+          lists:foldl(
+            fun(FieldName, Acc) ->
+                    case maps:find(FieldName, FieldInitTypes) of
+                        {ok, FieldType} ->
+                            IsMandatory = astranaut_struct_record:mandatory_field(FieldName, StructDef),
+                            AssocType = struct_field_assoc_type(IsMandatory),
+                            AtomFieldName = {atom, Line, FieldName},
+                            FieldType = astranaut:replace_line(FieldType, Line),
+                            Field = struct_field_type(AssocType, Line, AtomFieldName, FieldType),
+                            [Field|Acc];
+                        error ->
+                            Acc
+                    end
+            end, [], StructFields)),
+    astranaut_traverse_m:nodes(Fields).
+
+struct_name_field(StructName, Line) ->
+    [{atom, Line, '__struct__'}, {atom, Line, StructName}].
+
+struct_field_assoc_type(true) ->
+    map_field_exact;
+struct_field_assoc_type(false) ->
+    map_field_assoc.
+
+struct_field_type(Type, Line, FieldName, FieldType) ->
+    {type, Line, Type, [FieldName, FieldType]}.
+
+traverse_fields(Fun, RecordName, Fields, StructFields) ->
+    astranaut_monad:foldl_m(
+      fun({record_field, Line1, {atom, _Line2, FieldName} = FieldNameAtom, FieldValue}, Acc) ->
+              apply_field(Fun, RecordName, FieldName, Line1, FieldNameAtom, FieldValue, StructFields, Acc);
+         ({type, Line1, field_type, [{atom, _Line2, FieldName} = FieldNameAtom, FieldType]}, Acc) ->
+              apply_field(Fun, RecordName, FieldName, Line1, FieldNameAtom, FieldType, StructFields, Acc)
+      end, [], Fields, astranaut_traverse_m).
+
+apply_field(Fun, RecordName, FieldName, Line, FieldNameAtom, FieldValue, StructFields, Acc) ->
+    case lists:member(FieldName, StructFields) of
+        true ->
+            Node = Fun(Line, FieldNameAtom, FieldValue),
+            do([astranaut_traverse_m ||
+                   astranaut_traverse_m:node(Node),
+                   return([FieldName|Acc])
+               ]);
+        false ->
+            do([astranaut_traverse_m ||
+                   astranaut_traverse_m:error({undefined_record_field, RecordName, FieldName}),
+                   return(Acc)
+               ])
+    end.
 
 %%%===================================================================
 %%% Initialize Structs with attribute astranaut_struct.

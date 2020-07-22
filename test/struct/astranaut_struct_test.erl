@@ -18,7 +18,7 @@
 
 -include("test_record.hrl").
 
--type test() :: #test{}.
+-type test() :: #test{ }.
 -type test_with_name(Name) :: #test{ name :: Name }.
 
 %%%===================================================================

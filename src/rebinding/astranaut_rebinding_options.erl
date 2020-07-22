@@ -28,16 +28,12 @@ rebinding_options(Forms) ->
        ]).
 
 match_rebinding(Name, Arity, RebindingOptionsRec) ->
-    case find_rebinding_options(Name, Arity, RebindingOptionsRec) of
-        {ok, RebindingOptions} ->
-            case maps:get(non_rebinding, RebindingOptions, false) of
-                true ->
-                    error;
-                false ->
-                    {ok, RebindingOptions}
-            end;
-        error ->
-            error
+    RebindingOptions = find_rebinding_options(Name, Arity, RebindingOptionsRec),
+    case maps:get(non_rebinding, RebindingOptions, false) of
+        true ->
+            error;
+        false ->
+            {ok, RebindingOptions}
     end.
 
 keys() ->
@@ -112,12 +108,12 @@ validate_options(Options) ->
 find_rebinding_options(Name, Arity, #rebinding_options{fun_options = FunOptions, all_options = AllOptions}) ->
     case maps:find(Name, FunOptions) of
         {ok, Options} ->
-            {ok, Options};
+            Options;
         error ->
             case maps:find({Name, Arity}, FunOptions) of
                 {ok, Options} ->
-                    {ok, Options};
+                    Options;
                 error ->
-                    {ok, AllOptions}
+                    AllOptions
             end
     end.

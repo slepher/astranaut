@@ -18,18 +18,19 @@
 
 -export_type([endo/1]).
 
--opaque endo(A) :: #{?STRUCT_KEY => ?ENDO, list => endo_list(A), is_empty => boolean()}.
+-opaque endo(A) :: #{?STRUCT_KEY := ?ENDO, is_empty := boolean(), list => endo_list(A)}.
 -type endo_list(A) :: fun(([A]) -> [A]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+-spec endo([A]) -> endo(A).
 endo([]) ->
     empty();
 endo(List) when is_list(List) ->
     new(fun(List1) -> List ++ List1 end).
 
--spec endo(A) -> [A].
+-spec run(endo(A)) -> [A].
 run(#{?STRUCT_KEY := ?ENDO, is_empty := true}) ->
     [];
 run(#{?STRUCT_KEY := ?ENDO, list := EndoList}) ->
@@ -60,6 +61,7 @@ is_empty(#{?STRUCT_KEY := ?ENDO, is_empty := IsEmpty}) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec empty() -> astranaut_endo:endo(_A).
 empty() ->
     #{?STRUCT_KEY => ?ENDO, is_empty => true}.
 

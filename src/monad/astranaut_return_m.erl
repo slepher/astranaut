@@ -81,6 +81,9 @@ from_return(_) ->
 to_monad(A) ->
     try_concerete(A, [fun from_return/1, fun from_compiler/1]).
 
+-spec to_compiler(astranaut_return_m([erl_syntax:node()])) ->
+                         [erl_syntax:node()] | {warning, [erl_syntax:node()], astranaut_error_state:compiler_error()} |
+                         {error, astranaut_error_state:compiler_error(), astranaut_error_state:compiler_error()}.
 to_compiler(#{?STRUCT_KEY := ?RETURN_OK, return := Forms, error := Error}) ->
     case astranaut_error_state:realize(Error) of
         {[], []} ->

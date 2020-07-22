@@ -32,19 +32,20 @@
 -type traverse_error() :: term().
 -type traverse_state() :: term().
 -type traverse_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
+                           simplify_return => boolean(), parent => atom(),
+                           match_right_first => boolean(),
+                           children => boolean(),
+                           sequence_children => fun((any()) -> any()),
+                           transform => fun((any()) -> any()),
+                           syntax_lib => module(),
                            node => node_type(), formatter => module() }.
-
--type traverse_map_m_opts() :: #{traverse => traverse_style(), parse_transform => boolean(),
-                                 node => node_type(), attribute => atom(), 
-                                 formatter => module()
-                                }.
 
 -type traverse_error_state() :: #{file => string(), errors => traverse_return_error(), warnings => traverse_return_error(),
                                   file_errors => parse_transform_return_error(), 
                                   file_warnings => parse_transform_return_error()}.
 
 -type node_type() :: attribute | pattern | expression | guard | form.
--type traverse_style() :: traverse_step() | all.
+-type traverse_style() :: traverse_step() | all | list.
 -type traverse_step() :: pre | post | leaf.
 -type traverse_attr() :: #{step := traverse_step(), node := node_type()}.
 -type traverse_fun_return() :: #{'__struct__' := astranaut_traverse_fun_return, 
@@ -152,7 +153,7 @@ apply_attribute_f(F, AttributeValue, Acc) when is_function(F, 2) ->
 update_opts(Opts) ->
     maps:merge(#{formatter => ?MODULE, traverse => all}, Opts).
 
--spec map_m(traverse_fun(), Node, traverse_map_m_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
+-spec map_m(traverse_fun(), Node, traverse_opts()) -> astranaut_monad:monadic(M, Node) when M :: astranaut_monad:monad().
 map_m(F, Nodes, Opts) ->
     NOpts = update_opts(Opts),
     NF = transform_f(F, NOpts),

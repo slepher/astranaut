@@ -90,7 +90,7 @@ return(A, ?MODULE) ->
     return(A).
 
 warning_as_error(#{'__struct__' := ?MODULE, warnings := Warnings} = MA) ->
-    astranaut_base_m:bind(
+    astranaut_base_m:then(
       errors(Warnings),
       MA#{warnings => []}).
 

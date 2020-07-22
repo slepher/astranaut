@@ -1,4 +1,4 @@
--record(test, {name, value = list_to_binary("world"), enable = true, desc}).
+-record(test, {name :: atom(), value = list_to_binary("world") :: string(), enable = true :: boolean(), desc}).
 -record(test2, {name = hello, value}).
 -record(test3, {name = hello, value}).
 

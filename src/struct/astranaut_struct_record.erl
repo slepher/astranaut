@@ -14,7 +14,7 @@
 -export([record_def/3]).
 -export([fields/1, init_values/1]).
 -export([types/1, warnings/1, enforce_keys/1]).
--export([set_auto_fill/2]).
+-export([mandatory_field/2, auto_fill/1, set_auto_fill/2]).
 -export([filled_init_values/1, update_init_values/1, update_enforce_keys/2]).
 
 -record(record_def, {name :: atom(), 
@@ -61,6 +61,13 @@ types(#record_def{types = Types}) ->
 -spec warnings(#record_def{}) -> warnings().
 warnings(#record_def{warnings = Warnings}) ->
     Warnings.
+
+mandatory_field(FieldName, #record_def{auto_fill = AutoFill, enforce_keys = EnforceKeys}) ->
+    AutoFill or lists:member(FieldName, EnforceKeys).
+
+-spec auto_fill(#record_def{}) -> boolean().
+auto_fill(#record_def{auto_fill = AutoFill}) ->
+    AutoFill.
 
 -spec set_auto_fill(boolean(), #record_def{}) -> #record_def{}.
 set_auto_fill(AutoFill, #record_def{} = RefordDef) when is_boolean(AutoFill)  ->

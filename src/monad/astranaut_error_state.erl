@@ -11,6 +11,7 @@
 -include_lib("astranaut/include/astranaut_struct_name.hrl").
 
 -export_type([astranaut_error/0]).
+-export_type([compiler_error/0]).
 
 -opaque astranaut_error() :: #{'__struct__' => ?MODULE,
                                file => file(),
@@ -21,6 +22,7 @@
                                file_errors => #{file() => astranaut_endo:endo(formatted_error())},
                                file_warnings => #{file() => astranaut_endo:endo(formatted_error())}
                               }.
+-type compiler_error() :: [{file(), [formatted_error()]}].
 -type file() :: string().
 -type formatter() :: atom().
 -type line() :: integer().
