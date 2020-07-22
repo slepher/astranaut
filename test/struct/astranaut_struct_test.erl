@@ -38,6 +38,8 @@ test(#test{name = #test{name = A} = B} = D) ->
 test(#test{name = A}) ->
     A;
 test(#test2{'name' = A}) ->
+    A;
+test(#test3{'name' = A}) ->
     A.
 
 -spec from_record(astranaut_struct:record(#test{})) -> #test{}.

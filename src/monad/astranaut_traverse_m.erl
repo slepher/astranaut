@@ -64,7 +64,7 @@
 -export([bind_continue/2, bind_continue_nodes/2, updated_node/2]).
 -export(['>>='/3, return/2]).
 -export([fail/1, fail/2, fails/1]).
--export([fail_on_error/1, sequence_either/1]).
+-export([fail_on_error/1, sequence_either/1, sequence_all/1]).
 -export([state/1]).
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
@@ -297,6 +297,24 @@ sequence_either([MA|MAs]) ->
               end
       end, MA);
 sequence_either([]) ->
+    astranaut_traverse_m:return([]).
+
+-spec sequence_all([astranaut_traverse_m(S, A)]) -> astranaut_traverse_m(S, [A]).
+sequence_all([MA|MAs]) ->
+    map_m_state(
+      fun(Formatter, #{state := State1, error := Error1} = MState1) ->
+              #{error := Error2} = MState2 =
+                  run_0(sequence_all(MAs), Formatter, State1, Error1),
+              case {MState1, MState2} of
+                  {#{?STRUCT_KEY := ?STATE_OK, return := A,  nodes := Nodes1},
+                   #{?STRUCT_KEY := ?STATE_OK, return := As, nodes := Nodes2}} ->
+                      Nodes3 = astranaut_endo:append(Nodes1, Nodes2),
+                      update_m_state(MState2, #{return => [A|As], nodes => Nodes3, error => Error2});
+                  _ ->
+                      MState2
+              end
+      end, MA);
+sequence_all([]) ->
     astranaut_traverse_m:return([]).
 
 -spec fail(_E) -> astranaut_traverse_m(_S, _A).

@@ -19,7 +19,8 @@
 parse_transform(Forms, _Options) ->
     Macro1 = {?MACRO_MODULE, quote_unquote, 1, []},
     Macro2 = {?MACRO_MODULE, macro_exported_function, 2, [auto_export]},
-    astranaut_macro:transform_macros([Macro1, Macro2], Forms).
+    Return = astranaut_macro:transform_macros([Macro1, Macro2], Forms),
+    astranaut_return_m:to_compiler(Return).
 
 format_error(Error) ->
     astranaut_traverse:format_error(Error).

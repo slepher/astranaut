@@ -121,19 +121,7 @@ mapfold(F, Init, Node, Opts) ->
     transform_return_m(Return, Opts).
 
 without_errors(Forms) ->
-    Forms1 = 
-        reduce(
-          fun({error, Errors}, FormsAcc, #{}) when is_list(Errors) ->
-                  astranaut_traverse_m:then(
-                    astranaut_traverse_m:put(FormsAcc),
-                    astranaut_traverse_m:formatted_errors(Errors));
-             (Form, FormsAcc, #{}) ->
-                  astranaut_traverse_m:put([Form|FormsAcc])
-          end, [], Forms, #{traverse => list, formatter => ?MODULE}),
-    astranaut_monad:lift_m(
-      fun(Forms2) ->
-              lists:reverse(Forms2)
-      end, Forms1, astranaut_return_m).
+    map(fun(Node, #{}) -> Node end, Forms, #{traverse => list, formatter => ?MODULE, simplify_return => false}).
 
 with_attributes(F, Init, Name, Forms, Opts) ->
     reduce(
@@ -169,7 +157,7 @@ map_m(F, Nodes, Opts) ->
     NOpts = update_opts(Opts),
     NF = transform_f(F, NOpts),
     astranaut_traverse_m:bind(
-      astranaut_traverse_m:pop_nodes(map_m_1(NF, Nodes, NOpts)),
+      astranaut_traverse_m:pop_nodes(map_m_1(NF, Nodes, Opts)),
       fun(Nodes1) when is_list(Nodes) ->
               astranaut_traverse_m:return(Nodes1);
          ([Node|_T]) ->
@@ -183,6 +171,7 @@ format_error({invalid_option_value, OptionName, Key, Value}) ->
 format_error({invalid_option, OptionName, Value}) ->
     io_lib:format("invalid option of ~p: ~p", [OptionName, Value]);
 format_error(Message) ->
+    io:format("get message ~p~n", [Message]),
     case io_lib:deep_char_list(Message) of
         true -> Message;
         _    -> io_lib:write(Message)
@@ -212,6 +201,8 @@ mapfold_1(F, Init, Node, #{} = Opts) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
     astranaut_traverse_m:run(NodeM, Formatter, Init).
 
+map_m_1(F, Nodes, #{traverse := list} = Opts) ->
+    map_m_list(F, Nodes, Opts);
 map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
     astranaut_traverse_m:sequence_either(
       lists:map(
@@ -221,20 +212,29 @@ map_m_1(F, Nodes, Opts) when is_list(Nodes) ->
 map_m_1(F, NodeA, #{children := true} = Opts) ->
     Opts1 = maps:remove(children, Opts),
     astranaut_traverse_m:as_node(map_m_children(F, NodeA, Opts1));
-map_m_1(F, NodeA, #{traverse := list} = Opts) ->
-    SyntaxLib = syntax_lib(Opts),
-    MA = 
-        case SyntaxLib:is_file(NodeA) of
-            false ->
-                astranaut_traverse_m:return(ok);
-            {file, File} ->
-                astranaut_traverse_m:update_file(File)
-        end,
-    astranaut_traverse_m:then(
-      MA, apply_f(F, NodeA, #{}, SyntaxLib));
 map_m_1(F, NodeA, #{} = Opts) ->
     SyntaxLib = syntax_lib(Opts),
     map_m_tree(F, NodeA, Opts, SyntaxLib).
+
+map_m_list(F, Nodes, #{} = Opts) when is_list(Nodes) ->
+    astranaut_traverse_m:sequence_all(
+      lists:map(
+        fun(Subtree) ->
+                map_m_list(F, Subtree, Opts)
+        end, Nodes));
+map_m_list(_F, {error, Reason}, #{}) ->
+    astranaut_traverse_m:then(
+      astranaut_traverse_m:formatted_errors([Reason]),
+      astranaut_traverse_m:nodes([]));
+map_m_list(F, NodeA, Opts) ->
+    SyntaxLib = syntax_lib(Opts),
+    MA = case SyntaxLib:is_file(NodeA) of
+             false ->
+                 astranaut_traverse_m:return(ok);
+             {file, File} ->
+                 astranaut_traverse_m:update_file(File)
+         end,
+    astranaut_traverse_m:then(MA, apply_f(F, NodeA, #{}, SyntaxLib)).
 
 map_m_tree(_F, {error, Reason}, _Opts, _SyntaxLib) ->
     astranaut_traverse_m:then(

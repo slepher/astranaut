@@ -38,7 +38,8 @@ parse_transform(Forms, Options) ->
     {Macros, Warnings} = macros(File, Forms, Module),
     case astranaut_macro_local:compile(Macros, Forms, Options) of
         {ok, LWarnings} ->
-            transform_macros_1(Macros, Forms, File, Warnings ++ LWarnings);
+            TraverseReturn = transform_macros_1(Macros, Forms, File, Warnings ++ LWarnings),
+            astranaut_return_m:to_compiler(TraverseReturn);
         {error, Errors, NWarnings} ->
             {error, Errors, Warnings ++ NWarnings}
     end.
@@ -98,8 +99,7 @@ macros(File, Forms, LocalModule) ->
 
 transform_macros_1(Macros, Forms, _File, Warnings) ->
     Monad = transform_macros_2(Macros, Warnings),
-    TraverseReturn = astranaut_traverse_m:exec(Monad, ?MODULE, #{forms => Forms, counter => 1}),
-    astranaut_traverse:parse_transform_return(TraverseReturn).
+    astranaut_traverse_m:exec(Monad, ?MODULE, #{forms => Forms, counter => 1}).
 
 transform_macros_2(Macros, Warnings) ->
     do([astranaut_traverse_m || 

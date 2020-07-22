@@ -23,13 +23,16 @@ parse_transform(Forms, _Options) ->
     ReturnM =
         do([astranaut_return_m ||
                Forms <- astranaut_traverse:without_errors(Forms),
+               Forms0 = Forms,
                RecordDefMap = init_records(Module, Forms),
                {Forms, StructInitMap} <-
                    init_struct_defs(Forms, RecordDefMap),
-               astranaut_traverse:map(
+               Forms <- astranaut_traverse:map(
                  fun(Node, Attrs) ->
                          walk(Node, StructInitMap, Attrs)
-                 end, Forms, #{traverse => pre, formatter => ?MODULE, simplify_return => false})
+                 end, Forms, #{traverse => pre, formatter => ?MODULE, simplify_return => false}),
+               Forms <- transform_struct_macros(Forms),
+               remove_used_struct_records(Forms0, Forms)
            ]),
     astranaut_return_m:to_compiler(ReturnM).
 
@@ -125,12 +128,7 @@ walk({record_field, Line, Struct, RecordName, {atom, _Line2, FieldName} = Field}
 walk({type, Line, record, [{atom, _Line, RecordName}|Fields]} = Node, StructInitMap, #{}) ->
     case maps:find(RecordName, StructInitMap) of
         {ok, StructDef} ->
-            FieldTypes = astranaut_traverse_m:astranaut_traverse_m(
-                           update_record_field_types(RecordName, Line, Fields, StructDef)),
-            astranaut_monad:lift_m(
-              fun(FieldTypes1) ->
-                      {type, Line, map, FieldTypes1}
-              end, FieldTypes, astranaut_traverse_m);
+            update_record_field_types(RecordName, Line, Fields, StructDef);
         error ->
             Node
     end;
@@ -172,7 +170,7 @@ update_record_fields(RecordName, Line, Fields, StructDef, #{field_type := MapFie
     StructDefFields = astranaut_struct_record:fields(StructDef),
     OptsTraverse = #{traverse => list, formatter => ?MODULE, simplify_return => false},
     do([astranaut_traverse_m ||
-           {Fields1, FieldNames} <- 
+           {Fields1, FieldNames} <-
                astranaut_traverse_m:astranaut_traverse_m(
                astranaut_traverse:mapfold(
                  fun({record_field, Line1, {atom, _Line2, FieldName} = FieldNameAtom, FieldValue}, Acc, #{}) ->
@@ -220,23 +218,23 @@ append_struct(_RecordName, Fields, _Line, #{}) ->
 
 update_record_field_types(RecordName, Line, Fields, StructDef) ->
     StructDefFields = astranaut_struct_record:fields(StructDef),
-    Return = 
-        astranaut_traverse:mapfold(
-          fun({type, Line1, field_type, [{atom, _Line2, AtomFieldName} = FieldName, FieldType]}, Acc, #{}) ->
-                  MapFieldTypeNode = {type, Line1, map_field_exact, [FieldName, FieldType]},
-                  case lists:member(AtomFieldName, StructDefFields) of
-                      true ->
-                          {MapFieldTypeNode, [FieldName|Acc]};
-                      false ->
-                          Error = {undefined_recorid_field, RecordName, FieldName},
-                          astranaut_walk_return:new(
-                            #{node => MapFieldTypeNode, state => Acc, error => Error})
-                  end
-          end, [], Fields, #{traverse => list, formatter => ?MODULE, simplify_return => false}),
-    astranaut_monad:lift_m(
-      fun({Fields1, _FieldNames}) ->
-              append_struct_type(RecordName, Fields1, Line)
-      end, Return, astranaut_return_m).
+    do([astranaut_traverse_m ||
+           Fields <- 
+               astranaut_traverse_m:pop_nodes(
+                 astranaut_monad:map_m(
+                   fun({type, Line1, field_type, [{atom, _Line2, AtomFieldName} = FieldName, FieldType]}) ->
+                           case lists:member(AtomFieldName, StructDefFields) of
+                               true ->
+                                   MapFieldTypeNode = {type, Line1, map_field_exact, [FieldName, FieldType]},
+                                   astranaut_traverse_m:node(MapFieldTypeNode);
+                               false ->
+                                   astranaut_traverse_m:error({undefined_recorid_field, RecordName, FieldName})
+                           end
+                   end, Fields, astranaut_traverse_m)),
+           FieldTypes = append_struct_type(RecordName, Fields, Line),
+           StructType = {type, Line, map, FieldTypes},
+           astranaut_traverse_m:node(StructType)
+       ]).
 
 append_struct_type(RecordName, Fields, Line) ->
     [{type, Line, map_field_exact, [{atom, Line, '__struct__'}, {atom, Line, RecordName}]}|Fields].
@@ -303,3 +301,48 @@ update_record_def(RecordDef, #{} = StructDef) ->
     RecordDef2 = astranaut_struct_record:update_enforce_keys(EnforceKeys, RecordDef1),
     RecordDef3 = astranaut_struct_record:update_init_values(RecordDef2),
     RecordDef3.
+
+remove_used_structs(Forms, UsedStructs) ->
+    lists:filter(
+      fun({attribute, _Line, record, {RecordName, _Fields}}) ->
+              not ordsets:is_element(RecordName, UsedStructs);
+         (_Node) ->
+              true
+      end, Forms).
+
+transform_struct_macros(Forms) ->
+    Macros = [{astranaut_struct, from_record, 2, []}, {astranaut_struct, to_record, 2, []}, 
+              {astranaut_struct, from_map, 3, []}, {astranaut_struct, update, 3, []}],
+    astranaut_macro:transform_macros(Macros, Forms).
+
+remove_used_struct_records(Forms0, Forms1) ->
+    UsedRecords0 = used_records(Forms0),
+    UsedRecords1 = used_records(Forms1),
+    Forms = remove_used_structs(Forms1, ordsets:subtract(UsedRecords0, UsedRecords1)),
+    astranaut_return_m:return(Forms).
+    
+used_records(Forms) ->
+    astranaut_traverse:reduce(
+      fun(Node, Acc, #{}) ->
+              case walk_record_name(Node) of
+                  {ok, Name} ->
+                      ordsets:add_element(Name, Acc);
+                  error ->
+                      Acc
+              end
+      end, ordsets:new(), Forms, #{traverse => pre}).
+
+walk_record_name({call, _Line1, {atom, _Line2, record_info}, [{atom, _Line3, fields}, {atom, _Line4, Name}]}) ->
+    {ok, Name};
+walk_record_name({record, _Line, Name, _Fields}) ->
+    {ok, Name};
+walk_record_name({record, _Line, _Update, Name, _Fields}) ->
+    {ok, Name};
+walk_record_name({record_index, _Line, Name, _Field}) ->
+    {ok, Name};
+walk_record_name({record_field, _Line, _Record, Name, _Field}) ->
+    {ok, Name};
+walk_record_name({type, _Line1, record, [{atom, _Line2, Name}|_Fields]}) ->
+    {ok, Name};
+walk_record_name(_Node) ->
+    error.
