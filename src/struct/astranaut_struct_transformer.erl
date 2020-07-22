@@ -151,12 +151,10 @@ update_record(Name, Line, Fields, RecordInitMap, #{node := Node} = Opts) ->
     RecordOpts = record_opts(Opts),
     case maps:find(Name, RecordInitMap) of
         {ok, SturctDef} ->
-            ReturnFields = update_record_fields(Name, Line, Fields, SturctDef, RecordOpts),
-              astranaut_traverse_m:bind(
-                ReturnFields,
-                fun(Fields1) ->
-                        astranaut_traverse_m:node(update_record_main(Line, Fields1, RecordOpts))
-                end);
+            do([astranaut_traverse_m ||
+                   Fields1 <- update_record_fields(Name, Line, Fields, SturctDef, RecordOpts),
+                   astranaut_traverse_m:node(update_record_main(Line, Fields1, RecordOpts))
+               ]);
         error ->
             Node
     end.
@@ -196,23 +194,23 @@ append_init(RecordName, FieldNames, StructDef, Fields, Line, #{append_init := tr
     MissingKeys = EnforceKeys -- FieldNames,
     FieldInitValues = astranaut_struct_record:init_values(StructDef),
     FieldInitValues1 = maps:without(FieldNames, FieldInitValues),
-    Fields1 = 
+    Fields1 =
         lists:reverse(
           maps:fold(
             fun(FieldName, FieldInit, Acc) ->
                 [{MapFieldType, Line, {atom, Line, FieldName}, astranaut:replace_line(FieldInit, Line)}|Acc]
             end, Fields, FieldInitValues1)),
-    case MissingKeys of
-        [] ->
-            astranaut_traverse_m:return(Fields1);
-        _ ->
-            do([astranaut_traverse_m ||
-                   astranaut_traverse_m:error({missing_enforce_keys, RecordName, MissingKeys}),
-                   return(Fields1)
-               ])
-    end;
+    do([astranaut_traverse_m ||
+           check_missing_keys(RecordName, MissingKeys),
+           return(Fields1)
+       ]);
 append_init(_RecordName, _FieldNames, _FieldInitValues, Fields, _Line, _Opts) ->
     astranaut_traverse_m:return(Fields).
+
+check_missing_keys(_RecordName, []) ->
+    astranaut_traverse_m:return(ok);
+check_missing_keys(RecordName, MissingKeys) ->
+    astranaut_traverse_m:error({missing_enforce_keys, RecordName, MissingKeys}).
 
 append_struct(RecordName, Fields, Line, #{append_struct := true, field_type := MapFieldType}) ->
     astranaut_traverse_m:return(
