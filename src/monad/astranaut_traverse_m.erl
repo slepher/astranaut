@@ -69,7 +69,7 @@
 -export([with_error/2]).
 -export([get/0, put/1, modify/1]).
 -export([set_continue/1, set_continue/2, listen_continue/1, listen_updated/1]).
--export([listen/1, set_updated/1, pop_nodes/1, as_node/1, node/1, nodes/1]).
+-export([listen/1, listen_nodes/1, set_updated/1, pop_nodes/1, as_node/1, node/1, nodes/1]).
 -export([with_formatter/2]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_line/2]).
@@ -364,6 +364,12 @@ listen(MA) ->
     map_m_state_ok(
       fun(#{return := Return, nodes := Nodes} = StateM) ->
               update_m_state(StateM, #{return => {Return, astranaut_endo:run(Nodes)}})
+      end, MA).
+
+listen_nodes(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, nodes := Nodes} = StateM) ->
+              update_m_state(StateM, #{return => {Return, astranaut_endo:run(Nodes)}, nodes => astranaut_endo:empty()})
       end, MA).
 
 set_continue(MA) ->

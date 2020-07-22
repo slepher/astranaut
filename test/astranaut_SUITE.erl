@@ -213,7 +213,7 @@ test_reduce_attr(_Config) ->
              (_Node, Acc, #{}) ->
                   Acc
           end, 0, Forms, #{formatter => ?MODULE, traverse => list}),
-    #{'__struct__' := ?RETURN_FAIL, error := Error} = ReturnM,
+    #{'__struct__' := ?RETURN_OK, error := Error} = ReturnM,
     FileWarnings = [{File, [{17, ?MODULE, mark_0}]}],
     FileErrors = [{File, [{16, ?MODULE, mark_error_0}]}],
     ?assertMatch({FileErrors, FileWarnings}, astranaut_error_state:realize(Error)),

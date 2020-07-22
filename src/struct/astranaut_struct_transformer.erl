@@ -168,22 +168,26 @@ update_record_main(Line, Fields, #{}) ->
 
 update_record_fields(RecordName, Line, Fields, StructDef, #{field_type := MapFieldType} = Opts) ->
     StructDefFields = astranaut_struct_record:fields(StructDef),
-    OptsTraverse = #{traverse => list, formatter => ?MODULE, simplify_return => false},
     do([astranaut_traverse_m ||
-           {Fields1, FieldNames} <-
-               astranaut_traverse_m:astranaut_traverse_m(
-               astranaut_traverse:mapfold(
-                 fun({record_field, Line1, {atom, _Line2, FieldName} = FieldNameAtom, FieldValue}, Acc, #{}) ->
+           {FieldNames, Fields} <-
+               astranaut_traverse_m:listen_nodes(
+                 astranaut_monad:foldl_m(
+                 fun({record_field, Line1, {atom, _Line2, FieldName} = FieldNameAtom, FieldValue}, Acc) ->
                          MapFieldNode = {MapFieldType, Line1, FieldNameAtom, FieldValue},
                          case lists:member(FieldName, StructDefFields) of
                              true ->
-                                 {MapFieldNode, [FieldName|Acc]};
+                                 do([astranaut_traverse_m ||
+                                        astranaut_traverse_m:node(MapFieldNode),
+                                        return([FieldName|Acc])
+                                    ]);
                              false ->
-                                 Error = {undefined_record_field, RecordName, FieldName},
-                                 astranaut_walk_return:new(#{node => MapFieldNode, state => Acc, error => Error})
+                                 do([astranaut_traverse_m ||
+                                        astranaut_traverse_m:error({undefined_record_field, RecordName, FieldName}),
+                                        return(Acc)
+                                    ])
                          end
-                 end, [], Fields, OptsTraverse)),
-           Fields2 <- append_init(RecordName, FieldNames, StructDef, Fields1, Line, Opts),
+                 end, [], Fields, astranaut_traverse_m)),
+           Fields2 <- append_init(RecordName, FieldNames, StructDef, Fields, Line, Opts),
            append_struct(RecordName, Fields2, Line, Opts)
        ]).
 
