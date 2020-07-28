@@ -407,16 +407,16 @@ as_node(MA) ->
                    return(Node))
          end).
 
-node(Node) ->
-    then(
-      nodes([Node]),
-      return(Node)).
-
 pop_nodes(MA) ->
     map_m_state_ok(
       fun(#{nodes := Nodes} = StateM) ->
               update_m_state(StateM, #{return => astranaut_endo:run(Nodes), nodes => astranaut_endo:endo([])})
       end, MA).
+
+node(Node) ->
+    then(
+      nodes([Node]),
+      return(Node)).
 
 nodes(Nodes) ->
     Inner =
