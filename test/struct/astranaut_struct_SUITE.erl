@@ -14,7 +14,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include("test_record.hrl").
--include("struct.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -181,8 +180,8 @@ test_from_map_missing_name(_Config) ->
 
 test_from_other_record(_Config) ->
     Test2 = #test2{name = test_name, value = test_value},
-    Test1 = astranaut_struct:from_other_record(test2, test, Test2),
-    Test3 = astranaut_struct:from_other_record(test2, test3, Test2),
+    Test1 = astranaut_struct_test:to_test1(Test2),
+    Test3 = astranaut_struct_test:to_test3(Test2),
     ?assertEqual(#{'__struct__' => test,
                    name => test_name,
                    value => test_value,
