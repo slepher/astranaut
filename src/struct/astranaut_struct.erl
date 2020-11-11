@@ -13,15 +13,19 @@
 -include("astranaut_struct_name.hrl").
 
 -export_macro({[from_record/2, to_record/2], []}).
--export_macro({[from_map/3, update/3], [{attrs, [astranaut_struct_def]}]}).
+-export_macro({[from_map/3, update/3, from_other_record/4], [{attrs, [astranaut_struct_def]}]}).
 
 %% API
 -export([to_map/2]).
--export([from_record/2, to_record/2, update/3, from_map/3]).
--export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5]).
+-export([from_record/2, to_record/2, update/3, from_map/3, from_other_record/4]).
+-export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5, from_other_record_impl/7]).
+-export([format_error/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
+format_error(Reason) ->
+    astranaut_macro:format_error(Reason).
+
 from_record(RecordName, Record) ->
     do_record_function(quote(from_record_impl), RecordName, Record).
 
@@ -36,6 +40,18 @@ update(StructName, Struct, Attrs) ->
 
 to_map(StructName, #{?STRUCT_KEY := StructName} = Struct) ->
     maps:remove(?STRUCT_KEY, Struct).
+
+from_other_record(RecordName, StructName, Record, #{} = Attrs) ->
+    #{fields := FieldsAbs, enforce_keys := EnforceKeysAbs, inits := InitAbs} =
+        struct_attributes(StructName, Attrs),
+    quote(
+      astranaut_struct:from_other_record_impl(
+        unquote(RecordName),
+        record_info(fields, unquote(RecordName)),
+        unquote(Record),
+        unquote(StructName),
+        unquote(FieldsAbs), unquote(EnforceKeysAbs),
+        unquote(InitAbs))).
 
 from_record_impl(RecordName, RecordFields, Record) when is_tuple(Record) ->
     StructSize = length(RecordFields) + 1,
@@ -88,6 +104,10 @@ update_impl(StructName, Fields, EnforceKeys, StructFieldInits, #{'__struct__' :=
     from_map_impl(StructName, Fields, EnforceKeys, StructFieldInits, Struct);
 update_impl(StructName, _Fields, _EnforceKeys, _StructFieldInits, Struct) ->
     exit({invalid_struct, StructName, Struct}).
+
+from_other_record_impl(RecordName, RecordFields, Record, StructName, StructFields, EnforceKeys, StructInits) ->
+    Map = from_record_impl(RecordName, RecordFields, Record),
+    from_map_impl(StructName, StructFields, EnforceKeys, StructInits, Map).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -106,7 +126,7 @@ init_structs(StructName, AstranautStructDefs) ->
     end.
 
 struct_init_abs(Line, StructInits) ->
-    Fields = 
+    Fields =
         lists:reverse(
           maps:fold(
             fun(Name, Value, Acc) ->
@@ -120,7 +140,13 @@ do_record_function(FunctionName, {atom, _Line, _RecordName} = RecordName, Record
 do_record_function(_FunctionName, RecordName, _Record) ->
     exit({literal_atom_record_name_expected, RecordName}).
 
-do_struct_function(FunctionName, {atom, Line, StructName} = AtomStructName, Struct, #{astranaut_struct_def := StructDefs}) ->
+do_struct_function(FunctionName, StructName, Struct, Opts) ->
+    #{fields := FieldsAbs, enforce_keys := EnforceKeysAbs, inits := InitAbs} =
+        struct_attributes(StructName, Opts),
+    quote(astranaut_struct:(unquote(FunctionName))(
+            unquote(StructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct))).
+
+struct_attributes({atom, Line, StructName}, #{astranaut_struct_def := StructDefs}) ->
     case init_structs(StructName, StructDefs) of
         {ok, StructDef} ->
             Fields = astranaut_struct_record:fields(StructDef),
@@ -129,10 +155,9 @@ do_struct_function(FunctionName, {atom, Line, StructName} = AtomStructName, Stru
             InitAbs = struct_init_abs(Line, InitValue),
             FieldsAbs =  astranaut:replace_line(astranaut:abstract(Fields), Line),
             EnforceKeysAbs = astranaut:replace_line(astranaut:abstract(EnforceKeys), Line),
-            quote(astranaut_struct:(unquote(FunctionName))(
-                    unquote(AtomStructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct)));
+            #{fields => FieldsAbs, enforce_keys => EnforceKeysAbs, inits => InitAbs};
         {error, Reason} ->
-            {error, Reason}
+            exit(Reason)
     end;
-do_struct_function(_Action, StructName, _Struct, #{}) ->
+struct_attributes(StructName, #{}) ->
     exit({literal_atom_struct_name_expected, StructName}).

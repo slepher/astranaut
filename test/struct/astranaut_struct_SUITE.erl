@@ -14,6 +14,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include("test_record.hrl").
+-include("struct.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -111,6 +112,7 @@ groups() ->
 all() -> 
     [test_struct_new, test_struct_update, test_struct_test,
      test_from_record, test_to_record, test_from_map, test_update_struct,
+     test_from_other_record,
      test_from_map_missing_name, test_update_missing_name, test_update_fail,
      test_compile_enforce_fail, test_compile_non_record_fail].
 
@@ -177,11 +179,27 @@ test_from_map_missing_name(_Config) ->
                      astranaut_struct_test:from_map(Test)),
     ok.
 
+test_from_other_record(_Config) ->
+    Test2 = #test2{name = test_name, value = test_value},
+    Test1 = astranaut_struct:from_other_record(test2, test, Test2),
+    Test3 = astranaut_struct:from_other_record(test2, test3, Test2),
+    ?assertEqual(#{'__struct__' => test,
+                   name => test_name,
+                   value => test_value,
+                   enable => true
+                  },
+                 Test1),
+    ?assertEqual(#{'__struct__' => test3,
+                   name => test_name,
+                   value => test_value},
+                 Test3),
+    ok.
+
 test_update_struct(_Config) ->
     Test = #{'__struct__' => test, name => bye},
     Test1 = astranaut_struct_test:update(Test),
-    ?assertEqual(#{'__struct__' => test, 
-                   name => bye, 
+    ?assertEqual(#{'__struct__' => test,
+                   name => bye,
                    value => <<"world">>,
                    enable => true
                   }, Test1),

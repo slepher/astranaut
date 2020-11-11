@@ -350,8 +350,9 @@ remove_used_structs(Forms, UsedStructs) ->
       end, Forms).
 
 transform_struct_macros(Forms) ->
-    Macros = [{astranaut_struct, from_record, 2, []}, {astranaut_struct, to_record, 2, []}, 
-              {astranaut_struct, from_map, 3, []}, {astranaut_struct, update, 3, []}],
+    Macros = [{astranaut_struct, from_record, 2, []}, {astranaut_struct, to_record, 2, []},
+              {astranaut_struct, from_map, 3, []}, {astranaut_struct, update, 3, []},
+              {astranaut_struct, from_other_record, 4, []}],
     astranaut_macro:transform_macros(Macros, Forms).
 
 remove_used_struct_records(Forms0, Forms1) ->
