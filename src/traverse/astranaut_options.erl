@@ -46,7 +46,7 @@ with_attribute(Fun, Init, Forms, Attr, Opts) ->
     astranaut_traverse:reduce(
       fun({attribute, Line, Attr1, AttrValue} = Node, Acc, #{}) when Attr1 == Attr ->
               astranaut_traverse_m:bind(
-                    values_apply_fun_m(Node, Fun, AttrValue, Acc, #{line => Line}),
+                values_apply_fun_m(Node, Fun, AttrValue, Acc, #{line => Line}),
                 fun(Acc1) ->
                         astranaut_traverse_m:put(Acc1)
                 end);
@@ -124,9 +124,7 @@ attr_walk_return(Return) ->
 %%% Internal functions
 %%%===================================================================
 values_apply_fun_m(Node, Fun, AttrValues, Acc, Opts) ->
-    astranaut_traverse_m:astranaut_traverse_m(
-      astranaut_traverse:fun_return_to_monad(
-        values_apply_fun(Fun, AttrValues, Acc, Opts), Node)).
+      astranaut_walk_return:to_traverse_m(values_apply_fun(Fun, AttrValues, Acc, Opts), Node).
 
 values_apply_fun(Fun, AttrValues, Acc, Opts) when is_list(AttrValues) ->
     case maps:get(deep_attr, Opts, true) of

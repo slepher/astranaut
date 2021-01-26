@@ -41,14 +41,13 @@ format_error(Error) ->
 %%% parse options functions
 %%%===================================================================
 meta_options(Forms) ->
-    astranaut_traverse:with_attributes(
+    astranaut_options:with_attribute(
       fun(Opts, Acc) ->
               {Opts1, Warnings} = astranaut:validate_options(fun compile_meta_options_validator/2, Opts),
               Warnings1 = astranaut:update_option_warnings(astranaut_compile_meta, Warnings),
               Acc1 = merge_options(Acc, Opts1),
-              astranaut_walk_return:new(
-                #{node => ok, state => Acc1, warnings => Warnings1})
-      end, maps:new(), astranaut_compile_meta, Forms, #{formatter => astranaut_traverse}).
+              astranaut_walk_return:new(#{return => Acc1, warnings => Warnings1})
+      end, maps:new(), Forms, astranaut_compile_meta, #{formatter => ?MODULE, simplify_return => false}).
 
 merge_options(Options1, Options2) ->
     maps:fold(

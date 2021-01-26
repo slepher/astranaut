@@ -23,10 +23,30 @@
     
 -export([new/1]).
 -export([to_map/1, to_map/2]).
+-export([to_traverse_m/2, to_traverse_m/3]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+to_traverse_m(Return, Node) ->
+    to_traverse_m(Return, Node, #{}).
+
+to_traverse_m(Return, Node, Opts) ->
+    WithState = maps:get(with_state, Opts, false),
+    case to_map(Return) of
+        {ok, StructBase} ->
+            WalkReturn = new(StructBase),
+            astranaut_traverse_m:astranaut_traverse_m(WalkReturn);
+        error ->
+            case {Return, WithState} of
+                {{Node1, State}, true} ->
+                    WalkReturn = new(#{node => Node1, state => State}),
+                    astranaut_traverse_m:astranaut_traverse_m(WalkReturn);
+                _ ->
+                    astranaut_traverse_m:to_monad(Node, Return)
+            end
+    end.
+
 new(#{} = Map) ->
     Map1 = up_nodes(Map),
     Map2 = up_map(Map1),

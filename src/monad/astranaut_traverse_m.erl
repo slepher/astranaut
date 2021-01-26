@@ -73,7 +73,8 @@
 -export([with_formatter/2]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_line/2]).
-
+-export([deep_sequence_m/1, deep_r_sequence_m/1, deep_sequence_m_1/1]).
+-export([transform_mapfold_f/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -521,6 +522,27 @@ update_line(Line, MA) ->
                       update_m_state(MState, #{error => Error1})
               end
         end, MA).
+
+deep_sequence_m(MAss) ->
+    astranaut_monad:map_m(fun deep_sequence_m_1/1, MAss, astranaut_traverse_m).
+
+deep_sequence_m_1(MAs) when is_list(MAs) ->
+    astranaut_traverse_m:pop_nodes(astranaut_monad:sequence_m(MAs, astranaut_traverse_m));
+deep_sequence_m_1(MA) ->
+    astranaut_traverse_m:pop_nodes(MA).
+
+deep_r_sequence_m(MAs) ->
+    astranaut_monad:lift_m(fun lists:reverse/1, deep_sequence_m(lists:reverse(MAs)), astranaut_traverse_m).
+
+transform_mapfold_f(F) ->
+    fun(Node, Attr) ->
+            bind(
+              get(),
+              fun(State) ->
+                      Reply = F(Node, State, Attr),
+                      astranaut_walk_return:to_traverse_m(Reply, Node, #{with_state => true})
+              end)
+    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

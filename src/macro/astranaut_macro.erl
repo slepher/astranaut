@@ -132,7 +132,7 @@ transform_macro_attr(MacroOpts) ->
                             #{counter := CounterAcc, forms := Forms1, offset := Offset} <-
                                 astranaut_traverse_m:get(),
                             Return = walk_macro_attr(Form, MacroOpts#{counter => CounterAcc}),
-                            NForm <- astranaut_traverse:fun_return_to_monad(Return, Form, #{with_state => true}),
+                            NForm <- astranaut_walk_return:to_traverse_m(Return, Form, #{with_state => true}),
                             CounterAcc1 <- astranaut_traverse_m:get(),
                             FormsWithCounter1 = #{offset => Offset, 
                                                   forms => Forms1, 
@@ -255,7 +255,7 @@ transform_macro_call(MacroOpts) ->
                          do([astranaut_traverse_m ||
                                 CounterAcc <- astranaut_traverse_m:get(),
                                 Return = walk_macro_call(Node, MacroOpts#{counter => CounterAcc}),
-                                astranaut_traverse:fun_return_to_monad(Return, Node, #{with_state => true})
+                                astranaut_walk_return:to_traverse_m(Return, Node, #{with_state => true})
                             ])
                  end, Forms0, Opts),
            astranaut_traverse_m:modify(fun(Counter1) -> #{forms => Forms1, counter => Counter1} end)

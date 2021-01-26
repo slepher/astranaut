@@ -16,14 +16,8 @@
 -export([reduce/3, reduce/4]).
 -export([mapfold/3, mapfold/4]).
 -export([without_errors/1, with_attributes/5]).
--export([map_m/3, map_m_children/3, m_subtrees/3, update_opts/1]).
--export([transform_mapfold_f/2]).
--export([format_error/1, parse_transform_return/1]).
--export([deep_sequence_m/1, deep_r_sequence_m/1]).
--export([fun_return_to_monad/2, fun_return_to_monad/3]).
--export([transform_return_m/2]).
-
--export([map_m_subtrees/3]).
+-export([map_m/3]).
+-export([format_error/1]).
 
 -define(TRAVERSE_FUN_RETURN, traverse_fun_return).
 -define(TRAVERSE_ERROR, astranaut_traverse_error).
@@ -145,7 +139,7 @@ add_attribute(F, AttrValues, Acc) when is_list(AttrValues) ->
         end, AttrValues, astranaut_traverse_m));
 add_attribute(F, AttrValue, Acc) ->
     Acc1 = apply_attribute_f(F, AttrValue, Acc),
-    fun_return_to_monad(Acc1, ok, #{}).
+    astranaut_walk_return:to_traverse_m(Acc1, ok, #{}).
 
 apply_attribute_f(F, AttributeValue, Acc) when is_function(F, 2) ->
     F(AttributeValue, Acc).
@@ -167,37 +161,16 @@ map_m(F, Nodes, Opts) ->
               erlang:error({no_nodes_return, Nodes})
       end).
 
-format_error({invalid_option_value, OptionName, Key, Value}) ->
-    io_lib:format("invalid option of ~p: ~p, ~p", [OptionName, Key, Value]);
-format_error({invalid_option, OptionName, Value}) ->
-    io_lib:format("invalid option of ~p: ~p", [OptionName, Value]);
 format_error(Message) ->
-    io:format("get message ~p~n", [Message]),
     case io_lib:deep_char_list(Message) of
         true -> Message;
         _    -> io_lib:write(Message)
     end.
-
-parse_transform_return(#{return := Forms, error := Error}) ->
-    case astranaut_error_state:realize(Error) of
-        {[], []} ->
-            Forms;
-        {[], Warnings} ->
-            {warning, Forms, Warnings};
-        {Errors, Warnings} ->
-            {error, Errors, Warnings}
-    end;
-parse_transform_return(#{error := Error}) ->
-    {Errors, Warnings} = astranaut_error_state:realize(Error),
-    {error, Errors, Warnings};
-parse_transform_return(Forms) ->
-    Forms.
-
 %%====================================================================
 %% Internal functions
 %%====================================================================
 mapfold_1(F, Init, Node, #{} = Opts) ->
-    NF = transform_mapfold_f(F, Opts),
+    NF = astranaut_traverse_m:transform_mapfold_f(F),
     NodeM = map_m(NF, Node, Opts),
     Formatter = maps:get(formatter, Opts, ?MODULE),
     astranaut_traverse_m:run(NodeM, Formatter, Init).
@@ -311,7 +284,7 @@ map_m_subtrees(F, Nodes, #{sequence_children := Sequence} = Opts) ->
     Sequence(SubtreesM);
 map_m_subtrees(F, Nodes, Opts) ->
     SubtreesM = m_subtrees(F, Nodes, Opts),
-    deep_sequence_m(SubtreesM).
+    astranaut_traverse_m:deep_sequence_m(SubtreesM).
 
 
 m_subtrees(F, Subtrees, Opts) when is_list(Subtrees) ->
@@ -323,7 +296,7 @@ m_subtrees(_F, {skip, Subtree}, _Opts) ->
     deep_node(Subtree);
 m_subtrees(F, {transformer, Subtree, Transformer}, Opts) ->
     astranaut_traverse_m:bind(
-      map_m_subtrees(F, Subtree, Opts#{sequence_children => fun deep_sequence_m_1/1}),
+      map_m_subtrees(F, Subtree, Opts#{sequence_children => fun astranaut_traverse_m:deep_sequence_m_1/1}),
       fun(Subtree1) ->
               Transformed = Transformer(Subtree1),
               astranaut_traverse_m:nodes(Transformed) 
@@ -344,46 +317,6 @@ deep_node(Nodes) when is_list(Nodes) ->
       end, Nodes);
 deep_node(Node) ->
     astranaut_traverse_m:node(Node).
-
-deep_sequence_m(MAss) ->
-    astranaut_monad:map_m(fun deep_sequence_m_1/1, MAss, astranaut_traverse_m).
-
-deep_sequence_m_1(MAs) when is_list(MAs) ->
-    astranaut_traverse_m:pop_nodes(astranaut_monad:sequence_m(MAs, astranaut_traverse_m));
-deep_sequence_m_1(MA) ->
-    astranaut_traverse_m:pop_nodes(MA).
-
-deep_r_sequence_m(MAs) ->
-    astranaut_monad:lift_m(fun lists:reverse/1, deep_sequence_m(lists:reverse(MAs)), astranaut_traverse_m).
-
-transform_mapfold_f(F, _Opts) ->
-    fun(Node, Attr) ->
-            astranaut_traverse_m:bind(
-              astranaut_traverse_m:get(),
-              fun(State) ->
-                      Reply = F(Node, State, Attr),
-                      fun_return_to_monad(Reply, Node, #{with_state => true})
-              end)
-    end.
-
-fun_return_to_monad(Return, Node) ->
-    fun_return_to_monad(Return, Node, #{}).
-
-fun_return_to_monad(Return, Node, Opts) ->
-    WithState = maps:get(with_state, Opts, false),
-    case astranaut_walk_return:to_map(Return) of
-        {ok, StructBase} ->
-            WalkReturn = astranaut_walk_return:new(StructBase),
-            astranaut_traverse_m:astranaut_traverse_m(WalkReturn);
-        error ->
-            case {Return, WithState} of
-                {{Node1, State}, true} ->
-                    WalkReturn = astranaut_walk_return:new(#{node => Node1, state => State}),
-                    astranaut_traverse_m:astranaut_traverse_m(WalkReturn);
-                _ ->
-                    astranaut_traverse_m:to_monad(Node, Return)
-            end
-    end.
 
 transform_f(F, #{traverse := pre}) ->
     fun(Node, #{step := pre  } = Attr) -> F(Node, Attr);
