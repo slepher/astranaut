@@ -125,6 +125,7 @@ quote_0(Value, #{debug := true, quote_line := QuoteLine, file := File} = Options
       end, quote_0(Value, Options#{debug => false}), astranaut_traverse_m);
 quote_0(Value, #{line := Line, quote_line := QuoteLine} = Options) ->
     Options1 = maps:remove(line, Options),
+
     astranaut_monad:lift_m(
       fun(Quoted) ->
               call_remote(astranaut, replace_line_zero, [Quoted, Line], QuoteLine)
@@ -360,15 +361,15 @@ to_options(Ast) ->
     case lists:member(Type, [list, nil, map_expr, atom]) of
         true ->
             Line = erl_syntax:get_pos(Ast),
-            {Options, Warnings} = astranaut:ast_to_options(Ast, [line]),
-            validate_options(Options, Line, Warnings);
+            Options = ast_to_options(Ast),
+            validate_options(Options, Line);
         false ->
             #{line => Ast}
     end.
 
-validate_options(Line, _QuoteLine, Warnings) when is_integer(Line) ->
-    {#{code_line => Line}, Warnings};
-validate_options(Options, Line, Warnings) ->
+validate_options(Line, _QuoteLine) when is_integer(Line) ->
+    #{code_line => Line};
+validate_options(Options, Line) ->
     {Options1, Warnings1} = 
         astranaut:validate_options(
           fun validate_quote_option/2,
@@ -378,7 +379,7 @@ validate_options(Options, Line, Warnings) ->
           fun(Warning) ->
                   {Line, astranaut_quote, Warning}
           end, Warnings1),
-    Options1#{warnings => Warnings ++ Warnings2}.
+    Options1#{warnings => Warnings2}.
 
 validate_quote_option(debug, Boolean) when is_boolean(Boolean) ->
     ok;
@@ -437,3 +438,18 @@ parse_binding_1([$_,$@|T]) ->
     {value, T};
 parse_binding_1(_) ->
     default.
+
+ast_to_options(AstOptions) ->
+    StaticTypes = [atom, char, float, integer, nil, string, list, map_expr, map_field_assoc, tuple],
+    AstOptions1 =
+        astranaut_traverse:map(
+          fun(Node, _Attr) ->
+                  Type = erl_syntax:type(Node),
+                  case lists:member(Type, StaticTypes) of
+                      true ->
+                          Node;
+                      false ->
+                         {continue, astranaut:abstract(Node)}
+                  end
+          end, AstOptions, #{traverse => pre}),
+    erl_syntax:concrete(AstOptions1).

@@ -415,8 +415,15 @@ map_walk_return(F, WalkReturn) ->
             Map;
         {error, Reason} ->
             {error, Reason};
-        {ok, WalkReturn} ->
-            {ok, F(WalkReturn)};
+        {warning, WalkReturn1, Warning} ->
+            {Return, State} = F(WalkReturn1),
+            astranaut_walk_return:new(#{return => Return, state => State, warning => Warning});
+        {ok, WalkReturn1} ->
+            {Return, State} = F(WalkReturn1),
+            astranaut_walk_return:new(#{return => Return, state => State});
+        {continue, WalkReturn1} ->
+            {Return, State} = F(WalkReturn1),
+            astranaut_walk_return:new(#{continue => true, return => Return, state => State});
         WalkReturn ->
             F(WalkReturn)
     end.
