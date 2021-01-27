@@ -22,7 +22,6 @@
 -export([forms_with_attribute/5]).
 -export([options/1]).
 -export([validate/2, validate/3]).
--export([attr_walk_return/1]).
 -export([by_validator/3]).
 -export([get_boolean/4]).
 
@@ -98,22 +97,6 @@ validate(Validator, ToValidate, Options) ->
       fun(ToValidate1) ->
               validate_1(Validator, ToValidate1, Options)
       end).
-
-attr_walk_return(#{node := Node} = Map) ->
-    Map1 = maps:remove(node, Map),
-    attr_walk_return(Map1#{nodes => [Node]});
-attr_walk_return(#{} = Map) ->
-    Nodes = maps:get(nodes, Map, []),
-    A = maps:get(return, Map, ok),
-    Map1 = maps:remove(nodes, Map),
-    astranaut_walk_return:new(Map1#{return => {Nodes, A}});
-attr_walk_return(Return) ->
-    case astranaut_walk_return:to_map(Return) of
-        {ok, Map} ->
-            attr_walk_return(Map);
-        error ->
-            attr_walk_return(#{return => Return})
-    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

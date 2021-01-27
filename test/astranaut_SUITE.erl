@@ -264,7 +264,7 @@ test_forms_with_attribute(_Config) ->
         astranaut_options:forms_with_attribute(
           fun(Attr, Acc, #{line := Line}) ->
                   Node = astranaut:attribute_node(mark_1, Line, Attr),
-                  astranaut_options:attr_walk_return(#{node => Node, return => [Attr|Acc]})
+                  {[Node], [Attr|Acc]}
           end, [], Forms, mark, #{simplify_return => true}),
     Marks1 =
         astranaut_options:with_attribute(
