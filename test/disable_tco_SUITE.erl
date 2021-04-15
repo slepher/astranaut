@@ -9,7 +9,6 @@
 -module(disable_tco_SUITE).
 
 -compile(export_all).
--include_lib("stacktrace.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 %%--------------------------------------------------------------------
@@ -130,8 +129,8 @@ disable_tco(_Config) ->
     try
         disable_tco_example:f(1)
     catch
-        _:_?CAPTURE_STACKTRACE ->
-            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(?GET_STACKTRACE))
+        _:_:StackTraces ->
+            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(StackTraces))
     end.
 
 extract_stacktrace(StackTrace) ->

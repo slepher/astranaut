@@ -14,6 +14,7 @@
 -export([smap/3, sreduce/4, smapfold/4]).
 -export([map/3, reduce/4, mapfold/4]).
 -export([map_m/3]).
+-export([walk_return/1]).
 -export([uniplate/1]).
 -export([format_error/1]).
 

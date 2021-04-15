@@ -16,9 +16,10 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-parse_transform(Ast, _Opt) ->
-    Opts = #{parse_transform => true, formatter => ?MODULE},
-    astranaut_traverse:map_with_state(fun walk/3, sets:new(), Ast, Opts).
+parse_transform(Forms, _Opt) ->
+    Opts = #{formatter => ?MODULE},
+    {Forms1, _} = astranaut:smapfold(fun walk/3, sets:new(), Forms, Opts),
+    Forms1.
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
@@ -35,8 +36,8 @@ format_error(Message) ->
 %%% Internal functions
 %%%===================================================================
 walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
-    Opts =  #{traverse => leaf, formatter => ?MODULE},
-    Variables = astranaut_traverse:reduce(fun walk_variables/3, sets:new(), Function, Opts),
+    Opts = #{traverse => pre},
+    Variables = astranaut:sreduce(fun walk_variables/3, sets:new(), Function, Opts),
     {Function, Variables};
 walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
@@ -128,7 +129,7 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
           try
               unquote(Expr)
           catch
-              _@ClassVar:_@ExceptionVar ->
+              _@ClassVar:_@ExceptionVar:_@Stacktraces ->
                   erlang:raise(_@ClassVar,_@ExceptionVar,erlang:get_stacktrace())
           end, Line),
     {Node, NVariables}.

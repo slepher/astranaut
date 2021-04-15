@@ -1,19 +1,18 @@
 %%%-------------------------------------------------------------------
 %%% @author Chen Slepher <slepheric@gmail.com>
-%%% @copyright (C) 2020, Chen Slepher
+%%% @copyright (C) 2019, Chen Slepher
 %%% @doc
 %%%
 %%% @end
-%%% Created : 16 Jun 2020 by Chen Slepher <slepheric@gmail.com>
+%%% Created : 23 Sep 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_struct_SUITE).
+-module(astranaut_rebinding_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include("test_record.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -31,7 +30,20 @@ suite() ->
 %% @end
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    Config.
+    erlang:system_flag(backtrace_depth, 20),
+    TestModules = [rebinding_example, rebinding_test],
+    erl_af_test_lib:load_data_modules(Config, TestModules),
+    Forms = erl_af_test_lib:test_module_forms(rebinding_test, Config),
+    Forms1 = erl_af_rebinding:parse_transform(Forms, erl_af_test_lib:compile_opts()),
+    Functions =
+        lists:foldl(
+            fun({function, _Line, Name, _Arity, Clauses}, Acc) ->
+                    Clauses1 = erl_af_lib:replace_line(Clauses, 0),
+                    maps:put(Name, Clauses1, Acc);
+               (_Form, Acc) ->
+                   Acc
+            end, #{}, Forms1),
+    [{functions, Functions}|Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -109,17 +121,20 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_struct_new, test_struct_update, test_struct_test,
-     test_from_record, test_to_record, test_from_map, test_update_struct,
-     test_from_other_record,
-     test_from_map_missing_name, test_update_missing_name, test_update_fail,
-     test_compile_enforce_fail, test_compile_non_record_fail].
+    [test_lc, test_function, test_case, test_if,
+     test_map, test_map_update,
+     test_rec, test_rec_update,
+     test_operator, test_list, test_tuple,
+     test_pattern_save_var, test_pattern_save_var_in_fun, test_pattern_save_var_in_case
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
+test_rebinding_lc() -> 
+    [].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
@@ -130,103 +145,108 @@ all() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_struct_new(_Config) -> 
-    Test = astranaut_struct_test:new(),
-    #{name := hello, value := <<"world">>} = Test,
+test_lc(Config) ->
+    equal_functions(test_lc, test_lc_origin, Config),
+    A = rebinding_test:test_lc(10),
+    B = rebinding_test:test_lc_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_struct_update(_Config) -> 
-    Test = astranaut_struct_test:new(),
-    Test1 = astranaut_struct_test:update_name(Test, bye),
-    #{name := bye, value := <<"world">>} = Test1,
+test_function(Config) ->
+    equal_functions(test_function, test_function_origin, Config),
+    A = rebinding_test:test_function(10),
+    B = rebinding_test:test_function_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_struct_test(_Config) ->
-    Test = astranaut_struct_test:new(),
-    hello = astranaut_struct_test:test(Test),
-    ok.
-    
-test_from_record(_Config) ->
-    Test = #test{name = hello, value = world},
-    Test1 = astranaut_struct_test:from_record(Test),
-    ?assertEqual(#{'__struct__' => test,
-                   name => hello, value => world, enable => true,
-                   desc => undefined}, Test1),
+test_case(Config) ->
+    equal_functions(test_case, test_case_origin, Config),
+    equal_functions(test_case_pinned, test_case_origin, Config),
+    A = rebinding_test:test_case(10),
+    B = rebinding_test:test_case_origin(10),
+    C = rebinding_test:test_case_pinned(10),
+    ?assertEqual(A, B),
+    ?assertEqual(A, C),
     ok.
 
-test_to_record(_Config) ->
-    Test = #{'__struct__' => test, name => hello, value => world},
-    Test1 = astranaut_struct_test:to_record(Test),
-    ?assertEqual(#test{name = hello, value = world, 
-                       enable = undefined, desc = undefined}, Test1),
+test_if(Config) ->
+    equal_functions(test_if, test_if_origin, Config),
+    A = rebinding_test:test_if(10),
+    B = rebinding_test:test_if_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_from_map(_Config) ->
-    Test = #{name => test_name, desc => test_desc, beep => none},
-    Test1 = astranaut_struct_test:from_map(Test),
-    ?assertEqual(#{'__struct__' => test,
-                   name => test_name, 
-                   value => <<"world">>,
-                   desc => test_desc,
-                   enable => true}, 
-                 Test1),
+test_rec(Config) ->
+    equal_functions(test_rec, test_rec_origin, Config),
+    A = rebinding_test:test_rec(10),
+    B = rebinding_test:test_rec_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_from_map_missing_name(_Config) ->
-    Test = #{desc => test_desc, beep => none},
-    ?assertException(exit, {missing_enforce_keys, test, [name]}, 
-                     astranaut_struct_test:from_map(Test)),
+test_rec_update(Config) ->
+    equal_functions(test_rec_update, test_rec_update_origin, Config),
+    A = rebinding_test:test_rec_update(10),
+    B = rebinding_test:test_rec_update_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_from_other_record(_Config) ->
-    Test2 = #test2{name = test_name, value = test_value},
-    Test1 = astranaut_struct_test:to_test1(Test2),
-    Test3 = astranaut_struct_test:to_test3(Test2),
-    ?assertEqual(#{'__struct__' => test,
-                   name => test_name,
-                   value => test_value,
-                   enable => true
-                  },
-                 Test1),
-    ?assertEqual(#{'__struct__' => test3,
-                   name => test_name,
-                   value => test_value},
-                 Test3),
+test_map(Config) ->
+    equal_functions(test_map, test_map_origin, Config),
+    A = rebinding_test:test_map(10),
+    B = rebinding_test:test_map_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_update_struct(_Config) ->
-    Test = #{'__struct__' => test, name => bye},
-    Test1 = astranaut_struct_test:update(Test),
-    ?assertEqual(#{'__struct__' => test,
-                   name => bye,
-                   value => <<"world">>,
-                   enable => true
-                  }, Test1),
+test_map_update(Config) ->
+    equal_functions(test_map_update, test_map_update_origin, Config),
+    A = rebinding_test:test_map_update(10),
+    B = rebinding_test:test_map_update_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_update_missing_name(_Config) ->
-    Test = #{'__struct__' => test, desc => bye},
-    ?assertException(exit, {missing_enforce_keys, test, [name]}, 
-                     astranaut_struct_test:update(Test)),
+test_operator(Config) ->
+    equal_functions(test_operator, test_operator_origin, Config),
+    A = rebinding_test:test_operator(10),
+    B = rebinding_test:test_operator_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_update_fail(_Config) ->
-    Test = #{'__struct__' => test2, name => bye},
-    ?assertException(exit, {invalid_struct, test, Test}, astranaut_struct_test:update(Test)),
+test_tuple(Config) ->
+    equal_functions(test_tuple, test_tuple_origin, Config),
+    A = rebinding_test:test_tuple(10),
+    B = rebinding_test:test_tuple_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_compile_enforce_fail(_Config) ->
-    [{File, [Error]}] = astranaut_struct_fail_0:errors(),
-    Forms = astranaut_struct_fail_0:forms(),
-    [{Line, {test, _Opts}}] = astranaut:attributes_with_line(astranaut_struct, Forms),
-    ?assertEqual("astranaut_struct_fail_0.erl", filename:basename(File)),
-    ?assertEqual({Line,astranaut_struct_transformer, {enforce_keys_not_in_struct,test,[desc]}}, Error),
+test_list(Config) ->
+    equal_functions(test_list, test_list_origin, Config),
+    A = rebinding_test:test_list(10),
+    B = rebinding_test:test_list_origin(10),
+    ?assertEqual(A, B),
     ok.
 
-test_compile_non_record_fail(_Config) ->
-    [{File, [Error]}] = astranaut_struct_fail_1:errors(),
-    Forms = astranaut_struct_fail_1:forms(),
-    [{Line, other_test}] = astranaut:attributes_with_line(astranaut_struct, Forms),
-    ?assertEqual("test_record_1.hrl", filename:basename(File)),
-    ?assertMatch({Line,astranaut_struct_transformer,{undefined_record,other_test}}, Error),
+test_pattern_save_var(_Config) ->
+    A = rebinding_test:test_pattern_same_var(1, 2),
+    B = rebinding_test:test_pattern_same_var(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
     ok.
+
+test_pattern_save_var_in_fun(_Config) ->
+    A = rebinding_test:test_pattern_same_var_in_fun(1, 2),
+    B = rebinding_test:test_pattern_same_var_in_fun(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+test_pattern_save_var_in_case(_Config) ->
+    A = rebinding_test:test_pattern_same_var_in_case(1, 2),
+    B = rebinding_test:test_pattern_same_var_in_case(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+
+equal_functions(F1, F2, Config) ->
+    Functions = proplists:get_value(functions, Config),
+    ?assertEqual(maps:get(F1, Functions), maps:get(F2, Functions)).

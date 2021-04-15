@@ -10,8 +10,8 @@
 
 %% API
 -export([bind/3, return/2]).
--export([lift_m/3, sequence_m/3, map_m/2]).
--export([lift_m/4, sequence_m/4, map_m/3]).
+-export([lift_m/3, sequence_m/2, map_m/3]).
+-export([lift_m/4, sequence_m/3, map_m/4]).
 -export([identity_bind/0, identity_return/0]).
 -export([maybe_bind/0, maybe_return/0]).
 -export([either_bind/0, either_return/0]).
@@ -61,31 +61,31 @@ lift_m(F, MA, Monad) ->
 lift_m(F, MA, Bind, Return) ->
     Bind(MA, fun(A) -> Return(F(A)) end).
 
--spec sequence_m(fun((A) -> monad(M, B)), [A], M) -> monad(M, [B]).
-sequence_m(F, As, Monad) ->
-    sequence_m(F, As, monad_bind(Monad), monad_return(Monad)).
+-spec map_m(fun((A) -> monad(M, B)), [A], M) -> monad(M, [B]).
+map_m(F, As, Monad) ->
+    map_m(F, As, monad_bind(Monad), monad_return(Monad)).
 
--spec sequence_m(fun((A) -> monad(M, B)), [A], monad_bind(M), monad_return(M)) -> monad(M, [B]).
-sequence_m(F, [A|As], Bind, Return) ->
+-spec map_m(fun((A) -> monad(M, B)), [A], monad_bind(M), monad_return(M)) -> monad(M, [B]).
+map_m(F, [A|As], Bind, Return) ->
     Bind(
       F(A),
       fun(A1) ->
               Bind(
-                sequence_m(F, As, Bind, Return),
+                map_m(F, As, Bind, Return),
                 fun(As1) ->
                         Return([A1|As1])
                 end)
       end);
-sequence_m(_F, [], _Bind, Return) ->
+map_m(_F, [], _Bind, Return) ->
     Return([]).
 
--spec map_m([monad(M, A)], M) -> monad(M, [A]).
-map_m(MAs, Monad) ->
+-spec sequence_m([monad(M, A)], M) -> monad(M, [A]).
+sequence_m(MAs, Monad) ->
     map_m(MAs, monad_bind(Monad), monad_return(Monad)).
 
--spec map_m([monad(M, A)], monad_bind(M), monad_return(M)) -> monad(M, [A]).
-map_m(MAs, Bind, Return) ->
-    sequence_m(fun(A) -> A end, MAs, Bind, Return).
+-spec sequence_m([monad(M, A)], monad_bind(M), monad_return(M)) -> monad(M, [A]).
+sequence_m(MAs, Bind, Return) ->
+    map_m(fun(A) -> A end, MAs, Bind, Return).
 
 -spec identity_bind() -> fun((A, fun((A) -> B)) -> B).
 identity_bind() ->

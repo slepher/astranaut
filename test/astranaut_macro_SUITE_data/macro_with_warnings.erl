@@ -6,31 +6,30 @@
 %%% @end
 %%% Created :  8 Dec 2018 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_macro_with_warnings).
+-module(macro_with_warnings).
 
--include_lib("astranaut/include/compile_meta.hrl").
-%% -include_lib("astranaut/include/quote.hrl").
-%% -include_lib("astranaut/include/macro.hrl").
--astranaut_compile_meta([{transformers, [astranaut_quote, astranaut_macro]}]).
--astranaut_compile_meta(silent).
+-macro_options(debug_module).
+
+-include("quote.hrl").
+-include("macro.hrl").
 
 %% API
 -export([test_cons/2]).
 
--export([cons_macro/1]).
 -export([test_attributes/0]).
--export([function_macro/1]).
--export([noop_warnings/0]).
 -export([unquote_splicing_warnings/1]).
 -export([format_error/1]).
 
--use_macro({function_macro/1}).
--use_macro({noop_warnings/0, [formatter]}).
--use_macro({cons_macro/1}).
--base_line(true).
+-local_macro([function_macro/1]).
+-local_macro([noop_warnings/0]).
+-local_macro({[cons_macro/1], [as_attr]}).
+
+-baseline(yep).
 
 -exec_macro({function_macro, [a]}).
 -exec_macro({function_macro, [b]}).
+-exec_macro({function_macro, [c, d]}).
+-cons_macro([e, f, g]).
 
 %%%===================================================================
 %%% API
@@ -54,14 +53,14 @@ unquote_splicing_warnings(Ast) ->
     Head.
 
 function_macro(a) ->
-    astranaut:exported_function(
+    erl_af_lib:gen_exported_function(
       test_local,
       quote(
         fun() ->
                 ok
         end));
 function_macro(b) ->
-    Ast = astranaut:exported_function(
+    Ast = erl_af_lib:gen_exported_function(
             test_local_b,
             quote(
               fun() ->
@@ -76,7 +75,7 @@ cons_macro(Ast) ->
     Ast.
 
 format_error(Error) ->
-    astranaut_traverse:format_error(Error).
+    erl_af:format_error(Error).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -6,14 +6,14 @@
 %%% @end
 %%% Created : 24 Sep 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_rebinding_example).
+-module(rebinding_example).
 
 %% API
 -export([]).
 
--include("rebinding.hrl").
+-include_lib("astranaut/include/rebinding.hrl").
 
-%% -rebinding_all([debug]).
+-rebinding_all([debug]).
 
 %%%===================================================================
 %%% API

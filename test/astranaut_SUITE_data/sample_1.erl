@@ -6,19 +6,20 @@
 %%% @end
 %%% Created :  9 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_sample_0).
+-module(sample_1).
 
--include_lib("astranaut/include/compile_meta.hrl").
+-compile({parse_transform, sample_transformer_1}).
 
 %% API
 -export([warning_0/0, error_0/0]).
 
+-baseline(mark_base).
 -mark(mark_error_0).
 -mark(mark_0).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
+-baseline(function_base).
 error_0() ->
     mark_error_1.
 

@@ -176,11 +176,12 @@ monad_opts(Monad) ->
                      listen => astranaut_monad:monad_listen(M),
                      lift => astranaut_monad:monad_lift(_W)}, #{traverse => pre | post | all | subtree}) -> monad(M, A).
 map_m_monads(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
-    astranaut_monad:sequence_m(
+    astranaut_monad:map_m(
       fun(Node) ->
               sub_apply(F, Node, Uniplate, MOpts, Opts)
       end, Nodes, Bind, Return);
 map_m_monads(F, Node1, Uniplate, #{bind := Bind} = MOpts, Opts) ->
+    Opts1 = maps:merge(#{traverse => pre}, Opts),
     %% this function is too compliacated
     %% how to make it simpler.
     %% Node1 is simple node
@@ -190,7 +191,7 @@ map_m_monads(F, Node1, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% SubNode2 is sub_node without context
     %% Node4 is node without context
     pre_apply_bind(
-      F, Node1, MOpts, Opts,
+      F, Node1, MOpts, Opts1,
       fun(Node2) ->
               Bind(
                 context_apply(
@@ -199,12 +200,12 @@ map_m_monads(F, Node1, Uniplate, #{bind := Bind} = MOpts, Opts) ->
                             fun(SubNode1) ->
                                     context_apply(
                                       fun(SubNode2) ->
-                                              sub_apply(F, context_node(SubNode2), Uniplate, MOpts, Opts)
+                                              sub_apply(F, context_node(SubNode2), Uniplate, MOpts, Opts1)
                                     end, SubNode1, MOpts)
                             end, Node3, Uniplate, MOpts)
                   end, Node2, MOpts),
                 fun(Node4) ->
-                        post_apply(F, context_node(Node4), MOpts, Opts)
+                        post_apply(F, context_node(Node4), MOpts, Opts1)
                 end)
       end).
 
@@ -448,17 +449,17 @@ right_trees_1(F, [Head|T]) when is_list(Head) ->
     [right_trees(F, Head)|T].
 
 map_subtreess_m(F, Subtreess, Bind, Return) ->
-    astranaut_monad:sequence_m(fun(Subtrees) -> sequence_nodes_m(F, Subtrees, Bind, Return) end, Subtreess, Bind, Return).
+    astranaut_monad:map_m(fun(Subtrees) -> map_nodes_m(F, Subtrees, Bind, Return) end, Subtreess, Bind, Return).
 
-sequence_nodes_m(F, [H|T], Bind, Return) ->
+map_nodes_m(F, [H|T], Bind, Return) ->
     Bind(
       F(H),
       fun(H1) ->
               Bind(
-                sequence_nodes_m(F, T, Bind, Return),
+                map_nodes_m(F, T, Bind, Return),
                 fun(T1) ->
                         Return([H1|T1])
                 end)
       end);
-sequence_nodes_m(_F, [], _Bind, Return) ->
+map_nodes_m(_F, [], _Bind, Return) ->
     Return([]).

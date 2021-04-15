@@ -21,4 +21,4 @@ parse_transform(BaseForms, Opts) ->
     astranaut_syntax:insert_forms(CompileOptsForms, BaseForms).
 
 format_error(Error) ->
-    erl_af:format_error(Error).
+    astranaut:format_error(Error).

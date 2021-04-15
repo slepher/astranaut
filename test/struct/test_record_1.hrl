@@ -1,3 +1,0 @@
--include_lib("astranaut/include/struct.hrl").
--record(test, {name, value}).
--astranaut_struct(other_test).

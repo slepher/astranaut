@@ -6,30 +6,42 @@
 %%% @end
 %%% Created : 24 Jan 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_macro_exports).
+-module(macro_exports).
+
+-macro_options(debug_module).
 
 %% API
--export_macro({[macro_x/1], [auto_export, merge_function]}).
--export([macro_x/1]).
+-export_macro({[macro_x/1], [as_attr]}).
 
 -include("quote.hrl").
 -include("macro.hrl").
 
 -export([hello/1]).
 
--use_macro({macro_x/1, [{as_attr, macro_x}]}).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 macro_x(Name) ->
-    astranaut:function(
-      Name,
-      quote(
-        fun(this) ->
-                {this, _A@Name}
-        end)).
+    macro_x_1(Name).
+
+macro_x_1(Name) ->
+    Fun =
+        case Name of
+            hello ->
+              quote(
+                fun(this) ->
+                        {this, _A@Name};
+                   (Default) ->
+                       '__original__'(Default)
+                end);
+            _ ->
+              quote(
+                fun(this) ->
+                        {this, _A@Name}
+                end)
+        end,
+    astranaut_lib:gen_exported_function(Name, Fun).
 
 -macro_x([hello]).
 

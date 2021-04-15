@@ -6,21 +6,22 @@
 %%% @end
 %%% Created : 20 Sep 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_rebinding_test).
+-module(rebinding_test).
 
 -include("rebinding.hrl").
--include("stacktrace.hrl").
+
+-rebinding_all([debug]).
 
 -rebinding_fun({[test_lc, test_case, test_if], []}).
 -rebinding_fun({[test_case_pinned], [clause_pinned]}).
 -rebinding_fun({[test_function], [strict]}).
 -rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], [strict]}).
--rebinding_fun({[test_map, test_map_update], [strict]}).
--rebinding_fun({[test_rec, test_rec_update], [strict]}).
--rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], non_rebinding}).
--rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], non_rebinding}).
--rebinding_fun({[test_map_origin, test_map_update_origin], non_rebinding}).
--rebinding_fun({[test_rec_origin, test_rec_update_origin], non_rebinding}).
+-rebinding_fun({[test_map, test_map_update], [strict, debug]}).
+-rebinding_fun({[test_rec, test_rec_update], [strict, debug]}).
+-rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], no_rebinding}).
+-rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], no_rebinding}).
+-rebinding_fun({[test_map_origin, test_map_update_origin], no_rebinding}).
+-rebinding_fun({[test_rec_origin, test_rec_update_origin], no_rebinding}).
 -rebinding_fun({[test_pattern_same_var, test_pattern_same_var_in_fun, test_pattern_same_var_in_case], []}).
 
 -record(rec, {a, b, c, d}).
@@ -55,8 +56,7 @@ test_lc_origin(A) ->
 test_function(A) ->
     B = 10,
     B = ok(begin A = A + 1, A end, begin A = A + B, A end),
-    B = bind(A + B,
-             fun(A) -> A = A + B, A end),
+    B = bind(A + B, fun(A) -> A = A + B, A end),
     A = B + 1,
     A = A + 1,
     A.
@@ -65,11 +65,10 @@ test_function_origin(A) ->
     B = 10,
     B_1 = ok(begin A_1 = A + 1, A_1 end,
 	     begin A_2 = A + B, A_2 end),
-    B_2 = bind(begin A_3 = A_2 + B_1, A_3 end,
-	       fun (A_4) -> A_5 = A_4 + B_1, A_5 end),
-    A_4 = B_2 + 1,
-    A_5 = A_4 + 1,
-    A_5.
+    B_2 = bind(A_2 + B_1, fun (A_3) -> A_4 = A_3 + B_1, A_4 end),
+    A_3 = B_2 + 1,
+    A_4 = A_3 + 1,
+    A_4.
 
 test_case(A) ->
     B = 15,
@@ -79,7 +78,7 @@ test_case(A) ->
     B = case A of
             10 -> A = A + 1, A = A + 1, A;
             +B ->  B = A + 1, A = B + 1, A;
-            A ->  B = A + B, B
+            +A ->  B = A + B, B
         end,
     B = A + B,
     A = A + B,
@@ -160,8 +159,8 @@ test_try() ->
     try 
         A
     catch
-        Class:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(Class, Exception, ?GET_STACKTRACE)
+        Class:Exception:StackTrace ->
+            erlang:raise(Class, Exception, StackTrace)
     end.
 
 test_operator(A) ->

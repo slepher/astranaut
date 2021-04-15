@@ -6,30 +6,30 @@
 %%% @end
 %%% Created : 29 Jan 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_macro_example).
+-module(macro_example).
 
--include_lib("astranaut/include/quote.hrl").
--include_lib("astranaut/include/macro.hrl").
+-macro_options(debug_module).
+
+-include("quote.hrl").
+-include("macro.hrl").
 %% API
 
 -export_macro({[macro_group_args/1], [group_args]}).
--export_macro({[macro_with_attributes/1], [attrs]}).
--export_macro({[macro_exported_function/2], [auto_export]}).
--export_macro({[macro_with_vars/0], []}).
+-export_macro({[macro_with_attributes/1], [inject_attrs]}).
+-export_macro([macro_exported_function/2]).
+-export_macro({[macro_order_outer/1], [{order, outer}]}).
+-export_macro({[macro_order_inner/1], [{order, inner}]}).
+-export_macro({[macro_merge_function/2], [{as_attr, merge_function}]}).
 
--export([quote_ok/0]).
--export([quote_unquote/1, quote_binding/1]).
--export([quote_unquote_splicing/2, quote_unquote_splicing_mix/2]).
--export([quote_match_pattern/1, quote_function_pattern/1, quote_case_pattern/1]).
--export([quote_code/0]).
--export([quote_line_1/1, quote_line_2/1]).
--export([macro_function/2, macro_exported_function/2]).
--export([macro_try_catch/0, macro_case/3]).
--export([macro_with_attributes/1, macro_group_args/1]).
--export([macro_with_vars_1/1, macro_with_vars_2/1]).
-
--use_macro({quote_ok/0}).
--use_macro({macro_exported_function/2}).
+-export_macro([quote_ok/0]).
+-export_macro([quote_unquote/1, quote_binding/1]).
+-export_macro([quote_unquote_splicing/2, quote_unquote_splicing_mix/2]).
+-export_macro([quote_match_pattern/1, quote_function_pattern/1, quote_case_pattern/1]).
+-export_macro([quote_code/0]).
+-export_macro([quote_line_1/1, quote_line_2/1]).
+-export_macro([macro_function/2]).
+-export_macro([macro_try_catch/0, macro_case/3]).
+-export_macro([macro_with_vars_1/1, macro_with_vars_2/1]).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 
@@ -62,7 +62,7 @@ quote_unquote_splicing_mix(Ast1, Ast2) ->
           fun(unquote = Ast1, Two) ->
                   {error, unquote(Ast1), Two}
           end),
-    astranaut:merge_clauses([Fun1, Fun2]).
+    erl_af_lib:merge_clauses([Fun1, Fun2]).
 
 quote_match_pattern(Ast) ->
     quote(_A@Hello(_@Foo, _L@World)) = Ast,
@@ -91,7 +91,8 @@ quote_line_1(Ast) ->
     quote({hello, unquote(Ast)}, Line).
 
 quote_line_2(Ast) ->
-    Line = erl_syntax:get_pos(Ast),
+    Pos = erl_syntax:get_pos(Ast),
+    Line = erl_anno:line(Pos),
     Ast1 = quote({hello, unquote(Ast)}, Line + 3),
     quote({ok, unquote(Ast1)}, #{line => Line + 2}).
 
@@ -104,7 +105,6 @@ macro_case(Body, TrueClause, FalseClause) ->
               false
       end).
 
--ifdef(OTP_RELEASE).
 macro_try_catch() ->
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
@@ -117,29 +117,24 @@ macro_try_catch() ->
           _@Class:_@Exception:_@Stack ->
               erlang:raise(_L@Expr)
       end).
--else.
-macro_try_catch() ->
-    Class = {var, 0, 'Class0'},
-    Exception = {var, 0, 'Exception0'},
-    Stack = astranaut:replace_line(quote(erlang:get_stacktrace()), 0),
-    Expr = [Class, Exception, Stack],
-    quote(
-      try
-          exit(throw)
-      catch
-          _@Class:_@Exception ->
-              erlang:raise(_L@Expr)
-      end).
--endif.
 
+macro_order_outer(quote = ok) ->
+    quote(ok);
+macro_order_outer(_Ast) ->
+    quote(fail).
+
+macro_order_inner(quote = ok) ->
+    quote(ok);
+macro_order_inner(_Ast) ->
+    quote(fail).
 
 macro_function(Pattern, Middle) ->
     quote(fun(Head, _L@Pattern, Body) ->
                   {Head, _@Middle, Body}
-      end).
+          end).
 
 macro_exported_function(Name, Pattern1) ->
-    astranaut:function(
+    erl_af_lib:gen_exported_function(
       Name,
       quote(
         fun(_A@Pattern1) ->
@@ -148,6 +143,18 @@ macro_exported_function(Name, Pattern1) ->
                 {error, _Other}
         end)).
 
+macro_merge_function(Name, Pattern) ->
+    erl_af_lib:gen_exported_function(
+      Name,
+      quote(
+        fun(_A@Pattern) ->
+                ok_1;
+           (Other) ->
+                '__original__'(Other)
+        end)).
+
+macro_with_attributes(#{file := File, line := {Line, Col}, module := Module}) ->
+    quote({ok, {_S@File, {_I@Line, _I@Col}, _A@Module}});
 macro_with_attributes(#{file := File, line := Line, module := Module}) ->
     quote({ok, {_S@File, _I@Line, _A@Module}}).
 

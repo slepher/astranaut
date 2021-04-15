@@ -4,28 +4,32 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 28 Jun 2020 by Chen Slepher <slepheric@gmail.com>
+%%% Created :  9 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_struct_fail_0).
-
--include_lib("astranaut/include/compile_meta.hrl").
--include_lib("astranaut/include/struct.hrl").
-
--record(test, {name, value}).
-
--astranaut_compile_meta(silent).
-
--astranaut_struct({test, [{enforce_keys, [desc]}]}).
+-module(sample_2).
 
 %% API
--export([new/0]).
+-export([test/1]).
 
+-mark(mark_01).
 %%%===================================================================
 %%% API
 %%%===================================================================
-new() ->
-    #test{}.
 
+test(ok_2)->
+    test(ok_1);
+test(ok_3)->
+    test_1(ok_3);
+test(ok_4)->
+    test(ok_4, ok_4);
+test(_A) ->
+    ok_2.
+
+test_1(ok_3) ->
+    ok_3.
+
+test(A, _B) ->
+    A.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

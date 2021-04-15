@@ -57,12 +57,12 @@
 %% <li>if there is userdefined error or warning returned from macro definition, format_error/1 should defined</li>
 %% <li>if macro which returns error or warning is exported_macro, format_error/1 should be exported</li>
 %% <li>if macro which returns error or warning is local_macro, format_error/1 is not need to exported</li>
-%% <li>if format_error from macro module is not defined or exported, erl_af_macro will be used as default formatter</li>
+%% <li>if format_error from macro module is not defined or exported, astranaut_macro will be used as default formatter</li>
 %% <li>if format_error/1 is not implemented correctly, there will be no error msg details (because exception is caught by compiler).</li>
 %% </ul></dd>
 %% </dl>
 %% <dl>
-%% <dt>MacroOptions = erl_af_lib:options()</dt>
+%% <dt>MacroOptions = astranaut_lib:options()</dt>
 %% <dd>if an options is a <b>definition option</b>, which means it's only avaliable in  -export_macro -local_macro</dd>
 %% <dd>{order, Order}, when macro is nested, which macro will executed first, definition option.</dd>
 %% <dd><ul>
@@ -110,10 +110,10 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec parse_transform(erl_af:forms(), compile:option()) -> erl_af:parse_transform_return().
+-spec parse_transform(astranaut:forms(), compile:option()) -> astranaut:parse_transform_return().
 parse_transform(Forms, Options) ->
     astranaut_return:to_compiler(
-      do([return ||
+      do([ return ||
              Module = astranaut_lib:analyze_forms_module(Forms),
              %% load macros from attributes and transform -export_macro to -exported_macro
              %% add nowarn_unused_function compile options to -local_macro if it's not exported
@@ -148,7 +148,7 @@ format_error({macro_exception, Module, Function, Arguments, Exception}) ->
     io_lib:format("~napply macro ~p ~p ~p failed:~n~s",
                   [Module, Function, Arguments, eunit_lib:format_exception(Exception)]);
 format_error(Error) ->
-    erl_af:format_error(Error).
+    astranaut:format_error(Error).
 %%%===================================================================
 %%% analyze -export_macro -use_macro attributes functions
 %%%===================================================================
@@ -171,13 +171,13 @@ formatter_opts(Module, Functions, MacroOpts) ->
         true ->
             MacroOpts#{formatter => Module};
         false ->
-            MacroOpts#{formatter => erl_af_macro}
+            MacroOpts#{formatter => astranaut_macro}
     end.
 
 exported_macros(Forms) ->
     astranaut_lib:forms_with_attribute(
       fun(Attr, Acc, #{line := Line}) ->
-              do([ erl_af_return ||
+              do([ return ||
                      Validator = macro_definition_valitor(),
                      {FAs, Options} <-
                          validate_macro_attribute(fun macro_without_module_attr/1, Validator, export_macro, Attr),
@@ -186,13 +186,13 @@ exported_macros(Forms) ->
                      %% exported_macro options for external usage
                      ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Line, [{FAs, Options}]),
                      ExportAttribute = astranaut_lib:gen_attribute_node(export, Line, FAs),
-                     erl_af_return:return({[ExportAttribute, ExportedMacroAttribute], ExportedMacros})
+                     astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], ExportedMacros})
                  ])
       end, #{}, Forms, export_macro, #{formatter => ?MODULE, simplify_return => false}).
 
 %% analyze -import_macro attributes.
 imported_macros(GlobalMacroOpts, Forms) ->
-    erl_af_return:lift_m(
+    astranaut_return:lift_m(
       fun({Modules, MacroMap}) ->
               {lists:reverse(Modules), MacroMap}
       end,
@@ -215,19 +215,19 @@ imported_macros(GlobalMacroOpts, Forms) ->
                               end, #{}, Macros),
                         MacroMapAcc1 = maps:put(Module, Macros1, MacroMapAcc),
                         ModulesAcc1 = [Module|ModulesAcc],
-                        erl_af_return:return({ModulesAcc1, MacroMapAcc1});
+                        astranaut_return:return({ModulesAcc1, MacroMapAcc1});
                     false ->
-                        erl_af_return:error_ok({import_macro_failed, Module}, Acc)
+                        astranaut_return:error_ok({import_macro_failed, Module}, Acc)
                 end;
            (Attr, Acc) ->
-                erl_af_return:error_ok({invalid_import_macro_attr, Attr}, Acc)
+                astranaut_return:error_ok({invalid_import_macro_attr, Attr}, Acc)
         end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE, simplify_return => false})).
 
 local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
     FormsProp = erl_syntax_lib:analyze_forms(Forms),
     Functions = proplists:get_value(functions, FormsProp, []),
     GlobalMacroOpts1 = formatter_opts(local_macro_module(Module), Functions, GlobalMacroOpts),
-    erl_af_return:lift_m(
+    astranaut_return:lift_m(
       fun({Forms1, LocalMacros}) ->
               {Forms1, maps:map(
                          fun({Function, Arity}, MacroOptions) ->
@@ -240,7 +240,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
       end,
       astranaut_lib:forms_with_attribute(
         fun(Attr, Acc, #{line := Line}) ->
-                do([erl_af_return || 
+                do([astranaut_return || 
                        Validator = macro_definition_valitor(),
                        {FAs, Options} <-
                            validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
@@ -258,7 +258,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
 
 used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
     UsedMacros = maps:put(Module, LocalMacros, ImportedMacros),
-    erl_af_return:lift_m(
+    astranaut_return:lift_m(
       fun(UsedMacros2) ->
               maps:map(
                 fun(_MacroModule, ModuleMacros) ->
@@ -274,7 +274,7 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
       end,
       astranaut_lib:with_attribute(
         fun(Attr, UsedMacrosAcc) ->
-                do([ erl_af_return ||
+                do([ return ||
                        Validator = use_macro_validator(),
                        {MFAs, Options}
                            <- validate_macro_attribute(fun macro_attr/1, Validator, use_macro, Attr),
@@ -282,15 +282,15 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
                            {ImportedModule, FAs} ->
                                case maps:find(ImportedModule, UsedMacrosAcc) of
                                    {ok, ModuleMacros} ->
-                                       do([erl_af_return ||
+                                       do([ return ||
                                               ModuleMacros1 <- update_used_macros(ImportedModule, FAs, Options, ModuleMacros),
                                               return(maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc))
                                           ]);
                                    error ->
-                                       erl_af_return:error_ok({unimported_macro_module, Module}, UsedMacrosAcc)
+                                       astranaut_return:error_ok({unimported_macro_module, Module}, UsedMacrosAcc)
                                end;
                            FAs ->
-                               do([erl_af_return ||
+                               do([ return ||
                                       LocalMacrosAcc = maps:get(Module, UsedMacrosAcc),
                                       LocalMacrosAcc1 <- update_local_used_macros(FAs, Options, LocalMacrosAcc),
                                       return(maps:put(Module, LocalMacrosAcc1, UsedMacrosAcc))
@@ -300,28 +300,28 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
         end, UsedMacros, Forms, use_macro, #{formatter => ?MODULE, simplify_return => false})).
 
 update_used_macros(Module, FAs, UsedMacroOptions, MacroMap) ->
-    erl_af_return:foldl_m(
+    astranaut_return:foldl_m(
       fun({Function, Arity}, Acc) ->
               case maps:find({Function, Arity}, MacroMap) of
                   {ok, MacroOptions} ->
                       MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
                       MacroOptions2 = update_alias(MacroOptions1),
-                      erl_af_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
+                      astranaut_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
                   error ->
-                      erl_af_return:error_ok({macro_not_exported, {Module, Function, Arity}}, Acc)
+                      astranaut_return:error_ok({macro_not_exported, {Module, Function, Arity}}, Acc)
               end
       end, MacroMap, FAs).
 
 update_local_used_macros(FAs, UsedMacroOptions, MacroMap) ->
-    erl_af_return:foldl_m(
+    astranaut_return:foldl_m(
       fun({Function, Arity}, Acc) ->
               case maps:find({Function, Arity}, Acc) of
                   {ok, MacroOptions} ->
                       MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
                       MacroOptions2 = update_alias(MacroOptions1),
-                      erl_af_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
+                      astranaut_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
                   error ->
-                      erl_af_return:error_ok({macro_not_defined, {Function, Arity}}, Acc)
+                      astranaut_return:error_ok({macro_not_defined, {Function, Arity}}, Acc)
               end
       end, MacroMap, FAs).
 
@@ -396,9 +396,9 @@ analyze_module_macros(Module) ->
 validate_macro_attribute(Fun, Validator, AttrName, Attr) ->
     case Fun(Attr) of
         invalid_attr ->
-            erl_af_return:error_fail({invalid_attr, AttrName, Attr});
+            astranaut_return:error_fail({invalid_attr, AttrName, Attr});
         {MFAs, Options} ->
-            do([erl_af_return ||
+            do([ return ||
                    validate_mfas(MFAs),
                    Options1 <- astranaut_lib:validate(Validator, Options),
                    return({MFAs, Options1})
@@ -435,9 +435,9 @@ validate_mfas(FAs) when is_list(FAs) ->
 validate_fas([{Function, Arity}|T]) when is_atom(Function), is_integer(Arity) ->
     validate_fas(T);
 validate_fas([FA|_T]) ->
-    erl_af_return:error_fail({invalid_function_with_arity, FA});
+    astranaut_return:error_fail({invalid_function_with_arity, FA});
 validate_fas([]) ->
-    erl_af_return:return(ok).
+    astranaut_return:return(ok).
 
 macro_attr({Module, FAs}) when is_atom(Module), is_list(FAs) ->
     {{Module, FAs}, []};
@@ -471,7 +471,7 @@ macro_without_module_attr(_Other) ->
 %% Step 5. compile local macro and it's related functions from forms1, load it as local_macro_module.
 %% Step 6. parse_transform forms1 with loaded local_macro_module as external macro.
 transform_macros(Module, MacroModules, Macros, Forms, CompileOpts) ->
-    do([erl_af_return ||
+    do([ return ||
            Forms1 <- transform_external_macros(MacroModules, Macros, Forms),
            LocalMacroMap = maps:get(Module, Macros, #{}),
            LocalAttributeMacroMap = attribute_macro_map(LocalMacroMap),
@@ -491,9 +491,9 @@ transform_macros(Module, MacroModules, Macros, Forms, CompileOpts) ->
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
            case local_macro_caller(Forms1, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
                [] ->
-                   erl_af_return:return(Forms1);
+                   astranaut_return:return(Forms1);
                LocalMacroCaller ->
-                   do([erl_af_return ||
+                   do([ return ||
                           load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, Forms1, CompileOpts),
                           Forms2 <- transform_attribute_macros(LocalMacroMap, LocalAttributeMacroMap, Forms1),
                           transform_call_macros(Module, LocalMacroMap, Forms2, LocalMacroCaller)
@@ -502,11 +502,11 @@ transform_macros(Module, MacroModules, Macros, Forms, CompileOpts) ->
        ]).
 
 transform_external_macros(MacroModules, ModuleMacroMap, Forms) ->
-    erl_af_return:foldl_m(
+    astranaut_return:foldl_m(
       fun(MacroModule, FormsAcc) ->
               MacroMap = maps:get(MacroModule, ModuleMacroMap, #{}),
               AttributeMacroMap = attribute_macro_map(MacroMap),
-              do([erl_af_return ||
+              do([ return ||
                      FormsAcc1 <- transform_attribute_macros(MacroMap, AttributeMacroMap, FormsAcc),
                      transform_call_macros(MacroModule, MacroMap, FormsAcc1, all)
                  ])
@@ -560,20 +560,20 @@ append_if(Boolean, Form, Forms) ->
 
 transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
     Monad =
-        erl_af:map_m(
+        astranaut:map_m(
           fun(Form, #{}) ->
                   case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
                       {ok, Macro} ->
                           apply_macro(Macro);
                       error ->
-                          erl_af_traverse_m:then(
-                            erl_af_traverse_m:warning(invalid_macro_attribute),
-                            erl_af_traverse_m:nodes(Form));
+                          astranaut_traverse:then(
+                            astranaut_traverse:warning(invalid_macro_attribute),
+                            astranaut_traverse:nodes(Form));
                       not_macro ->
-                          erl_af_traverse_m:return(ok)
+                          astranaut_traverse:return(ok)
                   end
           end, Forms, #{traverse => form}),
-    erl_af_traverse_m:eval(Monad, ?MODULE, ok).
+    astranaut_traverse:eval(Monad, ?MODULE, ok).
 
 function_clauses_map([{function, _Line, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
@@ -606,7 +606,7 @@ local_macro_related_functions({clause, _Line1, _Patterns, _Guards, Exprs}) ->
       end, ordsets:new(), Exprs).
 
 with_local_function_call(Fun, Init, Exprs) ->
-    erl_af:reduce(
+    astranaut:reduce(
       fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc, _Attr) ->
               Arity = length(Arguments),
               Fun(Function, Arity, Acc);
@@ -623,22 +623,22 @@ to_list(Arguments) ->
 %%%===================================================================
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
-        erl_af:map_m(
+        astranaut:map_m(
           fun({function, Line, Name, Arity, Clauses}, #{}) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
-                          erl_af_traverse_m:return(ok);
+                          astranaut_traverse:return(ok);
                       true ->
-                          erl_af_traverse_m:lift_m(
+                          astranaut_traverse:lift_m(
                             fun([]) ->
                                     [];
                                (Clauses1) ->
                                     {function, Line, Name, Arity, Clauses1}
                             end,
-                            %% error in erl_af_traverse_m should be monad write
+                            %% error in astranaut_traverse should be monad write
                             %% current use as monad state is not right, should be changed.
-                            %% erl_af_traverse_m:fail_on_error(
-                              erl_af_traverse_m:sequence_nodes(
+                            %% astranaut_traverse:fail_on_error(
+                              astranaut_traverse:sequence_nodes(
                                 lists:map(
                                    fun(Clause) ->
                                            transform_call_macros_clause(Module, MacroMap, Clause)
@@ -646,15 +646,15 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                             %%)
                   end;
              (_Form, #{}) ->
-                  erl_af_traverse_m:return(ok)
+                  astranaut_traverse:return(ok)
           end, Forms, #{traverse => form}),
-    erl_af_traverse_m:eval(Monad, ?MODULE, 0).
+    astranaut_traverse:eval(Monad, ?MODULE, 0).
 
 transform_call_macros_clause(Module, MacroMap, Clause) ->
-    do([erl_af_traverse_m ||
+    do([astranaut_traverse ||
            %% counter is reseted in every function clause
-           erl_af_traverse_m:put(1),
-           erl_af:map_m(
+           astranaut_traverse:put(1),
+           astranaut:map_m(
              fun(Node, #{step := Step}) ->
                      case call_find_macro(Module, Node, MacroMap) of
                          {ok, Macro} ->
@@ -662,10 +662,10 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                  true ->
                                      apply_macro(Macro#{rename_quoted_variables => true});
                                  false ->
-                                     erl_af_traverse_m:return(ok)
+                                     astranaut_traverse:return(ok)
                              end;
                          error ->
-                             erl_af_traverse_m:return(ok)
+                             astranaut_traverse:return(ok)
                      end
              end, Clause, #{traverse => all, children => true})
        ]).
@@ -680,17 +680,17 @@ match_macro_order(Macro, Step) ->
 %%%===================================================================
 apply_macro(#{module := Module, function := Function, arguments := Arguments,
               line := Line, formatter := Formatter} = Opts) ->
-    erl_af_traverse_m:with_formatter(
+    astranaut_traverse:with_formatter(
       Formatter,
-      erl_af_traverse_m:update_pos(
+      astranaut_traverse:update_pos(
         Line, 
-        do([erl_af_traverse_m ||
-               MacroReturn = erl_af:walk_return(apply_mfa(Module, Function, Arguments)),
-               Return1 <- erl_af_traverse_m:erl_af_traverse_m(MacroReturn),
+        do([astranaut_traverse ||
+               MacroReturn = astranaut:walk_return(apply_mfa(Module, Function, Arguments)),
+               Return1 <- astranaut_traverse:astranaut_traverse(MacroReturn),
                Return2 = astranaut_lib:replace_line_zero(Return1, Line),
                Return3 <- update_quoted_variable_name(Return2, Opts),
                _ = format_node(Return3, Opts),
-               erl_af_traverse_m:nodes(Return3)
+               astranaut_traverse:nodes(Return3)
            ]))).
 
 apply_mfa(Module, Function, Arguments) ->
@@ -826,21 +826,21 @@ append_attrs(Arguments, #{}) ->
     Arguments.
 
 update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) ->
-    do([erl_af_traverse_m ||
-           Counter <- erl_af_traverse_m:get(),
-           erl_af_traverse_m:put(Counter + 1),
+    do([ traverse ||
+           Counter <- astranaut_traverse:get(),
+           astranaut_traverse:put(Counter + 1),
            Nodes1 = update_quoted_variable_name(Nodes, Macro, Counter),
            return(Nodes1)
        ]);
 update_quoted_variable_name(Nodes, _Macro) ->
-    erl_af_traverse_m:return(Nodes).
+    astranaut_traverse:return(Nodes).
 
 update_quoted_variable_name(Nodes, MacroOpts, Counter) ->
     MacroNameStr = macro_name_str(MacroOpts),
     CounterStr = integer_to_list(Counter),
     Opts = #{traverse => post, formatter => ?MODULE},
-    erl_af:map(
-      fun(Node, _Attr) ->
+    astranaut:smap(
+      fun(Node) ->
               walk_quoted_variable_name(Node, MacroNameStr, CounterStr)
       end, Nodes, Opts).
 
