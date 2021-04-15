@@ -17,19 +17,20 @@
 %%% API
 %%%===================================================================
 get_baseline(Mark, Forms) ->
-    case astranaut_lib:with_attribute(
-            fun(Mark1, _Acc, #{line := Line}) when Mark == Mark1 ->
-                    Line;
-               (_Mark2, Acc, #{}) ->
-                    Acc
-            end, undefined, Forms, baseline, #{formatter => ?MODULE, simplify_return => true}) of
-        undefined ->
+    case astranaut_return:run(
+           astranaut_lib:with_attribute(
+             fun(Mark1, _Acc, #{line := Line}) when Mark == Mark1 ->
+                     Line;
+                (_Mark2, Acc, #{}) ->
+                     Acc
+             end, undefined, Forms, baseline, #{formatter => ?MODULE})) of
+        {just, undefined} ->
             Msg = io_lib:format("attribute -baseline(~p) expected", [Mark]),
             io:format("~s", [Msg]),
             exit(list_to_binary(Msg));
-        Baseline when is_integer(Baseline) ->
+        {just, Baseline} when is_integer(Baseline) ->
             Baseline;
-        {Baseline, _Column} when is_integer(Baseline) ->
+        {just, {Baseline, _Column}} when is_integer(Baseline) ->
             Baseline
     end.
 

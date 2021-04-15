@@ -240,7 +240,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
       end,
       astranaut_lib:forms_with_attribute(
         fun(Attr, Acc, #{line := Line}) ->
-                do([astranaut_return || 
+                do([ return || 
                        Validator = macro_definition_valitor(),
                        {FAs, Options} <-
                            validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),

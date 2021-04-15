@@ -262,7 +262,7 @@ pre_apply_bind(F, Node1, #{bind := Bind, return := Return} = MOpts, #{traverse :
     Bind(
       pre_apply(F, Node1, MOpts, Opts),
       fun(Nodes) when is_list(Nodes) ->
-              astranaut_monad:sequence_m(AFB, Nodes, Bind, Return);
+              astranaut_monad:map_m(AFB, Nodes, Bind, Return);
          (Node2) ->
               AFB(Node2)
       end);
@@ -414,9 +414,9 @@ with_entry(Entry, Trees) ->
 with_exit(Exit, Trees) ->
     right_trees(
       fun(#node_context{exits = Exits} = Context) ->
-              Context#node_context{entries = [Exit|Exits]};
+              Context#node_context{exits = [Exit|Exits]};
          (Node) ->
-              #node_context{node = Node, entries = [Exit]}
+              #node_context{node = Node, exits = [Exit]}
       end, Trees).
 
 every_tree(F, Trees) when is_list(Trees) ->

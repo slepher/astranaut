@@ -16,6 +16,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
+-record(node_context, {node, updated = false, withs = [], reduces = [],
+                       skip = false, up_attrs = [], entries = [], exits = []
+                      }).
+
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -148,7 +152,7 @@ test_simple_map(_Config) ->
     Node0 = {atom, 1, ok},
     Monad =
         astranaut:map_m(
-          fun(_Node, #{}) ->
+          fun(_Node) ->
                   astranaut_traverse:return(ok)
           end, Node0, #{traverse => pre}),
     astranaut_traverse:bind(
@@ -194,14 +198,14 @@ test_reduce(Config) ->
     Baseline = astranaut_test_lib:get_baseline(function_base, Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
     Return =
-        erl_af:reduce(
+        astranaut:reduce(
           fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
-                  erl_af:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
+                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
              ({atom, _Line, mark_error_1}, _Acc, #{}) ->
                   {error, mark_error_1};
              (_Node, Acc, #{}) ->
                   Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => pre, simplify_return => false}),
+          end, 0, Forms, #{formatter => ?MODULE}),
     ErrorStruct = astranaut_return:run_error(Return),
     ?assertEqual(#{}, maps:without([file_errors, file_warnings], astranaut_error:printable(ErrorStruct))),
     ?assertMatch({[{File, [{2, ?MODULE, mark_error_1}]}], [{File, [{5, ?MODULE, mark_1}]}]},
@@ -209,18 +213,16 @@ test_reduce(Config) ->
     ?assertEqual({just, 1}, astranaut_return:run(Return)),
     ok.
 
-
-
 test_map_with_state_node(_Config) ->
     NodeA = {match, 10, {var, 10, 'A'}, {atom, 10, a}},
-    Return =
-        erl_af:map_with_state(
+    {Return, _} =
+        astranaut:smapfold(
           fun({var, Line, 'A'}, Acc, #{}) ->
                   Node1 = {var, Line, 'B'},
-                  erl_af:walk_return(#{state => Acc + 1, node => Node1});
+                  {Node1, Acc + 1};
              (Node, Acc, #{}) ->
                   {Node, Acc}
-          end, 0, NodeA, #{formatter => ?MODULE, traverse => pre, simplify_return => true}),
+          end, 0, NodeA, #{}),
     ?assertEqual({match, 10, {var, 10, 'B'}, {atom, 10, a}}, Return),
     ok.
 
@@ -229,9 +231,9 @@ test_map_with_state(Config) ->
     Baseline = astranaut_test_lib:get_baseline(function_base, Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
-        erl_af:map_with_state(
+        astranaut:mapfold(
           fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
-                  erl_af:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
+                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
              ({atom, _Line, mark_error_1}, Acc, #{}) ->
                   {{atom, _Line, mark_error_2}, Acc};
              (Node, Acc, #{}) ->
@@ -246,7 +248,7 @@ test_map_spec(_Config) ->
     Nodes = {attribute,56,spec,
              {{test_ok,0},[{type,56,'fun',[{type,56,product,[]},{atom,56,ok}]}]}},
     Nodes1 =
-        erl_af:map(
+        astranaut:map(
           fun(Node, #{}) ->
                   Node
           end, Nodes, #{traverse => post, simplify_return => true}),
@@ -256,7 +258,7 @@ test_map_spec(_Config) ->
 test_map_type(_Config) ->
     Nodes = {attribute,21,type,{test,{type,21,record,[{atom,21,test}]},[{var, 21, 'A'}]}},
     Nodes1 =
-        erl_af:map(
+        astranaut:map(
           fun(Node, #{}) ->
                   Node
           end, Nodes, #{traverse => post, simplify_return => true}),
@@ -268,9 +270,9 @@ test_reduce_attr(Config) ->
     Baseline = astranaut_test_lib:get_baseline(mark_base, Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
-        erl_af:reduce(
+        astranaut:reduce(
           fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
-                  erl_af:walk_return(#{warning => mark_0, state => Acc + 1, node => Node});
+                  astranaut:walk_return(#{warning => mark_0, state => Acc + 1, node => Node});
              ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->
@@ -289,7 +291,7 @@ test_with_formatter(_Config) ->
           astranaut_traverse:update_pos(
             10,
             astranaut_traverse:astranaut_traverse(
-              erl_af:walk_return(#{return => 10, error => error_0})
+              astranaut:walk_return(#{return => 10, error => error_0})
              ))),
     #{error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, ok),
     ?assertMatch([{10, formatter_1, error_0}], astranaut_error:formatted_errors(Error)),
@@ -350,7 +352,7 @@ test_forms_with_attribute(Config) ->
 test_traverse_m_updated(Config) ->
     Forms = proplists:get_value(forms, Config),
     TraverseM =
-        erl_af:map_m(
+        astranaut:map_m(
           fun(_Node, #{}) ->
                   astranaut_traverse:return(ok)
           end, Forms, #{traverse => post}),
@@ -365,7 +367,7 @@ test_traverse_m_updated(Config) ->
 test_map_forms(Config) ->
     Forms = astranaut_test_lib:test_module_forms(sample_2, Config),
     Forms1M = 
-        erl_af:map_m(
+        astranaut:map_m(
           fun({attribute, _Line, mark, mark_01}) ->
                   astranaut_traverse:return(
                     astranaut_lib:gen_function(
@@ -417,7 +419,7 @@ test_sequence_nodes(_Config) ->
 test_continue_sequence_children(_Config) ->
     TopNode = {tuple, 1, [{match, 1, {var, 1, 'Var'}, {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}}, {atom, 1, c}]},
     Monad =
-        erl_af:map_m(
+        astranaut:map_m(
           fun({match, _Line, _Left, _Right} = Match, _Attr) ->
                   Sequence = fun lists:reverse/1,
                   Reduce = fun lists:reverse/1,
@@ -436,7 +438,7 @@ test_continue_sequence_children(_Config) ->
                   astranaut_traverse:return(ok)
           end, TopNode, #{traverse => pre}),
     Monad1 =
-        erl_af:map_m(
+        astranaut:map_m(
           fun({atom, _Line, Atom}, _Attr) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
@@ -503,7 +505,7 @@ test_try_catch_expr(Config) ->
     ok.
 
 check_node_without_tree(TopAst) ->
-    erl_af:map_with_state(
+    astranaut:mapfold(
       fun(Node, [Parent|T], #{step := pre}) ->
               case element(1, Node) of
                   tree ->
@@ -512,6 +514,10 @@ check_node_without_tree(TopAst) ->
                               {Node, [Node, Parent|T]};
                           conjunction ->
                               {Node, [Node, Parent|T]};
+                          operator ->
+                              {Node, [Node, Parent|T]};
+                          class_qualifier ->
+                              {Node, [Node, Parent|T]};                              
                           _ ->
                               exit({unexpected_tree_node, Node, Parent})
                       end;
@@ -528,32 +534,32 @@ check_node_without_tree(TopAst) ->
 
 test_with_subtrees(_Config) ->
     TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
+    F =
+        fun(match_expr, _Node, Variables, _Attr) ->
+                {astranaut_uniplate:with_subtrees(
+                   fun([Patterns, Expressions]) ->
+                           [astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
+                            astranaut_uniplate:with(
+                              fun(Variables1) ->
+                                      [before_pattern|Variables1]
+                              end,
+                              fun(Variables1) ->
+                                      [after_pattern|Variables1]
+                              end,
+                              astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
+                   end, fun lists:reverse/1), Variables};
+           (variable, {var, _Pos, Var}, Variables, #{match_pattern := true}) ->
+                {keep, [{pattern, Var}|Variables]};
+           (variable, {var, _Pos, Var}, Variables, #{match_pattern := false}) ->
+                {keep, [{expression, Var}|Variables]};
+           (_Type, _Node, Variables, #{}) ->
+                {keep, Variables}
+        end,
     {TopNode1, State1} =
-        erl_af:mapfold(
-          fun(match_expr, Node, _Variables, Attr) ->
-                  Node1 =
-                      erl_af:with_subtrees(
-                        fun([Patterns, Expressions]) ->
-                                [erl_af:update_attr(#{match_pattern => false}, Expressions),
-                                 erl_af:with(
-                                   fun(Variables1) ->
-                                           [before_pattern|Variables1]
-                                   end,
-                                   fun(Variables1) ->
-                                           [after_pattern|Variables1]
-                                   end,
-                                   erl_af:update_attr(#{match_pattern => true}, Patterns))]
-                        end,
-                        fun([Expressions, Patterns]) ->
-                                [Patterns, Expressions]
-                        end, Node, Attr),
-                  erl_af:walk_return(Node1);
-             (variable, {var, _Pos, Var}, Variables, #{match_pattern := true}) ->
-                  {ok, [{pattern, Var}|Variables]};
-             (variable, {var, _Pos, Var}, Variables, #{match_pattern := false}) ->
-                  {ok, [{expression, Var}|Variables]};
-             (_Type, _Node, Variables, #{}) ->
-                  {ok, Variables}
+        astranaut:smapfold(
+          fun(Node, Acc, Attr) ->
+                  Type = erl_syntax:type(Node),
+                  F(Type, Node, Acc, Attr)
           end, [], TopNode, #{traverse => pre}),
     ?assertEqual([after_pattern, {pattern, 'D'}, before_pattern, {expression, 'C'}, after_pattern, {pattern, 'B'}, before_pattern, {expression, 'A'}], State1),
     ?assertEqual(TopNode, TopNode1),
@@ -561,12 +567,18 @@ test_with_subtrees(_Config) ->
 
 test_af_with(_Config) ->
     Datas1 = [[], [a, b], [c, d], []],
-    Datas2 = erl_af:with(g, h, Datas1),
-    ?assertEqual([[],[{modify_state, entry, g, a}, b], [c, {modify_state, exit, h, d}], []], Datas2),
+    Datas2 = astranaut_uniplate:with(g, h, Datas1),
+    ?assertEqual([[], [#node_context{node = a, entries = [g]}, b],
+                  [c, #node_context{node = d, exits = [h]}], []], Datas2),
     Datas3 = [[a, b], [c, d], []],
-    Datas4 = erl_af:with(g, h, Datas3),
-    ?assertEqual([[{modify_state, entry, g, a}, b], [c, {modify_state, exit, h, d}], []], Datas4),
-    Datas5 = erl_af:update_attr(#{name => data}, [erl_af:skip([a, b]), [c, d], []]),
-    Datas6 = erl_af:with(g, h, Datas5),
-    ?assertEqual([[{modify_state, entry, g, {skip, a}}, {skip, b}], [{update_attr, #{name => data}, c}, {modify_state, exit, h, {update_attr, #{name => data}, d}}], []], Datas6),
-    ok.
+    Datas4 = astranaut_uniplate:with(g, h, Datas3),
+    
+    ?assertEqual([[#node_context{node = a, entries = [g]}, b],
+                  [c, #node_context{node = d, exits = [h]}], []], Datas4),
+    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [astranaut_uniplate:skip([a, b]), [c, d], []]),
+    Datas6 = astranaut_uniplate:with(g, h, Datas5),
+    ?assertEqual([[#node_context{node = a, entries = [g], skip = true},
+                   #node_context{node = b, skip = true}],
+                  [#node_context{node = c, up_attrs = [#{name => data}]},
+                   #node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
+                 ok.

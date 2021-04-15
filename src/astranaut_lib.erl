@@ -395,7 +395,7 @@ with_attribute(F, Init, Forms, Attr, Opts) ->
               values_apply_fun_m(F, AttrValue, Acc, #{line => Line});
          (_Node, Acc) ->
               Acc
-      end, Init, Forms, Opts#{traverse => form}).
+      end, Init, Forms, Opts#{traverse => subtree}).
 
 -spec forms_with_attribute(WalkFun, State, Forms, atom(), Opts) ->
                                   astranaut_return:struct(Forms)

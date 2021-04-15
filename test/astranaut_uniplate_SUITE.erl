@@ -131,13 +131,13 @@ my_test_case() ->
 %%--------------------------------------------------------------------
 test_writer_or(_Config) ->
     Monad = identity,
-    Mempty = astranaut_uniplate_monad:mempty('or'),
-    Mappend = astranaut_uniplate_monad:mappend('or'),
-    Bind = astranaut_uniplate_monad:monad_bind(Monad),
-    Return = astranaut_uniplate_monad:monad_return(Monad),
-    BindW = astranaut_uniplate_monad:writer_bind(Bind, Return, Mappend),
-    ReturnW = astranaut_uniplate_monad:writer_return(Return, Mempty),
-    Writer = astranaut_uniplate_monad:writer_writer(Return),
+    Mempty = astranaut_monad:mempty('or'),
+    Mappend = astranaut_monad:mappend('or'),
+    Bind = astranaut_monad:monad_bind(Monad),
+    Return = astranaut_monad:monad_return(Monad),
+    BindW = astranaut_monad:writer_bind(Bind, Return, Mappend),
+    ReturnW = astranaut_monad:writer_return(Return, Mempty),
+    Writer = astranaut_monad:writer_writer(Return),
     WA =
         BindW(
           ReturnW(1),
@@ -146,13 +146,13 @@ test_writer_or(_Config) ->
           end),
     ?assertEqual({2, true}, WA),
     Monad1 = reader,
-    Bind1 = astranaut_uniplate_monad:monad_bind(Monad1),
-    Return1 = astranaut_uniplate_monad:monad_return(Monad1),
-    BindW1 = astranaut_uniplate_monad:writer_bind(Bind1, Return1, Mappend),
-    ReturnW1 = astranaut_uniplate_monad:writer_return(Return1, Mempty),
-    Writer1 = astranaut_uniplate_monad:writer_writer(Return1),
-    Lift = astranaut_uniplate_monad:writer_lift(Bind1, Return1, Mempty),
-    Ask1 = astranaut_uniplate_monad:writer_ask(Lift, astranaut_uniplate_monad:monad_ask(Monad1)),
+    Bind1 = astranaut_monad:monad_bind(Monad1),
+    Return1 = astranaut_monad:monad_return(Monad1),
+    BindW1 = astranaut_monad:writer_bind(Bind1, Return1, Mappend),
+    ReturnW1 = astranaut_monad:writer_return(Return1, Mempty),
+    Writer1 = astranaut_monad:writer_writer(Return1),
+    Lift = astranaut_monad:writer_lift(Bind1, Return1, Mempty),
+    Ask1 = astranaut_monad:writer_ask(Lift, astranaut_monad:monad_ask(Monad1)),
     WA1 =
         BindW1(
           ReturnW1(1),
@@ -169,7 +169,7 @@ test_writer_or(_Config) ->
 test_map(_Config) ->
     Ast = merl:quote("A + (B + C)"),
     Ast1 =
-        astranaut:map(
+        astranaut:smap(
           fun({var, _Pos, Varname}) ->
                   {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
              (_Node) ->
@@ -182,7 +182,7 @@ test_map(_Config) ->
 test_map_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Ast1 =
-        astranaut:map(
+        astranaut:smap(
           fun({var, _Pos, Varname}, #{pattern := true}) ->
                   {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
              (Node, #{}) ->
@@ -203,7 +203,7 @@ test_map_attr(_Config) ->
 test_reduce(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
-        astranaut:reduce(
+        astranaut:sreduce(
           fun({var, _Pos, Varname}, Acc) ->
                   [Varname|Acc];
              (_Node, Acc) ->
@@ -243,7 +243,7 @@ uniplate_node_attr(Node) ->
 test_reduce_traverse_all(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
-        astranaut:reduce(
+        astranaut:sreduce(
           fun(Node, Acc, #{step := Step}) ->
                   case erl_syntax:type(Node) of
                       match_expr ->
@@ -259,7 +259,7 @@ test_reduce_traverse_all(_Config) ->
 test_mapfold(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
-        astranaut:mapfold(
+        astranaut:smapfold(
           fun({var, Pos, Varname}, Acc) ->
                   {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
              (Node, Acc) ->
@@ -279,7 +279,7 @@ test_mapfold(_Config) ->
 test_mapfold_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
-        astranaut:mapfold(
+        astranaut:smapfold(
           fun({var, Pos, Varname}, Acc, #{step := pre}) ->
                   {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
              (Node, Acc, #{step := Step}) ->

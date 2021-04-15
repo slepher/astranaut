@@ -32,13 +32,13 @@ suite() ->
 init_per_suite(Config) ->
     erlang:system_flag(backtrace_depth, 20),
     TestModules = [rebinding_example, rebinding_test],
-    erl_af_test_lib:load_data_modules(Config, TestModules),
-    Forms = erl_af_test_lib:test_module_forms(rebinding_test, Config),
-    Forms1 = erl_af_rebinding:parse_transform(Forms, erl_af_test_lib:compile_opts()),
+    astranaut_test_lib:load_data_modules(Config, TestModules),
+    Forms = astranaut_test_lib:test_module_forms(rebinding_test, Config),
+    Forms1 = astranaut_rebinding:parse_transform(Forms, astranaut_test_lib:compile_opts()),
     Functions =
         lists:foldl(
             fun({function, _Line, Name, _Arity, Clauses}, Acc) ->
-                    Clauses1 = erl_af_lib:replace_line(Clauses, 0),
+                    Clauses1 = astranaut_lib:replace_line(Clauses, 0),
                     maps:put(Name, Clauses1, Acc);
                (_Form, Acc) ->
                    Acc

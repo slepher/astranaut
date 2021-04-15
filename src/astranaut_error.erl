@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_error).
 
--include("../../include/astranaut_struct_name.hrl").
+-include("astranaut_struct_name.hrl").
 
 -define(ENDO, astranaut_endo).
 

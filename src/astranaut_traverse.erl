@@ -64,13 +64,13 @@ astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
     Inner =
         fun(_Formatter, File, _Attr, State0) ->
                 State1 = maps:get(state, Map, State0),
-                {Return, Updated} = return_with_updated(Map),
+                Return = maps:get(return, Map, keep),
                 Errors = maps:get(errors, Map, []),
                 Warnings = maps:get(warnings, Map, []),
                 Error1 = astranaut_error:append_ews(Errors, Warnings, astranaut_error:new(File)),
                 case Errors of
                     [] ->
-                        state_ok(#{return => Return, state => State1, updated => Updated, error => Error1});
+                        state_ok(#{return => Return, state => State1, error => Error1});
                     _ ->
                         state_fail(#{state => State1, error => Error1})
                 end
@@ -90,12 +90,6 @@ astranaut_traverse(#{?STRUCT_KEY := ?RETURN_FAIL, error := ErrorStruct}) ->
     new(Inner);
 astranaut_traverse(#{?STRUCT_KEY := ?TRAVERSE_M} = MA) ->
     MA.
-
-return_with_updated(#{node := Node}) ->
-    {Node, true};
-return_with_updated(#{} = WalkReturn) ->
-    Return = maps:get(return, WalkReturn, ok),
-    {Return, false}.
 
 convertable_struct(#{?STRUCT_KEY := Key}) ->
     convertable_struct_key(Key);
