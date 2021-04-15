@@ -41,7 +41,6 @@ parse_transform(Forms, _Options) ->
                     ?MODULE, #{}, ok))
         end)).
 
-
 quote_validator() ->
     #{debug => [boolean, {default, false}], debug_module => [boolean, {default, false}]}.
 

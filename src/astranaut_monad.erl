@@ -45,6 +45,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+bind(ok, KMB, _Monad) ->
+    KMB(ok);
 bind(MA, KMB, Monad) ->
     Bind = monad_bind(Monad),
     Bind(MA, KMB).
@@ -326,9 +328,11 @@ monad_state(state) ->
 monad_state({state, M}) ->
     Return = monad_return(M),
     state_state(Return);
+monad_state(identity) ->
+    undefined;
 monad_state(maybe) ->
     undefined;
-monad_state(identity) ->
+monad_state(either) ->
     undefined;
 monad_state(traverse) ->
     fun astranaut_traverse:state/1.
@@ -348,11 +352,11 @@ monad_ask({state, M}) ->
             Lift = monad_lift({state, M}),
             state_ask(Lift, Ask)
     end;
-monad_ask(either) ->
+monad_ask(identity) ->
     undefined;
 monad_ask(maybe) ->
     undefined;
-monad_ask(identity) ->
+monad_ask(either) ->
     undefined;
 monad_ask(traverse) ->
     fun astranaut_traverse:ask/0;
@@ -372,11 +376,11 @@ monad_local({state, M}) ->
     end;
 monad_local(state) ->
     undefined;
-monad_local(either) ->
+monad_local(identity) ->
     undefined;
 monad_local(maybe) ->
     undefined;
-monad_local(identity) ->
+monad_local(either) ->
     undefined;
 monad_local(traverse) ->
     fun astranaut_traverse:local/2;

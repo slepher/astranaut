@@ -188,7 +188,7 @@ exported_macros(Forms) ->
                      ExportAttribute = astranaut_lib:gen_attribute_node(export, Line, FAs),
                      astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], ExportedMacros})
                  ])
-      end, #{}, Forms, export_macro, #{formatter => ?MODULE, simplify_return => false}).
+      end, #{}, Forms, export_macro, #{formatter => ?MODULE}).
 
 %% analyze -import_macro attributes.
 imported_macros(GlobalMacroOpts, Forms) ->
@@ -221,7 +221,7 @@ imported_macros(GlobalMacroOpts, Forms) ->
                 end;
            (Attr, Acc) ->
                 astranaut_return:error_ok({invalid_import_macro_attr, Attr}, Acc)
-        end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE, simplify_return => false})).
+        end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE})).
 
 local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
     FormsProp = erl_syntax_lib:analyze_forms(Forms),
@@ -254,7 +254,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
                              end, Acc, FAs),
                        return({[NoWarnNodes], Acc2})
                    ])
-        end, ExportedMacros, Forms, local_macro, #{formatter => ?MODULE, simplify_return => false})).
+        end, ExportedMacros, Forms, local_macro, #{formatter => ?MODULE})).
 
 used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
     UsedMacros = maps:put(Module, LocalMacros, ImportedMacros),
@@ -297,7 +297,7 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
                                   ])
                        end
                    ])
-        end, UsedMacros, Forms, use_macro, #{formatter => ?MODULE, simplify_return => false})).
+        end, UsedMacros, Forms, use_macro, #{formatter => ?MODULE})).
 
 update_used_macros(Module, FAs, UsedMacroOptions, MacroMap) ->
     astranaut_return:foldl_m(
@@ -561,19 +561,19 @@ append_if(Boolean, Form, Forms) ->
 transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
     Monad =
         astranaut:map_m(
-          fun(Form, #{}) ->
+          fun(Form) ->
                   case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
                       {ok, Macro} ->
                           apply_macro(Macro);
                       error ->
                           astranaut_traverse:then(
                             astranaut_traverse:warning(invalid_macro_attribute),
-                            astranaut_traverse:nodes(Form));
+                            astranaut_traverse:return(Form));
                       not_macro ->
-                          astranaut_traverse:return(ok)
+                          astranaut_traverse:return(keep)
                   end
-          end, Forms, #{traverse => form}),
-    astranaut_traverse:eval(Monad, ?MODULE, ok).
+          end, Forms, #{traverse => subtree}),
+    astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
 
 function_clauses_map([{function, _Line, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
@@ -599,6 +599,7 @@ local_macro_related_functions(Functions, ClauseMap, Deps) ->
                       ordsets:del_element(Function, Acc)
               end
       end, Deps, Functions).
+
 local_macro_related_functions({clause, _Line1, _Patterns, _Guards, Exprs}) ->
     with_local_function_call(
       fun(Function, Arity, Acc) when is_atom(Function) ->
@@ -606,13 +607,13 @@ local_macro_related_functions({clause, _Line1, _Patterns, _Guards, Exprs}) ->
       end, ordsets:new(), Exprs).
 
 with_local_function_call(Fun, Init, Exprs) ->
-    astranaut:reduce(
-      fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc, _Attr) ->
+    astranaut:sreduce(
+      fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc) ->
               Arity = length(Arguments),
               Fun(Function, Arity, Acc);
-         (_, Acc, _Attr) ->
+         (_, Acc) ->
               Acc
-      end, Init, Exprs, #{traverse => pre, simplify_return => true}).
+      end, Init, Exprs, #{traverse => pre}).
 
 to_list(Arguments) when is_list(Arguments) ->
     Arguments;
@@ -624,10 +625,10 @@ to_list(Arguments) ->
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
         astranaut:map_m(
-          fun({function, Line, Name, Arity, Clauses}, #{}) ->
+          fun({function, Line, Name, Arity, Clauses}) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
-                          astranaut_traverse:return(ok);
+                          astranaut_traverse:return(keep);
                       true ->
                           astranaut_traverse:lift_m(
                             fun([]) ->
@@ -638,35 +639,37 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                             %% error in astranaut_traverse should be monad write
                             %% current use as monad state is not right, should be changed.
                             %% astranaut_traverse:fail_on_error(
-                              astranaut_traverse:sequence_nodes(
-                                lists:map(
-                                   fun(Clause) ->
-                                           transform_call_macros_clause(Module, MacroMap, Clause)
-                                   end, Clauses)))
+                            astranaut_traverse:map_m(
+                              fun(Clause) ->
+                                      transform_call_macros_clause(Module, MacroMap, Clause)
+                              end, Clauses))
                             %%)
                   end;
-             (_Form, #{}) ->
-                  astranaut_traverse:return(ok)
-          end, Forms, #{traverse => form}),
-    astranaut_traverse:eval(Monad, ?MODULE, 0).
+             (_Form) ->
+                  astranaut_traverse:return(keep)
+          end, Forms, #{traverse => subtree}),
+    astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 
 transform_call_macros_clause(Module, MacroMap, Clause) ->
-    do([astranaut_traverse ||
+    do([ traverse ||
            %% counter is reseted in every function clause
            astranaut_traverse:put(1),
            astranaut:map_m(
-             fun(Node, #{step := Step}) ->
-                     case call_find_macro(Module, Node, MacroMap) of
-                         {ok, Macro} ->
-                             case match_macro_order(Macro, Step) of
-                                 true ->
-                                     apply_macro(Macro#{rename_quoted_variables => true});
-                                 false ->
-                                     astranaut_traverse:return(ok)
-                             end;
-                         error ->
-                             astranaut_traverse:return(ok)
-                     end
+             fun(Node) ->
+                     do([ traverse ||
+                            #{step := Step} <- astranaut_traverse:ask(),
+                            case call_find_macro(Module, Node, MacroMap) of
+                                {ok, Macro} ->
+                                    case match_macro_order(Macro, Step) of
+                                        true ->
+                                            apply_macro(Macro#{rename_quoted_variables => true});
+                                        false ->
+                                            astranaut_traverse:return(ok)
+                                    end;
+                                error ->
+                                    astranaut_traverse:return(ok)
+                            end
+                        ])
              end, Clause, #{traverse => all, children => true})
        ]).
 
@@ -684,13 +687,13 @@ apply_macro(#{module := Module, function := Function, arguments := Arguments,
       Formatter,
       astranaut_traverse:update_pos(
         Line, 
-        do([astranaut_traverse ||
+        do([ traverse ||
                MacroReturn = astranaut:walk_return(apply_mfa(Module, Function, Arguments)),
                Return1 <- astranaut_traverse:astranaut_traverse(MacroReturn),
                Return2 = astranaut_lib:replace_line_zero(Return1, Line),
                Return3 <- update_quoted_variable_name(Return2, Opts),
-               _ = format_node(Return3, Opts),
-               astranaut_traverse:nodes(Return3)
+               format_node(Return3, Opts),
+               return(Return3)
            ]))).
 
 apply_mfa(Module, Function, Arguments) ->

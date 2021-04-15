@@ -129,7 +129,7 @@ all() ->
      test_uniplate_reduce, test_reduce, test_map_with_state_node, test_map_with_state, test_map_spec, test_map_type,
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_with_attribute, test_forms_with_attribute,
-     test_traverse_m_updated, test_map_forms, test_sequence_nodes, test_deep_sequence_children,
+     test_traverse_m_updated, test_map_forms, test_sequence_nodes,
      test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr,
      test_with_subtrees, test_af_with].
 
@@ -207,6 +207,7 @@ test_reduce(Config) ->
                   Acc
           end, 0, Forms, #{formatter => ?MODULE}),
     ErrorStruct = astranaut_return:run_error(Return),
+    io:format("get printable errors ~p~n", [ astranaut_error:printable(ErrorStruct)]),
     ?assertEqual(#{}, maps:without([file_errors, file_warnings], astranaut_error:printable(ErrorStruct))),
     ?assertMatch({[{File, [{2, ?MODULE, mark_error_1}]}], [{File, [{5, ?MODULE, mark_1}]}]},
                  astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct)),
@@ -248,20 +249,20 @@ test_map_spec(_Config) ->
     Nodes = {attribute,56,spec,
              {{test_ok,0},[{type,56,'fun',[{type,56,product,[]},{atom,56,ok}]}]}},
     Nodes1 =
-        astranaut:map(
+        astranaut:smap(
           fun(Node, #{}) ->
                   Node
-          end, Nodes, #{traverse => post, simplify_return => true}),
+          end, Nodes, #{traverse => post}),
     ?assertEqual(Nodes, Nodes1),
     ok.
 
 test_map_type(_Config) ->
     Nodes = {attribute,21,type,{test,{type,21,record,[{atom,21,test}]},[{var, 21, 'A'}]}},
     Nodes1 =
-        astranaut:map(
-          fun(Node, #{}) ->
+        astranaut:smap(
+          fun(Node) ->
                   Node
-          end, Nodes, #{traverse => post, simplify_return => true}),
+          end, Nodes, #{traverse => post}),
     ?assertEqual(Nodes, Nodes1),
     ok.
 
@@ -277,8 +278,9 @@ test_reduce_attr(Config) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->
                   Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => form, simplify_return => false}),
+          end, 0, Forms, #{formatter => ?MODULE, traverse => subtree}),
     #{'__struct__' := ?RETURN_OK, error := Error} = ReturnM,
+    io:format("get printable errors ~p~n", [astranaut_error:printable(Error)]),
     FileWarnings = [{File, [{2, ?MODULE, mark_0}]}],
     FileErrors = [{File, [{1, ?MODULE, mark_error_0}]}],
     ?assertMatch({FileErrors, FileWarnings}, astranaut_test_lib:realize_with_baseline(Baseline, Error)),
@@ -326,34 +328,37 @@ test_validator(_Config) ->
 test_with_attribute(Config) ->
     Forms = proplists:get_value(forms, Config),
     Marks =
-        astranaut_lib:with_attribute(
-          fun(Attr, Acc) ->
-                  [Attr|Acc]
-          end, [], Forms, mark, #{simplify_return => true}),
-    ?assertEqual([mark_0, mark_error_0], Marks).
+        astranaut_return:run(
+          astranaut_lib:with_attribute(
+            fun(Attr, Acc) ->
+                    [Attr|Acc]
+            end, [], Forms, mark, #{})),
+    ?assertEqual({just, [mark_0, mark_error_0]}, Marks).
 
 test_forms_with_attribute(Config) ->
     Forms = proplists:get_value(forms, Config),
-    {Forms1, Marks} =
-        astranaut_lib:forms_with_attribute(
-          fun(Attr, Acc, #{line := Line}) ->
-                  Node = astranaut_lib:gen_attribute_node(mark_1, Line, Attr),
-                  {[Node], [Attr|Acc]}
-          end, [], Forms, mark, #{simplify_return => true}),
-    Marks1 =
-        astranaut_lib:with_attribute(
-          fun(Attr, Acc) ->
-                  [Attr|Acc]
-          end, [], Forms1, mark_1, #{simplify_return => true}),
-    ?assertEqual([mark_0, mark_error_0], Marks1),
+    {just, {Forms1, Marks}} =
+        astranaut_return:run(
+          astranaut_lib:forms_with_attribute(
+            fun(Attr, Acc, #{line := Line}) ->
+                    Node = astranaut_lib:gen_attribute_node(mark_1, Line, Attr),
+                    {[Node], [Attr|Acc]}
+            end, [], Forms, mark, #{})),
     ?assertEqual([mark_0, mark_error_0], Marks),
+    {just, Marks1} =
+        astranaut_return:run(
+          astranaut_lib:with_attribute(
+            fun(Attr, Acc) ->
+                    [Attr|Acc]
+            end, [], Forms1, mark_1, #{})),
+    ?assertEqual([mark_0, mark_error_0], Marks1),
     ok.
 
 test_traverse_m_updated(Config) ->
     Forms = proplists:get_value(forms, Config),
     TraverseM =
         astranaut:map_m(
-          fun(_Node, #{}) ->
+          fun(_Node) ->
                   astranaut_traverse:return(ok)
           end, Forms, #{traverse => post}),
     TraverseM1 =
@@ -379,7 +384,7 @@ test_map_forms(Config) ->
                           "end"])));
              (_Node) ->
                   astranaut_traverse:return(ok)
-          end, Forms, #{traverse => form}),
+          end, Forms, #{traverse => subtree}),
     Forms1 = astranaut_return:simplify(astranaut_traverse:eval(Forms1M, astranaut, #{}, ok)),
     Result = astranaut_test_lib:compile_test_forms(Forms1),
     astranaut_return:with_error(
@@ -401,7 +406,9 @@ test_sequence_nodes(_Config) ->
                   ({_Type, _Line, b} = Node) ->
                        astranaut_traverse:return([Node, Node]);
                   ({_Type, _Line, c}) ->
-                       astranaut_traverse:fail({invalid, c});
+                       astranaut_traverse:then(
+                         astranaut_traverse:error({invalid, c}),
+                         astranaut_traverse:return([]));
                   ({_Type, _Line, d} = Node) ->
                        astranaut_traverse:then(
                          astranaut_traverse:warning({suspecious, d}),
@@ -413,43 +420,43 @@ test_sequence_nodes(_Config) ->
       fun(ErrorStruct) ->
               ?assertEqual(#{errors => [{invalid, c}], warnings => [{suspecious, d}]}, astranaut_error:printable(ErrorStruct))
       end, Return),
-    ?assertEqual({just, [{atom, 1, a}, {atom, 1, b}, {atom, 1, b}, {atom, 1, d}]}, astranaut_return:run(Return)),
+    ?assertEqual({just, [{atom, 1, a}, [{atom, 1, b}, {atom, 1, b}], [], {atom, 1, d}]}, astranaut_return:run(Return)),
     ok.
 
 test_continue_sequence_children(_Config) ->
     TopNode = {tuple, 1, [{match, 1, {var, 1, 'Var'}, {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}}, {atom, 1, c}]},
     Monad =
         astranaut:map_m(
-          fun({match, _Line, _Left, _Right} = Match, _Attr) ->
+          fun({match, _Line, _Left, _Right} = Match) ->
                   Sequence = fun lists:reverse/1,
                   Reduce = fun lists:reverse/1,
                   astranaut_traverse:return(astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
-             ({atom, _Line, Atom}, _Attr) ->
+             ({atom, _Line, Atom}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Atom|Acc]
                     end);
-             ({var, _Line, Var},_Attr) ->
+             ({var, _Line, Var}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Var|Acc]
                     end);
-             (_Node, _Attr) ->
+             (_Node) ->
                   astranaut_traverse:return(ok)
           end, TopNode, #{traverse => pre}),
     Monad1 =
         astranaut:map_m(
-          fun({atom, _Line, Atom}, _Attr) ->
+          fun({atom, _Line, Atom}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Atom|Acc]
                     end);
-             ({var, _Line, Var},_Attr) ->
+             ({var, _Line, Var}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Var|Acc]
                     end);
-             (_Node, _Attr) ->
+             (_Node) ->
                   astranaut_traverse:return(ok)
           end, TopNode, #{traverse => pre}),
     Return = astranaut_traverse:exec(Monad, astranaut, #{}, []),

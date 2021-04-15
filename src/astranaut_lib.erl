@@ -51,9 +51,8 @@ replace_line_zero(Ast, Line) ->
 replace_line_cond(Cond, Ast, Pos) ->
     case astranaut_syntax:is_pos(Pos) of
         true ->
-            astranaut_return:simplify(
-              astranaut:map(
-                fun(Node, #{}) ->
+            astranaut:smap(
+                fun(Node) ->
                         Pos0 = astranaut_syntax:get_pos(Node),
                         case Cond(Pos0) of
                             true ->
@@ -61,7 +60,7 @@ replace_line_cond(Cond, Ast, Pos) ->
                             false ->
                                 Node
                         end
-                end, Ast, #{traverse => pre, simplify_return => false}));
+                end, Ast, #{});
         false ->
             exit({invalid_pos, Pos})
     end.
@@ -404,21 +403,13 @@ with_attribute(F, Init, Forms, Attr, Opts) ->
                                                                  astranaut_return:struct(FormsState) | FormsState),
                                            FormsState :: {Forms, State},
                                            Forms :: astranaut:forms(),
-                                           Opts :: #{simplify_return := false, formatter => module()};
-                          (WalkFun, State, Forms, atom(), Opts) ->
-                                  Forms | no_return()
-                                      when WalkFun :: fun((term(), State) -> astranaut_return:struct(FormsState) | FormsState) |
-                                                      fun((term(), State, #{line := erl_anno:line()}) ->
-                                                                 astranaut_return:struct(FormsState) | FormsState),
-                                           FormsState :: {Forms, State},
-                                           Forms :: astranaut:forms(),
-                                           Opts :: #{simplify_return => true, formatter => module()}.
+                                           Opts :: #{formatter => module()}.
 %% @doc visit every attribute which names Attr and accum result to Init, append forms generated Attribute.
 forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     F1 = fun(Value, {NodesAcc, StateAcc}, Attr1) ->
                  astranaut_return:bind(
                    values_apply_fun_m(F, Value, StateAcc, Attr1),
-                   fun({ok, State}) ->
+                   fun({keep, State}) ->
                            astranaut_return:return({NodesAcc, State});
                       ({Nodes, State}) ->
                            astranaut_return:return({Nodes ++ NodesAcc, State})
@@ -429,13 +420,13 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
               astranaut_return:bind(
                 values_apply_fun_m(F1, AttrValue, {[], Acc}, #{line => Line}),
                 fun({[], Acc1}) ->
-                        astranaut_return:return({ok, Acc1});
+                        astranaut_return:return({keep, Acc1});
                    ({Nodes, Acc1}) ->
                         astranaut_return:return({[Node|Nodes], Acc1})
                 end);
          (_Node, Acc) ->
-              {ok, Acc}
-      end, Init, Forms, Opts#{traverse => form}).
+              astranaut_return:return({keep, Acc})
+      end, Init, Forms, Opts#{traverse => subtree}).
 
 values_apply_fun_m(F, AttrValues, Acc, Opts) when is_list(AttrValues) ->
     case maps:get(deep_attr, Opts, true) of

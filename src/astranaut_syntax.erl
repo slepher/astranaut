@@ -448,7 +448,7 @@ update_function_name(Name, Arity, NewName, Forms) ->
       end, Forms).
 
 update_call_name(OrignalName, NewName, Arity, Function) ->
-    astranaut:map(
+    astranaut:smap(
       fun({call, Line, {atom, Line2, Name}, Arguments})
             when (Name == OrignalName) andalso (length(Arguments) == Arity) ->
               {call, Line, {atom, Line2, NewName}, Arguments};

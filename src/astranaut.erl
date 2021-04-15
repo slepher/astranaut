@@ -178,7 +178,7 @@ bind_return(#{?STRUCT_KEY := ?RETURN_OK, return := Return} = Struct, Opts, Fun) 
       bind_return(Return, Opts, Fun));
 bind_return(#{?STRUCT_KEY := ?RETURN_FAIL} = Struct, _Opts, _Fun) ->
     astranaut_traverse:astranaut_traverse(Struct);
-bind_return(#{?STRUCT_KEY := ?WALK_RETURN, return := Return} = WalkReturn, Opts, Fun) ->
+bind_return(#{?STRUCT_KEY := ?WALK_RETURN} = WalkReturn, Opts, Fun) ->
     WalkReturn1 =
         case Opts of
             #{without := Keys} ->
@@ -191,7 +191,12 @@ bind_return(#{?STRUCT_KEY := ?WALK_RETURN, return := Return} = WalkReturn, Opts,
     WalkReturn2 =
         case maps:find(bind, Opts) of
             {ok, true} ->
-                maps:merge(WalkReturn1, walk_return_up_map(Fun(Return)));
+                case maps:find(return, WalkReturn) of
+                    {ok, Return} ->
+                        maps:merge(WalkReturn1, walk_return_up_map(Fun(Return)));
+                    error ->
+                        WalkReturn1
+                end;
             error ->
                 WalkReturn1
         end,
@@ -214,7 +219,7 @@ walk_return(#{?STRUCT_KEY := ?WALK_RETURN} = Return) ->
 walk_return(#{} = Map) ->
     Keys = [return, state, node, error, warning, errors, warnings, continue],
     Map1 = walk_return_up_map(maps:with(Keys, Map)),
-    maps:merge(#{?STRUCT_KEY => ?WALK_RETURN, return => ok, errors => [], warnings => []}, Map1);
+    maps:merge(#{?STRUCT_KEY => ?WALK_RETURN, errors => [], warnings => []}, Map1);
 walk_return(Return) ->
     walk_return(walk_return_map(Return)).
 
@@ -304,13 +309,40 @@ validate_node(Node) ->
 map_m(F, [Node|_T] = Nodes, Opts) ->
     case erl_syntax:is_form(Node) of
         true ->
-            astranaut_monad:lift_m(
-              fun astranaut_syntax:reorder_updated_forms/1, map_m_1(F, Nodes, Opts), traverse);
+            astranaut_traverse:lift_m(
+              fun astranaut_syntax:reorder_updated_forms/1,
+              astranaut_traverse:map_m(
+                fun(Form) ->
+                        astranaut_traverse:lift_m(
+                          fun({Form1, true}) ->
+                                  {updated, Form, to_list(Form1)};
+                             ({_Form1, false}) ->
+                                  Form
+                          end, astranaut_traverse:listen_updated(map_form(F, Form, Opts)))
+                end, Nodes));
         false ->
-            astranaut_monad:lift_m(fun lists:flatten/1, map_m_1(F, Nodes, Opts), traverse)
+            map_m_1(F, Nodes, Opts)
     end;
 map_m(F, Node, Opts) ->
     map_m_1(F, Node, Opts).
+
+to_list(Form1) when is_list(Form1) ->
+    Form1;
+to_list(Form1) ->
+    [Form1].
+
+map_form(F, Form, #{traverse := subtree}) ->
+    astranaut_traverse:bind(
+      traverse_map_node(F, Form),
+      fun(ok) ->
+              astranaut_traverse:return(Form);
+         (keep) ->
+              astranaut_traverse:return(Form);
+         (Form1) ->
+              astranaut_traverse:set_updated(astranaut_traverse:return(Form1))
+      end);
+map_form(F, Form, Opts) ->
+    map_m_1(F, Form, Opts).
 
 map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
@@ -330,35 +362,26 @@ traverse_map_node(F, Node) ->
                     File = erl_syntax:concrete(FileTree),
                     astranaut_traverse:update_file(File);
                 _ ->
-                    updated_form(F, Node)
+                    Pos = erl_syntax:get_pos(Node),
+                    astranaut_traverse:update_pos(Pos, F(Node))
             end;
         function ->
-            updated_form(F, Node);
+            Pos = erl_syntax:get_pos(Node),
+            astranaut_traverse:update_pos(Pos, F(Node));
 	eof_marker ->
             astranaut_traverse:eof();
         error_marker ->
-            astranaut_traverse:formatted_errors([erl_syntax:error_marker_info(Node)]);
+            astranaut_traverse:then(
+              astranaut_traverse:formatted_errors([erl_syntax:error_marker_info(Node)]),
+              astranaut_traverse:return([]));
         warning_marker ->
-            astranaut_traverse:formatted_warnings([erl_syntax:warning_marker_info(Node)]);
+            astranaut_traverse:then(
+              astranaut_traverse:formatted_warnings([erl_syntax:warning_marker_info(Node)]),
+              astranaut_traverse:return([]));
         _ ->
             Pos = erl_syntax:get_pos(Node),
             astranaut_traverse:update_pos(Pos, F(Node))
     end.
-
-updated_form(F, Form) ->
-    Pos = erl_syntax:get_pos(Form),
-    astranaut_traverse:lift_m(
-      fun({Form1, true}) ->
-              Forms1 = to_list(Form1),
-              {updated, Form, Forms1};
-         ({_, false}) ->
-              Form
-      end, astranaut_traverse:listen_updated(astranaut_traverse:update_pos(Pos, F(Form)))).
-
-to_list(Forms) when is_list(Forms) ->
-    Forms;
-to_list(Form) ->
-    [Form].
 
 uniplate([]) ->
     {[], fun(_) -> [] end};

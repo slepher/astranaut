@@ -17,7 +17,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Opt) ->
-    Opts = #{formatter => ?MODULE},
+    Opts = #{formatter => ?MODULE, traverse => all},
     {Forms1, _} = astranaut:smapfold(fun walk/3, sets:new(), Forms, Opts),
     Forms1.
 
@@ -38,7 +38,7 @@ format_error(Message) ->
 walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
     Opts = #{traverse => pre},
     Variables = astranaut:sreduce(fun walk_variables/3, sets:new(), Function, Opts),
-    {Function, Variables};
+    {keep, Variables};
 walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{function, Line, Name, Arity, NClauses}, NVariables};
@@ -48,8 +48,8 @@ walk({'fun', Line, {clauses, Clauses}}, Variables, #{step := post}) ->
 walk({named_fun, Line, Name, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{named_fun, Line, Name, NClauses}, NVariables};
-walk(Node, Variables, _Attr) ->
-    {Node, Variables}.
+walk(_Node, Variables, _Attr) ->
+    {keep, Variables}.
 
 walk_variables({var, _Line, Name}, Variables, _Attr) ->
     sets:add_element(Name, Variables);

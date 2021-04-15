@@ -68,12 +68,7 @@ astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
                 Errors = maps:get(errors, Map, []),
                 Warnings = maps:get(warnings, Map, []),
                 Error1 = astranaut_error:append_ews(Errors, Warnings, astranaut_error:new(File)),
-                case Errors of
-                    [] ->
-                        state_ok(#{return => Return, state => State1, error => Error1});
-                    _ ->
-                        state_fail(#{state => State1, error => Error1})
-                end
+                state_ok(#{return => Return, state => State1, error => Error1})
         end,
     new(Inner);
 astranaut_traverse(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := ErrorStruct}) ->
@@ -219,8 +214,8 @@ fails(Es) ->
 %%%===================================================================
 ask() ->
     Inner =
-        fun(_Formatter, _File, Attr, State) ->
-                state_ok(#{return => Attr, state => State})
+        fun(_Formatter, File, Attr, State) ->
+                state_ok(#{return => Attr, state => State, error => astranaut_error:new(File)})
         end,
     new(Inner).
 

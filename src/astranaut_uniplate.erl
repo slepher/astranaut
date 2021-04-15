@@ -176,10 +176,12 @@ monad_opts(Monad) ->
                      listen => astranaut_monad:monad_listen(M),
                      lift => astranaut_monad:monad_lift(_W)}, #{traverse => pre | post | all | subtree}) -> monad(M, A).
 map_m_monads(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
-    astranaut_monad:map_m(
-      fun(Node) ->
-              sub_apply(F, Node, Uniplate, MOpts, Opts)
-      end, Nodes, Bind, Return);
+    astranaut_monad:lift_m(
+      fun lists:flatten/1,
+      astranaut_monad:map_m(
+        fun(Node) ->
+                sub_apply(F, Node, Uniplate, MOpts, Opts)
+        end, Nodes, Bind, Return), Bind, Return);
 map_m_monads(F, Node1, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     Opts1 = maps:merge(#{traverse => pre}, Opts),
     %% this function is too compliacated
@@ -297,7 +299,7 @@ node_apply(F, Node1, #{lift_writer := Lift, writer := Writer, bind := Bind}) ->
     Bind(
       Lift(F(Node1)),
       fun(Node2) ->
-              Writer(updated_node(Node1, Node2))
+                Writer(updated_node(Node1, Node2))
       end);
 node_apply(F, Node1, #{}) ->
     F(Node1).

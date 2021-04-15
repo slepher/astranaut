@@ -13,8 +13,8 @@
 %% API
 -export_macro({[macro_x/1], [as_attr]}).
 
--include("quote.hrl").
--include("macro.hrl").
+-include_lib("astranaut/include/quote.hrl").
+-include_lib("astranaut/include/macro.hrl").
 
 -export([hello/1]).
 
