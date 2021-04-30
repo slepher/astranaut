@@ -164,10 +164,8 @@ monad_opts(Monad) ->
     Listen = astranaut_monad:monad_listen(Monad),
     MOpts = #{bind => Bind, return => Return, ask => Ask, local => Local, state => State, writer => Writer, listen => Listen},
     maps:filter(
-      fun(_Key, undefined) ->
-              false;
-         (_Key, _Value) ->
-              true
+      fun(_Key, Value) ->
+              Value =/= undefined
       end, MOpts).
 
 -spec map_m_monads(fun((A) -> monad(M, A)), A, uniplate(A),
