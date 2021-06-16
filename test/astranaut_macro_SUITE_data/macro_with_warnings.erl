@@ -53,14 +53,14 @@ unquote_splicing_warnings(Ast) ->
     Head.
 
 function_macro(a) ->
-    erl_af_lib:gen_exported_function(
+    astranaut_lib:gen_exported_function(
       test_local,
       quote(
         fun() ->
                 ok
         end));
 function_macro(b) ->
-    Ast = erl_af_lib:gen_exported_function(
+    Ast = astranaut_lib:gen_exported_function(
             test_local_b,
             quote(
               fun() ->

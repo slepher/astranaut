@@ -62,7 +62,7 @@ quote_unquote_splicing_mix(Ast1, Ast2) ->
           fun(unquote = Ast1, Two) ->
                   {error, unquote(Ast1), Two}
           end),
-    erl_af_lib:merge_clauses([Fun1, Fun2]).
+    astranaut_lib:merge_clauses([Fun1, Fun2]).
 
 quote_match_pattern(Ast) ->
     quote(_A@Hello(_@Foo, _L@World)) = Ast,
@@ -134,7 +134,7 @@ macro_function(Pattern, Middle) ->
           end).
 
 macro_exported_function(Name, Pattern1) ->
-    erl_af_lib:gen_exported_function(
+    astranaut_lib:gen_exported_function(
       Name,
       quote(
         fun(_A@Pattern1) ->
@@ -144,7 +144,7 @@ macro_exported_function(Name, Pattern1) ->
         end)).
 
 macro_merge_function(Name, Pattern) ->
-    erl_af_lib:gen_exported_function(
+    astranaut_lib:gen_exported_function(
       Name,
       quote(
         fun(_A@Pattern) ->

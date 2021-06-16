@@ -119,7 +119,7 @@ walk(Node, Attr, _File) ->
       astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
                 astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
-        end, keep)).
+        end)).
 
 quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Debug}) ->
     QuotePos = erl_syntax:get_pos(Node),
@@ -203,10 +203,10 @@ quote_1({var, Pos, VarName} = Var, #{module := Module} = Opts) when is_atom(VarN
     end;
 %% quote values
 quote_1({LiteralType, Pos, Literal}, Opts) 
-  when LiteralType == atom ; 
-       LiteralType == integer ; 
-       LiteralType == char ; 
-       LiteralType == float ; 
+  when LiteralType == atom ;
+       LiteralType == integer ;
+       LiteralType == char ;
+       LiteralType == float ;
        LiteralType == string ->
     astranaut_traverse:return(quote_literal(LiteralType, Literal, Opts#{quote_pos => Pos}));
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
@@ -246,9 +246,14 @@ get_tuple_pos(_, #{quote_pos := Pos, attribute := attr}) ->
 get_tuple_pos([clauses, _Clauses], #{quote_pos := Pos}) ->
     %% if tuple is the function clauses value, use the original line.
     Pos;
-get_tuple_pos([_Action, TuplePos|_], #{}) ->
+get_tuple_pos([_Action, TuplePos|_] = Tuple, #{}) ->
     %% use the tuple line.
-    TuplePos.
+    case astranaut_syntax:is_pos(TuplePos) of
+        true ->
+            TuplePos;
+        false ->
+            exit({invalid_tuple_pos_in, list_to_tuple(Tuple)})
+    end.
 
 quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
@@ -377,7 +382,7 @@ ast_to_options(AstOptions) ->
                       true ->
                           Node;
                       false ->
-                          erl_uniplate:skip(astranaut_lib:abstract_form(Node))
+                          astranaut_uniplate:skip(astranaut_lib:abstract_form(Node))
                   end
           end, AstOptions, #{traverse => pre}),
     erl_syntax:concrete(AstOptions1).

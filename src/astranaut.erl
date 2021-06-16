@@ -21,7 +21,7 @@
 
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
--type rtrees() :: erl_uniplate:node_context(tree()) | [erl_uniplate:node_context(tree())] | keep.
+-type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | keep.
 
 -type traverse_opts() :: #{traverse => traverse_style(),
                            formatter => module(),

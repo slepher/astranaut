@@ -686,14 +686,22 @@ apply_macro(#{module := Module, function := Function, arguments := Arguments,
     astranaut_traverse:with_formatter(
       Formatter,
       astranaut_traverse:update_pos(
-        Line, 
+        Line,
         do([ traverse ||
                MacroReturn = astranaut:walk_return(apply_mfa(Module, Function, Arguments)),
                Return1 <- astranaut_traverse:astranaut_traverse(MacroReturn),
-               Return2 = astranaut_lib:replace_line_zero(Return1, Line),
-               Return3 <- update_quoted_variable_name(Return2, Opts),
-               format_node(Return3, Opts),
-               return(Return3)
+               %% TODO: fix returned errors, not use magic keep.
+               case Return1 of
+                   keep ->
+                       return(keep);
+                   _ ->
+                       do([ traverse ||
+                              Return2 = astranaut_lib:replace_line_zero(Return1, Line),
+                              Return3 <- update_quoted_variable_name(Return2, Opts),
+                              format_node(Return3, Opts),
+                              return(Return3)
+                          ])
+               end
            ]))).
 
 apply_mfa(Module, Function, Arguments) ->
