@@ -60,11 +60,16 @@ test_module_forms(Module, Config) ->
     DataDir = proplists:get_value(data_dir, Config),
     File = filename:join(DataDir, atom_to_list(Module) ++ ".erl"),
     Opts = compile_opts(),
-    case astranaut_lib:parse_file(File, Opts) of
-        {error, Errors, []} ->
-            exit({compile_module_failed, Errors});
-        Forms ->
-            Forms
+    case filelib:is_file(File) of
+        true ->
+            case astranaut_lib:parse_file(File, Opts) of
+                {error, Errors, []} ->
+                    exit({compile_module_failed, Errors});
+                Forms ->
+                    Forms
+            end;
+        false ->
+            exit({file_not_detected, File})
     end.
 
 load_data_modules(Config, TestModules) ->

@@ -150,7 +150,8 @@ mapfold(F, Init, TopNode, Opts) ->
                              fun({Node1, State1}) ->
                                      #{return => Node1, state => State1};
                                 (Return) ->
-                                     %% when return other value, we dont know which part is node and which part is state                                              %% just throw exception.
+                                     %% when return other value, we dont know which part is node and which part is state
+                                     %% just throw exception.
                                      exit({invalid_mapfold_return, Return})
                              end)
                    end)

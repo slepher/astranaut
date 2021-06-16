@@ -266,7 +266,7 @@ SequenceChildren =
   atom() => {atom() => true}
   proplists() => map(),
   Line => #{line => Line}
-  #{line => Line, code_line => CodeLine, debug => Debug}.
+  #{line => Line, code_pos => CodeLine, debug => Debug}.
 ```
 
 *Line*
@@ -285,17 +285,17 @@ SequenceChildren =
     {'fun', 10, {clauses, [{clause, 10, [{var, 10, '_'}], [], [{atom, 10, ok}]}]}}.
 ```
 
-*CodeLine*
+*CodePos*
 
-&emsp;&emsp; if CodeLine is true
+&emsp;&emsp; if CodePos is true
 
 ```erlang
     10: quote(
     11:   fun(_) ->
     12:     ok
-    13: end, code_line).
+    13: end, code_pos).
     =>  
-    {'fun' 10, {clauses, [{clause, 11, [{var, 11, '_'}], [], [{atom, 12, ok}]}]}}.
+    {'fun', {11, 2}, {clauses, [{clause, {11,5}, [{var, {11,5}, '_'}], [], [{atom, {12, 3}, ok}]}]}}.
 ```
 
 *Debug*
