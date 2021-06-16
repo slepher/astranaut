@@ -1,5 +1,5 @@
 
-![Travis CI](https://travis-ci.org/slepher/astranaut.svg?branch=master)
+[![Build Status](https://api.cirrus-ci.com/github/slepher/astranaut.svg)](https://cirrus-ci.com/github/slepher/astranaut)
 
 # requirements
 
