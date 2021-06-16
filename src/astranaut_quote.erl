@@ -243,14 +243,12 @@ quote_tuple(Tuple, Opts) ->
 get_tuple_pos(_, #{quote_pos := Pos, attribute := attr}) ->
     %% if tuple is the attribute value, use the original line.
     Pos;
-get_tuple_pos([Action, TuplePos|_], #{}) when is_integer(TuplePos), is_atom(Action) ->
+get_tuple_pos([clauses, _Clauses], #{quote_pos := Pos}) ->
+    %% if tuple is the function clauses value, use the original line.
+    Pos;
+get_tuple_pos([_Action, TuplePos|_], #{}) ->
     %% use the tuple line.
-    TuplePos;
-get_tuple_pos([_Action, {TuplePos, TupleCol}|_], #{}) when is_integer(TuplePos), is_integer(TupleCol) ->
-    %% use the tuple line.
-    {TuplePos, TupleCol};
-get_tuple_pos(_, #{quote_pos := Pos}) ->
-    Pos.
+    TuplePos.
 
 quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
@@ -269,7 +267,7 @@ quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Pos, export, [{F, A}...]}.
     %% special form of {attribute, Pos, Attribute, T}.
     %% there is no line in {F, A} and T.
-    quote_tuple_list_1(TupleList, Opts);
+    quote_tuple_list_rest(TupleList, Opts);
 quote_tuple_list([Action, TuplePos|_Rest] = TupleList, Opts)
   when is_atom(Action), is_integer(TuplePos) ->
     quote_tuple_list_with_pos(TupleList, Opts);
@@ -278,19 +276,19 @@ quote_tuple_list([Action, {TuplePos, TupleCol}|_Rest] = TupleList, Opts)
     quote_tuple_list_with_pos(TupleList, Opts);
 
 quote_tuple_list(List, Opts) ->
-    quote_tuple_list_1(List, Opts).
+    quote_tuple_list_rest(List, Opts).
 
 quote_tuple_list_with_pos([Action, TuplePos|Rest] = TupleList, Opts) ->
     NOpts = update_attribute_opt(TupleList, Opts),
     astranaut_traverse:bind(
-      quote_tuple_list_1(Rest, NOpts),
+      quote_tuple_list_rest(Rest, NOpts),
       fun(Rest1) ->
               Action1 = quote_literal_value(Action, Opts),
               Pos1 = quote_pos(Opts#{quote_pos => TuplePos}),
               astranaut_traverse:return([Action1, Pos1|Rest1])
       end).
 
-quote_tuple_list_1(List, Opts) ->
+quote_tuple_list_rest(List, Opts) ->
     astranaut_traverse:map_m(
       fun(Item) ->
               quote_1(Item, Opts)
