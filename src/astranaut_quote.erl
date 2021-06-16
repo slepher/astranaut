@@ -10,7 +10,7 @@
 
 %% API
 -export([parse_transform/2, format_error/1]).
--export([uncons/2, cons/2]).
+-export([flattencons/2, mergecons/2]).
 
 %%%===================================================================
 %%% API
@@ -46,7 +46,7 @@ quote_validator() ->
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
                   [astranaut_lib:ast_safe_to_string(Binding), astranaut_lib:ast_safe_to_string(Var)]);
-format_error({non_empty_tail, Rest}) ->
+format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
     io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
 format_error({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
@@ -58,25 +58,25 @@ debug_module(Forms1, true) ->
 debug_module(_Forms1, _) ->
     ok.
 
-uncons(Cons, []) ->
-    uncons_1(Cons);
-uncons(Cons, Rest) ->
-    uncons_1(Cons) ++ Rest.
+flattencons(Cons, []) ->
+    flattencons_1(Cons);
+flattencons(Cons, Rest) ->
+    flattencons_1(Cons) ++ Rest.
 
-uncons_1({cons, _pos, Head, Tail}) ->
-    [Head|uncons_1(Tail)];
-uncons_1({nil, _pos}) ->
+flattencons_1({cons, _pos, Head, Tail}) ->
+    [Head|flattencons_1(Tail)];
+flattencons_1({nil, _pos}) ->
     [];
-uncons_1(Value) ->
+flattencons_1(Value) ->
     Value.
 
-cons([H|T], Rest) ->
-    {cons, 0, H, cons(T, Rest)};
-cons([], Rest) ->
+mergecons([H|T], Rest) ->
+    {cons, 0, H, mergecons(T, Rest)};
+mergecons([], Rest) ->
     Rest;
-cons({cons, Pos, Head, Tail}, Rest) ->
-    {cons, Pos, Head, cons(Tail, Rest)};
-cons({nil, _pos}, Rest) ->
+mergecons({cons, Pos, Head, Tail}, Rest) ->
+    {cons, Pos, Head, mergecons(Tail, Rest)};
+mergecons({nil, _pos}, Rest) ->
     Rest.
 %%--------------------------------------------------------------------
 %% @doc
@@ -324,21 +324,21 @@ unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, j
       quote_1(Rest, Opts),
       fun(Rest1) ->
               astranaut_traverse:return(
-                call_remote(?MODULE, uncons, [Unquotes, Rest1], Pos))
+                call_remote(?MODULE, flattencons, [Unquotes, Rest1], Pos))
       end);
 unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, join := cons} = Opts) ->
     astranaut_traverse:bind(
       quote_1(Rest, Opts),
       fun(Rest1) ->
               astranaut_traverse:return(
-                call_remote(?MODULE, cons, [Unquotes, Rest1], Pos))
+                call_remote(?MODULE, mergecons, [Unquotes, Rest1], Pos))
       end);
 unquote_splicing(Unquotes, [], #{quote_type := pattern, join := list}) ->
     astranaut_traverse:return(Unquotes);
 unquote_splicing(Unquotes, {nil, _}, #{quote_type := pattern, join := cons}) ->
     astranaut_traverse:return(Unquotes);
 unquote_splicing(Unquotes, Rest, #{quote_type := pattern, quote_pos := Pos}) ->
-    Warning = {non_empty_tail, Rest},
+    Warning = {unquote_splicing_pattern_non_empty_tail, Rest},
     astranaut_traverse:then(
       astranaut_traverse:update_pos(
         Pos, astranaut_traverse:warning(Warning)),

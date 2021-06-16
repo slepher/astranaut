@@ -192,7 +192,7 @@ test_macro_with_warnings(Config) ->
         {12, Local, noop},
         {18, Local, noop},
         {20, Local, noop},
-        {25, astranaut_quote,{non_empty_tail,[{atom, _, tail}]}}
+        {25, astranaut_quote,{unquote_splicing_pattern_non_empty_tail,[{atom, _, tail}]}}
        ],
        Warnings),
     ?assertEqual([], FileWithErrors),

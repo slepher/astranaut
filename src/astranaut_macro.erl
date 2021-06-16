@@ -547,7 +547,7 @@ load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, Forms, C
           fun(Export, Acc) ->
                   [astranaut_lib:gen_exports([Export], 0)|Acc]
           end, [], LocalMacroFunctions),
-    Forms2 = erl_tree_syntax:sort_forms(Forms1 ++ ExtraExports),
+    Forms2 = astranaut_syntax:sort_forms(Forms1 ++ ExtraExports),
     astranaut_lib:load_forms(Forms2, [without_warnings|CompileOpts]).
 
 append_if(Boolean, Form, Forms) ->
