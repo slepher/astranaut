@@ -1,6 +1,11 @@
 test_task:
   container:
-    image: erlang:latest
+    matrix:
+      - image: erlang:23
+      - image: erlang:22
+      - image: erlang:21
+      - image: erlang:20
+      - image: erlang:19
   rebar3_cache:
     folder: _build
     fingerprint_script: cat rebar.lock
