@@ -5,9 +5,5 @@ test_task:
       - image: erlang:22
       - image: erlang:21
       - image: erlang:20
-  rebar3_cache:
-    folder: _build
-    fingerprint_script: cat rebar.lock
-    populate_script: rebar3 compile --deps_only
   compile_script: rebar3 compile
   test_script: rebar3 ct
