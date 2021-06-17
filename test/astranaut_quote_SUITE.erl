@@ -108,7 +108,13 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_quote_literal, test_quote_unquote, test_quote_unquote_splicing].
+    [test_literal_atom, test_literal_integer, test_literal_tuple,
+     test_pattern_match, test_pattern_function_1, test_pattern_function_2,
+     test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
+     test_unquote, test_binding, test_atom_binding,
+     test_unquote_splicing_1, test_unquote_splicing_2,
+     test_user_type, test_system_type, test_remote_type, test_record, test_spec, test_dyanmic_binding,
+     test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
 %%               ok | exit() | {skip,Reason} | {comment,Comment} |
@@ -118,36 +124,149 @@ all() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_quote_literal(_Config) -> 
-    Atom = quote_example:quote_atom(),
-    Integer = quote_example:quote_integer(),
-    Tuple = quote_example:quote_tuple(),
-    Ast1 = astranaut_lib:abstract_form(ok),
-    Ast2 = astranaut_lib:abstract_form(10),
-    Ast3 = astranaut_lib:abstract_form({hello, world}),
-    ?assertEqual(Ast1, Atom),
-    ?assertEqual(Ast2, Integer),
-    ?assertEqual(Ast3, Tuple),
+test_literal_atom(_Config) ->
+    Atom = quote_example:atom(),
+    Ast = astranaut_lib:abstract_form(ok),
+    ?assertEqual(Ast, Atom),
     ok.
 
-test_quote_unquote(_Config) ->
-    Atom = quote_example:quote_atom(),
-    OkAtom = quote_example:quote_unquote(Atom),
-    OkAtom1 = quote_example:quote_binding(Atom),
-    OkAtom2 = quote_example:quote_atom_binding(ok),
+test_literal_integer(_Config) ->
+    Integer = quote_example:integer(),
+    Ast = astranaut_lib:abstract_form(10),
+    ?assertEqual(Ast, Integer),
+    ok.
+
+test_literal_tuple(_Config) ->
+    Tuple = quote_example:tuple(),
+    Ast = astranaut_lib:abstract_form({hello, world}),
+    ?assertEqual(Ast, Tuple),
+    ok.
+
+test_pattern_match(_Config) ->
+    Ast1 = merl:quote(0, "hello(world, foo, bar)"),
+    Pattern = quote_example:match_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({hello, world, foo, bar}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_function_1(_Config) ->
+    Ast1 = astranaut_lib:abstract_form({hello, world}),
+    Pattern = quote_example:function_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({ok, {hello2, world, world, {hello, world}}}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_function_2(_Config) ->
+    Ast1 = astranaut_lib:abstract_form({foo, bar}),
+    Pattern = quote_example:function_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({error, {foo, bar}}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_case_1(_Config) ->
+    Ast1 = merl:quote(0, "F(10)"),
+    Pattern = quote_example:case_pattern(Ast1),
+    Ast2 = merl:quote(0, "{ok, F(10 + 1)}"),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_case_2(_Config) ->
+    Ast1 = merl:quote(0, "hello:world(foo, bar)"),
+    Pattern = quote_example:case_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({ok, {hello, world, foo, bar}}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_case_3(_Config) ->
+    Ast1 = merl:quote(0, "task"),
+    Pattern = quote_example:case_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({error, task}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_unquote(_Config) ->
+    Atom = quote_example:atom(),
+    OkAtom = quote_example:unquote(Atom),
     Ast = astranaut_lib:abstract_form({ok, ok}),
     ?assertEqual(Ast, OkAtom),
-    ?assertEqual(Ast, OkAtom1),
-    ?assertEqual(Ast, OkAtom2),
     ok.
 
-test_quote_unquote_splicing(_Config) ->
-    Hello = quote_example:quote_atom(hello),
-    World = quote_example:quote_atom(world),
-    HelloWorld1 = quote_example:quote_unquote_splicing_1(Hello, World),
-    HelloWorld2 = quote_example:quote_unquote_splicing_2(Hello, World),
-    Ast1 = astranaut_lib:abstract_form({ok, {hello, hello, world, world}}),
-    Ast2 = astranaut_lib:abstract_form({ok, [hello, hello, world, world]}),
-    ?assertEqual(Ast1, HelloWorld1),
-    ?assertEqual(Ast2, HelloWorld2),
+test_binding(_Config) ->
+    Atom = quote_example:atom(),
+    OkAtom = quote_example:binding(Atom),
+    Ast = astranaut_lib:abstract_form({ok, ok}),
+    ?assertEqual(Ast, OkAtom),
+    ok.
+
+test_atom_binding(_Config) ->
+    OkAtom = quote_example:atom_binding(ok),
+    Ast = astranaut_lib:abstract_form({ok, ok}),
+    ?assertEqual(Ast, OkAtom),
+    ok.
+
+test_unquote_splicing_1(_Config) ->
+    Hello = quote_example:atom(hello),
+    World = quote_example:atom(world),
+    HelloWorld = quote_example:unquote_splicing_1(Hello, World),
+    Ast = astranaut_lib:abstract_form({ok, {hello, hello, world, world}}),
+    ?assertEqual(Ast, HelloWorld),
+    ok.
+
+test_unquote_splicing_2(_Config) ->
+    Hello = quote_example:atom(hello),
+    World = quote_example:atom(world),
+    HelloWorld = quote_example:unquote_splicing_2(Hello, World),
+    Ast = astranaut_lib:abstract_form({ok, [hello, hello, world, world]}),
+    ?assertEqual(Ast, HelloWorld),
+    ok.
+
+test_user_type(_Config) ->
+    Type = quote_example:user_type(hello, world),
+    Ast = merl:quote(0, "-type hello() :: world()."),
+    ?assertEqual(Ast, Type),
+    ok.
+
+test_system_type(_Config) ->
+    Type = quote_example:system_type(hello, atom),
+    Ast = merl:quote(0, "-type hello() :: atom()."),
+    ?assertEqual(Ast, Type),
+    ok.
+
+test_remote_type(_Config) ->
+    World = astranaut_lib:abstract_form(world),
+    Type = quote_example:remote_type(hello, hello, World),
+    Ast = merl:quote(0, "-type hello() :: hello:world()."),
+    ?assertEqual(Ast, Type),
+    ok.
+
+test_record(_Config) ->
+    Record = quote_example:record(),
+    Ast = merl:quote(0, "-record(hello_world, {id, hello, world})."),
+    ?assertEqual(Ast, Record),
+    ok.
+
+test_spec(_Config) ->
+    Spec = quote_example:spec(),
+    Ast = merl:quote(0, "-spec hello(atom()) -> atom()."),
+    ?assertEqual(Ast, Spec),
+    ok.
+
+test_dyanmic_binding(_Config) ->
+    World = quote_example:dynamic_binding(),
+    ?assertEqual(world, World),
+    ok.
+
+test_guard(_Config) ->
+    Var = merl:quote(0, "A"),
+    Guard = merl:quote(0, "A == hello"),
+    TestGuard = quote_example:guard(Var, Guard),
+    Ast = merl:quote(
+            ["case A of",
+             "  A when A == hello ->",
+             "    A;",
+             "  _ ->",
+             "    {error, not_match}"
+             "end"]),
+    Ast1 = astranaut_lib:replace_line(Ast, 0),
+    ?assertEqual(Ast1, TestGuard),
     ok.

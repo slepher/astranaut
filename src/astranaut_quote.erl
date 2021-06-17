@@ -46,6 +46,15 @@ quote_validator() ->
 format_error({invalid_unquote_splicing, Binding, Var}) ->
     io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
                   [astranaut_lib:ast_safe_to_string(Binding), astranaut_lib:ast_safe_to_string(Var)]);
+format_error({only_bindings_supported, Bindings, VarName, Name}) ->
+    BindingsStr = string:join(
+                    lists:map(
+                      fun(Binding) ->
+                              io_lib:format("_~s@~s", [Binding, VarName])
+                      end, Bindings), " or "),
+    io_lib:format("expected _~s, not ~s", [BindingsStr, Name]);
+format_error({dynamic_binding_in_expression, Expr}) ->
+    io_lib:format("dynamic_binding _D@~s only avaliable in pattern", [Expr]);
 format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
     io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
 format_error({invalid_quote, Node}) ->
@@ -88,16 +97,18 @@ mergecons({nil, _pos}, Rest) ->
 %%% Internal functions
 %%%===================================================================
 walk({call, _pos1, {atom, _pos2, quote}, [Form]} = Node, Attr, WalkOpts) ->
-    %% transform quote(Form)
+    %% transform quote(Code)
     quote(Form, #{}, Node, Attr, WalkOpts);
 walk({call, _pos1, {atom, _pos2, quote}, [Form, Options]} = Node, Attr, WalkOpts) ->
+    %% transform quote(Code, Options)
     astranaut_traverse:bind(
       astranaut_traverse:astranaut_traverse(to_options(Options)),
       fun(Options1) ->
               quote(Form, Options1, Node, Attr, WalkOpts)
       end);
 walk({call, Pos1, {atom, _pos2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, WalkOpts) ->
-    %% transform quote_code(Codes)
+    %% transform quote_code("Code1", "Code2",...)
+    %% transform quote_code("Code1", "Code2",..., Options)
     case split_codes(Codes, NodeType) of
         {ok, NCodes, Options} ->
             Options1 = to_options(Options),
@@ -126,29 +137,29 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Deb
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_pos => QuotePos, quote_type => QuoteType, 
                             file => File, module => Module, debug => Debug}, Options),
-    astranaut_traverse:set_updated(quote_0(Value, Options1)).
+    astranaut_traverse:set_updated(quote(Value, Options1)).
 
-quote_0(Value, #{debug := true} = Options) ->
+quote(Node, #{debug := true} = Options) ->
     astranaut_traverse:lift_m(
       fun(QuotedAst) ->
               format_quoted_ast(QuotedAst, Options),
               QuotedAst
-      end, quote_0(Value, Options#{debug => false}));
-quote_0(Value, #{line := Pos, quote_pos := QuotePos} = Options) ->
+      end, quote(Node, Options#{debug => false}));
+quote(Node, #{line := Pos, quote_pos := QuotePos} = Options) ->
     Options1 = maps:remove(line, Options),
     astranaut_traverse:lift_m(
       fun(Quoted) ->
               call_remote(astranaut_lib, replace_line_zero, [Quoted, Pos], QuotePos)
-      end, quote_0(Value, Options1));
-quote_0(Value, #{} = Options) ->
-    quote_1(Value, Options).
+      end, quote(Node, Options1));
+quote(Node, #{} = Options) ->
+    quote_1(Node, Options).
 
 %% unquote
-quote_1({call, _pos1, {atom, _pos2, unquote}, [Unquote]}, Opts) ->
-    unquote(Unquote, Opts#{type => value});
-quote_1({match, _, {atom, _, unquote}, Unquote}, Opts) ->
+quote_1({call, _pos1, {atom, _pos2, unquote}, [Unquote]}, _Opts) ->
+    unquote(Unquote);
+quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
     %% quote = Unquote in pattern
-    unquote(Unquote, Opts#{type => value});
+    unquote(Unquote);
 %% unquote_splicing
 quote_1({cons, _pos1, {call, _pos2, {atom, _pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
     %quote([a, b, unquote_splicing(V), c, d]),
@@ -169,7 +180,7 @@ quote_1({match, _pos1, Pattern, Value}, #{quote_pos := Pos, quote_type := patter
       end);
 quote_1({cons, _pos1, {var, Pos, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
     %% [A, _L@Unquotes, B] expression.
-    case parse_binding(VarName, Pos) of
+    case parse_binding_var(VarName, Pos) of
         {value_list, Unquotes} ->
             unquote_splicing(Unquotes, T, Opts#{join => cons});
         default ->
@@ -179,7 +190,7 @@ quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
     %% any L@Unquotes in list in absformat, like
     %% {A, _L@Unquotes, B} expression.
     %% fun(A, _L@Unquotes, B) -> _L@Unquotes end.
-    case parse_binding(VarName, Pos) of
+    case parse_binding_var(VarName, Pos) of
         {value_list, Unquotes} ->
             unquote_splicing(Unquotes, T, Opts#{quote_pos => Pos, join => list});
         _ ->
@@ -188,19 +199,34 @@ quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
 quote_1({var, _Pos, '_'} = Var, Opts) ->
     quote_tuple(Var, Opts);
 quote_1({var, Pos, VarName} = Var, #{module := Module} = Opts) when is_atom(VarName) ->
-    case parse_binding(VarName, Pos) of
+    case parse_binding_var(VarName, Pos) of
         {value_list, Unquotes} ->
             astranaut_traverse:then(
                 astranaut_traverse:update_pos(
                   Pos, astranaut_traverse:warning({invalid_unquote_splicing, Unquotes, Var})),
               quote_tuple(Var, Opts));
         {BindingType, Unquote} ->
-            unquote(Unquote, Opts#{type => BindingType, quote_pos => Pos});
+            unquote_binding(Unquote, Opts#{type => BindingType, quote_pos => Pos});
         default ->
             VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
             Var1 = {var, Pos, VarName1},
             quote_tuple(Var1, Opts)
     end;
+quote_1({atom, Pos, Name} = Atom, #{type := true} = Opts) ->
+    %% typename transform is type
+    %% -type '_A@Name'() :: '_A@Type'().
+    case parse_binding_var(Name, Pos) of
+        {value, Unquote} ->
+            unquote_binding(Unquote, Opts#{type => value, quote_pos => Pos});
+        {atom, Unquote} ->
+            unquote_binding(Unquote, Opts#{type => atom, quote_pos => Pos});
+        {_Type, {var, _, Varname} = Var} ->
+            astranaut_traverse:then(
+              astranaut_traverse:warning({only_bindings_suported, ["A", ""], Varname, Name}),
+              astranaut_traverse:return(Var));
+        defaut ->
+            quote_tuple(Atom, Opts)
+      end;
 %% quote values
 quote_1({LiteralType, Pos, Literal}, Opts) 
   when LiteralType == atom ;
@@ -232,66 +258,119 @@ quote_list([], #{quote_pos := Pos}) ->
     astranaut_traverse:return({nil, Pos}).
 
 quote_tuple(Tuple, Opts) ->
-    TupleList = tuple_to_list(Tuple),
-    TuplePos = get_tuple_pos(TupleList, Opts),
+    quote_tuple_list(tuple_to_list(Tuple), Opts).
+
+quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
     astranaut_traverse:bind(
-      quote_tuple_list(TupleList, Opts),
-      fun(TupleList1) ->
-              astranaut_traverse:return({tuple, TuplePos, TupleList1})
-      end).
+        quote_type_name(Name, Opts),
+        fun(QuotedName) ->
+                astranaut_traverse:bind(
+                  quote_1(Params, Opts),
+                  fun(QuotedParams) ->
+                          astranaut_traverse:return(
+                            {tuple, Pos, [quote_type_style(Name, Opts), quote_pos(Opts), QuotedName, QuotedParams]})
+                  end)
+        end);
+quote_tuple_list([attribute, Pos, type, {Name, Type, Params}], Opts) ->
+    Opts1 = Opts#{type => true},
+    astranaut_traverse:bind(
+      astranaut_traverse:bind(
+        quote_type_name(Name, Opts),
+        fun(QuotedName) ->
+                astranaut_traverse:bind(
+                  quote_1(Type, Opts1),
+                  fun(QuotedType) ->
+                          astranaut_traverse:bind(
+                            quote_1(Params, Opts1),
+                            fun(QuotedParams) ->
+                                    astranaut_traverse:return(
+                                      {tuple, Pos, [QuotedName, QuotedType, QuotedParams]})
+                            end)
+                  end)
+        end),
+      fun(QuotedTypeBody) ->
+              astranaut_traverse:return(
+                {tuple, Pos, [quote_literal_value(attribute, Opts), quote_pos(Opts), quote_literal_value(type, Opts),
+                              QuotedTypeBody]})
+      end);
 
-get_tuple_pos(_, #{quote_pos := Pos, attribute := attr}) ->
-    %% if tuple is the attribute value, use the original line.
-    Pos;
-get_tuple_pos([clauses, _Clauses], #{quote_pos := Pos}) ->
-    %% if tuple is the function clauses value, use the original line.
-    Pos;
-get_tuple_pos([_Action, TuplePos|_] = Tuple, #{}) ->
-    %% use the tuple line.
-    case astranaut_syntax:is_pos(TuplePos) of
-        true ->
-            TuplePos;
-        false ->
-            exit({invalid_tuple_pos_in, list_to_tuple(Tuple)})
-    end.
-
-quote_tuple_list([MA, Spec], #{attribute := spec} = Opts) ->
+quote_tuple_list([Type|Rest], #{quote_pos := Pos, attribute := type} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
+    %% special form of {attribute, Pos, type, {Name, Params, Type}}.
     %% there is no line in {F, A}.
-    NOpts = maps:remove(attribute, Opts),
+    Opts1 = maps:remove(attribute, Opts),
     astranaut_traverse:bind(
-      quote_1(MA, Opts#{attribute => attr}),
-      fun(MA1) ->
-              astranaut_traverse:bind(
-                quote_1(Spec, NOpts),
-                fun(Spec1) ->
-                        astranaut_traverse:return([MA1, Spec1])
-                end)
+      quote_tuple_list_rest(Rest, Opts1),
+      fun(QuotedRest) ->
+              astranaut_traverse:return({tuple, Pos, [quote_literal_value(Type, Opts)|QuotedRest]})
       end);
 quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Pos, export, [{F, A}...]}.
     %% special form of {attribute, Pos, Attribute, T}.
     %% there is no line in {F, A} and T.
-    quote_tuple_list_rest(TupleList, Opts);
-quote_tuple_list([Action, TuplePos|_Rest] = TupleList, Opts)
-  when is_atom(Action), is_integer(TuplePos) ->
-    quote_tuple_list_with_pos(TupleList, Opts);
-quote_tuple_list([Action, {TuplePos, TupleCol}|_Rest] = TupleList, Opts) 
-  when is_atom(Action), is_integer(TuplePos), is_integer(TupleCol) ->
-    quote_tuple_list_with_pos(TupleList, Opts);
-
-quote_tuple_list(List, Opts) ->
-    quote_tuple_list_rest(List, Opts).
-
-quote_tuple_list_with_pos([Action, TuplePos|Rest] = TupleList, Opts) ->
-    NOpts = update_attribute_opt(TupleList, Opts),
+    quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts);
+quote_tuple_list([clauses, Clauses], #{quote_pos := Pos} = Opts) ->
+    %% if tuple is the function clauses value, use the original line.
     astranaut_traverse:bind(
-      quote_tuple_list_rest(Rest, NOpts),
-      fun(Rest1) ->
-              Action1 = quote_literal_value(Action, Opts),
-              Pos1 = quote_pos(Opts#{quote_pos => TuplePos}),
-              astranaut_traverse:return([Action1, Pos1|Rest1])
-      end).
+      quote_1(Clauses, Opts),
+      fun(QuotedClauses) ->
+              astranaut_traverse:return({tuple, Pos, [quote_literal_value(clauses, Opts), QuotedClauses]})
+      end);
+quote_tuple_list([Action, TuplePos|Rest] = TupleList, #{} = Opts) ->
+    case astranaut_syntax:is_pos(TuplePos) of
+        true ->
+            Opts1 = update_attribute_opt(TupleList, Opts),
+            astranaut_traverse:bind(
+              quote_tuple_list_rest(Rest, Opts1),
+              fun(QuotedRest) ->
+                      QuotedAction = quote_literal_value(Action, Opts),
+                      QuotedPos = quote_pos(Opts#{quote_pos => TuplePos}),
+                      astranaut_traverse:return({tuple, TuplePos, [QuotedAction, QuotedPos|QuotedRest]})
+              end);
+        false ->
+            astranaut_traverse:then(
+              astranaut_traverse:warning({could_not_get_tuple_pos_value, list_to_tuple(TupleList)}),
+              quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts))
+    end.
+
+quote_type_style(Name, #{quote_pos := Pos} = Opts) ->
+    case parse_binding_var(Name, Pos) of
+        {type, _} ->
+            quote_literal_value(type, Opts);
+        _ ->
+            quote_literal_value(user_type, Opts)
+    end.
+
+quote_type_name(Name, #{quote_pos := Pos} = Opts) ->
+    case parse_binding_var(Name, Pos) of
+        {atom, Var} ->
+            astranaut_traverse:return(Var);
+        {type, Var} ->
+            astranaut_traverse:return(Var);
+        {_Type, {var, _, VarName} = Var} ->
+            astranaut_traverse:then(
+              astranaut_traverse:warning({only_bindings_supported, ["", "T", "A"], VarName, Name}),
+              astranaut_traverse:return(Var));
+        default ->
+            astranaut_traverse:return(quote_literal_value(Name, Opts))
+    end.
+
+update_attribute_opt([attribute, _Pos, spec|_T], Opts) ->
+    Opts#{attribute => type};
+update_attribute_opt([attribute, _Pos, type|_T], Opts) ->
+    Opts#{attribute => type};
+update_attribute_opt([attribute, _Pos, record|_T], Opts) ->
+    Opts#{attribute => type};
+update_attribute_opt([attribute|_T], Opts) ->
+    Opts#{attribute => attr};
+update_attribute_opt(_, Opts) ->
+    Opts.
+
+quoted_tuple(QuotedTupleListM, #{quote_pos := Pos}) ->
+    astranaut_traverse:lift_m(
+      fun(QuotedTupleList) ->
+              {tuple, Pos, QuotedTupleList}
+      end, QuotedTupleListM).
 
 quote_tuple_list_rest(List, Opts) ->
     astranaut_traverse:map_m(
@@ -300,9 +379,7 @@ quote_tuple_list_rest(List, Opts) ->
       end, List).
 
 quote_literal(LiteralType, LiteralValue, #{quote_pos := Pos} = Opts) ->
-    {tuple, Pos, [quote_literal_value(LiteralType, Opts),
-                   quote_pos(Opts),
-                   quote_literal_value(LiteralValue, Opts)]}.
+    {tuple, Pos, [quote_literal_value(LiteralType, Opts), quote_pos(Opts), quote_literal_value(LiteralValue, Opts)]}.
 
 quote_literal_value(Literal, #{quote_pos := Pos}) ->
     astranaut_lib:replace_line(astranaut_lib:abstract_form(Literal), Pos).
@@ -316,9 +393,19 @@ quote_pos(#{quote_type := expression} = Opts) ->
     quote_literal_value(0, Opts).
 
 %% unquote return monad
-unquote(Exp, #{type := value}) ->
+unquote(Exp) ->
+    astranaut_traverse:return(Exp).
+
+%% unquote return monad
+unquote_binding(Exp, #{type := value}) ->
     astranaut_traverse:return(Exp);
-unquote(Exp, #{type := Type, quote_pos := Pos} = Opts) ->
+unquote_binding(Exp, #{type := dynamic, quote_type := pattern, quote_pos := Pos} = Opts) ->
+    astranaut_traverse:return({tuple, Pos, [{var, Pos, '_'}, quote_pos(Opts), Exp]});
+unquote_binding({var, _, Varname} = Exp, #{type := dynamic, quote_type := expression}) ->
+    astranaut_traverse:then(
+      astranaut_traverse:error({dynamic_binding_in_expression, Varname}),
+      astranaut_traverse:return(Exp));
+unquote_binding(Exp, #{type := Type, quote_pos := Pos} = Opts) ->
     astranaut_traverse:return({tuple, Pos, [quote_literal_value(Type, Opts), quote_pos(Opts), Exp]}).
 
 %% unquote_splicing return monad.
@@ -346,15 +433,6 @@ unquote_splicing(Unquotes, Rest, #{quote_type := pattern, quote_pos := Pos}) ->
       astranaut_traverse:update_pos(
         Pos, astranaut_traverse:warning(Warning)),
       astranaut_traverse:return(Unquotes)).
-
-update_attribute_opt([attribute, _pos, spec|_T], Opts) ->
-    Opts#{attribute => spec};
-update_attribute_opt([attribute, _pos, type|_T], Opts) ->
-    Opts;
-update_attribute_opt([attribute|_T], Opts) ->
-    Opts#{attribute => attr};
-update_attribute_opt(_, Opts) ->
-    Opts.
 
 quote_type(#{node := pattern}) ->
     pattern;
@@ -424,10 +502,18 @@ call_remote(Module, Function, Arguments, Pos) ->
 
 %% 
 %% 
-parse_binding(Atom, Pos) ->
+parse_binding_var(Atom, Pos) ->
+    case parse_binding_name(Atom) of
+        {VarType, VarName} ->
+            {VarType, {var, Pos, VarName}};
+        default ->
+            default
+    end.
+
+parse_binding_name(Atom) ->
     case parse_binding_1(atom_to_list(Atom)) of
         {VarType, VarName} ->
-            {VarType, {var, Pos, list_to_atom(VarName)}};
+            {VarType, list_to_atom(VarName)};
         default ->
             default
     end.
@@ -442,6 +528,10 @@ parse_binding_1([$_,$F,$@|T]) ->
     {float, T};
 parse_binding_1([$_,$S,$@|T]) ->
     {string, T};
+parse_binding_1([$_,$D,$@|T]) ->
+    {dynamic, T};
+parse_binding_1([$_,$T,$@|T]) ->
+    {type, T};
 parse_binding_1([$_,$L,$@|T]) ->
     {value_list, T};
 parse_binding_1([$_,$@|T]) ->
