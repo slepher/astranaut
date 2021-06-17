@@ -240,13 +240,13 @@ test_remote_type(_Config) ->
     ok.
 
 test_record(_Config) ->
-    Record = quote_example:record(),
+    Record = quote_example:record(hello_world),
     Ast = merl:quote(0, "-record(hello_world, {id, hello, world})."),
     ?assertEqual(Ast, Record),
     ok.
 
 test_spec(_Config) ->
-    Spec = quote_example:spec(),
+    Spec = quote_example:spec(hello),
     Ast = merl:quote(0, "-spec hello(atom()) -> atom()."),
     ?assertEqual(Ast, Spec),
     ok.

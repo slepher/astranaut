@@ -98,11 +98,11 @@ system_type(Name, Value) ->
 remote_type(Name, Module, Type) ->
     quote_code("-type '_A@Name'() :: '_A@Module':'_@Type'().").
 
-record() ->
-    quote_code("-record(hello_world, {id, hello, world}).").
+record(Name) ->
+    quote_code("-record('_A@Name', {id, hello, world}).").
 
-spec() ->
-    quote_code("-spec hello(atom()) -> atom().").
+spec(Name) ->
+    quote_code("-spec '_A@Name'(atom()) -> atom().").
 
 dynamic_binding() ->
     quote({hello, _D@World}) = quote({hello, world}),

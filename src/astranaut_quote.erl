@@ -224,7 +224,7 @@ quote_1({atom, Pos, Name} = Atom, #{type := true} = Opts) ->
             astranaut_traverse:then(
               astranaut_traverse:warning({only_bindings_suported, ["A", ""], Varname, Name}),
               astranaut_traverse:return(Var));
-        defaut ->
+        default ->
             quote_tuple(Atom, Opts)
       end;
 %% quote values
@@ -271,38 +271,19 @@ quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
                             {tuple, Pos, [quote_type_style(Name, Opts), quote_pos(Opts), QuotedName, QuotedParams]})
                   end)
         end);
-quote_tuple_list([attribute, Pos, type, {Name, Type, Params}], Opts) ->
-    Opts1 = Opts#{type => true},
-    astranaut_traverse:bind(
-      astranaut_traverse:bind(
-        quote_type_name(Name, Opts),
-        fun(QuotedName) ->
-                astranaut_traverse:bind(
-                  quote_1(Type, Opts1),
-                  fun(QuotedType) ->
-                          astranaut_traverse:bind(
-                            quote_1(Params, Opts1),
-                            fun(QuotedParams) ->
-                                    astranaut_traverse:return(
-                                      {tuple, Pos, [QuotedName, QuotedType, QuotedParams]})
-                            end)
-                  end)
-        end),
-      fun(QuotedTypeBody) ->
-              astranaut_traverse:return(
-                {tuple, Pos, [quote_literal_value(attribute, Opts), quote_pos(Opts), quote_literal_value(type, Opts),
-                              QuotedTypeBody]})
-      end);
-
 quote_tuple_list([Type|Rest], #{quote_pos := Pos, attribute := type} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
     %% special form of {attribute, Pos, type, {Name, Params, Type}}.
     %% there is no line in {F, A}.
-    Opts1 = maps:remove(attribute, Opts),
+    Opts1 = maps:remove(attribute, Opts#{type => true}),
     astranaut_traverse:bind(
-      quote_tuple_list_rest(Rest, Opts1),
-      fun(QuotedRest) ->
-              astranaut_traverse:return({tuple, Pos, [quote_literal_value(Type, Opts)|QuotedRest]})
+      quote_type_name(Type, Opts),
+      fun(QuotedType) ->
+              astranaut_traverse:bind(
+                quote_tuple_list_rest(Rest, Opts1),
+                fun(QuotedRest) ->
+                        astranaut_traverse:return({tuple, Pos, [QuotedType|QuotedRest]})
+                end)
       end);
 quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Pos, export, [{F, A}...]}.
@@ -341,7 +322,7 @@ quote_type_style(Name, #{quote_pos := Pos} = Opts) ->
             quote_literal_value(user_type, Opts)
     end.
 
-quote_type_name(Name, #{quote_pos := Pos} = Opts) ->
+quote_type_name(Name, #{quote_pos := Pos} = Opts) when is_atom(Name) ->
     case parse_binding_var(Name, Pos) of
         {atom, Var} ->
             astranaut_traverse:return(Var);
@@ -353,7 +334,13 @@ quote_type_name(Name, #{quote_pos := Pos} = Opts) ->
               astranaut_traverse:return(Var));
         default ->
             astranaut_traverse:return(quote_literal_value(Name, Opts))
-    end.
+    end;
+quote_type_name({Name, Arity}, #{quote_pos := Pos} = Opts) when is_atom(Name), is_integer(Arity) ->
+    astranaut_traverse:bind(
+      quote_type_name(Name, Opts),
+      fun(QuotedName) ->
+              astranaut_traverse:return({tuple, Pos, [QuotedName, quote_literal_value(Arity, Opts)]})
+      end).
 
 update_attribute_opt([attribute, _Pos, spec|_T], Opts) ->
     Opts#{attribute => type};
