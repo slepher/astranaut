@@ -114,7 +114,8 @@ all() ->
      test_unquote, test_binding, test_atom_binding,
      test_dynamic_binding, test_dynamic_binding_pattern,
      test_unquote_splicing_1, test_unquote_splicing_2,
-     test_user_type, test_system_type, test_remote_type, test_record, test_spec, test_guard].
+     test_type, test_type_atom, test_type_map, test_type_tuple, test_remote_type,
+     test_record, test_spec, test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
 %%               ok | exit() | {skip,Reason} | {comment,Comment} |
@@ -231,15 +232,27 @@ test_unquote_splicing_2(_Config) ->
     ?assertEqual(Ast, HelloWorld),
     ok.
 
-test_user_type(_Config) ->
-    Type = quote_example:user_type(hello, world),
+test_type(_Config) ->
+    Type = quote_example:type(hello, world),
     Ast = merl:quote(0, "-type hello() :: world()."),
     ?assertEqual(Ast, Type),
     ok.
 
-test_system_type(_Config) ->
-    Type = quote_example:system_type(hello, atom),
+test_type_atom(_Config) ->
+    Type = quote_example:type(hello, atom),
     Ast = merl:quote(0, "-type hello() :: atom()."),
+    ?assertEqual(Ast, Type),
+    ok.
+
+test_type_tuple(_Config) ->
+    Type = quote_example:type(hello, tuple),
+    Ast = merl:quote(0, "-type hello() :: tuple()."),
+    ?assertEqual(Ast, Type),
+    ok.
+
+test_type_map(_Config) ->
+    Type = quote_example:type(hello, map),
+    Ast = merl:quote(0, "-type hello() :: map()."),
     ?assertEqual(Ast, Type),
     ok.
 

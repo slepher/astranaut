@@ -12,6 +12,7 @@
 -export([parse_transform/2, format_error/1]).
 -export([flattencons/2, mergecons/2]).
 -export([bind_var/2]).
+-export([fix_type/1]).
 
 %%%===================================================================
 %%% API
@@ -89,26 +90,32 @@ mergecons({cons, Pos, Head, Tail}, Rest) ->
 mergecons({nil, _pos}, Rest) ->
     Rest.
 
-bind_var(Var, #{type := integer, pos := Pos}) when is_integer(Var) ->
-    {integer, Pos, Var};
-bind_var(Var, #{type := float, pos := Pos}) when is_float(Var) ->
-    {float, Pos, Var};
-bind_var(Var, #{type := float, pos := Pos}) when is_integer(Var) ->
-    {float, Pos, float(Var)};
-bind_var(Var, #{type := string, pos := Pos}) when is_list(Var) ->
-    {string, Pos, Var};
-bind_var(Var, #{type := string, pos := Pos}) when is_binary(Var) ->
-    {string, Pos, unicode:characters_to_list(Var)};
-bind_var(Var, #{type := atom, pos := Pos} = Opts) when is_atom(Var) ->
-    {atom, Pos, atom_value(Var, Opts)};
-bind_var(Var, #{type := var, pos := Pos} = Opts) when is_atom(Var) ->
-    {var, Pos, atom_value(Var, Opts)};
-bind_var(Var, #{type := type, pos := Pos} = Opts) ->
-    {user_type, Pos, atom_value(Var, Opts)};
 bind_var(Var, #{type := value}) ->
     Var;
 bind_var(Var, #{type := dynamic, pos := Pos}) ->
-    astranaut_lib:abstract_form(Var, Pos).
+    astranaut_lib:abstract_form(Var, Pos);
+bind_var(Var, #{type := Type, pos := Pos} = Opts) ->
+    {Type, Pos, var_value(Var, Opts)}.
+
+var_value(Var, #{type := integer}) when is_integer(Var) ->
+    Var;
+var_value(Var, #{type := float}) when is_float(Var) ->
+    Var;
+var_value(Var, #{type := float}) when is_integer(Var) ->
+    float(Var);
+var_value(Var, #{type := string, name := Name}) when is_list(Var) ->
+    case lists:all(fun is_integer/1, Var) of
+        true ->
+            Var;
+        false ->
+            exit({unexpected_type_of_var, Name, string, Var})
+    end;
+var_value(Var, #{type := string}) when is_binary(Var) ->
+    unicode:characters_to_list(Var);
+var_value(Var, #{type := atom} = Opts) ->
+    atom_value(Var, Opts);
+var_value(Var, #{type := var} = Opts) ->
+    atom_value(Var, Opts).
 
 atom_value(Var, #{}) when is_atom(Var) ->
     Var;
@@ -119,6 +126,18 @@ atom_value(Var, #{}) when is_list(Var) ->
 atom_value(Var, #{type := Type, name := Name}) ->
     exit({unexpected_type_of_var, Name, Type, Var}).
 
+fix_type({user_type, Pos, map, []}) ->
+    {type, Pos, map, any};
+fix_type({user_type, Pos, tuple, []}) ->
+    {type, Pos, tuple, any};
+fix_type({user_type, Pos, Type, Args}) ->
+    ParamsLen = length(Args),
+    case erl_internal:is_type(Type, ParamsLen) of
+        true ->
+            {type, Pos, Type, Args};
+        false ->
+            {user_type, Pos, Type, Args}
+    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
@@ -299,8 +318,9 @@ quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
                 astranaut_traverse:bind(
                   quote_1(Params, Opts),
                   fun(QuotedParams) ->
-                          astranaut_traverse:return(
-                            {tuple, Pos, [quote_type_style(Name, Opts), quote_pos(Opts), QuotedName, QuotedParams]})
+                          Quoted =
+                              {tuple, Pos, [quote_literal_value(user_type, Opts), quote_pos(Opts), QuotedName, QuotedParams]},
+                          astranaut_traverse:return(call_remote(?MODULE, fix_type, [Quoted], Pos))
                   end)
         end);
 quote_tuple_list([Type|Rest], #{quote_pos := Pos, attribute := type} = Opts) ->
@@ -358,11 +378,9 @@ quote_type_name(Name, #{quote_pos := Pos} = Opts) when is_atom(Name) ->
     case parse_binding(Name, Pos) of
         {atom, Var} ->
             astranaut_traverse:return(Var);
-        {type, Var} ->
-            astranaut_traverse:return(Var);
         {_Type, {var, _, VarName} = Var} ->
             astranaut_traverse:then(
-              astranaut_traverse:warning({only_bindings_supported, ["", "T", "A"], VarName, Name}),
+              astranaut_traverse:warning({only_bindings_supported, ["A"], VarName, Name}),
               astranaut_traverse:return(Var));
         default ->
             astranaut_traverse:return(quote_literal_value(Name, Opts))
@@ -544,8 +562,6 @@ parse_binding_1([$_,$S,$@|T]) ->
     {string, T};
 parse_binding_1([$_,$D,$@|T]) ->
     {dynamic, T};
-parse_binding_1([$_,$T,$@|T]) ->
-    {type, T};
 parse_binding_1([$_,$L,$@|T]) ->
     {value_list, T};
 parse_binding_1([$_,$@|T]) ->

@@ -99,11 +99,8 @@ line_2(Ast) ->
     Ast1 = quote({hello, unquote(Ast)}, Line + 3),
     quote({ok, unquote(Ast1)}, #{line => Line + 2}).
 
-user_type(Name, Value) ->
+type(Name, Value) ->
     quote_code("-type '_A@Name'() :: '_A@Value'().").
-
-system_type(Name, Value) ->
-    quote_code("-type '_A@Name'() :: '_T@Value'().").
 
 remote_type(Name, Module, Type) ->
     quote_code("-type '_A@Name'() :: '_A@Module':'_@Type'().").
