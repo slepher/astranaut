@@ -35,6 +35,8 @@
 -export([then/2]).
 -export([with_error/2]).
 -export([error/1, errors/1, warning/1, warnings/1]).
+-export([formatted_error/1, formatted_error/3, formatted_errors/1]).
+-export([formatted_warning/1, formatted_warning/3, formatted_warnings/1]).
 -export([has_error/1]).
 
 %%%===================================================================
@@ -217,6 +219,28 @@ warning(Warning) ->
 warnings(Warnings) ->
     ErrorStruct = astranaut_error:new(),
     ErrorStruct1 = astranaut_error:append_warnings(Warnings, ErrorStruct),
+    ok(ok, ErrorStruct1).
+
+formatted_error({Line, Formatter, Error}) ->
+    formatted_error(Line, Formatter, Error).
+
+formatted_error(Line, Formatter, Error) ->
+    formatted_errors([{Line, Formatter, Error}]).
+
+formatted_errors(Errors) ->
+    ErrorStruct = astranaut_error:new(),
+    ErrorStruct1 = astranaut_error:append_formatted_errors(Errors, ErrorStruct),
+    ok(ok, ErrorStruct1).
+
+formatted_warning({Line, Formatter, Warning}) ->
+    formatted_warning(Line, Formatter, Warning).
+
+formatted_warning(Line, Formatter, Warning) ->
+   formatted_warnings([{Line, Formatter, Warning}]).
+
+formatted_warnings(Warnings) ->
+    ErrorStruct = astranaut_error:new(),
+    ErrorStruct1 = astranaut_error:append_formatted_warnings(Warnings, ErrorStruct),
     ok(ok, ErrorStruct1).
 
 has_error(#{error := ErrorStruct}) ->
