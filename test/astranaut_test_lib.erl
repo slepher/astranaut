@@ -78,7 +78,8 @@ load_data_modules(Config, TestModules) ->
               Return = compile_test_module(TestModule, Config),
               astranaut_return:with_error(
                 fun(Error) ->
-                        ?assertEqual(#{}, astranaut_error:printable(Error)),
+                        ?assertEqual(#{}, maps:without([warnings, formatted_warnings, file_warnings],
+                                                       astranaut_error:printable(Error))),
                         Error
                 end, Return)
       end, TestModules),

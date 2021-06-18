@@ -111,10 +111,10 @@ all() ->
     [test_literal_atom, test_literal_integer, test_literal_tuple,
      test_pattern_match, test_pattern_function_1, test_pattern_function_2,
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
-     test_unquote, test_binding, test_atom_binding,
+     test_unquote, test_unquote_map, test_binding, test_atom_binding,
      test_dynamic_binding, test_dynamic_binding_pattern,
-     test_unquote_splicing_1, test_unquote_splicing_2,
-     test_type, test_type_atom, test_type_map, test_type_tuple, test_remote_type,
+     test_unquote_splicing_1, test_unquote_splicing_2, test_unquote_splicing_map,
+     test_type, test_type_atom, test_type_map, test_type_tuple, test_exp_type, test_remote_type,
      test_record, test_spec, test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
@@ -192,6 +192,14 @@ test_unquote(_Config) ->
     ?assertEqual(Ast, OkAtom),
     ok.
 
+test_unquote_map(_Config) ->
+    Ast1 = merl:quote(0, "#{a => 1}"),
+    [Ast2] = erl_syntax:map_expr_fields(Ast1),
+    Map = quote_example:unquote_map(Ast2),
+    Ast3 = merl:quote(0, "{ok, #{a => 1}}"),
+    ?assertEqual(Ast3, Map),
+    ok.
+
 test_binding(_Config) ->
     Atom = quote_example:atom(),
     OkAtom = quote_example:binding(Atom),
@@ -232,6 +240,14 @@ test_unquote_splicing_2(_Config) ->
     ?assertEqual(Ast, HelloWorld),
     ok.
 
+test_unquote_splicing_map(_Config) ->
+    Ast1 = erl_syntax:map_expr_fields(merl:quote(0, "#{a => 0, b => 1}")),
+    Ast2 = erl_syntax:map_expr_fields(merl:quote(0, "#{c => 2, d => 3}")),
+    HelloWorld = quote_example:unquote_splicing_map(Ast1, Ast2),
+    Ast3 = merl:quote(0, "{ok, #{hello => 1, a => 0, b => 1, c => 2, d => 3, world => 2}}"),
+    ?assertEqual(Ast3, HelloWorld),
+    ok.
+
 test_type(_Config) ->
     Type = quote_example:type(hello, world),
     Ast = merl:quote(0, "-type hello() :: world()."),
@@ -256,6 +272,11 @@ test_type_map(_Config) ->
     ?assertEqual(Ast, Type),
     ok.
 
+test_exp_type(_Config) ->
+    Type = quote_example:exp_type(hello),
+    Ast1 = merl:quote(0, "-type hello() :: hello:world()."),
+    ?assertEqual(Ast1, Type).
+
 test_remote_type(_Config) ->
     World = astranaut_lib:abstract_form(world),
     Type = quote_example:remote_type(hello, hello, World),
@@ -270,8 +291,8 @@ test_record(_Config) ->
     ok.
 
 test_spec(_Config) ->
-    Spec = quote_example:spec(hello),
-    Ast = merl:quote(0, "-spec hello(atom()) -> atom()."),
+    Spec = quote_example:spec(hello, map, world),
+    Ast = merl:quote(0, "-spec hello(map()) -> world()."),
     ?assertEqual(Ast, Spec),
     ok.
 

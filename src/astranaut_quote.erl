@@ -9,66 +9,15 @@
 -module(astranaut_quote).
 
 %% API
--export([parse_transform/2, format_error/1]).
 -export([flattencons/2, mergecons/2]).
 -export([bind_var/2]).
--export([fix_type/1]).
+-export([fix_user_type/1, type_from_exp/1]).
+-export([quote_type_code/1, quote/2]).
+-export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-parse_transform(Forms, _Options) ->
-    File = astranaut_lib:analyze_forms_file(Forms),
-    Module = astranaut_lib:analyze_forms_module(Forms),
-    astranaut_return:to_compiler(
-      astranaut_return:bind(
-        astranaut_lib:validate_attribute_option(quote_validator(), ?MODULE, quote_options, Forms),
-        fun(#{debug := Debug, debug_module := DebugModule}) ->
-                WalkOpts = #{file => File, module => Module, debug => Debug},
-                astranaut_return:lift_m(
-                  fun(Forms1) ->
-                          debug_module(Forms1, DebugModule),
-                          Forms1
-                  end,
-                  astranaut_traverse:eval(
-                    astranaut:map_m(
-                      fun(Node) ->
-                              astranaut_traverse:bind(
-                                astranaut_traverse:ask(),
-                                fun(Attr) ->
-                                        walk(Node, Attr, WalkOpts)
-                                end)
-                      end, Forms, #{traverse => pre}),
-                    ?MODULE, #{}, ok))
-        end)).
-
-quote_validator() ->
-    #{debug => [boolean, {default, false}], debug_module => [boolean, {default, false}]}.
-
-format_error({invalid_unquote_splicing, Binding, Var}) ->
-    io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
-                  [astranaut_lib:ast_safe_to_string(Binding), astranaut_lib:ast_safe_to_string(Var)]);
-format_error({only_bindings_supported, Bindings, VarName, Name}) ->
-    BindingsStr = string:join(
-                    lists:map(
-                      fun(Binding) ->
-                              io_lib:format("_~s@~s", [Binding, VarName])
-                      end, Bindings), " or "),
-    io_lib:format("expected _~s, not ~s", [BindingsStr, Name]);
-format_error({dynamic_binding_in_expression, Expr}) ->
-    io_lib:format("dynamic_binding _D@~s only avaliable in pattern", [Expr]);
-format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
-    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
-format_error({invalid_quote, Node}) ->
-    io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
-format_error(Message) ->
-    astranaut:format_error(Message).
-
-debug_module(Forms1, true) ->
-    io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]);
-debug_module(_Forms1, _) ->
-    ok.
-
 flattencons(Cons, []) ->
     flattencons_1(Cons);
 flattencons(Cons, Rest) ->
@@ -78,7 +27,7 @@ flattencons_1({cons, _pos, Head, Tail}) ->
     [Head|flattencons_1(Tail)];
 flattencons_1({nil, _pos}) ->
     [];
-flattencons_1(Value) ->
+flattencons_1(Value) when is_list(Value) ->
     Value.
 
 mergecons([H|T], Rest) ->
@@ -126,11 +75,11 @@ atom_value(Var, #{}) when is_list(Var) ->
 atom_value(Var, #{type := Type, name := Name}) ->
     exit({unexpected_type_of_var, Name, Type, Var}).
 
-fix_type({user_type, Pos, map, []}) ->
+fix_user_type({user_type, Pos, map, []}) ->
     {type, Pos, map, any};
-fix_type({user_type, Pos, tuple, []}) ->
+fix_user_type({user_type, Pos, tuple, []}) ->
     {type, Pos, tuple, any};
-fix_type({user_type, Pos, Type, Args}) ->
+fix_user_type({user_type, Pos, Type, Args}) ->
     ParamsLen = length(Args),
     case erl_internal:is_type(Type, ParamsLen) of
         true ->
@@ -138,15 +87,81 @@ fix_type({user_type, Pos, Type, Args}) ->
         false ->
             {user_type, Pos, Type, Args}
     end.
-%%--------------------------------------------------------------------
-%% @doc
-%% @spec
-%% @end
-%%--------------------------------------------------------------------
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+type_from_exp(Expression) ->
+    case erl_syntax:type(Expression) of
+        application ->
+            Pos = erl_syntax:get_pos(Expression),
+            Operator = erl_syntax:application_operator(Expression),
+            Arguments = erl_syntax:application_arguments(Expression),
+            Arguments1 = lists:map(fun type_from_exp/1, Arguments),
+            case erl_syntax:type(Operator) of
+                atom ->
+                    Type = erl_syntax:atom_value(Operator),
+                    fix_user_type({user_type, Pos, Type, Arguments1});
+                module_qualifer ->
+                    Module = erl_syntax:module_qualifier_argument(Operator),
+                    Function = erl_syntax:module_qualifier_body(Operator),
+                    {remote_type, Pos, [Module, Function, Arguments1]}
+            end;
+        _ ->
+            Expression
+    end.
+
+quote_type_code(Code) ->
+    {attribute, 0, type, {dummy, Type, []}} = merl:quote(0, "-type dummy() :: " ++ Code ++ "."),
+    Type.
+
+parse_transform(Forms, _Options) ->
+    File = astranaut_lib:analyze_forms_file(Forms),
+    Module = astranaut_lib:analyze_forms_module(Forms),
+    astranaut_return:to_compiler(
+      astranaut_return:bind(
+        astranaut_lib:validate_attribute_option(quote_validator(), ?MODULE, quote_options, Forms),
+        fun(#{debug := Debug, debug_module := DebugModule}) ->
+                WalkOpts = #{file => File, module => Module, debug => Debug},
+                astranaut_return:lift_m(
+                  fun(Forms1) ->
+                          debug_module(Forms1, DebugModule),
+                          Forms1
+                  end,
+                  astranaut_traverse:eval(
+                    astranaut:map_m(
+                      fun(Node) ->
+                              astranaut_traverse:bind(
+                                astranaut_traverse:ask(),
+                                fun(Attr) ->
+                                        walk(Node, Attr, WalkOpts)
+                                end)
+                      end, Forms, #{traverse => pre}),
+                    ?MODULE, #{}, ok))
+        end)).
+
+quote_validator() ->
+    #{debug => [boolean, {default, false}], debug_module => [boolean, {default, false}]}.
+
+format_error({invalid_unquote_splicing, Binding, Var}) ->
+    io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
+                  [astranaut_lib:ast_safe_to_string(Binding), astranaut_lib:ast_safe_to_string(Var)]);
+format_error({only_bindings_supported, Bindings, VarName, Name}) ->
+    BindingsStr = string:join(
+                    lists:map(
+                      fun(Binding) ->
+                              io_lib:format("_~s@~s", [Binding, VarName])
+                      end, Bindings), " or "),
+    io_lib:format("expected _~s, not ~s", [BindingsStr, Name]);
+format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
+    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
+format_error({invalid_quote, Node}) ->
+    io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
+format_error(Message) ->
+    astranaut:format_error(Message).
+
+debug_module(Forms1, true) ->
+    io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]);
+debug_module(_Forms1, _) ->
+    ok.
+
 walk({call, _pos1, {atom, _pos2, quote}, [Form]} = Node, Attr, WalkOpts) ->
     %% transform quote(Code)
     quote(Form, #{}, Node, Attr, WalkOpts);
@@ -165,6 +180,17 @@ walk({call, Pos1, {atom, _pos2, quote_code}, Codes} = Node, #{node := NodeType} 
             Options1 = to_options(Options),
             Form = merl:quote(Pos1, NCodes),
             quote(Form, Options1, Node, Attr, WalkOpts);
+        {error, invalid_quote_code} ->
+            astranaut_traverse:fail({invalid_quote, Node})
+    end;
+walk({call, Pos1, {atom, _pos2, quote_type_code}, Codes} = Node, #{node := NodeType} = Attr, WalkOpts) ->
+    %% transform quote_code("Code1", "Code2",...)
+    %% transform quote_code("Code1", "Code2",..., Options)
+    case split_codes(Codes, NodeType) of
+        {ok, [CodeH|CodesT], Options} ->
+            Options1 = to_options(Options),
+            {attribute, _Pos, type, {dummy, Type, []}} = merl:quote(Pos1, ["-type dummy() :: " ++ CodeH| CodesT] ++ ["."]),
+            quote(Type, Options1, Node, Attr, WalkOpts);
         {error, invalid_quote_code} ->
             astranaut_traverse:fail({invalid_quote, Node})
     end;
@@ -211,15 +237,21 @@ quote_1({call, _pos1, {atom, _pos2, unquote}, [Unquote]}, _Opts) ->
 quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
     %% quote = Unquote in pattern
     unquote(Unquote);
+quote_1({map_field_assoc, _, {atom, _, unquote}, Unquote}, _Opts) ->
+    %% quote = Unquote in pattern
+    unquote(Unquote);
 %% unquote_splicing
-quote_1({cons, _pos1, {call, _pos2, {atom, _pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
-    %quote([a, b, unquote_splicing(V), c, d]),
+quote_1({cons, _Pos1, {call, _Pos2, {atom, _pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
+    %% quote([a, b, unquote_splicing(V), c, d]),
     unquote_splicing(Unquotes, T, Opts#{join => cons});
-quote_1([{call, _pos1, {atom, _pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
-    %quote({a, b, unquote_splicing(V), c, d}),
+quote_1([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
+    %% quote({a, b, unquote_splicing(V), c, d}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
     %% unquote_splicing = Unquotes in pattern
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+quote_1([{map_field_assoc, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% quote(#{a => 1, b => 2, unquote_splicing(V), c => 3, d => 4}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
 %% unquote variables
 quote_1({match, _pos1, Pattern, Value}, #{quote_pos := Pos, quote_type := pattern} = Opts) ->
@@ -263,12 +295,13 @@ quote_1({var, Pos, VarName} = Var, #{module := Module} = Opts) when is_atom(VarN
             Var1 = {var, Pos, VarName1},
             quote_tuple(Var1, Opts)
     end;
-quote_1({atom, Pos, Name} = Atom, #{type := true} = Opts) ->
+quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
     %% typename transform is type
     %% -type '_A@Name'() :: '_A@Type'().
     case parse_binding(Name, Pos) of
         {value, Unquote} ->
-            unquote_binding(Unquote, Opts#{type => value, quote_pos => Pos});
+            astranaut_traverse:return(
+              call_remote(?MODULE, type_from_exp, [Unquote], Pos));
         {atom, Unquote} ->
             unquote_binding(Unquote, Opts#{type => atom, quote_pos => Pos});
         {_Type, {var, _, Varname} = Var} ->
@@ -320,14 +353,14 @@ quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
                   fun(QuotedParams) ->
                           Quoted =
                               {tuple, Pos, [quote_literal_value(user_type, Opts), quote_pos(Opts), QuotedName, QuotedParams]},
-                          astranaut_traverse:return(call_remote(?MODULE, fix_type, [Quoted], Pos))
+                          astranaut_traverse:return(call_remote(?MODULE, fix_user_type, [Quoted], Pos))
                   end)
         end);
-quote_tuple_list([Type|Rest], #{quote_pos := Pos, attribute := type} = Opts) ->
+quote_tuple_list([Type|Rest], #{quote_pos := Pos, attribute := type_header} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
     %% special form of {attribute, Pos, type, {Name, Params, Type}}.
     %% there is no line in {F, A}.
-    Opts1 = maps:remove(attribute, Opts#{type => true}),
+    Opts1 = Opts#{attribute => type_body},
     astranaut_traverse:bind(
       quote_type_name(Type, Opts),
       fun(QuotedType) ->
@@ -366,14 +399,6 @@ quote_tuple_list([Action, TuplePos|Rest] = TupleList, #{} = Opts) ->
               quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts))
     end.
 
-quote_type_style(Name, #{quote_pos := Pos} = Opts) ->
-    case parse_binding(Name, Pos) of
-        {type, _} ->
-            quote_literal_value(type, Opts);
-        _ ->
-            quote_literal_value(user_type, Opts)
-    end.
-
 quote_type_name(Name, #{quote_pos := Pos} = Opts) when is_atom(Name) ->
     case parse_binding(Name, Pos) of
         {atom, Var} ->
@@ -393,11 +418,11 @@ quote_type_name({Name, Arity}, #{quote_pos := Pos} = Opts) when is_atom(Name), i
       end).
 
 update_attribute_opt([attribute, _Pos, spec|_T], Opts) ->
-    Opts#{attribute => type};
+    Opts#{attribute => type_header};
 update_attribute_opt([attribute, _Pos, type|_T], Opts) ->
-    Opts#{attribute => type};
+    Opts#{attribute => type_header};
 update_attribute_opt([attribute, _Pos, record|_T], Opts) ->
-    Opts#{attribute => type};
+    Opts#{attribute => type_header};
 update_attribute_opt([attribute|_T], Opts) ->
     Opts#{attribute => attr};
 update_attribute_opt(_, Opts) ->
@@ -440,6 +465,8 @@ unquote(Exp) ->
 unquote_binding(Exp, Opts) ->
     astranaut_traverse:return(unquote_binding_1(Exp, Opts)).
 
+unquote_binding_1(Exp, #{type := value, attribute := type_body, quote_pos := Pos}) ->
+    call_remote(?MODULE, type_from_exp, [Exp], Pos);
 unquote_binding_1(Exp, #{type := value}) ->
     Exp;
 unquote_binding_1(Exp, #{type := dynamic, quote_type := pattern, quote_pos := Pos} = Opts) ->
@@ -464,6 +491,7 @@ unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, j
               astranaut_traverse:return(
                 call_remote(?MODULE, mergecons, [Unquotes, Rest1], Pos))
       end);
+
 unquote_splicing(Unquotes, [], #{quote_type := pattern, join := list}) ->
     astranaut_traverse:return(Unquotes);
 unquote_splicing(Unquotes, {nil, _}, #{quote_type := pattern, join := cons}) ->

@@ -29,6 +29,9 @@ tuple() ->
 unquote(Ast) ->
     quote({ok, unquote(Ast)}).
 
+unquote_map(Ast) ->
+    quote({ok, #{unquote => Ast}}).
+
 binding(Ast) ->
     quote({ok, _@Ast}).
 
@@ -47,6 +50,9 @@ unquote_splicing_1(Ast1, Ast2) ->
 
 unquote_splicing_2(Ast1, Ast2) ->
     quote({ok, [hello, unquote_splicing([Ast1, Ast2]), world]}).
+
+unquote_splicing_map(Ast1, Ast2) ->
+    quote({ok, #{hello => 1, unquote_splicing => Ast1 ++ Ast2, world => 2}}).
 
 unquote_splicing_mix(Ast1, Ast2) ->
     AstList = [Ast1, Ast2],
@@ -102,14 +108,18 @@ line_2(Ast) ->
 type(Name, Value) ->
     quote_code("-type '_A@Name'() :: '_A@Value'().").
 
+exp_type(Name) ->
+    Type = quote_type_code("hello:world()"),
+    quote_code("-type '_A@Name'() :: _@Type.").
+
 remote_type(Name, Module, Type) ->
     quote_code("-type '_A@Name'() :: '_A@Module':'_@Type'().").
 
 record(Name) ->
     quote_code("-record('_A@Name', {id, hello, world}).").
 
-spec(Name) ->
-    quote_code("-spec '_A@Name'(atom()) -> atom().").
+spec(Name, Value1, Value2) ->
+    quote_code("-spec '_A@Name'('_A@Value1'()) -> '_A@Value2'().").
 
 guard(Var, Cond) ->
     quote(
