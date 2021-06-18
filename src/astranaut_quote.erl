@@ -232,16 +232,20 @@ quote(Node, #{} = Options) ->
     quote_1(Node, Options).
 
 %% unquote
-quote_1({call, _pos1, {atom, _pos2, unquote}, [Unquote]}, _Opts) ->
+quote_1({call, _Pos1, {atom, _Pos2, unquote}, [Unquote]}, _Opts) ->
+    %% quote({ok, unquote(Unquote)})
     unquote(Unquote);
-quote_1({match, _, {atom, _, unquote}, Unquote}, _Opts) ->
-    %% quote = Unquote in pattern
+quote_1({match, _Pos1, {atom, _Pos2, unquote}, Unquote}, _Opts) ->
+    %% quote(fun(unquote = Unquote) -> Unquote end) in pattern
     unquote(Unquote);
-quote_1({map_field_assoc, _, {atom, _, unquote}, Unquote}, _Opts) ->
-    %% quote = Unquote in pattern
+quote_1({map_field_assoc, _Pos1, {atom, _Pos2, unquote}, Unquote}, _Opts) ->
+    %% quote(#{unquote => Unquote})
+    unquote(Unquote);
+quote_1({record_field, _Pos1, {atom, _Pos2, unquote}, Unquote}, _Opts) ->
+    %% quote(#Rec{unquote = Unquote})
     unquote(Unquote);
 %% unquote_splicing
-quote_1({cons, _Pos1, {call, _Pos2, {atom, _pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
+quote_1({cons, _Pos1, {call, _Pos2, {atom, _Pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
     %% quote([a, b, unquote_splicing(V), c, d]),
     unquote_splicing(Unquotes, T, Opts#{join => cons});
 quote_1([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
@@ -251,7 +255,10 @@ quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
     %% unquote_splicing = Unquotes in pattern
     unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1([{map_field_assoc, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    %% quote(#{a => 1, b => 2, unquote_splicing(V), c => 3, d => 4}),
+    %% quote(#{a => 1, b => 2, unquote_splicing => V, c => 3, d => 4}),
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+quote_1([{record_field, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% quote(#Rec{a = 1, b = 2, unquote_splicing = V, c = 3, d = 4}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
 %% unquote variables
 quote_1({match, _pos1, Pattern, Value}, #{quote_pos := Pos, quote_type := pattern} = Opts) ->

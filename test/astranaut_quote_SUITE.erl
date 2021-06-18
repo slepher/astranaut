@@ -111,7 +111,9 @@ all() ->
     [test_literal_atom, test_literal_integer, test_literal_tuple,
      test_pattern_match, test_pattern_function_1, test_pattern_function_2,
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
-     test_unquote, test_unquote_map, test_binding, test_atom_binding,
+     test_unquote, test_unquote_map, test_unquote_map_match, test_unquote_map_match_list,
+     test_unquote_record, test_unquote_record_match, test_unquote_record_match_list,
+     test_binding, test_atom_binding,
      test_dynamic_binding, test_dynamic_binding_pattern,
      test_unquote_splicing_1, test_unquote_splicing_2, test_unquote_splicing_map,
      test_type, test_type_atom, test_type_map, test_type_tuple, test_exp_type, test_remote_type,
@@ -198,6 +200,44 @@ test_unquote_map(_Config) ->
     Map = quote_example:unquote_map(Ast2),
     Ast3 = merl:quote(0, "{ok, #{a => 1}}"),
     ?assertEqual(Ast3, Map),
+    ok.
+
+test_unquote_map_match(_Config) ->
+    Ast1 = merl:quote(0, "#{a => 1}"),
+    [Ast2] = erl_syntax:map_expr_fields(Ast1),
+    Matched = quote_example:unquote_map_match(Ast1),
+    ?assertEqual(Ast2, Matched),
+    ok.
+
+test_unquote_map_match_list(_Config) ->
+    Ast1 = merl:quote(0, "#{a => 1, b => 2, c => 3}"),
+    Ast2 = merl:quote(0, "#{b => 2, c => 3}"),
+    Ast3 = erl_syntax:map_expr_fields(Ast2),
+    Map = quote_example:unquote_map_match_list(Ast1),
+    ?assertEqual(Ast3, Map),
+    ok.
+
+test_unquote_record(_Config) ->
+    Ast1 = merl:quote(0, "#test{a = 1}"),
+    {record, _, _Name, [Ast2]} = Ast1,
+    Rec = quote_example:unquote_record(Ast2),
+    Ast3 = merl:quote(0, "{ok, #test{a = 1}}"),
+    ?assertEqual(Ast3, Rec),
+    ok.
+
+test_unquote_record_match(_Config) ->
+    Ast1 = merl:quote(0, "#test{a = 1}"),
+    {record, _, _Name, [Ast2]} = Ast1,
+    Matched = quote_example:unquote_record_match(Ast1),
+    ?assertEqual(Ast2, Matched),
+    ok.
+
+test_unquote_record_match_list(_Config) ->
+    Ast1 = merl:quote(0, "#test{a = 1, b = 2, c = 3}"),
+    Ast2 = merl:quote(0, "#test{b = 2, c = 3}"),
+    {record, _, _Name, Ast3} = Ast2,
+    RecordFields = quote_example:unquote_record_match_list(Ast1),
+    ?assertEqual(Ast3, RecordFields),
     ok.
 
 test_binding(_Config) ->

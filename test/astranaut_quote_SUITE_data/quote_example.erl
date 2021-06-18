@@ -32,6 +32,25 @@ unquote(Ast) ->
 unquote_map(Ast) ->
     quote({ok, #{unquote => Ast}}).
 
+unquote_map_match(Ast) ->
+    quote(#{unquote => Assoc}) = Ast,
+    Assoc.
+
+unquote_map_match_list(Ast) ->
+    quote(#{a => 1, unquote_splicing => Assocs}) = Ast,
+    Assocs.
+
+unquote_record(Ast) ->
+    quote({ok, #test{unquote = Ast}}).
+
+unquote_record_match(Ast) ->
+    quote(#test{unquote = Assoc}) = Ast,
+    Assoc.
+
+unquote_record_match_list(Ast) ->
+    quote(#test{a = 1, unquote_splicing = Assocs}) = Ast,
+    Assocs.
+
 binding(Ast) ->
     quote({ok, _@Ast}).
 
