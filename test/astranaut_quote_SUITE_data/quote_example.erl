@@ -35,6 +35,13 @@ binding(Ast) ->
 atom_binding(Atom) ->
     quote({ok, _A@Atom}).
 
+dynamic_binding(Value) ->
+    quote({ok, _D@Value}).
+
+dynamic_binding_pattern() ->
+    quote({hello, _D@World}) = quote({hello, world}),
+    World.
+
 unquote_splicing_1(Ast1, Ast2) ->
     quote({ok, {hello, unquote_splicing([Ast1, Ast2]), world}}).
 
@@ -60,6 +67,9 @@ unquote_splicing_mix(Ast1, Ast2) ->
 match_pattern(Ast) ->
     quote(_A@Hello(_@Foo, _L@World)) = Ast,
     quote({_A@Hello, _@Foo, _L@World}).
+
+bind_string(String) ->
+    quote({ok, _S@String}).
 
 function_pattern(quote = {hello, _A@World = World2} = C) ->
     quote({ok, {hello2, _A@World, _@World2, _@C}});
@@ -103,10 +113,6 @@ record(Name) ->
 
 spec(Name) ->
     quote_code("-spec '_A@Name'(atom()) -> atom().").
-
-dynamic_binding() ->
-    quote({hello, _D@World}) = quote({hello, world}),
-    World.
 
 guard(Var, Cond) ->
     quote(

@@ -112,9 +112,9 @@ all() ->
      test_pattern_match, test_pattern_function_1, test_pattern_function_2,
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
      test_unquote, test_binding, test_atom_binding,
+     test_dynamic_binding, test_dynamic_binding_pattern,
      test_unquote_splicing_1, test_unquote_splicing_2,
-     test_user_type, test_system_type, test_remote_type, test_record, test_spec, test_dyanmic_binding,
-     test_guard].
+     test_user_type, test_system_type, test_remote_type, test_record, test_spec, test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
 %%               ok | exit() | {skip,Reason} | {comment,Comment} |
@@ -199,9 +199,20 @@ test_binding(_Config) ->
     ok.
 
 test_atom_binding(_Config) ->
-    OkAtom = quote_example:atom_binding(ok),
-    Ast = astranaut_lib:abstract_form({ok, ok}),
+    OkAtom = quote_example:atom_binding(hello),
+    Ast = astranaut_lib:abstract_form({ok, hello}),
     ?assertEqual(Ast, OkAtom),
+    ok.
+
+test_dynamic_binding(_Config) ->
+    Ok = quote_example:dynamic_binding({hello, 10, 10.0}),
+    Ast = astranaut_lib:abstract_form({ok, {hello, 10, 10.0}}),
+    ?assertEqual(Ast, Ok),
+    ok.
+
+test_dynamic_binding_pattern(_Config) ->
+    World = quote_example:dynamic_binding_pattern(),
+    ?assertEqual(world, World),
     ok.
 
 test_unquote_splicing_1(_Config) ->
@@ -251,10 +262,6 @@ test_spec(_Config) ->
     ?assertEqual(Ast, Spec),
     ok.
 
-test_dyanmic_binding(_Config) ->
-    World = quote_example:dynamic_binding(),
-    ?assertEqual(world, World),
-    ok.
 
 test_guard(_Config) ->
     Var = merl:quote(0, "A"),
