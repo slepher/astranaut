@@ -316,18 +316,7 @@ quote_1({record_field, _Pos1, {atom, _Pos2, unquote}, Unquote}, _Opts) ->
 quote_1({cons, _Pos1, {call, _Pos2, {atom, _Pos3, unquote_splicing}, [Unquotes]}, T}, Opts) ->
     %% quote([a, b, unquote_splicing(V), c, d]),
     unquote_splicing(Unquotes, T, Opts#{join => cons});
-quote_1([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
-    %% quote({a, b, unquote_splicing(V), c, d}),
-    unquote_splicing(Unquotes, T, Opts#{join => list});
-quote_1([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    %% unquote_splicing = Unquotes in pattern
-    unquote_splicing(Unquotes, T, Opts#{join => list});
-quote_1([{map_field_assoc, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    %% quote(#{a => 1, b => 2, unquote_splicing => V, c => 3, d => 4}),
-    unquote_splicing(Unquotes, T, Opts#{join => list});
-quote_1([{record_field, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    %% quote(#record{a = 1, b = 2, unquote_splicing = V, c = 3, d = 4}),
-    unquote_splicing(Unquotes, T, Opts#{join => list});
+
 %% unquote_splicing variables
 quote_1({cons, _Pos1, {var, Pos, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
     %% [A, _L@Unquotes, B] expression.
@@ -337,19 +326,8 @@ quote_1({cons, _Pos1, {var, Pos, VarName}, T} = Tuple, Opts) when is_atom(VarNam
         _ ->
             quote_tuple(Tuple, Opts)
     end;
-quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
-    %% any L@Unquotes in list in absformat, like
-    %% {A, _L@Unquotes, B} expression.
-    %% fun(A, _L@Unquotes, B) -> _L@Unquotes end.
-    case parse_binding(VarName, Pos) of
-        {value_list, Unquotes} ->
-            unquote_splicing(Unquotes, T, Opts#{quote_pos => Pos, join => list});
-        _ ->
-            quote_list(List, Opts)
-    end;
+
 %% unquote variables
-quote_1({var, _Pos, '_'} = Var, Opts) ->
-    quote_tuple(Var, Opts);
 quote_1({var, Pos, VarName} = Var, #{} = Opts) when is_atom(VarName) ->
     case parse_binding(VarName, Pos) of
         {value_list, Unquotes} ->
@@ -406,23 +384,53 @@ quote_variable(default, Var, Opts) ->
 quote_variable(BindingType, Unquote, #{} = Opts) ->
     unquote_binding(Unquote, Opts#{type => BindingType}).
 
+rename_variable({var, Pos, '_'} = Var, Opts) ->
+    quote_tuple(Var, Opts#{quote_pos => Pos});
 rename_variable({var, Pos, VarName}, #{module := Module} = Opts) ->
     VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
     Var1 = {var, Pos, VarName1},
     quote_tuple(Var1, Opts#{quote_pos => Pos}).
 
-quote_list([H|T], #{quote_pos := Pos} = Opts) ->
+quote_list([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
+    %% quote({a, b, unquote_splicing(V), c, d}),
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+quote_list([{match, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% unquote_splicing = Unquotes in pattern
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+quote_list([{map_field_assoc, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% quote(#{a => 1, b => 2, unquote_splicing => V, c => 3, d => 4}),
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+quote_list([{record_field, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
+    %% quote(#record{a = 1, b = 2, unquote_splicing = V, c = 3, d = 4}),
+    unquote_splicing(Unquotes, T, Opts#{join => list});
+%% unquote variables
+quote_list([{var, Pos, VarName} = Var|T], Opts) when is_atom(VarName) ->
+    %% any L@Unquotes in list in absformat, like
+    %% {A, _L@Unquotes, B} expression.
+    %% fun(A, _L@Unquotes, B) -> _L@Unquotes end.
+    case parse_binding(VarName, Pos) of
+        {value_list, Unquotes} ->
+            unquote_splicing(Unquotes, T, Opts#{quote_pos => Pos, join => list});
+        {BindingType, Unquote} ->
+            quote_list_1(quote_variable(BindingType, Unquote, Opts#{quote_pos => Pos}), T, Opts);
+        default ->
+            quote_list_1(quote_variable(default, Var, Opts#{quote_pos => Pos}), T, Opts)
+    end;
+quote_list([H|T], #{} = Opts) ->
+    quote_list_1(quote_1(H, Opts), T, Opts);
+quote_list([], #{quote_pos := Pos}) ->
+    astranaut_return:return({nil, Pos}).
+
+quote_list_1(HM, T, #{quote_pos := Pos} = Opts) ->
     astranaut_return:bind(
-      quote_1(H, Opts),
+      HM,
       fun(H1) ->
               astranaut_return:bind(
                 quote_1(T, Opts),
                 fun(T1) ->
                         astranaut_return:return({cons, Pos, H1, T1})
                 end)
-      end);
-quote_list([], #{quote_pos := Pos}) ->
-    astranaut_return:return({nil, Pos}).
+      end).
 
 quote_tuple(Tuple, Opts) ->
     quote_tuple_list(tuple_to_list(Tuple), Opts).
