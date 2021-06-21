@@ -209,7 +209,6 @@ walk(Node, Attr, _File) ->
                 astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
         end)).
 
-
 to_options(Ast) ->
     Type = erl_syntax:type(Ast),
     case lists:member(Type, [list, nil, map_expr, atom]) of
@@ -327,22 +326,15 @@ quote_1([{map_field_assoc, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) -
     %% quote(#{a => 1, b => 2, unquote_splicing => V, c => 3, d => 4}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
 quote_1([{record_field, _, {atom, _, unquote_splicing}, Unquotes}|T], Opts) ->
-    %% quote(#Rec{a = 1, b = 2, unquote_splicing = V, c = 3, d = 4}),
+    %% quote(#record{a = 1, b = 2, unquote_splicing = V, c = 3, d = 4}),
     unquote_splicing(Unquotes, T, Opts#{join => list});
-%% unquote variables
-quote_1({match, _pos1, Pattern, Value}, #{quote_pos := Pos, quote_type := pattern} = Opts) ->
-    % _A@World = World2 => {atom, _, World} = World2
-    astranaut_return:bind(
-      quote_1(Pattern, Opts),
-      fun(Pattern1) ->
-              astranaut_return:return({match, Pos, Pattern1, Value})
-      end);
-quote_1({cons, _pos1, {var, Pos, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
+%% unquote_splicing variables
+quote_1({cons, _Pos1, {var, Pos, VarName}, T} = Tuple, Opts) when is_atom(VarName) ->
     %% [A, _L@Unquotes, B] expression.
     case parse_binding(VarName, Pos) of
         {value_list, Unquotes} ->
             unquote_splicing(Unquotes, T, Opts#{join => cons});
-        default ->
+        _ ->
             quote_tuple(Tuple, Opts)
     end;
 quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
@@ -355,6 +347,7 @@ quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
         _ ->
             quote_list(List, Opts)
     end;
+%% unquote variables
 quote_1({var, _Pos, '_'} = Var, Opts) ->
     quote_tuple(Var, Opts);
 quote_1({var, Pos, VarName} = Var, #{module := Module} = Opts) when is_atom(VarName) ->
@@ -386,6 +379,13 @@ quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
         default ->
             quote_tuple(Atom, Opts)
       end;
+quote_1({match, _pos1, Pattern, Value}, #{quote_pos := Pos, quote_type := pattern} = Opts) ->
+    % _A@World = World2 => {atom, _, World} = World2
+    astranaut_return:bind(
+      quote_1(Pattern, Opts),
+      fun(Pattern1) ->
+              astranaut_return:return({match, Pos, Pattern1, Value})
+      end);
 %% quote values
 quote_1({LiteralType, Pos, Literal}, Opts) 
   when LiteralType == atom ;
@@ -551,7 +551,6 @@ unquote_binding_1(Exp, #{type := Type, quote_type := pattern, quote_pos := Pos} 
 unquote_binding_1({var, _, Varname} = Exp, #{type := Type} = Opts) ->
     call_bind_var(Exp, #{name => Varname, pos => abstract_pos(Opts), type => Type}).
 
-%% unquote_splicing return monad.
 unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, join := list} = Opts) ->
     astranaut_return:bind(
       quote_1(Rest, Opts),
