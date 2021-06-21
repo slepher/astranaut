@@ -332,14 +332,13 @@ quote_1({cons, Pos1, {var, _Pos2, _VarName} = Var, T}, Opts) ->
             unquote_splicing(Unquotes, T, Opts#{join => cons});
         Binding ->
             Opts1 = Opts#{quote_pos => Pos1},
-            astranaut_return:bind(
-              quote_1(T, Opts1),
+            astranaut_return:lift_m(
               fun(T1) ->
-                      astranaut_return:return({tuple, Pos1, [quote_literal_value(cons, Opts1),
-                                                             quote_pos(Opts1),
-                                                             quote_variable(Binding, Opts1),
-                                                             T1]})
-              end)
+                      {tuple, Pos1, [quote_literal_value(cons, Opts1),
+                                     quote_pos(Opts1),
+                                     quote_variable(Binding, Opts1),
+                                     T1]}
+              end, quote_1(T, Opts1))
     end;
 
 %% unquote variables
@@ -358,8 +357,7 @@ quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
     Opts1 = Opts#{quote_pos => Pos},
     case parse_binding_name(Name, Pos) of
         {value, Unquote} ->
-            astranaut_return:return(
-              call_remote(?MODULE, type_from_exp, [Unquote], Pos));
+            astranaut_return:return(call_remote(?MODULE, type_from_exp, [Unquote], Pos));
         {atom, Unquote} ->
             astranaut_return:return(unquote_binding(Unquote, Opts1#{type => atom}));
         {_Type, {var, _, Varname} = Var} ->
@@ -371,11 +369,10 @@ quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
       end;
 quote_1({match, _Pos1, Pattern, {var, _Pos2, _} = Var}, #{quote_pos := Pos, quote_type := pattern} = Opts) ->
     % _A@World = World2 => {atom, _, World} = World2 in pattern
-    astranaut_return:bind(
-      quote_1(Pattern, Opts),
+    astranaut_return:lift_m(
       fun(Pattern1) ->
-              astranaut_return:return({match, Pos, Pattern1, Var})
-      end);
+            {match, Pos, Pattern1, Var}
+      end, quote_1(Pattern, Opts));
 %% quote values
 quote_1({LiteralType, _Pos, _Literal} = Tuple, Opts) 
   when LiteralType == atom ;
