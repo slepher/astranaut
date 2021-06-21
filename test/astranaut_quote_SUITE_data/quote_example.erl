@@ -117,9 +117,14 @@ case_pattern(Ast) ->
 function_expression(Name) ->
     quote(fun '_A@Name'/3).
 
-named_function_expression(Name) ->
+named_function_expression_1(Name) ->
     quote(fun _V@Name(0) -> 0;
               _V@Name(N) -> _V@Name(N -1) + N
+         end).
+
+named_function_expression_2() ->
+    quote(fun Name(0) -> 0;
+              Name(N) -> Name(N -1) + N
          end).
 
 code() ->

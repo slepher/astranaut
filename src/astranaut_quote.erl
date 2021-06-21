@@ -440,12 +440,15 @@ quote_variable({default, Var}, Opts) ->
 quote_variable({BindingType, Unquote}, #{} = Opts) ->
     unquote_binding(Unquote, Opts#{type => BindingType}).
 
-rename_variable({var, _Pos, '_'} = Var, Opts) ->
-    quote_literal_tuple(Var, Opts);
-rename_variable({var, Pos, VarName}, #{module := Module} = Opts) ->
-    VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
-    Var = {var, Pos, VarName1},
+rename_variable({var, Pos, VarName}, Opts) ->
+    Var = {var, Pos, rename_variable_name(VarName, Opts)},
     quote_literal_tuple(Var, Opts).
+
+rename_variable_name('_', #{}) ->
+    '_';
+rename_variable_name(VarName, #{module := Module}) ->
+    list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)).
+
 
 quote_list([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
     %% quote({a, b, unquote_splicing(V), c, d}),
@@ -530,7 +533,6 @@ quote_atom_literal_name(Name, Opts) ->
 quote_var_literal_name(Name, Opts) ->
     quote_literal_name(Name, Opts#{type => var}).
 
-
 quote_literal_name(Name, #{quote_pos := Pos, type := Type} = Opts) when is_atom(Name) ->
     case parse_binding_name(Name, Pos) of
         {Type, Var, _VarName} ->
@@ -540,7 +542,12 @@ quote_literal_name(Name, #{quote_pos := Pos, type := Type} = Opts) when is_atom(
               astranaut_return:warning({only_bindings_supported, supported_bindings(Type), VarName, Name}),
               astranaut_return:return(unquote_binding(Var, Opts#{type => atom_value})));
         default ->
-            astranaut_return:return(quote_literal_value(Name, Opts))
+            case Type of
+                var ->
+                    astranaut_return:return(quote_literal_value(rename_variable_name(Name, Opts), Opts));
+                atom ->
+                    astranaut_return:return(quote_literal_value(Name, Opts))
+            end
     end.
 
 supported_bindings(atom) ->
