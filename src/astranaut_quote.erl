@@ -335,9 +335,9 @@ quote_1({var, Pos, VarName} = Var, #{} = Opts) when is_atom(VarName) ->
               astranaut_return:formatted_warning(Pos, ?MODULE, {invalid_unquote_splicing, Unquotes, Var}),
               quote_tuple(Var, Opts));
         {BindingType, Unquote} ->
-            quote_variable(BindingType, Unquote, Opts#{quote_pos => Pos});
+            astranaut_return:return(quote_variable(BindingType, Unquote, Opts#{quote_pos => Pos}));
         default ->
-            quote_variable(default, Var, Opts#{quote_pos => Pos})
+            astranaut_return:return(quote_variable(default, Var, Opts#{quote_pos => Pos}))
     end;
 quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
     %% typename transform is type
@@ -382,14 +382,13 @@ quote_1(Integer, Opts) when is_integer(Integer) ->
 quote_variable(default, Var, Opts) ->
     rename_variable(Var, Opts);
 quote_variable(BindingType, Unquote, #{} = Opts) ->
-    unquote_binding(Unquote, Opts#{type => BindingType}).
+    unquote_binding_1(Unquote, Opts#{type => BindingType}).
 
-rename_variable({var, Pos, '_'} = Var, Opts) ->
-    quote_tuple(Var, Opts#{quote_pos => Pos});
+rename_variable({var, Pos, '_'}, Opts) ->
+    quote_literal(var, '_', Opts#{quote_pos => Pos});
 rename_variable({var, Pos, VarName}, #{module := Module} = Opts) ->
     VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
-    Var1 = {var, Pos, VarName1},
-    quote_tuple(Var1, Opts#{quote_pos => Pos}).
+    quote_literal(var, VarName1, Opts#{quote_pos => Pos}).
 
 quote_list([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
     %% quote({a, b, unquote_splicing(V), c, d}),
@@ -417,19 +416,19 @@ quote_list([{var, Pos, VarName} = Var|T], Opts) when is_atom(VarName) ->
             quote_list_1(quote_variable(default, Var, Opts#{quote_pos => Pos}), T, Opts)
     end;
 quote_list([H|T], #{} = Opts) ->
-    quote_list_1(quote_1(H, Opts), T, Opts);
+    astranaut_return:bind(
+      quote_1(H, Opts),
+      fun(H1) ->
+              quote_list_1(H1, T, Opts)
+      end);
 quote_list([], #{quote_pos := Pos}) ->
     astranaut_return:return({nil, Pos}).
 
-quote_list_1(HM, T, #{quote_pos := Pos} = Opts) ->
+quote_list_1(H, T, #{quote_pos := Pos} = Opts) ->
     astranaut_return:bind(
-      HM,
-      fun(H1) ->
-              astranaut_return:bind(
-                quote_1(T, Opts),
-                fun(T1) ->
-                        astranaut_return:return({cons, Pos, H1, T1})
-                end)
+      quote_1(T, Opts),
+      fun(T1) ->
+              astranaut_return:return({cons, Pos, H, T1})
       end).
 
 quote_tuple(Tuple, Opts) ->
