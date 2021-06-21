@@ -435,14 +435,19 @@ quote_tuple(Tuple, Opts) ->
     quote_tuple_list(tuple_to_list(Tuple), Opts).
 
 quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
+    Opts1 = Opts#{quote_pos => Pos},
     astranaut_return:bind(
-        quote_type_name(Name, Opts),
+        quote_type_name(Name, Opts1),
         fun(QuotedName) ->
                 astranaut_return:bind(
-                  quote_1(Params, Opts),
+                  quote_1(Params, Opts1),
                   fun(QuotedParams) ->
                           Quoted =
-                              {tuple, Pos, [quote_literal_value(user_type, Opts), quote_pos(Opts), QuotedName, QuotedParams]},
+                              {tuple, Pos,
+                               [quote_literal_value(user_type, Opts1),
+                                quote_pos(Opts1),
+                                QuotedName,
+                                QuotedParams]},
                           astranaut_return:return(call_remote(?MODULE, fix_user_type, [Quoted], Pos))
                   end)
         end);
@@ -466,7 +471,7 @@ quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% there is no line in {F, A} and T.
     quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts);
 quote_tuple_list([clauses, Clauses], #{quote_pos := Pos} = Opts) ->
-    %% if tuple is the function clauses value, use the original line.
+    %% if tuple is the function clauses value, there is no pos.
     astranaut_return:bind(
       quote_1(Clauses, Opts),
       fun(QuotedClauses) ->
@@ -475,12 +480,13 @@ quote_tuple_list([clauses, Clauses], #{quote_pos := Pos} = Opts) ->
 quote_tuple_list([Action, TuplePos|Rest] = TupleList, #{} = Opts) ->
     case astranaut_syntax:is_pos(TuplePos) of
         true ->
-            Opts1 = update_attribute_opt(TupleList, Opts),
+            Opts1 = Opts#{quote_pos => TuplePos},
+            RestOpts = update_attribute_opt(TupleList, Opts1),
             astranaut_return:bind(
-              quote_tuple_list_rest(Rest, Opts1),
+              quote_tuple_list_rest(Rest, RestOpts),
               fun(QuotedRest) ->
-                      QuotedAction = quote_literal_value(Action, Opts),
-                      QuotedPos = quote_pos(Opts#{quote_pos => TuplePos}),
+                      QuotedAction = quote_literal_value(Action, Opts1),
+                      QuotedPos = quote_pos(Opts1),
                       astranaut_return:return({tuple, TuplePos, [QuotedAction, QuotedPos|QuotedRest]})
               end);
         false ->
