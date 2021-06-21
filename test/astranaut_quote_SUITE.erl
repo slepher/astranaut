@@ -111,6 +111,7 @@ all() ->
     [test_literal_atom, test_literal_integer, test_literal_tuple,
      test_pattern_match, test_pattern_function_1, test_pattern_function_2, test_pattern_function_3,
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
+     test_function_expression, test_function_expression_error, test_named_function_expression,
      test_unquote, test_unquote_map, test_unquote_map_match, test_unquote_map_match_list,
      test_unquote_record, test_unquote_record_match, test_unquote_record_match_list,
      test_binding, test_atom_binding,
@@ -192,6 +193,22 @@ test_pattern_case_3(_Config) ->
     Pattern = quote_example:case_pattern(Ast1),
     Ast2 = astranaut_lib:abstract_form({error, task}),
     ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_function_expression(_Config) ->
+    Expression = quote_example:function_expression(send),
+    Ast = merl:quote(0, "fun send/3"),
+    ?assertEqual(Ast, Expression),
+    ok.
+
+test_function_expression_error(_Config) ->
+    ?assertException(error, {unexpected_type_of_var, _, atom_value, 233}, quote_example:function_expression(233)),
+    ok.
+
+test_named_function_expression(_Config) ->
+    Expression = quote_example:named_function_expression('H'),
+    Ast = merl:quote(0, "fun H(0) -> 0; H(N@quote_example) -> H(N@quote_example - 1) + N@quote_example end"),
+    ?assertEqual(Ast, Expression),
     ok.
 
 test_unquote(_Config) ->
