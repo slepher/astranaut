@@ -118,8 +118,8 @@ function_expression(Name) ->
     quote(fun '_A@Name'/3).
 
 named_function_expression(Name) ->
-    quote(fun _A@Name(0) -> 0;
-              _A@Name(N) -> _V@Name(N -1) + N
+    quote(fun _V@Name(0) -> 0;
+              _V@Name(N) -> _V@Name(N -1) + N
          end).
 
 code() ->

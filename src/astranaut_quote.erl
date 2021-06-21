@@ -378,6 +378,46 @@ quote_1({match, _Pos1, Pattern, {var, _Pos2, _} = Var}, #{quote_pos := Pos, quot
       fun(Pattern1) ->
             {match, Pos, Pattern1, Var}
       end, quote_1(Pattern, Opts));
+
+quote_1({user_type, Pos, Name, Params}, Opts) ->
+    Opts1 = Opts#{quote_pos => Pos},
+    astranaut_return:lift_m(
+      fun([QuotedName, QuotedParams]) ->
+              Quoted = tuple([quote_literal_value(user_type, Opts1),
+                              quote_pos(Opts1),
+                              QuotedName,
+                              QuotedParams], Opts1),
+              call_remote(?MODULE, fix_user_type, [Quoted], Pos)
+      end, astranaut_return:sequence_m([quote_type_name(Name, Opts1), quote_1(Params, Opts1)]));
+%% special tuple expression dose not contains pos
+quote_1({clauses, Clauses}, #{} = Opts) ->
+    %% if tuple is the function clauses value, there is no pos.
+    astranaut_return:lift_m(
+      fun(QuotedClauses) ->
+              tuple([quote_literal_value(clauses, Opts), QuotedClauses], Opts)
+      end, quote_1(Clauses, Opts));
+
+quote_1({function, Name, Arity}, #{} = Opts) ->
+    %% fun Name/Arity.
+    astranaut_return:lift_m(
+      fun(QuotedName) ->
+              tuple([quote_literal_value(function, Opts),
+                     QuotedName,
+                     quote_literal_value(Arity, Opts)], Opts)
+      end, quote_atom_literal_name(Name, Opts));
+
+%% Name in named_fun is literal atom, but should treated as variable.
+quote_1({named_fun, Pos1, Name, Clauses}, #{} = Opts) ->
+    %% fun Name/Arity.
+    Opts1 = Opts#{quote_pos => Pos1},
+    astranaut_return:lift_m(
+      fun([QuotedName, QuotedClauses]) ->
+              tuple([quote_literal_value(named_fun, Opts1),
+                     quote_pos(Opts1),
+                     QuotedName,
+                     QuotedClauses], Opts)
+      end, astranaut_return:sequence_m([quote_var_literal_name(Name, Opts), quote_list(Clauses, Opts1)]));
+
 %% quote values
 quote_1({LiteralType, _Pos, _Literal} = Tuple, Opts) 
   when LiteralType == atom ;
@@ -446,16 +486,6 @@ quote_list_1(H, T, #{quote_pos := Pos} = Opts) ->
               {cons, Pos, H, T1}
       end, quote_1(T, Opts)).
 
-quote_tuple_list([user_type, Pos, Name, Params], Opts) ->
-    Opts1 = Opts#{quote_pos => Pos},
-    astranaut_return:lift_m(
-      fun([QuotedName, QuotedParams]) ->
-              Quoted = tuple([quote_literal_value(user_type, Opts1),
-                              quote_pos(Opts1),
-                              QuotedName,
-                              QuotedParams], Opts1),
-              call_remote(?MODULE, fix_user_type, [Quoted], Pos)
-      end, astranaut_return:sequence_m([quote_type_name(Name, Opts1), quote_1(Params, Opts1)]));
 quote_tuple_list([Type|Rest], #{attribute := type_header} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
     %% special form of {attribute, Pos, type, {Name, Params, Type}}.
@@ -470,20 +500,7 @@ quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Pos, Attribute, T}.
     %% there is no line in {F, A} and T.
     quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts);
-quote_tuple_list([clauses, Clauses], #{} = Opts) ->
-    %% if tuple is the function clauses value, there is no pos.
-    astranaut_return:lift_m(
-      fun(QuotedClauses) ->
-              tuple([quote_literal_value(clauses, Opts), QuotedClauses], Opts)
-      end, quote_1(Clauses, Opts));
-quote_tuple_list([function, Name, Arity], #{} = Opts) ->
-    %% fun Name/Arity.
-    astranaut_return:lift_m(
-      fun(QuotedName) ->
-              tuple([quote_literal_value(function, Opts),
-                     QuotedName,
-                     quote_literal_value(Arity, Opts)], Opts)
-      end, quote_atom_literal_name(Name, Opts));
+
 quote_tuple_list([Action, TuplePos|Rest] = TupleList, #{} = Opts) ->
     case astranaut_syntax:is_pos(TuplePos) of
         true ->
@@ -507,17 +524,29 @@ quote_type_name({Name, Arity}, #{} = Opts) when is_atom(Name), is_integer(Arity)
                 tuple([QuotedName, quote_literal_value(Arity, Opts)], Opts)
         end, quote_atom_literal_name(Name, Opts)).
 
-quote_atom_literal_name(Name, #{quote_pos := Pos} = Opts) when is_atom(Name) ->
+quote_atom_literal_name(Name, Opts) ->
+    quote_literal_name(Name, Opts#{type => atom}).
+
+quote_var_literal_name(Name, Opts) ->
+    quote_literal_name(Name, Opts#{type => var}).
+
+
+quote_literal_name(Name, #{quote_pos := Pos, type := Type} = Opts) when is_atom(Name) ->
     case parse_binding_name(Name, Pos) of
-        {atom, Var, _VarName} ->
+        {Type, Var, _VarName} ->
             astranaut_return:return(unquote_binding(Var, Opts#{type => atom_value}));
-        {_Type, Var, VarName} ->
+        {_Type1, Var, VarName} ->
             astranaut_return:then(
-              astranaut_return:warning({only_bindings_supported, ["A"], VarName, Name}),
+              astranaut_return:warning({only_bindings_supported, supported_bindings(Type), VarName, Name}),
               astranaut_return:return(unquote_binding(Var, Opts#{type => atom_value})));
         default ->
             astranaut_return:return(quote_literal_value(Name, Opts))
     end.
+
+supported_bindings(atom) ->
+    ["A"];
+supported_bindings(var) ->
+    ["V"].
 
 update_attribute_opt([attribute, _Pos, spec|_T], Opts) ->
     Opts#{attribute => type_header};
