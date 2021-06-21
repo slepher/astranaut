@@ -350,18 +350,16 @@ quote_1([{var, Pos, VarName}|T] = List, Opts) when is_atom(VarName) ->
 %% unquote variables
 quote_1({var, _Pos, '_'} = Var, Opts) ->
     quote_tuple(Var, Opts);
-quote_1({var, Pos, VarName} = Var, #{module := Module} = Opts) when is_atom(VarName) ->
+quote_1({var, Pos, VarName} = Var, #{} = Opts) when is_atom(VarName) ->
     case parse_binding(VarName, Pos) of
         {value_list, Unquotes} ->
             astranaut_return:then(
               astranaut_return:formatted_warning(Pos, ?MODULE, {invalid_unquote_splicing, Unquotes, Var}),
               quote_tuple(Var, Opts));
         {BindingType, Unquote} ->
-            unquote_binding(Unquote, Opts#{type => BindingType, quote_pos => Pos});
+            quote_variable(BindingType, Unquote, Opts#{quote_pos => Pos});
         default ->
-            VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
-            Var1 = {var, Pos, VarName1},
-            quote_tuple(Var1, Opts)
+            quote_variable(default, Var, Opts#{quote_pos => Pos})
     end;
 quote_1({atom, Pos, Name} = Atom, #{attribute := type_body} = Opts) ->
     %% typename transform is type
@@ -402,6 +400,16 @@ quote_1(Atom, Opts) when is_atom(Atom) ->
     astranaut_return:return(quote_literal_value(Atom, Opts));
 quote_1(Integer, Opts) when is_integer(Integer) ->
     astranaut_return:return(quote_literal_value(Integer, Opts)).
+
+quote_variable(default, Var, Opts) ->
+    rename_variable(Var, Opts);
+quote_variable(BindingType, Unquote, #{} = Opts) ->
+    unquote_binding(Unquote, Opts#{type => BindingType}).
+
+rename_variable({var, Pos, VarName}, #{module := Module} = Opts) ->
+    VarName1 = list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)),
+    Var1 = {var, Pos, VarName1},
+    quote_tuple(Var1, Opts#{quote_pos => Pos}).
 
 quote_list([H|T], #{quote_pos := Pos} = Opts) ->
     astranaut_return:bind(
