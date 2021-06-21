@@ -98,6 +98,9 @@ bind_string(String) ->
 
 function_pattern(quote = {hello, _A@World = World2} = C) ->
     quote({ok, {hello2, _A@World, _@World2, _@C}});
+function_pattern(quote = {hello2, _@World} = C) ->
+    quote(_A@World2) = World,
+    quote({ok, {hello3, _A@World2, _@World, _@C}});
 function_pattern(Ast) ->
     quote({error, unquote(Ast)}).
 

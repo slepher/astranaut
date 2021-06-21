@@ -109,7 +109,7 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [test_literal_atom, test_literal_integer, test_literal_tuple,
-     test_pattern_match, test_pattern_function_1, test_pattern_function_2,
+     test_pattern_match, test_pattern_function_1, test_pattern_function_2, test_pattern_function_3,
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
      test_unquote, test_unquote_map, test_unquote_map_match, test_unquote_map_match_list,
      test_unquote_record, test_unquote_record_match, test_unquote_record_match_list,
@@ -160,6 +160,13 @@ test_pattern_function_1(_Config) ->
     ok.
 
 test_pattern_function_2(_Config) ->
+    Ast1 = astranaut_lib:abstract_form({hello2, world}),
+    Pattern = quote_example:function_pattern(Ast1),
+    Ast2 = astranaut_lib:abstract_form({ok, {hello3, world, world, {hello2, world}}}),
+    ?assertEqual(Ast2, Pattern),
+    ok.
+
+test_pattern_function_3(_Config) ->
     Ast1 = astranaut_lib:abstract_form({foo, bar}),
     Pattern = quote_example:function_pattern(Ast1),
     Ast2 = astranaut_lib:abstract_form({error, {foo, bar}}),
