@@ -12,7 +12,7 @@
 -export([flattencons/2, mergecons/2]).
 -export([bind_var/2]).
 -export([fix_user_type/1]).
--export([quote_type_code/1, quote/2]).
+-export([quote_type_code/1, transform_quote/2]).
 -export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
@@ -97,6 +97,35 @@ fix_user_type({user_type, Pos, Type, Args}) ->
     end.
 
 %%%===================================================================
+%%% API quote_type_code/2
+%%%===================================================================
+quote_type_code(Code) ->
+    {attribute, 0, type, {dummy, Type, []}} = merl:quote(0, "-type dummy() :: " ++ Code ++ "."),
+    Type.
+
+%%%===================================================================
+%%% API transform_quote/2
+%%%===================================================================
+transform_quote(Node, Opts) ->
+    Opts1 = maps:merge(#{quote_pos => 0, quote_type => expression}, Opts),
+    Opts2 =
+        case maps:find(pos, Opts) of
+            {ok, Pos} ->
+                maps:put(pos, astranaut_lib:abstract_form(Pos), Opts1);
+            error ->
+                Opts1
+        end,
+    Quoted = quote(Node, Opts2),
+    {just, Return} = astranaut_return:run(Quoted),
+    ErrorStruct = astranaut_return:run_error(Quoted),
+    case maps:find(formatted_warnings, astranaut_error:printable(ErrorStruct)) of
+        {ok, Warnings} ->
+            {warning, Return, Warnings};
+        error ->
+            Return
+    end.
+
+%%%===================================================================
 %%% parse_transform/2
 %%%===================================================================
 parse_transform(Forms, _Options) ->
@@ -154,17 +183,17 @@ format_error(Message) ->
 %%%===================================================================
 %%% transform walk function
 %%%===================================================================
-walk({call, _pos1, {atom, _pos2, quote}, [Form]} = Node, Attr, WalkOpts) ->
+walk({call, _Pos1, {atom, _Pos2, quote}, [Form]} = Node, Attr, WalkOpts) ->
     %% transform quote(Code)
     quote(Form, #{}, Node, Attr, WalkOpts);
-walk({call, _pos1, {atom, _pos2, quote}, [Form, Options]} = Node, Attr, WalkOpts) ->
+walk({call, _Pos1, {atom, _Pos2, quote}, [Form, Options]} = Node, Attr, WalkOpts) ->
     %% transform quote(Code, Options)
     astranaut_traverse:bind(
       astranaut_traverse:astranaut_traverse(to_options(Options)),
       fun(Options1) ->
               quote(Form, Options1, Node, Attr, WalkOpts)
       end);
-walk({call, Pos1, {atom, _pos2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, WalkOpts) ->
+walk({call, Pos1, {atom, _Pos2, quote_code}, Codes} = Node, #{node := NodeType} = Attr, WalkOpts) ->
     %% transform quote_code("Code1", "Code2",...)
     %% transform quote_code("Code1", "Code2",..., Options)
     case split_codes(Codes, NodeType) of
@@ -219,7 +248,7 @@ to_options(Ast) ->
             Options = ast_to_options(Ast),
             validate_options(Options, Pos);
         false ->
-            astranaut_return:return(#{line => Ast})
+            astranaut_return:return(#{pos => Ast})
     end.
 
 ast_to_options(AstOptions) ->
@@ -238,9 +267,9 @@ ast_to_options(AstOptions) ->
     erl_syntax:concrete(AstOptions1).
 
 validate_options(Pos, _QuotePos) when is_integer(Pos) ->
-    astranaut_return:return(#{line => Pos});
+    astranaut_return:return(#{pos => Pos});
 validate_options(Options, Pos) ->
-    Return = astranaut_lib:validate(#{debug => boolean, code_pos => boolean, line => any}, Options),
+    Return = astranaut_lib:validate(#{debug => boolean, code_pos => boolean, pos => any}, Options),
     astranaut_return:with_error(
         fun(ErrorStruct) ->
             astranaut_error:update_pos(Pos, ?MODULE, ErrorStruct)
@@ -276,35 +305,30 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Deb
                             file => File, module => Module, debug => Debug}, Options),
     astranaut_traverse:set_updated(astranaut_traverse:astranaut_traverse(quote(Value, Options1))).
 
-%%%===================================================================
-%%% API quote_type_code/2
-%%%===================================================================
-quote_type_code(Code) ->
-    {attribute, 0, type, {dummy, Type, []}} = merl:quote(0, "-type dummy() :: " ++ Code ++ "."),
-    Type.
-
-%%%===================================================================
-%%% API quote/2
-%%%===================================================================
 quote(Node, #{debug := true} = Options) ->
     astranaut_return:lift_m(
       fun(QuotedAst) ->
               format_quoted_ast(QuotedAst, Options),
               QuotedAst
       end, quote(Node, Options#{debug => false}));
-quote(Node, #{line := Pos, quote_pos := QuotePos} = Options) ->
-    Options1 = maps:remove(line, Options),
+quote(Node, #{pos := Pos, quote_pos := QuotePos} = Options) ->
+    Options1 = maps:remove(pos, Options),
     astranaut_return:lift_m(
       fun(Quoted) ->
               call_remote(astranaut_lib, replace_line_zero, [Quoted, Pos], QuotePos)
       end, quote(Node, Options1));
-quote(Node, #{} = Options) ->
-    quote_1(Node, Options).
+quote(Node, #{} = Opts) ->
+    quote_1(Node, Opts).
 
-format_quoted_ast(QuotedAst, #{quote_pos := QuotePos, file := File}) ->
+format_quoted_ast(QuotedAst, #{} = Opts) ->
     QuotedCode = astranaut_lib:ast_safe_to_string(QuotedAst),
+    io:format("~ts~s~n", [format_file(Opts), QuotedCode]).
+
+format_file(#{quote_pos := QuotePos, file := File}) ->
     RelaPath = astranaut_lib:relative_path(File),
-    io:format("~ts:~s~n~s~n", [RelaPath, format_quote_pos(QuotePos), QuotedCode]).
+    io_lib:format("~ts:~s~n", [RelaPath, format_quote_pos(QuotePos)]);
+format_file(#{}) ->
+    "".
 
 format_quote_pos({Line, Col}) ->
     io_lib:format("~p,~p", [Line, Col]);
@@ -447,8 +471,9 @@ rename_variable({var, Pos, VarName}, Opts) ->
 rename_variable_name('_', #{}) ->
     '_';
 rename_variable_name(VarName, #{module := Module}) ->
-    list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module)).
-
+    list_to_atom(atom_to_list(VarName) ++ "@" ++ atom_to_list(Module));
+rename_variable_name(VarName, #{}) ->
+    VarName.
 
 quote_list([{call, _Pos1, {atom, _Pos2, unquote_splicing}, [Unquotes]}|T], Opts) ->
     %% quote({a, b, unquote_splicing(V), c, d}),
@@ -487,7 +512,7 @@ quote_list_1(H, T, #{quote_pos := Pos} = Opts) ->
     astranaut_return:lift_m(
       fun(T1) ->
               {cons, Pos, H, T1}
-      end, quote_1(T, Opts)).
+      end, quote_list(T, Opts)).
 
 quote_tuple_list([Type|Rest], #{attribute := type_header} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
@@ -535,9 +560,9 @@ quote_var_literal_name(Name, Opts) ->
 
 quote_literal_name(Name, #{quote_pos := Pos, type := Type} = Opts) when is_atom(Name) ->
     case parse_binding_name(Name, Pos) of
-        {Type, Var, _VarName} ->
+        { Type, Var, _VarName} ->
             astranaut_return:return(unquote_binding(Var, Opts#{type => atom_value}));
-        {_Type1, Var, VarName} ->
+        {_Type, Var,  VarName} ->
             astranaut_return:then(
               astranaut_return:warning({only_bindings_supported, supported_bindings(Type), VarName, Name}),
               astranaut_return:return(unquote_binding(Var, Opts#{type => atom_value})));
@@ -602,11 +627,11 @@ quote_literal_value(String, #{quote_pos := Pos}) when is_list(String) ->
 quote_pos(#{quote_pos := Pos, quote_type := pattern}) ->
     {var, Pos, '_'};
 quote_pos(#{quote_type := expression} = Opts) ->
-    quote_literal_value(abstract_pos(Opts), Opts).
+    quote_literal_value(quote_pos_value(Opts), Opts).
 
-abstract_pos(#{quote_pos := Pos, code_pos := true}) ->
+quote_pos_value(#{quote_pos := Pos, code_pos := true}) ->
     Pos;
-abstract_pos(#{}) ->
+quote_pos_value(#{}) ->
     0.
 
 %% unquote return monad
@@ -619,8 +644,8 @@ unquote_binding(Exp, #{type := dynamic, quote_type := pattern, quote_pos := Pos}
     tuple([{var, Pos, '_'}, quote_pos(Opts), Exp], Opts);
 unquote_binding(Exp, #{type := Type, quote_type := pattern} = Opts) ->
     tuple([quote_literal_value(Type, Opts), quote_pos(Opts), Exp], Opts);
-unquote_binding({var, _, Varname} = Exp, #{type := Type} = Opts) ->
-    call_bind_var(Exp, #{name => Varname, pos => abstract_pos(Opts), type => Type}).
+unquote_binding({var, _, Varname} = Exp, #{quote_pos := Pos, type := Type} = Opts) ->
+    call_bind_var(Exp, #{name => Varname, pos => quote_pos_value(Opts), type => Type}, Pos).
 
 unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, join := list} = Opts) ->
     astranaut_return:bind(
@@ -692,10 +717,10 @@ parse_binding_1([$_,$@|T]) ->
 parse_binding_1(_) ->
     default.
 
-call_bind_var(Var, #{type := value}) ->
+call_bind_var(Var, #{type := value}, _QuotePos) ->
     Var;
-call_bind_var(Var, #{type := value_list}) ->
+call_bind_var(Var, #{type := value_list}, _QuotePos) ->
     Var;
-call_bind_var(Var, #{pos := Pos} = Opts) ->
+call_bind_var(Var, #{} = Opts, Pos) ->
     Opts1 = astranaut_lib:abstract_form(Opts, Pos),
     call_remote(?MODULE, bind_var, [Var, Opts1], Pos).

@@ -113,6 +113,7 @@ all() ->
      test_pattern_case_1, test_pattern_case_2, test_pattern_case_3,
      test_function_expression, test_function_expression_error,
      test_named_function_expression_1, test_named_function_expression_2,
+     test_pos_1, test_pos_2,
      test_unquote, test_unquote_map, test_unquote_map_match, test_unquote_map_match_list,
      test_unquote_record, test_unquote_record_match, test_unquote_record_match_list,
      test_binding, test_atom_binding,
@@ -216,6 +217,18 @@ test_named_function_expression_2(_Config) ->
     Expression = quote_example:named_function_expression_2(),
     Ast = merl:quote(0, "fun Name@quote_example(0) -> 0; Name@quote_example(N@quote_example) -> Name@quote_example(N@quote_example - 1) + N@quote_example end"),
     ?assertEqual(Ast, Expression),
+    ok.
+
+test_pos_1(_Config) ->
+    Ast = {atom, {10, 11}, world},
+    HelloWorld = quote_example:pos_1(Ast),
+    ?assertEqual({tuple, {10, 11}, [{atom, {10, 11}, hello}, {atom, {10, 11}, world}]}, HelloWorld),
+    ok.
+
+test_pos_2(_Config) ->
+    Ast = {atom, {10, 11}, world},
+    HelloWorld = quote_example:pos_2(Ast),
+    ?assertEqual({tuple, 12, [{atom, 12, ok}, {tuple, 13, [{atom, 13, hello}, {atom, {10, 11}, world}]}]}, HelloWorld),
     ok.
 
 test_unquote(_Config) ->

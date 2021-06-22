@@ -130,15 +130,15 @@ named_function_expression_2() ->
 code() ->
     quote_code("test_fun()").
 
-line_1(Ast) ->
+pos_1(Ast) ->
     Line = erl_syntax:get_pos(Ast),
     quote({hello, unquote(Ast)}, Line).
 
-line_2(Ast) ->
+pos_2(Ast) ->
     Pos = erl_syntax:get_pos(Ast),
     Line = erl_anno:line(Pos),
     Ast1 = quote({hello, unquote(Ast)}, Line + 3),
-    quote({ok, unquote(Ast1)}, #{line => Line + 2}).
+    quote({ok, unquote(Ast1)}, #{pos => Line + 2}).
 
 type(Name, Value) ->
     quote_code("-type '_A@Name'() :: '_A@Value'().").
