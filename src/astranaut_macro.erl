@@ -666,10 +666,10 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                         true ->
                                             apply_macro(Macro#{rename_quoted_variables => true});
                                         false ->
-                                            astranaut_traverse:return(ok)
+                                            astranaut_traverse:return(keep)
                                     end;
                                 error ->
-                                    astranaut_traverse:return(ok)
+                                    astranaut_traverse:return(keep)
                             end
                         ])
              end, Clause, #{traverse => all, children => true})
@@ -687,20 +687,16 @@ apply_macro(#{module := Module, function := Function, arguments := Arguments,
               line := Line, formatter := Formatter} = Opts) ->
       astranaut_traverse:update_pos(
         Line, Formatter,
-        do([ traverse ||
-               Return <- astranaut:traverse_return(apply_mfa(Module, Function, Arguments, Opts)),
-               update_return(Return, Opts)
-           ])).
-
-update_return(keep, _Opts) ->
-    astranaut_traverse:return(keep);
-update_return(Return, #{line := Line} = Opts) ->
-    do([ traverse ||
-           Return1 = astranaut_lib:replace_line_zero(Return, Line),
-           Return2 <- update_quoted_variable_name(Return1, Opts),
-           format_node(Return2, Opts),
-           return(Return2)
-       ]).
+        astranaut_traverse:bind_on_success(
+          astranaut:traverse_return(apply_mfa(Module, Function, Arguments, Opts)),
+          fun(Return) ->
+                  do([ traverse ||
+                         Return1 = astranaut_lib:replace_line_zero(Return, Line),
+                         Return2 <- update_quoted_variable_name(Return1, Opts),
+                         format_node(Return2, Opts),
+                         return(Return2)
+                     ])
+          end)).
 
 apply_mfa(Module, Function, Arguments, Opts) ->
     try erlang:apply(Module, Function, Arguments) of
@@ -721,6 +717,7 @@ apply_mfa(Module, Function, Arguments, Opts) ->
 macro_exception_error(Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
     MFA = #{module => Module, function => Function, arity => length(Arguments)},
     {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
+%% replace `module`__local_macro with module in stacktrace
 macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
                                                                  macro_module := Module, macro := Function}) ->
     StackTraces1 =

@@ -18,7 +18,6 @@
 -export([uniplate/1]).
 -export([format_error/1]).
 
-
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
 -type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | keep.

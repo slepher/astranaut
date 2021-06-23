@@ -47,13 +47,14 @@
 -export([run/4, eval/4, exec/4]).
 -export([lift_m/2, map_m/2, sequence_m/1]).
 -export([bind/2, then/2, return/1]).
+-export([bind_on_success/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1]).
 -export([with_error/2, catch_fail/2, set_fail/1, catched_nodes/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
--export([writer_updated/1, listen_updated/1, set_updated/1]).
+-export([listen_error/1, writer_updated/1, listen_updated/1, set_updated/1]).
 -export([with_formatter/2]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3]).
@@ -180,6 +181,21 @@ return(A) ->
         end,
     new(Inner).
 
+-spec bind_on_success(struct(S, A) | ok, fun((A) -> struct(S, B))) -> struct(S, B).
+bind_on_success(ok, KMB) ->
+    KMB(ok);
+bind_on_success(MA, KMB) ->
+    bind(
+      listen_error(MA),
+      fun({A, ErrorStruct}) ->
+              case astranaut_error:is_empty(ErrorStruct) of
+                  true ->
+                      KMB(A);
+                  false ->
+                      return(A)
+              end
+      end).
+
 -spec fail_on_error(struct(S, A)) -> struct(S, A).
 fail_on_error(MA) ->
     map_m_state_ok(
@@ -246,6 +262,13 @@ get() ->
 -spec put(S) -> struct(S, ok).
 put(State) ->
     state(fun(_State) -> {ok, State} end).
+
+-spec listen_error(struct(S, A)) -> struct(S, {A, astranaut_error:struct()}).
+listen_error(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, error := Error} = MState) ->
+              MState#{return => {Return, Error}}
+      end, MA).
 
 writer_updated({A, Updated}) ->
     Inner = 
