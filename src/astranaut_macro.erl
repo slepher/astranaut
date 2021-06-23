@@ -71,9 +71,9 @@
 %% </ul></dd>
 %% <dd>{inject_attrs, InjectAttrs}, extra arguments will be passed to macro function, definition option.</dd>
 %% <dd><ul>
-%% <li>InjectAttrs = true, #{file => File, module => Module, line => Line} will be extra arguments.</li>
-%% <li>InjectAttrs = Attr, if -Attr(AttrValue) declared in module which executes macro, #{Attr => [AttrValue...]} with file, module, line, will be extra arguments.</li>
-%% <li>InjectAttrs = [Attr1, Attr2...], #{Attr1 => [AttrValue1...], Attr2 => [AttrValue2...]} with file, module, line, will be extra arguments.</li>
+%% <li>InjectAttrs = true, #{file => File, module => Module, pos => Pos} will be extra arguments.</li>
+%% <li>InjectAttrs = Attr, if -Attr(AttrValue) declared in module which executes macro, #{Attr => [AttrValue...]} with file, module, pos, will be extra arguments.</li>
+%% <li>InjectAttrs = [Attr1, Attr2...], #{Attr1 => [AttrValue1...], Attr2 => [AttrValue2...]} with file, module, pos, will be extra arguments.</li>
 %% </ul></dd>
 %% <dd>{group_args, GroupArgs}, treat macro arguments as list, definition option.</dd>
 %% <dd>{as_attr, As}, -As(Arguments) will replace -exec_macro({M, F, A}), should not be dulicated, definition option.</dd>
@@ -176,7 +176,7 @@ formatter_opts(Module, Functions, MacroOpts) ->
 
 exported_macros(Forms) ->
     astranaut_lib:forms_with_attribute(
-      fun(Attr, Acc, #{line := Line}) ->
+      fun(Attr, Acc, #{pos := Pos}) ->
               do([ return ||
                      Validator = macro_definition_valitor(),
                      {FAs, Options} <-
@@ -184,8 +184,8 @@ exported_macros(Forms) ->
                      %% export_macro options for local usage
                      ExportedMacros = lists:foldl(fun(FA, Acc1) -> maps:put(FA, Options, Acc1) end, Acc, FAs),
                      %% exported_macro options for external usage
-                     ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Line, [{FAs, Options}]),
-                     ExportAttribute = astranaut_lib:gen_attribute_node(export, Line, FAs),
+                     ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options}]),
+                     ExportAttribute = astranaut_lib:gen_attribute_node(export, Pos, FAs),
                      astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], ExportedMacros})
                  ])
       end, #{}, Forms, export_macro, #{formatter => ?MODULE}).
@@ -241,12 +241,12 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
                          end, LocalMacros)}
       end,
       astranaut_lib:forms_with_attribute(
-        fun(Attr, Acc, #{line := Line}) ->
+        fun(Attr, Acc, #{pos := Pos}) ->
                 do([ return || 
                        Validator = macro_definition_valitor(),
                        {FAs, Options} <-
                            validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
-                       NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Line, {nowarn_unused_function, FAs}),
+                       NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
                        Acc2 = 
                            lists:foldl(
                              fun({Function, Arity}, Acc1) ->
@@ -350,7 +350,7 @@ inject_attrs(#{inject_attrs := Attrs, file := File, local_module := Module} = Op
                   Acc;
              (file, Acc) ->
                   Acc;
-             (line, Acc) ->
+             (pos, Acc) ->
                   Acc;
              (Attr, Acc) ->
                   Attributes = astranaut_lib:analyze_forms_attributes(Attr, Forms),
@@ -533,13 +533,13 @@ load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, Forms, C
     Forms1 =
         lists:reverse(
           lists:foldl(
-            fun({attribute, Line, module, Module}, Acc) ->
-                    [{attribute, Line, module, local_macro_module(Module)}|Acc];
-               ({function, _Line, Name, Arity, _Clauses} = Node, Acc) ->
+            fun({attribute, Pos, module, Module}, Acc) ->
+                    [{attribute, Pos, module, local_macro_module(Module)}|Acc];
+               ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
                     append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-               ({attribute,_Line, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
+               ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
                     append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-               ({attribute,_Line, export, _Exports}, Acc) ->
+               ({attribute,_Pos, export, _Exports}, Acc) ->
                     Acc;
                (Node, Acc) ->
                     [Node|Acc]
@@ -577,7 +577,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
           end, Forms, #{traverse => subtree}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
 
-function_clauses_map([{function, _Line, Name, Arity, Clauses}|T], Acc) ->
+function_clauses_map([{function, _Pos, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
     function_clauses_map(T, NAcc);
 function_clauses_map([_H|T], Acc) ->
@@ -602,7 +602,7 @@ local_macro_related_functions(Functions, ClauseMap, Deps) ->
               end
       end, Deps, Functions).
 
-local_macro_related_functions({clause, _Line1, _Patterns, _Guards, Exprs}) ->
+local_macro_related_functions({clause, _Pos1, _Patterns, _Guards, Exprs}) ->
     with_local_function_call(
       fun(Function, Arity, Acc) when is_atom(Function) ->
               ordsets:add_element({Function, Arity}, Acc)
@@ -610,7 +610,7 @@ local_macro_related_functions({clause, _Line1, _Patterns, _Guards, Exprs}) ->
 
 with_local_function_call(Fun, Init, Exprs) ->
     astranaut:sreduce(
-      fun({call, _Line2, {atom, _Line3, Function}, Arguments}, Acc) ->
+      fun({call, _Pos1, {atom, _Pos2, Function}, Arguments}, Acc) ->
               Arity = length(Arguments),
               Fun(Function, Arity, Acc);
          (_, Acc) ->
@@ -627,7 +627,7 @@ to_list(Arguments) ->
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
         astranaut:map_m(
-          fun({function, Line, Name, Arity, Clauses}) ->
+          fun({function, Pos, Name, Arity, Clauses}) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
                           astranaut_traverse:return(keep);
@@ -636,7 +636,7 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                             fun([]) ->
                                     [];
                                (Clauses1) ->
-                                    {function, Line, Name, Arity, Clauses1}
+                                    {function, Pos, Name, Arity, Clauses1}
                             end,
                             %% error in astranaut_traverse should be monad write
                             %% current use as monad state is not right, should be changed.
@@ -683,22 +683,22 @@ match_macro_order(Macro, Step) ->
 %%%===================================================================
 %%% apply macro functions
 %%%===================================================================
-apply_macro(#{module := Module, function := Function, arguments := Arguments,
-              line := Line, formatter := Formatter} = Opts) ->
-      astranaut_traverse:update_pos(
-        Line, Formatter,
-        astranaut_traverse:bind_on_success(
-          astranaut:traverse_return(apply_mfa(Module, Function, Arguments, Opts)),
-          fun(Return) ->
-                  do([ traverse ||
-                         Return1 = astranaut_lib:replace_line_zero(Return, Line),
-                         Return2 <- update_quoted_variable_name(Return1, Opts),
-                         format_node(Return2, Opts),
-                         return(Return2)
-                     ])
-          end)).
+apply_macro(#{pos := Pos} = Opts) ->
+    astranaut_traverse:bind_without_error(
+      traverse_apply_mfa(Opts),
+      fun(Return) ->
+              astranaut_traverse:lift_m(
+                fun(Return1) ->
+                        Return2 = astranaut_lib:replace_pos_zero(Return1, Pos),
+                        format_node(Return2, Opts),
+                        Return2
+                end, update_quoted_variable_name(Return, Opts))
+      end).
 
-apply_mfa(Module, Function, Arguments, Opts) ->
+traverse_apply_mfa(#{pos := Pos, formatter := Formatter} = Opts) ->
+    astranaut_traverse:update_pos(Pos, Formatter, astranaut:traverse_return(apply_mfa(Opts))).
+
+apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Opts) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
             Return
@@ -707,7 +707,7 @@ apply_mfa(Module, Function, Arguments, Opts) ->
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) -> 
-                          {M, F, A} =/= {?MODULE, apply_mfa, 4};
+                          {M, F, A} =/= {?MODULE, apply_mfa, 1};
                      (_Stack) ->
                           false
                   end, StackTraces),
@@ -730,7 +730,6 @@ macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := Loca
     MFA = #{function => Function, arity => length(Arguments), local => true},
     {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}}.
     
-
 should_transform_function(_Function, _Arity, all) ->
     true;
 should_transform_function(Function, Arity, LocalMacroCaller) ->
@@ -742,7 +741,7 @@ local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelat
             ordsets:new();
         _ ->
             lists:foldl(
-              fun({function, _Line, Function, Arity, Clauses}, Acc) ->
+              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
                       IsLocalMacroCaller = 
                           case ordsets:is_element({function, Function, Arity}, LocalMacroRelatedFunctions) of
                               true ->
@@ -761,7 +760,7 @@ local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelat
                           false ->
                               Acc
                       end;
-                 ({attribute, _Line, Attribute, AttributeValue} = Node, Acc) ->
+                 ({attribute, _Pos, Attribute, AttributeValue} = Node, Acc) ->
                       case attribute_find_macro(Node, LocalMacroMap, LocalAttributeMacroMap) of
                           {ok, _} ->
                               ordsets:add_element({attribute, Attribute, AttributeValue}, Acc);
@@ -778,37 +777,37 @@ local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelat
 %% for -exec_macro, if there is no macro found, error is returned
 %% for other -Attr, if there is no macro with same name, not_macro is returned
 %% for other -Attr, if there is macro with same name, but arity not matched, error is returned
-attribute_find_macro({attribute, Line, exec_macro, {Function, Arguments}}, Macros, _AttributeMacros) ->
-    find_macro_with_arguments(Function, Arguments, Line, Macros);
-attribute_find_macro({attribute, Line, exec_macro, {Module, Function, Arguments}}, Macros, _AttributeMacros) ->
-    find_macro_with_arguments({Module, Function}, Arguments, Line, Macros);
-attribute_find_macro({attribute, Line, Attribute, Arguments}, _Macros, AttributeMacros) ->
-    find_attribute_macro_with_arguments(Attribute, Arguments, Line, AttributeMacros);
+attribute_find_macro({attribute, Pos, exec_macro, {Function, Arguments}}, Macros, _AttributeMacros) ->
+    find_macro_with_arguments(Function, Arguments, Pos, Macros);
+attribute_find_macro({attribute, Pos, exec_macro, {Module, Function, Arguments}}, Macros, _AttributeMacros) ->
+    find_macro_with_arguments({Module, Function}, Arguments, Pos, Macros);
+attribute_find_macro({attribute, Pos, Attribute, Arguments}, _Macros, AttributeMacros) ->
+    find_attribute_macro_with_arguments(Attribute, Arguments, Pos, AttributeMacros);
 attribute_find_macro(_Node, _Macros, _AttributeMacros) ->
     not_macro.
 
-find_attribute_macro_with_arguments(Function, Arguments, Line, AttributeMacroMap) ->
+find_attribute_macro_with_arguments(Function, Arguments, Pos, AttributeMacroMap) ->
     case maps:find(Function, AttributeMacroMap) of
         {ok, MacroMap} ->
-            find_macro_with_arguments(Function, Arguments, Line, MacroMap);
+            find_macro_with_arguments(Function, Arguments, Pos, MacroMap);
         error ->
             not_macro
     end.
 
-call_find_macro(_Module, {call, Line, {atom, _Line2, Function}, Arguments}, Macros) ->
-    find_macro_with_arguments(Function, Arguments, Line, Macros);
-call_find_macro(Module, {call, Line, {remote, _Line2, {atom, _Line3, Module}, {atom, _Line4, Function}}, Arguments},
+call_find_macro(_Module, {call, Pos1, {atom, _Pos2, Function}, Arguments}, Macros) ->
+    find_macro_with_arguments(Function, Arguments, Pos1, Macros);
+call_find_macro(Module, {call, Pos1, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments},
                 Macros) ->
-    find_macro_with_arguments({Module, Function}, Arguments, Line, Macros);
+    find_macro_with_arguments({Module, Function}, Arguments, Pos1, Macros);
 call_find_macro(_Module, _Node, _Macros) ->
     error.
 
-find_macro_with_arguments(MacroName, Arguments, Line, Macros) ->
+find_macro_with_arguments(MacroName, Arguments, Pos, Macros) ->
     Arguments1 = to_list(Arguments),
     Arity = length(Arguments1),
     case find_macro(MacroName, Arity, Macros) of
         {ok, Macro} ->
-            Macro1 = Macro#{line => Line},
+            Macro1 = Macro#{pos => Pos},
             Arguments2 = group_arguments(Arguments1, Macro1),
             Arguments3 = append_attrs(Arguments2, Macro1),
             {ok, Macro1#{arguments => Arguments3}};
@@ -842,40 +841,33 @@ group_arguments(Arguments, #{group_args := true}) ->
 group_arguments(Arguments, #{}) ->
     Arguments.
 
-append_attrs(Arguments, #{attributes := Attrs, line := Line}) ->
-    Arguments ++ [Attrs#{line => Line}];
+append_attrs(Arguments, #{attributes := Attrs, pos := Pos}) ->
+    Arguments ++ [Attrs#{pos => Pos}];
 append_attrs(Arguments, #{}) ->
     Arguments.
 
 update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) ->
-    do([ traverse ||
-           Counter <- astranaut_traverse:get(),
-           astranaut_traverse:put(Counter + 1),
-           Nodes1 = update_quoted_variable_name(Nodes, Macro, Counter),
-           return(Nodes1)
-       ]);
+    astranaut_traverse:state(
+      fun(Counter) ->
+              MacroNameStr = macro_name_str(Macro),
+              CounterStr = integer_to_list(Counter),
+              Nodes1 =
+                  astranaut:smap(
+                    fun({var, Pos, VarName} = Var) ->
+                            case split_varname(atom_to_list(VarName)) of
+                                [Head, MacroNameStr1] when MacroNameStr == MacroNameStr1 ->
+                                    VarName1 = list_to_atom(Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
+                                    {var, Pos, VarName1};
+                                _ ->
+                                    Var
+                            end;
+                       (Node) ->
+                            Node
+                    end, Nodes, #{traverse => post}),
+              {Nodes1, Counter + 1}
+      end);
 update_quoted_variable_name(Nodes, _Macro) ->
     astranaut_traverse:return(Nodes).
-
-update_quoted_variable_name(Nodes, MacroOpts, Counter) ->
-    MacroNameStr = macro_name_str(MacroOpts),
-    CounterStr = integer_to_list(Counter),
-    Opts = #{traverse => post, formatter => ?MODULE},
-    astranaut:smap(
-      fun(Node) ->
-              walk_quoted_variable_name(Node, MacroNameStr, CounterStr)
-      end, Nodes, Opts).
-
-walk_quoted_variable_name({var, Line, VarName} = Var, MacronameStr, Counter) ->
-    case split_varname(atom_to_list(VarName)) of
-        [Head, MacronameStr] ->
-            VarName1 = list_to_atom(Head ++ "@" ++ MacronameStr ++ "_" ++ Counter),
-            {var, Line, VarName1};
-        _ ->
-            Var
-    end;
-walk_quoted_variable_name(Node, _ModuleStr, _Counter) ->
-    Node.
 
 split_varname(String) ->
     case lists:splitwith(
@@ -908,17 +900,17 @@ format_forms(Forms, Opts) ->
             ok
     end.
 
-format_node(Node, #{file := File, line := Line} = Opts) ->
+format_node(Node, #{file := File, pos := Pos} = Opts) ->
     case maps:get(debug, Opts, false) of
         true ->
-            io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Opts)]),
+            io:format("from ~s:~p ~s~n", [filename:basename(File), Pos, format_mfa(Opts)]),
             io:format("~s~n", [astranaut_lib:ast_safe_to_string(Node)]);
         false ->
             ok
     end,
     case maps:get(debug_ast, Opts, false) of
         true ->
-            io:format("from ~s:~p ~s~n", [filename:basename(File), Line, format_mfa(Opts)]),
+            io:format("from ~s:~p ~s~n", [filename:basename(File), Pos, format_mfa(Opts)]),
             io:format("~p~n", [Node]);
         false ->
             ok

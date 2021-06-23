@@ -75,7 +75,7 @@ new(File) ->
       formatted_errors => endo_empty(), formatted_warnings => endo_empty(),
       file_errors => #{}, file_warnings => #{}}.
 
--spec update_pos(erl_anno:line(), module(), struct()) -> struct().
+-spec update_pos(erl_anno:location(), module(), struct()) -> struct().
 %% @doc update struct with line number and formatter, this will convert all errors and warnings to formatted_errors and formatted_warnings.
 update_pos(Line, Formatter, #{?STRUCT_KEY := ?MODULE,
                                errors := Errors0, warnings := Warnings0,

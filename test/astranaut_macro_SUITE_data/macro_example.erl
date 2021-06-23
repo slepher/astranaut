@@ -153,9 +153,9 @@ macro_merge_function(Name, Pattern) ->
                 '__original__'(Other)
         end)).
 
-macro_with_attributes(#{file := File, line := {Line, Col}, module := Module}) ->
+macro_with_attributes(#{file := File, pos := {Line, Col}, module := Module}) ->
     quote({ok, {_S@File, {_I@Line, _I@Col}, _A@Module}});
-macro_with_attributes(#{file := File, line := Line, module := Module}) ->
+macro_with_attributes(#{file := File, pos := Line, module := Module}) ->
     quote({ok, {_S@File, _I@Line, _A@Module}}).
 
 macro_group_args(Asts) ->

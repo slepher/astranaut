@@ -38,7 +38,7 @@ init_per_suite(Config) ->
     Functions =
         lists:foldl(
             fun({function, _Line, Name, _Arity, Clauses}, Acc) ->
-                    Clauses1 = astranaut_lib:replace_line(Clauses, 0),
+                    Clauses1 = astranaut_lib:replace_pos(Clauses, 0),
                     maps:put(Name, Clauses1, Acc);
                (_Form, Acc) ->
                    Acc

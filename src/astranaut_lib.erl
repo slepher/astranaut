@@ -10,7 +10,7 @@
 
 -include_lib("astranaut_struct_name.hrl").
 
--export([replace_line/2, replace_line_zero/2, abstract_form/1, abstract_form/2,
+-export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
          analyze_module_attributes/2, analyze_forms_attributes/2, analyze_forms_file/1,
          analyze_forms_module/1, analyze_transform_file_line/2,
@@ -31,24 +31,24 @@
 -type validator_fun_return() :: {ok, Value::term()} | {error, Reason::term()} | true | false | {warning, Reason::term()} | {warning, Value::term(), Reason::term()} | astranaut_return:struct(Value::term()).
 -type internal_validator() :: boolean | atom | integer | number | binary | {list_of, [validator()]} | {one_of, [term()]} | required | {default, Default::term()} | paired | {paired, PairedKey::atom()} | any.
 
--spec replace_line(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
+-spec replace_pos(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
 %% @doc replace line attribute of subtrees to Line.
-replace_line(Ast, Line) ->
-    replace_line_cond(fun(_) -> true end, Ast, Line).
+replace_pos(Ast, Line) ->
+    replace_pos_cond(fun(_) -> true end, Ast, Line).
 
--spec replace_line_zero(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
-%% @doc Like `replace_line/2', only line attribute of subtrees which is 0 will be replaced.
-%% @see replace_line/2
-replace_line_zero(Ast, 0) ->
+-spec replace_pos_zero(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
+%% @doc Like `replace_pos/2', only line attribute of subtrees which is 0 will be replaced.
+%% @see replace_pos/2
+replace_pos_zero(Ast, 0) ->
     Ast;
-replace_line_zero(Ast, Line) ->
-    replace_line_cond(
+replace_pos_zero(Ast, Line) ->
+    replace_pos_cond(
       fun(0) -> true;
          (_) -> false
       end, Ast, Line).
 
--spec replace_line_cond(fun((any()) -> boolean()), astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
-replace_line_cond(Cond, Ast, Pos) ->
+-spec replace_pos_cond(fun((any()) -> boolean()), astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
+replace_pos_cond(Cond, Ast, Pos) ->
     case astranaut_syntax:is_pos(Pos) of
         true ->
             astranaut:smap(
@@ -74,12 +74,12 @@ abstract_form(Term) ->
     erl_syntax:revert(erl_syntax:abstract(Term)).
 
 -spec abstract_form(term(), erl_anno:line()) -> erl_syntax:syntaxTree().
-%% @doc {@link abstract_form/1} then {@link replace_line/2}.
+%% @doc {@link abstract_form/1} then {@link replace_pos/2}.
 %% @see abstract_form/1
-%% @see replace_line/2
+%% @see replace_pos/2
 
 abstract_form(Term, Line) ->
-    replace_line(abstract_form(Term), Line).
+    replace_pos(abstract_form(Term), Line).
 
 -spec original_forms(astranaut:forms(), [compile:option()]) -> astranaut:forms().
 %% @doc get original froms before all parse transform compile flags removed by read file attribute in forms and re-parse it.
@@ -390,8 +390,8 @@ try_concerete(_A, []) ->
 %% @end
 with_attribute(F, Init, Forms, Attr, Opts) ->
     astranaut:reduce(
-      fun({attribute, Line, Attr1, AttrValue}, Acc) when Attr1 == Attr ->
-              values_apply_fun_m(F, AttrValue, Acc, #{line => Line});
+      fun({attribute, Pos, Attr1, AttrValue}, Acc) when Attr1 == Attr ->
+              values_apply_fun_m(F, AttrValue, Acc, #{pos => Pos});
          (_Node, Acc) ->
               Acc
       end, Init, Forms, Opts#{traverse => subtree}).
@@ -418,7 +418,7 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     astranaut:mapfold(
       fun({attribute, Line, Attr1, AttrValue} = Node, Acc) when Attr1 == Attr ->
               astranaut_return:bind(
-                values_apply_fun_m(F1, AttrValue, {[], Acc}, #{line => Line}),
+                values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Line}),
                 fun({[], Acc1}) ->
                         astranaut_return:return({keep, Acc1});
                    ({Nodes, Acc1}) ->

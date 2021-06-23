@@ -392,6 +392,6 @@ test_guard(_Config) ->
              "  _ ->",
              "    {error, not_match}"
              "end"]),
-    Ast1 = astranaut_lib:replace_line(Ast, 0),
+    Ast1 = astranaut_lib:replace_pos(Ast, 0),
     ?assertEqual(Ast1, TestGuard),
     ok.

@@ -47,7 +47,7 @@
 -export([run/4, eval/4, exec/4]).
 -export([lift_m/2, map_m/2, sequence_m/1]).
 -export([bind/2, then/2, return/1]).
--export([bind_on_success/2]).
+-export([bind_without_error/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1]).
 -export([with_error/2, catch_fail/2, set_fail/1, catched_nodes/1]).
@@ -181,10 +181,10 @@ return(A) ->
         end,
     new(Inner).
 
--spec bind_on_success(struct(S, A) | ok, fun((A) -> struct(S, B))) -> struct(S, B).
-bind_on_success(ok, KMB) ->
+-spec bind_without_error(struct(S, A) | ok, fun((A) -> struct(S, B))) -> struct(S, B).
+bind_without_error(ok, KMB) ->
     KMB(ok);
-bind_on_success(MA, KMB) ->
+bind_without_error(MA, KMB) ->
     bind(
       listen_error(MA),
       fun({A, ErrorStruct}) ->

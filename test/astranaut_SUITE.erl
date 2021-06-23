@@ -340,7 +340,7 @@ test_forms_with_attribute(Config) ->
     {just, {Forms1, Marks}} =
         astranaut_return:run(
           astranaut_lib:forms_with_attribute(
-            fun(Attr, Acc, #{line := Line}) ->
+            fun(Attr, Acc, #{pos := Line}) ->
                     Node = astranaut_lib:gen_attribute_node(mark_1, Line, Attr),
                     {[Node], [Attr|Acc]}
             end, [], Forms, mark, #{})),
@@ -469,16 +469,16 @@ test_record(Config) ->
     Expressions = proplists:get_value(expressions, Config),
     Records = maps:get(record, Expressions),
     {match, _, _, Record1} = lists:nth(1, Records),
-    Record1_0 = astranaut_lib:replace_line(Record1, 0),
+    Record1_0 = astranaut_lib:replace_pos(Record1, 0),
     ?assertEqual({record,0, test, [{record_field, 0, {atom,0,a},{integer,0,1}}, {record_field, 0, {atom,0,b},{integer,0,2}}]}, Record1_0),
     {match, _, _, Record2} = lists:nth(2, Records),
-    Record2_0 = astranaut_lib:replace_line(Record2, 0),
+    Record2_0 = astranaut_lib:replace_pos(Record2, 0),
     ?assertEqual({record,0, {var,0,'A'}, test, [{record_field, 0, {atom,0,a},{integer,0,2}}, {record_field, 0, {atom,0,b},{integer,0,3}}]}, Record2_0),
     {match, _, _, Record3} = lists:nth(3, Records),
-    Record3_0 = astranaut_lib:replace_line(Record3, 0),
+    Record3_0 = astranaut_lib:replace_pos(Record3, 0),
     ?assertEqual({record_index, 0, test, {atom, 0, a}}, Record3_0),
     {match, _, _, Record4} = lists:nth(4, Records),
-    Record4_0 = astranaut_lib:replace_line(Record4, 0),
+    Record4_0 = astranaut_lib:replace_pos(Record4, 0),
     ?assertEqual({record_field, 0, {var, 0, 'A'}, test, {atom, 0, a}}, Record4_0),
     ok.
 
@@ -486,7 +486,7 @@ test_map(Config) ->
     Expressions = proplists:get_value(expressions, Config),
     Maps = maps:get(map, Expressions),
     {match, _, _, Map1} = lists:nth(1, Maps),
-    Map1_0 = astranaut_lib:replace_line(Map1, 0),
+    Map1_0 = astranaut_lib:replace_pos(Map1, 0),
     ?assertEqual({map, 0 ,[{map_field_assoc, 0, {atom, 0, a}, {integer, 0, 1}}, {map_field_assoc, 0, {atom, 0, b}, {integer, 0, 2}}] }, Map1_0),
     ok.
 
