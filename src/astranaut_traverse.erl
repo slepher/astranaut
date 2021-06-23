@@ -306,7 +306,6 @@ with_state_attr(F) ->
 %%%===================================================================
 %%% error_state related functions
 %%%===================================================================
-
 -spec with_error(fun((astranaut_error:struct())
                      -> astranaut_error:struct()),
                  struct(S, A))

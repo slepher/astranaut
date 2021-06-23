@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(quote_example).
 
--include_lib("astranaut/include/quote.hrl").
+-include("quote.hrl").
 
 %% API
 -compile(export_all).

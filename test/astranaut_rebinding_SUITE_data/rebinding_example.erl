@@ -11,7 +11,7 @@
 %% API
 -export([]).
 
--include_lib("astranaut/include/rebinding.hrl").
+-include("rebinding.hrl").
 
 -rebinding_all([debug]).
 

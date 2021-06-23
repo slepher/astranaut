@@ -10,8 +10,8 @@
 
 -macro_options(debug_module).
 
--include_lib("astranaut/include/quote.hrl").
--include_lib("astranaut/include/macro.hrl").
+-include("quote.hrl").
+-include("macro.hrl").
 %% API
 
 -export_macro({[macro_group_args/1], [group_args]}).

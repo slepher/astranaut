@@ -110,7 +110,8 @@ groups() ->
 all() -> 
     [test_ok_case, test_function_case, test_quote_case,
      test_unquote_splicing_case, test_pattern_case, test_other_case,
-     test_macro_with_warnings, test_macro_with_vars, test_macro_order, test_merge_rename_function].
+     test_macro_with_warnings, test_macro_with_error,
+     test_macro_with_vars, test_macro_order, test_merge_rename_function].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -181,12 +182,8 @@ test_macro_with_warnings(Config) ->
     Basepos = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
     io:format("error is ~p~n", [astranaut_error:printable(ErrorStruct)]),
-    {[{File, Errors}], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Basepos, ErrorStruct),
+    {[], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Basepos, ErrorStruct),
     Local = macro_with_warnings__local_macro,
-    ?assertMatch(
-       [{45,  Local, {macro_exception, _MFA, [], _StackTrace}},
-        {48,  Local, bar}
-       ], Errors),
     ?assertEqual("macro_with_warnings.erl", filename:basename(File)),
     ?assertMatch(
        [{3,  Local, noop_function},
@@ -199,6 +196,18 @@ test_macro_with_warnings(Config) ->
        ],
        Warnings),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
+    ok.
+
+test_macro_with_error(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_with_error, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    Local = macro_with_error__local_macro,
+    ?assertMatch(
+       [{3,  Local, {macro_exception, _MFA, [], _StackTrace}},
+        {6,  Local, bar}
+       ], Errors),
     ok.
 
 test_macro_with_vars(_Config) ->

@@ -158,7 +158,7 @@ load_forms(Forms, Opts) ->
       fun({Mod, Binary}) ->
               case code:load_binary(Mod, [], Binary) of
                   {module, Mod} ->
-                      astranaut_return:return(Mod);
+                      astranaut_return:return({Mod, Binary});
                   {error, What} ->
                       astranaut_return:error_fail(What)
               end

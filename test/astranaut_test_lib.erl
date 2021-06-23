@@ -47,9 +47,18 @@ realize_with_baseline(Baseline, ErrorStruct) ->
     astranaut_error:realize(ErrorStruct1).
 
 compile_test_module(Module, Config) ->
-    Forms = test_module_forms(Module, Config),
+    DataDir = proplists:get_value(data_dir, Config),
+    Forms = test_module_forms(Module, DataDir, Config),
     Opts = compile_opts(),
-    astranaut_lib:load_forms(Forms, Opts).
+    Outfile = filename:join(filename:dirname(filename:absname(DataDir)), atom_to_list(Module) ++ ".beam"),
+    file:delete(Outfile),
+    astranaut_return:bind(
+      astranaut_lib:load_forms(Forms, Opts),
+      fun({Mod, Binary}) ->
+              %% write beam file to make edts works.
+              ok = file:write_file(Outfile, Binary, []),
+              astranaut_return:return(Mod)
+      end).
 
 compile_test_forms(Forms) ->
     Opts = compile_opts(),
@@ -58,6 +67,9 @@ compile_test_forms(Forms) ->
 
 test_module_forms(Module, Config) ->
     DataDir = proplists:get_value(data_dir, Config),
+    test_module_forms(Module, DataDir, Config).
+
+test_module_forms(Module, DataDir, _Config) ->
     File = filename:join(DataDir, atom_to_list(Module) ++ ".erl"),
     Opts = compile_opts(),
     case filelib:is_file(File) of

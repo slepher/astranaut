@@ -11,8 +11,8 @@
 -quote_options(debug).
 -macro_options(debug_module).
 
--include_lib("astranaut/include/quote.hrl").
--include_lib("astranaut/include/macro.hrl").
+-include("quote.hrl").
+-include("macro.hrl").
 
 -define(MACRO_MODULE, macro_example).
 

@@ -8,8 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(macro_with_warnings).
 
--include_lib("astranaut/include/quote.hrl").
--include_lib("astranaut/include/macro.hrl").
+-include("quote.hrl").
+-include("macro.hrl").
 
 %% API
 -export([test_cons/2]).
@@ -21,7 +21,6 @@
 -local_macro([function_macro/1]).
 -local_macro([noop_warnings/0]).
 -local_macro({[cons_macro/1], [as_attr]}).
--local_macro([exception_error/0, return_error/0]).
 
 -baseline(yep).
 
@@ -67,37 +66,14 @@ function_macro(b) ->
               end)),
     {warning, Ast, noop_function}.
 
-error_macro_1() ->
-    exception_error().
-
-error_macro_2() ->
-    return_error().
-
 noop_warnings() ->
     {warning, quote(ok), noop}.
 
-exception_error() ->
-    erlang:error(foo).
-
-return_error() ->
-    {error, bar}.
 
 cons_macro(Ast) ->
     Ast.
 
-format_error(bar) ->
-    "oops, bar";
 format_error(noop) ->
     "oops, noop";
 format_error(Error) ->
     astranaut_macro:format_error(Error).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @spec
-%% @end
-%%--------------------------------------------------------------------
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
