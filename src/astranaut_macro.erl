@@ -688,26 +688,25 @@ apply_macro(#{module := Module, function := Function, arguments := Arguments,
       astranaut_traverse:update_pos(
         Line,
         do([ traverse ||
-               MacroReturn = astranaut:walk_return(apply_mfa(Module, Function, Arguments)),
-               Return1 <- astranaut_traverse:astranaut_traverse(MacroReturn),
+               Return <- astranaut:traverse_return(apply_mfa(Module, Function, Arguments)),
                %% TODO: fix returned errors, not use magic keep.
-               case Return1 of
+               case Return of
                    keep ->
                        return(keep);
                    _ ->
                        do([ traverse ||
-                              Return2 = astranaut_lib:replace_line_zero(Return1, Line),
-                              Return3 <- update_quoted_variable_name(Return2, Opts),
-                              format_node(Return3, Opts),
-                              return(Return3)
+                              Return1 = astranaut_lib:replace_line_zero(Return, Line),
+                              Return2 <- update_quoted_variable_name(Return1, Opts),
+                              format_node(Return2, Opts),
+                              return(Return2)
                           ])
                end
            ]))).
 
 apply_mfa(Module, Function, Arguments) ->
     try erlang:apply(Module, Function, Arguments) of
-        Node ->
-            Node
+        Return ->
+            Return
     catch
         Class:Exception:StackTraces ->
             StackTraces1 =

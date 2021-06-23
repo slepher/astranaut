@@ -94,7 +94,7 @@ quote_line_2(Ast) ->
     Pos = erl_syntax:get_pos(Ast),
     Line = erl_anno:line(Pos),
     Ast1 = quote({hello, unquote(Ast)}, Line + 3),
-    quote({ok, unquote(Ast1)}, #{line => Line + 2}).
+    quote({ok, unquote(Ast1)}, #{pos => Line + 2}).
 
 macro_case(Body, TrueClause, FalseClause) ->
     quote(

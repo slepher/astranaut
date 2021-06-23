@@ -14,7 +14,7 @@
 -export([smap/3, sreduce/4, smapfold/4]).
 -export([map/3, reduce/4, mapfold/4]).
 -export([map_m/3]).
--export([walk_return/1]).
+-export([walk_return/1, traverse_return/1]).
 -export([uniplate/1]).
 -export([format_error/1]).
 
@@ -283,6 +283,9 @@ validate_walk_return_node(#{?STRUCT_KEY := ?WALK_RETURN, node := Node} = WalkRet
     end;
 validate_walk_return_node(WalkReturn) ->
     WalkReturn.
+
+traverse_return(Return) ->
+    astranaut_traverse:astranaut_traverse(walk_return(Return)).
 
 validate_node([Node|T]) ->
     case validate_node(Node) of

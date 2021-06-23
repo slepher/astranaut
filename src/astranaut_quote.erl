@@ -9,26 +9,27 @@
 -module(astranaut_quote).
 
 %% API
--export([flattencons/2, mergecons/2]).
+-export([flattencons/1, flattencons/2, mergecons/2]).
 -export([bind_var/2]).
 -export([fix_user_type/1]).
--export([quote_type_code/1, transform_quote/2]).
+-export([validate_pos/2]).
+-export([quote_type_code/1, quoted/1, quoted/2]).
 -export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API for quote flattencons/2, mergecons/2
 %%%===================================================================
-flattencons(Cons, []) ->
-    flattencons_1(Cons);
-flattencons(Cons, Rest) ->
-    flattencons_1(Cons) ++ Rest.
-
-flattencons_1({cons, _pos, Head, Tail}) ->
-    [Head|flattencons_1(Tail)];
-flattencons_1({nil, _pos}) ->
+flattencons({cons, _pos, Head, Tail}) ->
+    [Head|flattencons(Tail)];
+flattencons({nil, _pos}) ->
     [];
-flattencons_1(Value) when is_list(Value) ->
+flattencons(Value) when is_list(Value) ->
     Value.
+
+flattencons(Cons, []) ->
+    flattencons(Cons);
+flattencons(Cons, Rest) ->
+    flattencons(Cons) ++ Rest.
 
 mergecons([H|T], Rest) ->
     {cons, 0, H, mergecons(T, Rest)};
@@ -95,7 +96,16 @@ fix_user_type({user_type, Pos, Type, Args}) ->
         false ->
             {user_type, Pos, Type, Args}
     end.
-
+%%%===================================================================
+%%% API for quote validate_pos/1
+%%%===================================================================
+validate_pos(Quoted, Pos) ->
+    case astranaut_syntax:is_pos(Pos) of
+        true ->
+            Quoted;
+        false ->
+            erlang:error({invalid_pos_value, Pos})
+    end.
 %%%===================================================================
 %%% API quote_type_code/2
 %%%===================================================================
@@ -104,17 +114,15 @@ quote_type_code(Code) ->
     Type.
 
 %%%===================================================================
-%%% API transform_quote/2
+%%% API quoted/1, quoted/2
 %%%===================================================================
-transform_quote(Node, Opts) ->
-    Opts1 = maps:merge(#{quote_pos => 0, quote_type => expression}, Opts),
-    Opts2 =
-        case maps:find(pos, Opts) of
-            {ok, Pos} ->
-                maps:put(pos, astranaut_lib:abstract_form(Pos), Opts1);
-            error ->
-                Opts1
-        end,
+quoted(Node) ->
+    quoted(Node, #{}).
+
+quoted(Node, #{} = Opts) ->
+    QuotePos = erl_syntax:get_pos(Node),
+    Opts1 = maps:merge(#{quote_type => expression}, Opts#{quote_pos => QuotePos}),
+    Opts2 = maps:map(fun(pos, Pos) -> astranaut_lib:abstract_form(Pos, QuotePos); (_Key, Value) -> Value end, Opts1),
     Quoted = quote(Node, Opts2),
     {just, Return} = astranaut_return:run(Quoted),
     ErrorStruct = astranaut_return:run_error(Quoted),
@@ -123,7 +131,9 @@ transform_quote(Node, Opts) ->
             {warning, Return, Warnings};
         error ->
             Return
-    end.
+    end;
+quoted(Node, Pos) ->
+    quoted(Node, #{pos => Pos}).
 
 %%%===================================================================
 %%% parse_transform/2
@@ -152,7 +162,6 @@ parse_transform(Forms, _Options) ->
                       end, Forms, #{traverse => pre}),
                     ?MODULE, #{}, ok))
         end)).
-
 quote_validator() ->
     #{debug => [boolean, {default, false}], debug_module => [boolean, {default, false}]}.
 
@@ -160,26 +169,6 @@ debug_module(Forms1, true) ->
     io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]);
 debug_module(_Forms1, _) ->
     ok.
-%%%===================================================================
-%%% format_error/1
-%%%===================================================================
-format_error({invalid_unquote_splicing, Binding, Var}) ->
-    io_lib:format("expected unquote, not unquote_splicing ~s in ~s",
-                  [astranaut_lib:ast_safe_to_string(Binding), astranaut_lib:ast_safe_to_string(Var)]);
-format_error({only_bindings_supported, Bindings, VarName, Name}) ->
-    BindingsStr = string:join(
-                    lists:map(
-                      fun(Binding) ->
-                              io_lib:format("_~s@~s", [Binding, VarName])
-                      end, Bindings), " or "),
-    io_lib:format("expected _~s, not ~s", [BindingsStr, Name]);
-format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
-    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
-format_error({invalid_quote, Node}) ->
-    io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
-format_error(Message) ->
-    astranaut:format_error(Message).
-
 %%%===================================================================
 %%% transform walk function
 %%%===================================================================
@@ -305,18 +294,18 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Deb
                             file => File, module => Module, debug => Debug}, Options),
     astranaut_traverse:set_updated(astranaut_traverse:astranaut_traverse(quote(Value, Options1))).
 
-quote(Node, #{debug := true} = Options) ->
+quote(Node, #{debug := true} = Opts) ->
+    Opts1 = maps:remove(debug, Opts),
     astranaut_return:lift_m(
       fun(QuotedAst) ->
-              format_quoted_ast(QuotedAst, Options),
+              format_quoted_ast(QuotedAst, Opts1),
               QuotedAst
-      end, quote(Node, Options#{debug => false}));
+      end, quote(Node, Opts1));
 quote(Node, #{pos := Pos, quote_pos := QuotePos} = Options) ->
-    Options1 = maps:remove(pos, Options),
     astranaut_return:lift_m(
-      fun(Quoted) ->
-              call_remote(astranaut_lib, replace_line_zero, [Quoted, Pos], QuotePos)
-      end, quote(Node, Options1));
+      fun(QuotedAst) ->
+              call_remote(?MODULE, validate_pos, [QuotedAst, Pos], QuotePos)
+      end, quote_1(Node, Options));
 quote(Node, #{} = Opts) ->
     quote_1(Node, Opts).
 
@@ -353,6 +342,12 @@ quote_1({cons, _Pos1, {call, _Pos2, {atom, _Pos3, unquote_splicing}, [Unquotes]}
     %% quote([a, b, unquote_splicing(V), c, d]),
     unquote_splicing(Unquotes, T, Opts#{join => cons});
 
+%% invalid place of unquote_splicing
+quote_1({call, Pos1, {atom, _Pos2, unquote_splicing}, [Unquote]}, _Opts) ->
+    astranaut_return:then(
+      astranaut_return:formatted_warning(Pos1, ?MODULE, {invalid_unquote_splicing, Unquote}),
+      unquote(Unquote));
+
 %% unquote_splicing variables
 quote_1({cons, Pos1, {var, _Pos2, _VarName} = Var, T}, Opts) ->
     %% [A, _L@Unquotes, B] expression.
@@ -373,10 +368,10 @@ quote_1({cons, Pos1, {var, _Pos2, _VarName} = Var, T}, Opts) ->
 %% unquote variables
 quote_1({var, Pos, VarName} = Var, #{} = Opts) when is_atom(VarName) ->
     case parse_binding_var(Var) of
-        {value_list, Unquotes} ->
+        {value_list, {var, _, Name} = Unquote} ->
             astranaut_return:then(
-              astranaut_return:formatted_warning(Pos, ?MODULE, {invalid_unquote_splicing, Unquotes, Var}),
-              quote_literal_tuple(Var, Opts));
+              astranaut_return:formatted_warning(Pos, ?MODULE, {invalid_unquote_splicing_binding, Name}),
+              astranaut_return:return(quote_literal_tuple(Unquote, Opts)));
         Binding ->
             astranaut_return:return(quote_variable(Binding, Opts#{quote_pos => Pos}))
     end;
@@ -624,6 +619,8 @@ quote_literal_value(String, #{quote_pos := Pos}) when is_list(String) ->
     {string, Pos, String}.
 
 %% quote_pos not return monad
+quote_pos(#{pos := Pos}) ->
+    Pos;
 quote_pos(#{quote_pos := Pos, quote_type := pattern}) ->
     {var, Pos, '_'};
 quote_pos(#{quote_type := expression} = Opts) ->
@@ -724,3 +721,27 @@ call_bind_var(Var, #{type := value_list}, _QuotePos) ->
 call_bind_var(Var, #{} = Opts, Pos) ->
     Opts1 = astranaut_lib:abstract_form(Opts, Pos),
     call_remote(?MODULE, bind_var, [Var, Opts1], Pos).
+
+%%%===================================================================
+%%% format_error/1
+%%%===================================================================
+format_error({invalid_unquote_splicing_binding, VarName}) ->
+    io_lib:format("_L@~s not works without list in abstract tree, "
+                  " _@~s expected.", [VarName, VarName]);
+format_error({invalid_unquote_splicing, Unquote}) ->
+    UnquoteStr = astranaut_lib:ast_safe_to_string(Unquote),
+    io_lib:format("unquote_splicing(~s) not works without list in abstract tree, "
+                  "unquote(~s) expected", [UnquoteStr, UnquoteStr]);
+format_error({only_bindings_supported, Bindings, VarName, Name}) ->
+    BindingsStr = string:join(
+                    lists:map(
+                      fun(Binding) ->
+                              io_lib:format("_~s@~s", [Binding, VarName])
+                      end, Bindings), " or "),
+    io_lib:format("~s expected, not ~s.", [BindingsStr, Name]);
+format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
+    io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
+format_error({invalid_quote, Node}) ->
+    io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
+format_error(Message) ->
+    astranaut:format_error(Message).
