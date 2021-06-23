@@ -144,9 +144,9 @@ format_error({unloaded_formatter_module, Module}) ->
     io_lib:format("formatter module ~p could not be loaded.", [Module]);
 format_error(invalid_macro_attribute) ->
     io_lib:format("invalid attribute macro call: macro not found", []);
-format_error({macro_exception, Module, Function, Arguments, Exception}) ->
-    io_lib:format("~napply macro ~p ~p ~p failed:~n~s",
-                  [Module, Function, Arguments, eunit_lib:format_exception(Exception)]);
+format_error({macro_exception, MFA, Arguments, Exception}) ->
+    io_lib:format("apply macro ~s ~p failed:~n~s",
+                  [format_mfa(MFA), Arguments, eunit_lib:format_exception(Exception)]);
 format_error(Error) ->
     astranaut:format_error(Error).
 %%%===================================================================
@@ -208,6 +208,7 @@ imported_macros(GlobalMacroOpts, Forms) ->
                               fun({Function, Arity}, MacroOptions, MacrosAcc) ->
                                       MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
                                       MacroOptions2 = MacroOptions1#{module => Module,
+                                                                     macro_module => Module,
                                                                      macro => {Module, Function},
                                                                      function => Function,
                                                                      arity => Arity},
@@ -233,6 +234,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
                          fun({Function, Arity}, MacroOptions) ->
                                  MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
                                  MacroOptions1#{module => local_macro_module(Module),
+                                                macro_module => Module,
                                                 macro => Function,
                                                 function => Function,
                                                 arity => Arity}
@@ -683,27 +685,24 @@ match_macro_order(Macro, Step) ->
 %%%===================================================================
 apply_macro(#{module := Module, function := Function, arguments := Arguments,
               line := Line, formatter := Formatter} = Opts) ->
-    astranaut_traverse:with_formatter(
-      Formatter,
       astranaut_traverse:update_pos(
-        Line,
+        Line, Formatter,
         do([ traverse ||
-               Return <- astranaut:traverse_return(apply_mfa(Module, Function, Arguments)),
-               %% TODO: fix returned errors, not use magic keep.
-               case Return of
-                   keep ->
-                       return(keep);
-                   _ ->
-                       do([ traverse ||
-                              Return1 = astranaut_lib:replace_line_zero(Return, Line),
-                              Return2 <- update_quoted_variable_name(Return1, Opts),
-                              format_node(Return2, Opts),
-                              return(Return2)
-                          ])
-               end
-           ]))).
+               Return <- astranaut:traverse_return(apply_mfa(Module, Function, Arguments, Opts)),
+               update_return(Return, Opts)
+           ])).
 
-apply_mfa(Module, Function, Arguments) ->
+update_return(keep, _Opts) ->
+    astranaut_traverse:return(keep);
+update_return(Return, #{line := Line} = Opts) ->
+    do([ traverse ||
+           Return1 = astranaut_lib:replace_line_zero(Return, Line),
+           Return2 <- update_quoted_variable_name(Return1, Opts),
+           format_node(Return2, Opts),
+           return(Return2)
+       ]).
+
+apply_mfa(Module, Function, Arguments, Opts) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
             Return
@@ -712,12 +711,28 @@ apply_mfa(Module, Function, Arguments) ->
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) -> 
-                          {M, F, A} =/= {?MODULE, apply_mfa, 3};
+                          {M, F, A} =/= {?MODULE, apply_mfa, 4};
                      (_Stack) ->
                           false
                   end, StackTraces),
-            {error, {macro_exception, Module, Function, Arguments, {Class, Exception, StackTraces1}}}
+            macro_exception_error(Arguments, Class, Exception, StackTraces1, Opts)
     end.
+
+macro_exception_error(Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
+    MFA = #{module => Module, function => Function, arity => length(Arguments)},
+    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
+macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
+                                                                 macro_module := Module, macro := Function}) ->
+    StackTraces1 =
+        lists:map(
+          fun({M, F, A, Pos}) when M == LocalModule ->
+                  {Module, F, A, Pos};
+             (Val) ->
+                  Val
+          end, StackTraces),
+    MFA = #{function => Function, arity => length(Arguments), local => true},
+    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}}.
+    
 
 should_transform_function(_Function, _Arity, all) ->
     true;

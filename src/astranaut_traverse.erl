@@ -37,7 +37,6 @@
           error => astranaut_error:struct()}.
 
 -type formatter() :: module().
--type line() :: integer().
 -type convertable(S, A) :: astranaut:walk_return(S, A) | astranaut_return:struct(A) | state_struct(S, A).
 
 %%%===================================================================
@@ -57,7 +56,7 @@
 -export([writer_updated/1, listen_updated/1, set_updated/1]).
 -export([with_formatter/2]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
--export([update_file/1, eof/0, update_pos/2]).
+-export([update_file/1, eof/0, update_pos/2, update_pos/3]).
 
 -spec astranaut_traverse(convertable(S, A)) -> struct(S, A).
 astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
@@ -340,7 +339,7 @@ warning(Warning) ->
 warnings(Warnings) ->
     generate_error(astranaut_error:new_warnings(Warnings)).
 
--spec formatted_warnings([{line(), formatter(), term()}]) -> struct(_S, _A).
+-spec formatted_warnings([{erl_anno:location(), formatter(), term()}]) -> struct(_S, _A).
 formatted_warnings(Warnings) ->
     generate_error(astranaut_error:new_formatted_warnings(Warnings)).
 
@@ -352,7 +351,7 @@ error(Error) ->
 errors(Errors) ->
     generate_error(astranaut_error:new_errors(Errors)).
 
--spec formatted_errors([{line(), formatter(), term()}]) -> struct(_S, _A).
+-spec formatted_errors([{erl_anno:location(), formatter(), term()}]) -> struct(_S, _A).
 formatted_errors(Errors) ->
     generate_error(astranaut_error:new_formatted_errors(Errors)).
 
@@ -368,7 +367,7 @@ update_file(File) ->
 eof() ->
     update_file(eof).
 
--spec update_pos(line(), struct(S, A)) -> struct(S, A).
+-spec update_pos(erl_anno:location(), struct(S, A)) -> struct(S, A).
 update_pos(Line, MA) ->
     map_m_state(
       fun(Formatter, #{error := Error0} = MState) ->
@@ -380,6 +379,10 @@ update_pos(Line, MA) ->
                       update_m_state(MState, #{error => Error1})
               end
         end, MA).
+
+-spec update_pos(erl_anno:location(), module(), struct(S, A)) -> struct(S, A).
+update_pos(Pos, Formatter, MA) ->
+    with_formatter(Formatter, update_pos(Pos, MA)).
 
 %%%===================================================================
 %%% Internal functions

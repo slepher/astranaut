@@ -448,6 +448,7 @@ right_trees_1(F, [[]|T]) ->
 right_trees_1(F, [Head|T]) when is_list(Head) ->
     [right_trees(F, Head)|T].
 
+%% list of list of subtree, so there is two 's'
 map_subtreess_m(F, Subtreess, Bind, Return) ->
     astranaut_monad:map_m(fun(Subtrees) -> map_nodes_m(F, Subtrees, Bind, Return) end, Subtreess, Bind, Return).
 

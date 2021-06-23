@@ -181,8 +181,12 @@ test_macro_with_warnings(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
     io:format("error is ~p~n", [astranaut_error:printable(ErrorStruct)]),
-    {FileWithErrors, [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    {[{File, Errors}], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     Local = macro_with_warnings__local_macro,
+    ?assertMatch(
+       [{45,  Local, {macro_exception, _MFA, [], _StackTrace}},
+        {48,  Local, bar}
+       ], Errors),
     ?assertEqual("macro_with_warnings.erl", filename:basename(File)),
     ?assertMatch(
        [{3,  Local, noop_function},
@@ -194,7 +198,6 @@ test_macro_with_warnings(Config) ->
         {25, astranaut_quote,{unquote_splicing_pattern_non_empty_tail,[{atom, _, tail}]}}
        ],
        Warnings),
-    ?assertEqual([], FileWithErrors),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
     ok.
 
