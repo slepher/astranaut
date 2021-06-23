@@ -76,13 +76,13 @@ new(File) ->
       file_errors => #{}, file_warnings => #{}}.
 
 -spec update_pos(erl_anno:location(), module(), struct()) -> struct().
-%% @doc update struct with line number and formatter, this will convert all errors and warnings to formatted_errors and formatted_warnings.
-update_pos(Line, Formatter, #{?STRUCT_KEY := ?MODULE,
+%% @doc update struct with pos number and formatter, this will convert all errors and warnings to formatted_errors and formatted_warnings.
+update_pos(Pos, Formatter, #{?STRUCT_KEY := ?MODULE,
                                errors := Errors0, warnings := Warnings0,
                                formatted_errors := FormattedErrors0,
                                formatted_warnings := FormattedWarnings0} = Struct) ->
-    FormattedErrors1 = format_errors(Line, Formatter, Errors0),
-    FormattedWarnings1 = format_errors(Line, Formatter, Warnings0),
+    FormattedErrors1 = format_errors(Pos, Formatter, Errors0),
+    FormattedWarnings1 = format_errors(Pos, Formatter, Warnings0),
     FormattedErrors2 = endo_append(FormattedErrors0, FormattedErrors1),
     FormattedWarnings2 = endo_append(FormattedWarnings0, FormattedWarnings1),
     Struct#{formatted_errors => FormattedErrors2, formatted_warnings => FormattedWarnings2,
@@ -226,8 +226,8 @@ with_formatted_base_warning(Fun, Struct) ->
 with_formatted_base_failure(Fun, Struct) ->
     sequence_withs(Fun, [fun with_formatted_base_error/2, fun with_formatted_base_warning/2], Struct).
 
-with_formatted(Fun, {Line, Formatter, Error}) ->
-    {Line, Formatter, Fun(Error)}.
+with_formatted(Fun, {Pos, Formatter, Error}) ->
+    {Pos, Formatter, Fun(Error)}.
 
 with_formatted_base(Fun, FormattedErrors) ->
     astranaut_lib:nested_withs(Fun, [fun with_formatted/2, fun endo_map/2], FormattedErrors).
@@ -453,8 +453,8 @@ merge_file_errors(ErrorsWithFile1, ErrorsWithFile2) ->
 append(Errors0, Errors1) ->
     endo_append(Errors0, Errors1).
 
-format_errors(Line, Formatter, Errors) ->
-    lists:map(fun(Error) -> {Line, Formatter, Error} end, endo_run(Errors)).
+format_errors(Pos, Formatter, Errors) ->
+    lists:map(fun(Error) -> {Pos, Formatter, Error} end, endo_run(Errors)).
 
 from_compiler_errors(CompilerFileErrors) ->
     maps:from_list(

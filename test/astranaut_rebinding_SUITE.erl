@@ -37,7 +37,7 @@ init_per_suite(Config) ->
     Forms1 = astranaut_rebinding:parse_transform(Forms, astranaut_test_lib:compile_opts()),
     Functions =
         lists:foldl(
-            fun({function, _Line, Name, _Arity, Clauses}, Acc) ->
+            fun({function, _Pos, Name, _Arity, Clauses}, Acc) ->
                     Clauses1 = astranaut_lib:replace_pos(Clauses, 0),
                     maps:put(Name, Clauses1, Acc);
                (_Form, Acc) ->

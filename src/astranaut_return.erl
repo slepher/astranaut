@@ -221,22 +221,22 @@ warnings(Warnings) ->
     ErrorStruct1 = astranaut_error:append_warnings(Warnings, ErrorStruct),
     ok(ok, ErrorStruct1).
 
-formatted_error({Line, Formatter, Error}) ->
-    formatted_error(Line, Formatter, Error).
+formatted_error({Pos, Formatter, Error}) ->
+    formatted_error(Pos, Formatter, Error).
 
-formatted_error(Line, Formatter, Error) ->
-    formatted_errors([{Line, Formatter, Error}]).
+formatted_error(Pos, Formatter, Error) ->
+    formatted_errors([{Pos, Formatter, Error}]).
 
 formatted_errors(Errors) ->
     ErrorStruct = astranaut_error:new(),
     ErrorStruct1 = astranaut_error:append_formatted_errors(Errors, ErrorStruct),
     ok(ok, ErrorStruct1).
 
-formatted_warning({Line, Formatter, Warning}) ->
-    formatted_warning(Line, Formatter, Warning).
+formatted_warning({Pos, Formatter, Warning}) ->
+    formatted_warning(Pos, Formatter, Warning).
 
-formatted_warning(Line, Formatter, Warning) ->
-   formatted_warnings([{Line, Formatter, Warning}]).
+formatted_warning(Pos, Formatter, Warning) ->
+   formatted_warnings([{Pos, Formatter, Warning}]).
 
 formatted_warnings(Warnings) ->
     ErrorStruct = astranaut_error:new(),

@@ -42,7 +42,7 @@ init_per_suite(Config) ->
     Forms1 = astranaut_test_lib:test_module_forms(sample_expressions, Config1),
     Expressions =
         lists:foldl(
-          fun({function, _Line, Name, _Arity, [{clause, _Line1, _Pattern, [], Expressions}]}, Acc) ->
+          fun({function, _Pos, Name, _Arity, [{clause, _Pos1, _Pattern, [], Expressions}]}, Acc) ->
                   maps:put(Name, Expressions, Acc);
              (_Form, Acc) ->
                   Acc
@@ -185,7 +185,7 @@ test_uniplate_reduce(Config) ->
     Forms = proplists:get_value(forms, Config),
     Return =
         astranaut:sreduce(
-          fun({atom, _Line, mark_1}, Acc) ->
+          fun({atom, _Pos, mark_1}, Acc) ->
                   Acc + 1;
              (_Node, Acc) ->
                   Acc
@@ -199,9 +199,9 @@ test_reduce(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     Return =
         astranaut:reduce(
-          fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
+          fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
                   astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
-             ({atom, _Line, mark_error_1}, _Acc, #{}) ->
+             ({atom, _Pos, mark_error_1}, _Acc, #{}) ->
                   {error, mark_error_1};
              (_Node, Acc, #{}) ->
                   Acc
@@ -218,8 +218,8 @@ test_map_with_state_node(_Config) ->
     NodeA = {match, 10, {var, 10, 'A'}, {atom, 10, a}},
     {Return, _} =
         astranaut:smapfold(
-          fun({var, Line, 'A'}, Acc, #{}) ->
-                  Node1 = {var, Line, 'B'},
+          fun({var, Pos, 'A'}, Acc, #{}) ->
+                  Node1 = {var, Pos, 'B'},
                   {Node1, Acc + 1};
              (Node, Acc, #{}) ->
                   {Node, Acc}
@@ -233,10 +233,10 @@ test_map_with_state(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
         astranaut:mapfold(
-          fun({atom, _Line, mark_1} = Node, Acc, #{}) ->
+          fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
                   astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
-             ({atom, _Line, mark_error_1}, Acc, #{}) ->
-                  {{atom, _Line, mark_error_2}, Acc};
+             ({atom, _Pos, mark_error_1}, Acc, #{}) ->
+                  {{atom, _Pos, mark_error_2}, Acc};
              (Node, Acc, #{}) ->
                   {Node, Acc}
           end, 0, Forms, #{formatter => ?MODULE, traverse => pre, simplify_return => false}),
@@ -272,9 +272,9 @@ test_reduce_attr(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
         astranaut:reduce(
-          fun({attribute, _Line, mark, mark_0} = Node, Acc, #{}) ->
+          fun({attribute, _Pos, mark, mark_0} = Node, Acc, #{}) ->
                   astranaut:walk_return(#{warning => mark_0, state => Acc + 1, node => Node});
-             ({attribute, _Line, mark, mark_error_0}, _Acc, #{}) ->
+             ({attribute, _Pos, mark, mark_error_0}, _Acc, #{}) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->
                   Acc
@@ -340,8 +340,8 @@ test_forms_with_attribute(Config) ->
     {just, {Forms1, Marks}} =
         astranaut_return:run(
           astranaut_lib:forms_with_attribute(
-            fun(Attr, Acc, #{pos := Line}) ->
-                    Node = astranaut_lib:gen_attribute_node(mark_1, Line, Attr),
+            fun(Attr, Acc, #{pos := Pos}) ->
+                    Node = astranaut_lib:gen_attribute_node(mark_1, Pos, Attr),
                     {[Node], [Attr|Acc]}
             end, [], Forms, mark, #{})),
     ?assertEqual([mark_0, mark_error_0], Marks),
@@ -373,7 +373,7 @@ test_map_forms(Config) ->
     Forms = astranaut_test_lib:test_module_forms(sample_2, Config),
     Forms1M = 
         astranaut:map_m(
-          fun({attribute, _Line, mark, mark_01}) ->
+          fun({attribute, _Pos, mark, mark_01}) ->
                   astranaut_traverse:return(
                     astranaut_lib:gen_function(
                       test,
@@ -401,15 +401,15 @@ test_map_forms(Config) ->
 test_sequence_nodes(_Config) ->
     Nodes = [{atom, 1, a}, {atom, 1, b}, {atom, 1, c}, {atom, 1, d}],
     NodeMs = lists:map(
-               fun({_Type, _Line, a} = Node) ->
+               fun({_Type, _Pos, a} = Node) ->
                        astranaut_traverse:return(Node);
-                  ({_Type, _Line, b} = Node) ->
+                  ({_Type, _Pos, b} = Node) ->
                        astranaut_traverse:return([Node, Node]);
-                  ({_Type, _Line, c}) ->
+                  ({_Type, _Pos, c}) ->
                        astranaut_traverse:then(
                          astranaut_traverse:error({invalid, c}),
                          astranaut_traverse:return([]));
-                  ({_Type, _Line, d} = Node) ->
+                  ({_Type, _Pos, d} = Node) ->
                        astranaut_traverse:then(
                          astranaut_traverse:warning({suspecious, d}),
                          astranaut_traverse:return(Node))
@@ -427,16 +427,16 @@ test_continue_sequence_children(_Config) ->
     TopNode = {tuple, 1, [{match, 1, {var, 1, 'Var'}, {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}}, {atom, 1, c}]},
     Monad =
         astranaut:map_m(
-          fun({match, _Line, _Left, _Right} = Match) ->
+          fun({match, _Pos, _Left, _Right} = Match) ->
                   Sequence = fun lists:reverse/1,
                   Reduce = fun lists:reverse/1,
                   astranaut_traverse:return(astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
-             ({atom, _Line, Atom}) ->
+             ({atom, _Pos, Atom}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Atom|Acc]
                     end);
-             ({var, _Line, Var}) ->
+             ({var, _Pos, Var}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Var|Acc]
@@ -446,12 +446,12 @@ test_continue_sequence_children(_Config) ->
           end, TopNode, #{traverse => pre}),
     Monad1 =
         astranaut:map_m(
-          fun({atom, _Line, Atom}) ->
+          fun({atom, _Pos, Atom}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Atom|Acc]
                     end);
-             ({var, _Line, Var}) ->
+             ({var, _Pos, Var}) ->
                   astranaut_traverse:modify(
                     fun(Acc) ->
                             [Var|Acc]

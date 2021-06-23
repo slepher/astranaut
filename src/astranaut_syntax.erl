@@ -198,7 +198,7 @@ forms_functions(Forms) ->
 
 forms_functions(Forms, Functions0) ->
     lists:foldl(
-      fun({function, _Line, Name, Arity, _Clauses}, Acc) ->
+      fun({function, _Pos, Name, Arity, _Clauses}, Acc) ->
               ordsets:add_element({Name, Arity}, Acc);
          (_Node, Acc) ->
               Acc
@@ -212,19 +212,19 @@ grforms_new() ->
 grforms_to_forms({ERForms, FRForms, ARForms, MRForms}) ->
     lists:reverse(MRForms) ++ lists:reverse(ARForms) ++ lists:reverse(FRForms) ++ ERForms.
 
-grforms_append({attribute, _Line, module, _ModuleName} = Module, {[], [], [], MForms}) ->
+grforms_append({attribute, _Pos, module, _ModuleName} = Module, {[], [], [], MForms}) ->
     {[], [], [], [Module|MForms]};
-grforms_append({attribute, _Line, file, _FileName} = File, {[], [], [], MForms}) ->
+grforms_append({attribute, _Pos, file, _FileName} = File, {[], [], [], MForms}) ->
     {[], [], [], [File|MForms]};
-grforms_append({attribute, _Line, file, _FileName} = File, {[], [], ARForms, MForms}) ->
+grforms_append({attribute, _Pos, file, _FileName} = File, {[], [], ARForms, MForms}) ->
     {[], [], [File|ARForms], MForms};
-grforms_append({attribute, _Line, file, _FileName} = File, {[], FRForms, ARForms, MForms}) ->
+grforms_append({attribute, _Pos, file, _FileName} = File, {[], FRForms, ARForms, MForms}) ->
     {[], [File|FRForms], ARForms, MForms};
-grforms_append({attribute, _Line, spec, _SpecValue} = Spec, {ERForms, FRForms, ARForms, MRForms}) ->
+grforms_append({attribute, _Pos, spec, _SpecValue} = Spec, {ERForms, FRForms, ARForms, MRForms}) ->
     {ERForms, [Spec|FRForms], ARForms, MRForms};
-grforms_append({function, _Line, _Name, _Arity, _Clauses} = Function, {ERForms, FRForms, ARForms, MRForms}) ->
+grforms_append({function, _Pos, _Name, _Arity, _Clauses} = Function, {ERForms, FRForms, ARForms, MRForms}) ->
     {ERForms, [Function|FRForms], ARForms, MRForms};
-grforms_append({eof, _Line} = Eof, {[], FRForms, ARForms, MRForms}) ->
+grforms_append({eof, _Pos} = Eof, {[], FRForms, ARForms, MRForms}) ->
     {[Eof], FRForms, ARForms, MRForms};
 grforms_append(Form, {[], [], ARForms, MRForms}) ->
     {[], [], [Form|ARForms], MRForms};
@@ -260,18 +260,18 @@ grforms_insert_attribute(file, File, {ERForms, FRForms, ARForms, []}) ->
     {ERForms, FRForms, ARForms, [File]};
 grforms_insert_attribute(file, File, GRForms) ->
     grforms_append(File, GRForms);
-grforms_insert_attribute(module, Module, {ERForms, FRForms, ARForms, [{attribute, _Line2, module, _ModuleName1}|MForms]}) ->
+grforms_insert_attribute(module, Module, {ERForms, FRForms, ARForms, [{attribute, _Pos2, module, _ModuleName1}|MForms]}) ->
     {ERForms, FRForms, ARForms, [Module|MForms]};
 grforms_insert_attribute(module, Module, {ERForms, FRForms, ARForms, MForms}) ->
     {ERForms, FRForms, ARForms, [Module|MForms]};
-grforms_insert_attribute(export, {attribute, Line, export, Exports}, {ERForms, FRForms, ARForms, MRForms}) ->
+grforms_insert_attribute(export, {attribute, Pos, export, Exports}, {ERForms, FRForms, ARForms, MRForms}) ->
     Exports1 = remove_duplicated_exports(Exports, FRForms),
     Exports2 = remove_duplicated_exports(Exports1, ARForms),
     case Exports2 of
         [] ->
             {ERForms, FRForms, ARForms, MRForms};
         _ ->
-            Export = {attribute, Line, export, Exports2},
+            Export = {attribute, Pos, export, Exports2},
             {ERForms, FRForms, [Export|ARForms], MRForms}
     end;
 grforms_insert_attribute(spec, Spec, {ERForms, FRForms, ARForms, MRForms}) ->
@@ -305,7 +305,7 @@ grforms_insert_text(Text, GRForms) ->
 grforms_insert_default(Form, GRForms) ->
     grforms_append(Form, GRForms).
 
-remove_duplicated_exports(Exports1, [{attribute, _Line, export, Exports}|T]) ->
+remove_duplicated_exports(Exports1, [{attribute, _Pos, export, Exports}|T]) ->
     Exports2 = Exports1 -- Exports,
     remove_duplicated_exports(Exports2, T);
 remove_duplicated_exports(Exports, [_Form|T]) ->
@@ -379,7 +379,7 @@ merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
     Functions1 = ordsets:union(Functions, NewFormsFucntions),
     {Functions2, NewFormsR2, GRForms1, Tails1} =
         lists:foldl(
-          fun({function, _Line, Name, Arity, _Clauses} = Form,
+          fun({function, _Pos, Name, Arity, _Clauses} = Form,
               {FunctionsAcc, NewFormsAcc, GRFormsAcc, TailsAcc}) ->
                   case ordsets:is_element({Name, Arity}, ExistsNewFunctions) andalso is_renamed(Arity, Form) of
                       true ->
@@ -404,7 +404,7 @@ merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
 is_renamed(Arity, Form) ->
     Either =
         astranaut_uniplate:map_m_static(
-          fun({call, _Line1, {atom, _Line2, '__original__'}, Arguments} = Node) ->
+          fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments} = Node) ->
                   case length(Arguments) == Arity of
                       true ->
                           {left, renamed};
@@ -435,23 +435,23 @@ new_function_name(FName, Arity, Functions, Counter) ->
 
 update_function_name(Name, Arity, NewName, Forms) ->
     lists:map(
-      fun({function, Line, FName, FArity, Clauses})
+      fun({function, Pos, FName, FArity, Clauses})
             when (FName == Name) andalso (FArity == Arity) ->
               Clauses1 =
                   lists:map(
                     fun(Clause) ->
                             update_call_name(Name, NewName, Arity, Clause)
                     end, Clauses),
-              {function, Line, NewName, Arity, Clauses1};
+              {function, Pos, NewName, Arity, Clauses1};
          (Form) ->
               Form
       end, Forms).
 
 update_call_name(OrignalName, NewName, Arity, Function) ->
     astranaut:smap(
-      fun({call, Line, {atom, Line2, Name}, Arguments})
+      fun({call, Pos, {atom, Pos2, Name}, Arguments})
             when (Name == OrignalName) andalso (length(Arguments) == Arity) ->
-              {call, Line, {atom, Line2, NewName}, Arguments};
+              {call, Pos, {atom, Pos2, NewName}, Arguments};
          (_Node) ->
               keep
       end, Function, #{traverse => pre}).

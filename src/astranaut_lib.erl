@@ -13,7 +13,7 @@
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
          analyze_module_attributes/2, analyze_forms_attributes/2, analyze_forms_file/1,
-         analyze_forms_module/1, analyze_transform_file_line/2,
+         analyze_forms_module/1, analyze_transform_file_pos/2,
          ast_safe_to_string/1, ast_to_string/1, relative_path/1,
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
          concerete/2, try_concerete/2,
@@ -31,21 +31,21 @@
 -type validator_fun_return() :: {ok, Value::term()} | {error, Reason::term()} | true | false | {warning, Reason::term()} | {warning, Value::term(), Reason::term()} | astranaut_return:struct(Value::term()).
 -type internal_validator() :: boolean | atom | integer | number | binary | {list_of, [validator()]} | {one_of, [term()]} | required | {default, Default::term()} | paired | {paired, PairedKey::atom()} | any.
 
--spec replace_pos(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
-%% @doc replace line attribute of subtrees to Line.
-replace_pos(Ast, Line) ->
-    replace_pos_cond(fun(_) -> true end, Ast, Line).
+-spec replace_pos(astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
+%% @doc replace pos attribute of subtrees to Pos.
+replace_pos(Ast, Pos) ->
+    replace_pos_cond(fun(_) -> true end, Ast, Pos).
 
--spec replace_pos_zero(astranaut:trees(), erl_anno:line()) -> astranaut:trees() | no_return().
-%% @doc Like `replace_pos/2', only line attribute of subtrees which is 0 will be replaced.
+-spec replace_pos_zero(astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
+%% @doc Like `replace_pos/2', only pos attribute of subtrees which is 0 will be replaced.
 %% @see replace_pos/2
 replace_pos_zero(Ast, 0) ->
     Ast;
-replace_pos_zero(Ast, Line) ->
+replace_pos_zero(Ast, Pos) ->
     replace_pos_cond(
       fun(0) -> true;
          (_) -> false
-      end, Ast, Line).
+      end, Ast, Pos).
 
 -spec replace_pos_cond(fun((any()) -> boolean()), astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
 replace_pos_cond(Cond, Ast, Pos) ->
@@ -73,13 +73,13 @@ replace_pos_cond(Cond, Ast, Pos) ->
 abstract_form(Term) ->
     erl_syntax:revert(erl_syntax:abstract(Term)).
 
--spec abstract_form(term(), erl_anno:line()) -> erl_syntax:syntaxTree().
+-spec abstract_form(term(), erl_anno:location()) -> erl_syntax:syntaxTree().
 %% @doc {@link abstract_form/1} then {@link replace_pos/2}.
 %% @see abstract_form/1
 %% @see replace_pos/2
 
-abstract_form(Term, Line) ->
-    replace_pos(abstract_form(Term), Line).
+abstract_form(Term, Pos) ->
+    replace_pos(abstract_form(Term), Pos).
 
 -spec original_forms(astranaut:forms(), [compile:option()]) -> astranaut:forms().
 %% @doc get original froms before all parse transform compile flags removed by read file attribute in forms and re-parse it.
@@ -114,10 +114,10 @@ parse_file(File, Opts) ->
 	    case find_invalid_unicode(Forms, File) of
 		none ->
 		    Forms;
-		{invalid_unicode, File, Line} ->
+		{invalid_unicode, File, Pos} ->
 		    case Encoding of
 			none ->
-                            Es = [{File,[{Line, compile, reparsing_invalid_unicode}]}],
+                            Es = [{File,[{Pos, compile, reparsing_invalid_unicode}]}],
                             {error, Es, []};
 			_ ->
 			    Forms
@@ -168,8 +168,8 @@ find_invalid_unicode([H|T], File0) ->
     case H of
         {attribute,_,file,{File,_}} ->
             find_invalid_unicode(T, File);
-        {error,{Line,file_io_server,invalid_unicode}} ->
-            {invalid_unicode,File0,Line};
+        {error,{Pos,file_io_server,invalid_unicode}} ->
+            {invalid_unicode,File0,Pos};
         _Other ->
             find_invalid_unicode(T, File0)
     end;
@@ -216,7 +216,7 @@ analyze_forms_file([Form|Forms]) ->
     case erl_syntax:type(Form) of
         attribute ->
             case erl_syntax_lib:analyze_attribute(Form) of
-                {file, {Filename, _Line}} ->
+                {file, {Filename, _Pos}} ->
                     Filename;
                 _ ->
                     analyze_forms_file(Forms)
@@ -234,27 +234,27 @@ analyze_forms_module(Forms) ->
     Analyzed = erl_syntax_lib:analyze_forms(Forms),
     proplists:get_value(module, Analyzed).
 
--spec analyze_transform_file_line(module(), astranaut:forms()) -> {file:filename(), erl_anno:line()}.
-%% @doc transformer and it's line number of Analyzed Forms.
-analyze_transform_file_line(Transformer, Forms) ->
-    analyze_transform_file_line(Transformer, Forms, undefined).
+-spec analyze_transform_file_pos(module(), astranaut:forms()) -> {file:filename(), erl_anno:location()}.
+%% @doc transformer and it's pos number of Analyzed Forms.
+analyze_transform_file_pos(Transformer, Forms) ->
+    analyze_transform_file_pos(Transformer, Forms, undefined).
 
-analyze_transform_file_line(Transformer, [Form|Forms], Filename) ->
+analyze_transform_file_pos(Transformer, [Form|Forms], Filename) ->
     case erl_syntax:type(Form) of
         attribute ->
             case erl_syntax_lib:analyze_attribute(Form) of
-                {file, {Filename1, _Line}} ->
-                    analyze_transform_file_line(Transformer, Forms, Filename1);
+                {file, {Filename1, _Pos}} ->
+                    analyze_transform_file_pos(Transformer, Forms, Filename1);
                 {compile, {parse_transform, Transformer}} ->
-                    Line = astranaut_syntax:get_pos(Form),
-                    {Filename, Line};
+                    Pos = astranaut_syntax:get_pos(Form),
+                    {Filename, Pos};
                 _ ->
-                    analyze_transform_file_line(Transformer, Forms, Filename)
+                    analyze_transform_file_pos(Transformer, Forms, Filename)
             end;
         _ ->
-            analyze_transform_file_line(Transformer, Forms, Filename)
+            analyze_transform_file_pos(Transformer, Forms, Filename)
     end;
-analyze_transform_file_line(_Transformer, [], Filename) ->
+analyze_transform_file_pos(_Transformer, [], Filename) ->
     {Filename, 0}.
 
 -spec ast_safe_to_string([erl_syntax:syntaxTree()] | erl_syntax:syntaxTree()) -> string().
@@ -286,10 +286,10 @@ relative_path(Path) ->
     end.
 
 %% =====================================================================
--spec gen_attribute_node(atom(), erl_anno:line(), term()) -> erl_parse:abstract_form().
-%% @doc build {attribute, Line, Name, Value}.
-gen_attribute_node(Name, Line, Value) when is_atom(Name) ->
-    {attribute, Line, Name, Value}.
+-spec gen_attribute_node(atom(), erl_anno:location(), term()) -> erl_parse:abstract_form().
+%% @doc build {attribute, Pos, Name, Value}.
+gen_attribute_node(Name, Pos, Value) when is_atom(Name) ->
+    {attribute, Pos, Name, Value}.
 
 %% =====================================================================
 -spec gen_exported_function(atom(), erl_syntax:syntaxTree()) -> astranaut:forms().
@@ -297,64 +297,64 @@ gen_attribute_node(Name, Line, Value) when is_atom(Name) ->
 %% @see gen_function/2
 gen_exported_function(Name, Fun) ->
     Function = gen_function(Name, Fun),
-    Line = astranaut_syntax:get_pos(Function),
+    Pos = astranaut_syntax:get_pos(Function),
     FunctionFa = function_fa(Function),
-    [gen_exports([FunctionFa], Line), Function]. 
+    [gen_exports([FunctionFa], Pos), Function].
 
 %% =====================================================================
 -spec gen_function(atom(), erl_parse:abstract_expr() | [erl_parse:abstract_clause()] | erl_parse:abstract_clause()) ->
                           astranaut:form().
 %% @doc generate function by name and `erl_parse' node of anonymous function or clauses or expressions.
-gen_function(Name, {'fun', Line, {clauses, Clauses}}) ->
-    gen_function(Name, Line, Clauses);
-gen_function(Name, {named_fun, Line, {var, _, FunName1}, Clauses}) ->
+gen_function(Name, {'fun', Pos, {clauses, Clauses}}) ->
+    gen_function(Name, Pos, Clauses);
+gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
     Clauses1 = 
         astranaut:map(
-          fun({var, FunNameLine, FunName2}, #{type := expression}) when FunName1 == FunName2 ->
-                  {atom, FunNameLine, FunName2};
+          fun({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 == FunName2 ->
+                  {atom, FunNamePos, FunName2};
              (Node, _Attr) ->
                   Node
           end, Clauses, #{traverse => leaf, simplify_return => true}),
-    gen_function(Name, Line, Clauses1);
+    gen_function(Name, Pos, Clauses1);
 gen_function(Name, [Clause|_T] = Forms) ->
     case erl_syntax:type(Clause) of
         clause ->
-            Line = astranaut_syntax:get_pos(Clause),
-            gen_function(Name, Line, Forms);
+            Pos = astranaut_syntax:get_pos(Clause),
+            gen_function(Name, Pos, Forms);
         _ ->
-            Line = astranaut_syntax:get_pos(Clause),
-            gen_function(Name, Line, [{clause, Line, [], [], Forms}])
+            Pos = astranaut_syntax:get_pos(Clause),
+            gen_function(Name, Pos, [{clause, Pos, [], [], Forms}])
     end;
 gen_function(Name, Clause) ->
     gen_function(Name, [Clause]).
 
-gen_function(Name, Line, Clauses) when is_list(Clauses) ->
+gen_function(Name, Pos, Clauses) when is_list(Clauses) ->
     Arity = clause_arity(Clauses),
-    {function, Line, Name, Arity, Clauses}.
+    {function, Pos, Name, Arity, Clauses}.
 
-function_fa({function, _Line, Name, Arity, _Clauses}) ->
+function_fa({function, _Pos, Name, Arity, _Clauses}) ->
     {Name, Arity}.
 
-clause_arity([{clause, _Line, Patterns, _Guards, _Body}|_T]) ->
+clause_arity([{clause, _Pos, Patterns, _Guards, _Body}|_T]) ->
     length(Patterns).
 
 -spec merge_clauses([erl_syntax:syntaxTree()]) -> erl_syntax:syntaxTree().
-merge_clauses([{'fun', Line, {clauses, _}}|_T] = Nodes) ->
+merge_clauses([{'fun', Pos, {clauses, _}}|_T] = Nodes) ->
     NClauses =
         lists:flatten(
           lists:map(
             fun({'fun', _, {clauses, FClauses}}) ->
                     FClauses
             end, Nodes)),
-    {'fun', Line, {clauses, NClauses}}.
+    {'fun', Pos, {clauses, NClauses}}.
 
 %% it's strange to generate export attribute node by erl_syntax so hard
 %% I write this down manaualy.
 %% erl_syntax:revert(erl_syntax:attribute(erl_syntax:abstract(export), [erl_syntax:list([erl_syntax:arity_qualifier(erl_syntax:atom(Name), erl_syntax:integer(Arity))])])).
--spec gen_exports([{atom(), integer()}], erl_anno:line()) -> astranaut:form().
-%% @doc generate {attribute, Line, export, Exports} node.
-gen_exports(Exports, Line) when is_list(Exports) ->
-    gen_attribute_node(export, Line, Exports).
+-spec gen_exports([{atom(), integer()}], erl_anno:location()) -> astranaut:form().
+%% @doc generate {attribute, Pos, export, Exports} node.
+gen_exports(Exports, Pos) when is_list(Exports) ->
+    gen_attribute_node(export, Pos, Exports).
 
 -spec concerete(A, [fun((A) -> {ok, B} | error)]) -> B | no_return().
 %% @doc works like {@link try_concerete/2}, returns B or throw exception.
@@ -399,7 +399,7 @@ with_attribute(F, Init, Forms, Attr, Opts) ->
 -spec forms_with_attribute(WalkFun, State, Forms, atom(), Opts) ->
                                   astranaut_return:struct(Forms)
                                       when WalkFun :: fun((term(), State) -> astranaut_return:struct(FormsState) | FormsState) |
-                                                      fun((term(), State, #{line := erl_anno:line()}) ->
+                                                      fun((term(), State, #{pos := erl_anno:location()}) ->
                                                                  astranaut_return:struct(FormsState) | FormsState),
                                            FormsState :: {Forms, State},
                                            Forms :: astranaut:forms(),
@@ -416,9 +416,9 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
                    end)
          end,
     astranaut:mapfold(
-      fun({attribute, Line, Attr1, AttrValue} = Node, Acc) when Attr1 == Attr ->
+      fun({attribute, Pos, Attr1, AttrValue} = Node, Acc) when Attr1 == Attr ->
               astranaut_return:bind(
-                values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Line}),
+                values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Pos}),
                 fun({[], Acc1}) ->
                         astranaut_return:return({keep, Acc1});
                    ({Nodes, Acc1}) ->
@@ -486,10 +486,10 @@ validate_attribute_option(Validator, ParseTransformer, Attribute, Forms) ->
         end, maps:new(), Forms, Attribute, #{formatter => ParseTransformer}),
       fun(MergedOptions) ->
               Return = validate(DefaultValidator, MergedOptions),
-              {File, Line} = analyze_transform_file_line(ParseTransformer, Forms),
+              {File, Pos} = analyze_transform_file_pos(ParseTransformer, Forms),
               astranaut_return:with_error(
                 fun(ErrorState) ->
-                        ErrorState1 = astranaut_error:update_pos(Line, ParseTransformer, ErrorState),
+                        ErrorState1 = astranaut_error:update_pos(Pos, ParseTransformer, ErrorState),
                         astranaut_error:update_file(File, ErrorState1)
                 end, Return)
       end).

@@ -87,7 +87,7 @@ rebinding_keys() ->
 %%%===================================================================
 %%% walk form
 %%%===================================================================
-walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec) ->
+walk_form({function, Pos, Name, Arity, Clauses} = Function, RebindingOptionsRec) ->
     case match_rebinding(Name, Arity, RebindingOptionsRec) of
         {ok, RebindingOptions} ->
             ClausesM =
@@ -97,7 +97,7 @@ walk_form({function, Line, Name, Arity, Clauses} = Function, RebindingOptionsRec
                   end, Clauses),
             astranaut_traverse:lift_m(
               fun(Clauses1) ->
-                      Function1 = {function, Line, Name, Arity, Clauses1},
+                      Function1 = {function, Pos, Name, Arity, Clauses1},
                       case maps:get(debug, RebindingOptions, false) of
                           true ->
                               io:format("~s~n", [astranaut_lib:ast_safe_to_string(Function1)]);
@@ -153,7 +153,7 @@ walk_function_clause(Clause, RebindingOptions) ->
 
 %% the + pin operator will be replaced with ^ pin operator after this pull request merged.
 %% https://github.com/erlang/otp/pull/2951
-walk_node(prefix_expr, {op, _Line1, '+', {var, _Line3, _Varname} = Var},
+walk_node(prefix_expr, {op, _Pos1, '+', {var, _Pos3, _Varname} = Var},
           #{pattern := PatternType} = Context, #{node := pattern})
   when PatternType == match_left; PatternType == clause_match ->
     Var1 = rename_var(Var, Context),

@@ -128,7 +128,7 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     map_m(F, Node, Uniplate, MonadOpts, Opts).
 
 -spec map_m_static(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), #{traverse => traverse_style()}) -> monad(M, A).
-%% @doc works line map_m/5, but node will not be changed.
+%% @doc works like map_m/5, but node will not be changed.
 map_m_static(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     map_m_monads(F, Node, uniplate_static(Uniplate), MonadOpts, Opts);
 map_m_static(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->

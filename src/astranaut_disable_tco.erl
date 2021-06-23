@@ -35,23 +35,23 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk({function, _Line, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
+walk({function, _Pos, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
     Opts = #{traverse => pre},
     Variables = astranaut:sreduce(fun walk_variables/3, sets:new(), Function, Opts),
     {keep, Variables};
-walk({function, Line, Name, Arity, Clauses}, Variables, #{step := post}) ->
+walk({function, Pos, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
-    {{function, Line, Name, Arity, NClauses}, NVariables};
-walk({'fun', Line, {clauses, Clauses}}, Variables, #{step := post}) ->  
+    {{function, Pos, Name, Arity, NClauses}, NVariables};
+walk({'fun', Pos, {clauses, Clauses}}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, undefined, Variables),
-    {{'fun', Line, {clauses, NClauses}}, NVariables};
-walk({named_fun, Line, Name, Clauses}, Variables, #{step := post}) ->
+    {{'fun', Pos, {clauses, NClauses}}, NVariables};
+walk({named_fun, Pos, Name, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
-    {{named_fun, Line, Name, NClauses}, NVariables};
+    {{named_fun, Pos, Name, NClauses}, NVariables};
 walk(_Node, Variables, _Attr) ->
     {keep, Variables}.
 
-walk_variables({var, _Line, Name}, Variables, _Attr) ->
+walk_variables({var, _Pos, Name}, Variables, _Attr) ->
     sets:add_element(Name, Variables);
 walk_variables(_Node, Variables, _Attr) ->
     Variables.
@@ -65,11 +65,11 @@ walk_clauses(Clauses, Name, Variables) ->
           end, {[], Variables}, Clauses),
     {lists:reverse(NClauses), NVaraibles}.
 
-walk_clause({clause, Line, Patterns, Guards, Body}, Name, Variables) ->
+walk_clause({clause, Pos, Patterns, Guards, Body}, Name, Variables) ->
     {NBody, NVariables} = walk_body(Body, Name, Variables),
-    {{clause, Line, Patterns, Guards, NBody}, NVariables}.
+    {{clause, Pos, Patterns, Guards, NBody}, NVariables}.
 
-walk_body([{call, _Line, {Type, _Line1, FName}, _Args} = Rep], Name, Variables) ->
+walk_body([{call, _Pos, {Type, _Pos1, FName}, _Args} = Rep], Name, Variables) ->
     if
         {Type, FName} == Name ->
             {[Rep], Variables};
@@ -77,7 +77,7 @@ walk_body([{call, _Line, {Type, _Line1, FName}, _Args} = Rep], Name, Variables) 
             {NRep, NVariables} = add_try_catch(Rep, Variables), 
             {[NRep], NVariables}
     end;
-walk_body([{call, _Line, {remote, _Line1, _Module, _Function}, _Args} = Rep], _Name, Variables) ->
+walk_body([{call, _Pos, {remote, _Pos1, _Module, _Function}, _Args} = Rep], _Name, Variables) ->
     {NRep, NVariables} = add_try_catch(Rep, Variables),
     {[NRep], NVariables};
 walk_body([H], _Name, Variables) ->
@@ -89,7 +89,7 @@ walk_body([], _Name, Variables) ->
     {[], Variables}.
 
 -ifdef('OTP_RELEASE').
-add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
+add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     Class = 
         erl_syntax_lib:new_variable_name(
           fun(N) -> list_to_atom("Class" ++ integer_to_list(N)) end, Variables),
@@ -100,9 +100,9 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
         erl_syntax_lib:new_variable_name(
           fun(N) -> list_to_atom("StackTrace" ++ integer_to_list(N)) end, Variables),
     NVariables = sets:union(sets:from_list([Class, Exception, StackTrace]), Variables),
-    ClassVar = {var, Line, Class},
-    ExceptionVar = {var, Line, Exception},
-    StackTraceVar = {var, Line, StackTrace},
+    ClassVar = {var, Pos, Class},
+    ExceptionVar = {var, Pos, Exception},
+    StackTraceVar = {var, Pos, StackTrace},
     Vars = [ClassVar, ExceptionVar, StackTraceVar],
     Node = 
         quote(
@@ -111,10 +111,10 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
           catch
               _@ClassVar:_@ExceptionVar:_@StackTraceVar ->
                   erlang:raise(_L@Vars)
-          end, Line),
+          end, Pos),
     {Node, NVariables}.
 -else.
-add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
+add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     Class = 
         erl_syntax_lib:new_variable_name(
           fun(N) -> list_to_atom("Class" ++ integer_to_list(N)) end, Variables),
@@ -122,8 +122,8 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
         erl_syntax_lib:new_variable_name(
           fun(N) -> list_to_atom("Exception" ++ integer_to_list(N)) end, Variables),
     NVariables = sets:union(sets:from_list([Class, Exception]), Variables),
-    ClassVar = {var, Line, Class},
-    ExceptionVar = {var, Line, Exception},
+    ClassVar = {var, Pos, Class},
+    ExceptionVar = {var, Pos, Exception},
     Node = 
         quote(
           try
@@ -131,6 +131,6 @@ add_try_catch({call, Line, _Fun, _Args} = Expr, Variables) ->
           catch
               _@ClassVar:_@ExceptionVar:_@Stacktraces ->
                   erlang:raise(_@ClassVar,_@ExceptionVar,erlang:get_stacktrace())
-          end, Line),
+          end, Pos),
     {Node, NVariables}.
 -endif.

@@ -23,7 +23,7 @@
 -export([test_match_pattern/0]).
 -export([test_function_pattern_1/0, test_function_pattern_2/0]).
 -export([test_case_pattern_1/0, test_case_pattern_2/0, test_case_pattern_3/0]).
--export([test_quote_code/0, test_quote_line_1/0, test_quote_line_2/0]).
+-export([test_quote_code/0, test_quote_pos_1/0, test_quote_pos_2/0]).
 -export([test_try_catch/0, test_case/0, test_function/0]).
 -export([test_attributes/0]).
 -export([test_group_args/0]).
@@ -91,11 +91,11 @@ test_quote_code() ->
 test_fun() ->
     ok.
 
-test_quote_line_1() ->
-    macro_example:quote_line_1(ok).
+test_quote_pos_1() ->
+    macro_example:quote_pos_1(ok).
 
-test_quote_line_2() ->
-    macro_example:quote_line_2(ok).
+test_quote_pos_2() ->
+    macro_example:quote_pos_2(ok).
 
 test_case() ->
     macro_example:macro_case(one_plus(), 2, 3).

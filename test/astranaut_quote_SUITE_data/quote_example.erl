@@ -131,8 +131,8 @@ code() ->
     quote_code("test_fun()").
 
 pos_1(Ast) ->
-    Line = erl_syntax:get_pos(Ast),
-    quote({hello, unquote(Ast)}, Line).
+    Pos = erl_syntax:get_pos(Ast),
+    quote({hello, unquote(Ast)}, Pos).
 
 pos_2(Ast) ->
     Pos = erl_syntax:get_pos(Ast),

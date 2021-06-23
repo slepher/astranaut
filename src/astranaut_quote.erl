@@ -512,7 +512,7 @@ quote_list_1(H, T, #{quote_pos := Pos} = Opts) ->
 quote_tuple_list([Type|Rest], #{attribute := type_header} = Opts) ->
     %% special form of {attribute, Pos, spec, {{F, A}, Spec}}.
     %% special form of {attribute, Pos, type, {Name, Params, Type}}.
-    %% there is no line in {F, A}.
+    %% there is no pos in {F, A}.
     Opts1 = Opts#{attribute => type_body},
     astranaut_return:lift_m(
       fun([QuotedType, QuotedRest]) ->
@@ -521,7 +521,7 @@ quote_tuple_list([Type|Rest], #{attribute := type_header} = Opts) ->
 quote_tuple_list(TupleList, #{attribute := attr} = Opts) ->
     %% special form of {attribute, Pos, export, [{F, A}...]}.
     %% special form of {attribute, Pos, Attribute, T}.
-    %% there is no line in {F, A} and T.
+    %% there is no pos in {F, A} and T.
     quoted_tuple(quote_tuple_list_rest(TupleList, Opts), Opts);
 
 quote_tuple_list([Action, TuplePos|Rest] = TupleList, #{} = Opts) ->

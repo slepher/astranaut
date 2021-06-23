@@ -110,7 +110,7 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [test_return, test_bind, test_error_0, test_state, 
-     test_line, test_line_2, test_file_line, test_fail].
+     test_pos, test_pos_2, test_file_pos, test_fail].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -174,7 +174,7 @@ test_state(_Config) ->
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
-test_line(_Config) ->
+test_pos(_Config) ->
     MA = 
         do([ traverse ||
                astranaut_traverse:put(10),
@@ -191,7 +191,7 @@ test_line(_Config) ->
     ok.
 
 
-test_line_2(_Config) ->
+test_pos_2(_Config) ->
     MA = 
         do([ traverse ||
                astranaut_traverse:update_pos(
@@ -203,7 +203,7 @@ test_line_2(_Config) ->
     ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error:formatted_errors(Error)}),
     ok.
 
-test_file_line(_Config) ->
+test_file_pos(_Config) ->
     MA = 
         do([ traverse ||
                astranaut_traverse:update_file(?FILE),
@@ -268,7 +268,7 @@ test_fail(_Config) ->
 %%     Walk = astranaut_walk_return:new(#{}),
 %%     Return = 
 %%         bind_pre(NodeA, Walk,
-%%                  fun({atom, _Line, A}) ->
+%%                  fun({atom, _Pos, A}) ->
 %%                          NodeC = {atom, 20, A},
 %%                          astranaut_walk_return:new(#{node => NodeC})
 %%                  end),
@@ -280,7 +280,7 @@ test_fail(_Config) ->
 %%     Walk = astranaut_walk_return:new(#{continue => true, node => {atom, 10, 'B'}}),
 %%     Return = 
 %%         bind_pre(NodeA, Walk,
-%%                  fun({atom, _Line, A}) ->
+%%                  fun({atom, _Pos, A}) ->
 %%                          NodeC = {atom, 20, A},
 %%                          astranaut_walk_return:new(#{node => NodeC})
 %%                  end),
@@ -292,7 +292,7 @@ test_fail(_Config) ->
 %%     Walk = astranaut_walk_return:new(#{node => {atom, 10, 'B'}}),
 %%     Return = 
 %%         bind_pre(NodeA, Walk,
-%%                  fun({atom, _Line, A}) ->
+%%                  fun({atom, _Pos, A}) ->
 %%                          NodeC = {atom, 20, A},
 %%                          astranaut_walk_return:new(#{node => NodeC})
 %%                  end),

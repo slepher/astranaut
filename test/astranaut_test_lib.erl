@@ -37,8 +37,8 @@ get_baseline(Mark, Forms) ->
 realize_with_baseline(Baseline, ErrorStruct) ->
     ErrorStruct1 =
         astranaut_error:with_all_formatted_failure(
-            fun({Line, Formatter, Error}) when is_integer(Line) ->
-                    {Line - Baseline, Formatter, Error};
+            fun({Pos, Formatter, Error}) when is_integer(Pos) ->
+                    {Pos - Baseline, Formatter, Error};
                ({{Line, _Column}, Formatter, Error}) when is_integer(Line) ->
                     {Line - Baseline, Formatter, Error};
                (Error) ->

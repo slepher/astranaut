@@ -158,10 +158,10 @@ test_pattern_case(_Config) ->
 
 test_quote_code_case(_Config) ->
     ?assertEqual(ok, macro_test:test_quote_code()),
-    ?assertEqual({hello, ok}, macro_test:test_quote_line_1()),
+    ?assertEqual({hello, ok}, macro_test:test_quote_pos_1()),
     Ast = {tuple, 20, [{atom, 20, a}, {atom, 20, b}]},
     NewAst = {tuple, 22, [{atom, 22, ok}, {tuple, 23, [{atom, 23, hello}, Ast]}]},
-    ?assertEqual(NewAst,macro_example:quote_line_2(Ast)),
+    ?assertEqual(NewAst,macro_example:quote_pos_2(Ast)),
     ok.
 
 test_other_case(_Config) ->
@@ -178,10 +178,10 @@ test_macro_order(_Config) ->
 
 test_macro_with_warnings(Config) ->
     Forms = astranaut_test_lib:test_module_forms(macro_with_warnings, Config),
-    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    Basepos = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
     io:format("error is ~p~n", [astranaut_error:printable(ErrorStruct)]),
-    {[{File, Errors}], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    {[{File, Errors}], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Basepos, ErrorStruct),
     Local = macro_with_warnings__local_macro,
     ?assertMatch(
        [{45,  Local, {macro_exception, _MFA, [], _StackTrace}},

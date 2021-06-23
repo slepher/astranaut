@@ -391,14 +391,14 @@ eof() ->
     update_file(eof).
 
 -spec update_pos(erl_anno:location(), struct(S, A)) -> struct(S, A).
-update_pos(Line, MA) ->
+update_pos(Pos, MA) ->
     map_m_state(
       fun(Formatter, #{error := Error0} = MState) ->
               case astranaut_error:no_pending(Error0) of
                   true ->
                       MState;
                   false ->
-                      Error1 = astranaut_error:update_pos(Line, Formatter, Error0),
+                      Error1 = astranaut_error:update_pos(Pos, Formatter, Error0),
                       update_m_state(MState, #{error => Error1})
               end
         end, MA).
