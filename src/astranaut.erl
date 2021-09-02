@@ -82,7 +82,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-%% @doc 
+%% @doc
 %% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
 -spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
 smap(F, Nodes, Opts) ->
