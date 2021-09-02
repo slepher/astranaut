@@ -96,40 +96,57 @@ parse_file(File, Opts) ->
                      true -> filename:basename(SourceName0);
                      false -> SourceName0
                  end,
-    StartLocation = case with_columns(Opts) of
-                        true ->
-                            {1,1};
-                        false ->
-                            1
-                    end,
-    case epp:parse_file(File,
-                        [{includes,[".",Dir|inc_paths(Opts)]},
-                         {source_name, SourceName},
-                         {macros,pre_defs(Opts)},
-                         {default_encoding, utf8},
-                         {location, StartLocation},
-                         extra]) of
-	{ok,Forms,Extra} ->
-	    Encoding = proplists:get_value(encoding, Extra),
-	    case find_invalid_unicode(Forms, File) of
-		none ->
-		    Forms;
-		{invalid_unicode, File, Pos} ->
-		    case Encoding of
-			none ->
+    EppOpts = [{includes,[".",Dir|inc_paths(Opts)]},
+               {source_name, SourceName},
+               {macros,pre_defs(Opts)},
+               {default_encoding, utf8},
+               extra],
+    case epp:parse_file(File, eppopts_add_location(Opts, EppOpts)) of
+	{ok, Forms, Extra} ->
+            Encoding = proplists:get_value(encoding, Extra, none),
+            case find_invalid_unicode(Forms, File) of
+                none ->
+                    Forms;
+                {invalid_unicode, File, Pos} ->
+                    case Encoding of
+                        none ->
                             Es = [{File,[{Pos, compile, reparsing_invalid_unicode}]}],
                             {error, Es, []};
-			_ ->
-			    Forms
-		    end
-	    end;
+                        _ ->
+                            Forms
+                    end
+            end;
 	{error,E} ->
 	    Es = [{File,[{none,compile,{epp,E}}]}],
 	    {error, Es, []}
     end.
 
-with_columns(Opts) ->
-    proplists:get_value(error_location, Opts, column) =:= column.
+%% StartLocation Option is added after OTP-24, it's need to pass dialyzer before OTP-23.
+-if(?OTP_RELEASE >= 24).
+eppopts_add_location(Opts, EppOpts) ->
+    WithColumns = proplists:get_value(error_location, Opts, column) =:= column,
+    StartLocation = case WithColumns of
+                        true ->
+                            {1,1};
+                        false ->
+                            1
+                    end,
+    [{location, StartLocation}|EppOpts].
+-else.
+eppopts_add_location(_Opts, EppOpts) ->
+    EppOpts.
+-endif.
+
+find_invalid_unicode([H|T], File0) ->
+    case H of
+        {attribute,_,file,{File,_}} ->
+            find_invalid_unicode(T, File);
+        {error,{Pos,file_io_server,invalid_unicode}} ->
+            {invalid_unicode,File0,Pos};
+        _Other ->
+            find_invalid_unicode(T, File0)
+    end;
+find_invalid_unicode([], _) -> none.    
 
 -spec compile_forms(astranaut:forms(), [compile:option()|without_warnings]) -> astranaut_return:struct(module()).
 %% @doc compile and load forms from file with compile opts, an extra option is without_warnings, while provided, no warnings return or reported, it's useful while temperary compile part of forms on compile time and use it later.
@@ -164,17 +181,6 @@ load_forms(Forms, Opts) ->
               end
       end).
 
-find_invalid_unicode([H|T], File0) ->
-    case H of
-        {attribute,_,file,{File,_}} ->
-            find_invalid_unicode(T, File);
-        {error,{Pos,file_io_server,invalid_unicode}} ->
-            {invalid_unicode,File0,Pos};
-        _Other ->
-            find_invalid_unicode(T, File0)
-    end;
-find_invalid_unicode([], _) -> none.
-
 inc_paths(Opts) ->
     [ P || {i,P} <- Opts, is_list(P) ].
 
@@ -204,10 +210,16 @@ analyze_module_attributes(AttributeName, Module) ->
 %% @see erl_syntax_lib:analyze_forms/1.
 analyze_forms_attributes(AttributeName, Forms) ->
     lists:reverse(
-      with_attribute(
-        fun(Attr, Acc) ->
-                [Attr|Acc]
-        end, [], Forms, AttributeName, #{simplify_return => true})).
+      lists:foldl(
+        fun({attribute, _, Attr, AttrValue}, Acc) when Attr == AttributeName ->
+                [AttrValue|Acc];
+           (_Form, Acc) ->
+                Acc
+        end, [], Forms)).
+      %% with_attribute(
+      %%   fun(Attr, Acc) ->
+      %%           [Attr|Acc]
+      %%   end, [], Forms, AttributeName, #{simplify_return => true})).
 
 -spec analyze_forms_file(astranaut:forms()) -> string() | undefined.
 %% @doc file in attribute of Analyzed Forms.
@@ -309,12 +321,12 @@ gen_function(Name, {'fun', Pos, {clauses, Clauses}}) ->
     gen_function(Name, Pos, Clauses);
 gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
     Clauses1 = 
-        astranaut:map(
+        astranaut:smap(
           fun({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 == FunName2 ->
                   {atom, FunNamePos, FunName2};
              (Node, _Attr) ->
                   Node
-          end, Clauses, #{traverse => leaf, simplify_return => true}),
+          end, Clauses, #{traverse => leaf}),
     gen_function(Name, Pos, Clauses1);
 gen_function(Name, [Clause|_T] = Forms) ->
     case erl_syntax:type(Clause) of

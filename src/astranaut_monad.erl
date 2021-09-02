@@ -83,7 +83,7 @@ map_m(_F, [], _Bind, Return) ->
 
 -spec sequence_m([monad(M, A)], M) -> monad(M, [A]).
 sequence_m(MAs, Monad) ->
-    map_m(MAs, monad_bind(Monad), monad_return(Monad)).
+    sequence_m(MAs, monad_bind(Monad), monad_return(Monad)).
 
 -spec sequence_m([monad(M, A)], monad_bind(M), monad_return(M)) -> monad(M, [A]).
 sequence_m(MAs, Bind, Return) ->

@@ -26,6 +26,9 @@
                            formatter => module(),
                            attr => traverse_attr()}.
 
+-type straverse_opts() :: #{traverse => traverse_style(),
+                           attr => traverse_attr()}.
+
 -type traverse_attr() :: #{_ => _}.
 -type traverse_style() :: traverse_step() | all | subtree.
 -type traverse_step() :: pre | post | leaf.
@@ -79,19 +82,20 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), traverse_opts()) -> trees().
+-spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
 smap(F, Nodes, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     Opts1 = maps:remove(uniplate, Opts),
     astranaut_uniplate:map(F, Nodes, Uniplate, Opts1).
 
--spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), #{}) -> S.
+-spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Nodes, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     Opts1 = maps:remove(uniplate, Opts),
     astranaut_uniplate:reduce(F, Init, Nodes, Uniplate, Opts1).
 
--spec smapfold(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}), S, trees(), #{}) -> {trees(), S}.
+-spec smapfold(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}),
+               S, trees(), straverse_opts()) -> {trees(), S}.
 smapfold(F, Init, Nodes, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     Opts1 = maps:remove(uniplate, Opts),
@@ -113,7 +117,7 @@ map(F, TopNode, Opts) ->
       fun({TopNode1, _State}) ->
               TopNode1
       end,
-      mapfold(F1, ok, TopNode, Opts#{use_traverse => true})).
+      mapfold_1(F1, ok, TopNode, Opts#{use_traverse => true})).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn == Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
@@ -133,11 +137,14 @@ reduce(F, Init, TopNode, Opts) ->
       fun({_TopNode1, State}) ->
               State
       end,
-      mapfold(F1, Init, TopNode, Opts1#{use_traverse => true})).
+      mapfold_1(F1, Init, TopNode, Opts1#{use_traverse => true})).
 
 -spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
 %% @doc Combines the operations of map/3 and reduce/4 into one pass.
 mapfold(F, Init, TopNode, Opts) ->
+    mapfold_1(F, Init, TopNode, Opts).
+
+mapfold_1(F, Init, TopNode, Opts) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
     InitAttr = maps:get(attr, Opts, #{}),
     Opts1 = maps:without([formatter, attr, uniplate], Opts),

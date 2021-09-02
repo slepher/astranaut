@@ -113,4 +113,4 @@ update_expression(Expression, Monad) ->
               quote(astranaut_monad:return(unquote(Arg), unquote(Monad)), Pos);
          (_Node) ->
               keep
-      end, Expression, #{formatter => ?MODULE, traverse => pre}).
+      end, Expression, #{traverse => pre}).

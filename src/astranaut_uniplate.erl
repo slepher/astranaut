@@ -87,7 +87,7 @@ uniplate_static(Uniplate) ->
             {Subtrees, fun(_) -> Node end}
     end.
 
--spec mapfold(fun((A, S) -> {A, S}) | fun((A, S, #{}) -> {A, S}), S, #{}, A, uniplate(A)) -> {A, S}.
+-spec mapfold(fun((A, S) -> {A, S}) | fun((A, S, #{}) -> {A, S}), S,  A, uniplate(A), #{}) -> {A, S}.
 mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2) ->
     SA =
         map_m(
@@ -169,10 +169,11 @@ monad_opts(Monad) ->
       end, MOpts).
 
 -spec map_m_monads(fun((A) -> monad(M, A)), A, uniplate(A),
-                   #{
+                   #{bind => astranaut_monad:monad_bind(M),
+                     return => astranaut_monad:monad_return(M),
                      writer => astranaut_monad:monad_writer(M),
                      listen => astranaut_monad:monad_listen(M),
-                     lift => astranaut_monad:monad_lift(_W)}, #{traverse => pre | post | all | subtree}) -> monad(M, A).
+                     lift_writer => astranaut_monad:monad_lift(_W)}, #{traverse => pre | post | all | subtree}) -> monad(M, A).
 map_m_monads(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
     astranaut_monad:lift_m(
       fun lists:flatten/1,

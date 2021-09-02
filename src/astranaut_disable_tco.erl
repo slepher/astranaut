@@ -15,7 +15,7 @@
 %%% API
 %%%===================================================================
 parse_transform(Forms, _Opt) ->
-    Opts = #{formatter => ?MODULE, traverse => all},
+    Opts = #{traverse => all},
     {Forms1, _} = astranaut:smapfold(fun walk/3, sets:new(), Forms, Opts),
     Forms1.
 

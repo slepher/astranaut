@@ -38,7 +38,6 @@
 
 -type formatter() :: module().
 -type convertable(S, A) :: astranaut:walk_return(S, A) | astranaut_return:struct(A) | state_struct(S, A).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -55,9 +54,8 @@
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
 -export([listen_error/1, writer_updated/1, listen_updated/1, set_updated/1]).
--export([with_formatter/2]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
--export([update_file/1, eof/0, update_pos/2, update_pos/3]).
+-export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
 
 -spec astranaut_traverse(convertable(S, A)) -> struct(S, A).
 astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
@@ -345,14 +343,6 @@ generate_error(Error) ->
         end,
     new(Inner).
 
--spec with_formatter(fun((formatter()) -> formatter()), struct(S, A)) -> struct(S, A).
-with_formatter(Formatter, MA) ->
-    Inner = 
-        fun(_Formatter0, File, Attr, State) ->
-                  run_0(MA, Formatter, File, Attr, State)
-        end,
-    new(Inner).
-
 -spec warning(term()) -> struct(_S, _A).
 warning(Warning) ->
     warnings([Warning]).
@@ -406,6 +396,13 @@ update_pos(Pos, MA) ->
 update_pos(Pos, Formatter, MA) ->
     with_formatter(Formatter, update_pos(Pos, MA)).
 
+-spec with_formatter(module(), struct(S, A)) -> struct(S, A).
+with_formatter(Formatter, MA) ->
+    Inner = 
+        fun(_Formatter0, File, Attr, State) ->
+                  run_0(MA, Formatter, File, Attr, State)
+        end,
+    new(Inner).
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================

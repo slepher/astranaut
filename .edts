@@ -1,3 +1,2 @@
 :lib-dirs '("_build/default/lib" "_build/test/lib")
 :app-include-dirs '("include")
-:start-command "../otp/bin/erl -sname astranaut"

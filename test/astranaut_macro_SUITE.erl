@@ -10,7 +10,6 @@
 
 -compile(export_all).
 
--include("astranaut_struct_name.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 

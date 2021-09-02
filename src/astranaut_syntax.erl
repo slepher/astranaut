@@ -14,8 +14,7 @@
 -export([type/1, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
 -export([subtrees_pge/3, attribute_subtrees_type/3]).
--export([pattern_node/1, guard_node/1, expression_node/1]).
--export([update_node/2]).
+-export([pattern_node/1, guard_node/1, expression_node/1, update_node/2]).
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
 type(Node) ->
@@ -81,8 +80,8 @@ update_tree(Node, Subtrees) ->
 %% as this issue mentioned, it's a bug, but will cause compatibility issue
 %% https://github.com/erlang/otp/issues/4529
 %% the goal of module is to fix this without cause compatibility issues.
-%% just use erl_tree_syntax:subtrees/1 replace of erl_syntax:subtress/1,
-%% erl_tree_syntax:revert/1 replace of erl_syntax:revert/1.
+%% just use astranaut_syntax:subtrees/1 replace of erl_syntax:subtress/1,
+%% astranaut_syntax:revert/1 replace of erl_syntax:revert/1.
 revert(Node) ->
     case erl_syntax:is_tree(Node) of
         false ->
@@ -174,6 +173,9 @@ attribute(Attribute, Subtree) ->
 update_node(Node, Subtree) ->
     astranaut_uniplate:up_attr(#{node => Node}, Subtree).
 
+%%===================================================================
+%% update forms related functions
+%%===================================================================
 -spec reorder_updated_forms([form()]) -> [form()].
 reorder_updated_forms(Forms) ->
     Functions = forms_functions(Forms),
@@ -191,7 +193,6 @@ reorder_updated_forms([Form|Tails], Functions, GRForms) ->
     reorder_updated_forms(Tails, Functions, grforms_append(Form, GRForms));
 reorder_updated_forms([], _Functions, GRForms) ->
     grforms_to_forms(GRForms).
-
 
 forms_functions(Forms) ->
     forms_functions(Forms, ordsets:new()).

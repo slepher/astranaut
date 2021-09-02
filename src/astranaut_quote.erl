@@ -16,6 +16,9 @@
 -export([quote_type_code/1, quoted/1, quoted/2]).
 -export([parse_transform/2, format_error/1]).
 
+-type binding_type() :: atom | dynamic | float | integer | string | value | value_list | var.
+-type erl_var() :: {var, erl_anno:location(), atom()}.
+
 %%%===================================================================
 %%% API for quote flattencons/2, mergecons/2
 %%%===================================================================
@@ -28,8 +31,7 @@ flattencons(Value) when is_list(Value) ->
 
 flattencons(Cons, []) ->
     flattencons(Cons);
-flattencons(Cons, Rest) ->
-    flattencons(Cons) ++ Rest.
+flattencons(Cons, Rest) ->    flattencons(Cons) ++ Rest.
 
 mergecons([H|T], Rest) ->
     {cons, 0, H, mergecons(T, Rest)};
@@ -77,7 +79,7 @@ atom_value(Var, #{}) when is_atom(Var) ->
     Var;
 atom_value(Var, #{}) when is_list(Var) ->
     list_to_atom(Var);
-atom_value(Var, #{}) when is_list(Var) ->
+atom_value(Var, #{}) when is_binary(Var) ->
     binary_to_atom(Var, utf8);
 atom_value(Var, #{type := Type, name := Name}) ->
     erlang:error({unexpected_type_of_var, Name, Type, Var}).
@@ -169,6 +171,7 @@ debug_module(Forms1, true) ->
     io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]);
 debug_module(_Forms1, _) ->
     ok.
+
 %%%===================================================================
 %%% transform walk function
 %%%===================================================================
@@ -642,7 +645,8 @@ unquote_binding(Exp, #{type := dynamic, quote_type := pattern, quote_pos := Pos}
 unquote_binding(Exp, #{type := Type, quote_type := pattern} = Opts) ->
     tuple([quote_literal_value(Type, Opts), quote_pos(Opts), Exp], Opts);
 unquote_binding({var, _, Varname} = Exp, #{quote_pos := Pos, type := Type} = Opts) ->
-    call_bind_var(Exp, #{name => Varname, pos => quote_pos_value(Opts), type => Type}, Pos).
+    Opts1 = astranaut_lib:abstract_form(#{name => Varname, pos => quote_pos_value(Opts), type => Type}, Pos),
+    call_remote(?MODULE, bind_var, [Exp, Opts1], Pos).
 
 unquote_splicing(Unquotes, Rest, #{quote_pos := Pos, quote_type := expression, join := list} = Opts) ->
     astranaut_return:bind(
@@ -677,6 +681,7 @@ quote_type(_) ->
 call_remote(Module, Function, Arguments, Pos) ->
     {call, Pos, {remote, Pos, {atom, Pos, Module}, {atom, Pos, Function}}, Arguments}.
 
+-spec parse_binding_var(erl_var()) -> {binding_type() | default, erl_var()}.
 parse_binding_var({var, Pos, Varname} = Var) ->
     case parse_binding_1(atom_to_list(Varname)) of
         {VarType, VarNameStr} ->
@@ -686,6 +691,7 @@ parse_binding_var({var, Pos, Varname} = Var) ->
             {default, Var}
     end.
 
+-spec parse_binding_name(atom(), erl_anno:location()) -> {binding_type(), erl_var(), atom()} | default.
 parse_binding_name(Name, Pos) ->
     case parse_binding_1(atom_to_list(Name)) of
         {VarType, VarName} ->
@@ -713,14 +719,6 @@ parse_binding_1([$_,$@|T]) ->
     {value, T};
 parse_binding_1(_) ->
     default.
-
-call_bind_var(Var, #{type := value}, _QuotePos) ->
-    Var;
-call_bind_var(Var, #{type := value_list}, _QuotePos) ->
-    Var;
-call_bind_var(Var, #{} = Opts, Pos) ->
-    Opts1 = astranaut_lib:abstract_form(Opts, Pos),
-    call_remote(?MODULE, bind_var, [Var, Opts1], Pos).
 
 %%%===================================================================
 %%% format_error/1
