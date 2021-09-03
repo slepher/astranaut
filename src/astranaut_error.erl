@@ -485,7 +485,7 @@ endo_map(_Fun, #{?STRUCT_KEY := ?ENDO, is_empty := true} = Endo) ->
 endo_map(Fun, #{?STRUCT_KEY := ?ENDO, list := EndoList}) ->
     endo_new(fun(List) -> lists:map(Fun, EndoList(List)) end).
 
--spec append(endo(A) | [A], endo(A) | [A]) -> endo(A).
+-spec endo_append(endo(A) | [A], endo(A) | [A]) -> endo(A).
 endo_append(List1, List2) when is_list(List1) ->
     endo_append(endo(List1), List2);
 endo_append(List1, List2) when is_list(List2) ->
