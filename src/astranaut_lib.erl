@@ -321,7 +321,7 @@ relative_path(Path) ->
 
 -ifdef(OTP_RELEASE).
 replace_path(Path, BasePath) ->
-    string:replace(Path, BasePath).
+    string:replace(Path, BasePath, "").
 -else.
 %% string:replace is not avaliable before otp-20
 replace_path([H|T1], [H|T2]) ->
