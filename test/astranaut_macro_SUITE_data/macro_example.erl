@@ -119,6 +119,7 @@ macro_try_catch() ->
               erlang:raise(_L@Expr)
       end).
 -else.
+macro_try_catch() ->
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
     quote(
