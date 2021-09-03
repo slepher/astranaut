@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_lib).
 
--include_lib("astranaut_struct_name.hrl").
+-include("astranaut_struct_name.hrl").
 
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
@@ -308,10 +308,13 @@ ast_to_string(Form) ->
 relative_path(Path) ->
     case file:get_cwd() of
         {ok, BasePath} ->
-            string:replace(Path, BasePath ++ "/", "");
+            replace_path(Path, BasePath ++ "/");
         {error, _Reason} ->
             Path
     end.
+
+replace_path(Path, BasePath) ->
+    string:replace(Path, BasePath, "").
 
 %% =====================================================================
 -spec gen_attribute_node(atom(), erl_anno:location(), term()) -> erl_parse:abstract_form().

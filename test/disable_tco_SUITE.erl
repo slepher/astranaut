@@ -129,8 +129,8 @@ disable_tco(_Config) ->
     try
         disable_tco_example:f(1)
     catch
-        _:_:StackTraces ->
-            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(StackTraces))
+        _:_:StackTrace ->
+            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(StackTrace))
     end.
 
 extract_stacktrace(StackTrace) ->

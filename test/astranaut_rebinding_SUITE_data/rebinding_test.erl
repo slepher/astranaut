@@ -159,8 +159,8 @@ test_try() ->
     try 
         A
     catch
-        Class:Exception:StackTrace ->
-            erlang:raise(Class, Exception, StackTrace)
+        Class:Exception:StrackTrace ->
+            erlang:raise(Class, Exception, StrackTrace)
     end.
 
 test_operator(A) ->

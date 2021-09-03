@@ -707,14 +707,14 @@ apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Op
         Return ->
             Return
     catch
-        Class:Exception:StackTraces ->
+        Class:Exception:StackTrace ->
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) -> 
                           {M, F, A} =/= {?MODULE, apply_mfa, 1};
                      (_Stack) ->
                           false
-                  end, StackTraces),
+                  end, StackTrace),
             macro_exception_error(Arguments, Class, Exception, StackTraces1, Opts)
     end.
 

@@ -323,7 +323,7 @@ validate_node(Node) ->
                 _Type ->
                     ok
             catch
-                _:{badarg, _}:_ ->
+                _:{badarg, _} ->
                     {error, invalid_abstract_node}
             end
     end.
