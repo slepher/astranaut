@@ -104,6 +104,7 @@
 -module(astranaut_macro).
 
 -include("do.hrl").
+-include("stacktrace.hrl").
 
 %% API
 -export([parse_transform/2, format_error/1]).

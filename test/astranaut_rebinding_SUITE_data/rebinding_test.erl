@@ -9,6 +9,7 @@
 -module(rebinding_test).
 
 -include("rebinding.hrl").
+-include("stacktrace.hrl").
 
 -rebinding_all([debug]).
 

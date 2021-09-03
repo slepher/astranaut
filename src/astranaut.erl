@@ -9,6 +9,7 @@
 -module(astranaut).
 
 -include("astranaut_struct_name.hrl").
+-include("stacktrace.hrl").
 
 %% API
 -export([smap/3, sreduce/4, smapfold/4]).
@@ -433,8 +434,8 @@ update_tree(Node, Subtrees) ->
         Node1 ->
             Node1
     catch
-        EType:Exception:StackTrace ->
-            erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, StackTrace)
+        EType:Exception?CAPTURE_STACKTRACE ->
+            erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, ?GET_STACKTRACE)
     end.
 
 with_badarg(Fun, Node) ->
@@ -442,8 +443,8 @@ with_badarg(Fun, Node) ->
         Value ->
             Value
     catch
-        EType:{badarg, _}:StackTrace ->
-            erlang:raise(EType, {invalid_node, Node}, StackTrace)
+        EType:{badarg, _}?CAPTURE_STACKTRACE ->
+            erlang:raise(EType, {invalid_node, Node}, ?GET_STACKTRACE)
     end.
 
 format_error({validate_key_failure, required, Key, _Value}) ->
