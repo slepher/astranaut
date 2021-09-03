@@ -98,9 +98,9 @@
   error()   :: Reason.
 ```
     
-*Line*
+*Pos*
 
-&emsp;&emsp;expected error line, default is line of node in traverse_walk_fun().
+&emsp;&emsp;expected error pos, default is pos of node in traverse_walk_fun().
 
 *Module*
 
@@ -200,7 +200,7 @@ SequenceChildren =
 *ReturnError*
 
 ```erlang
-  traverse_return_error() :: [{Line :: line(), Module :: module(), Reason :: term()}].
+  traverse_return_error() :: [{Pos :: pos(), Module :: module(), Reason :: term()}].
   parse_transform_error() :: [{File, traverse_retrun_error()}].
 ```
 
@@ -265,14 +265,14 @@ SequenceChildren =
 ```
   atom() => {atom() => true}
   proplists() => map(),
-  Line => #{line => Line}
-  #{line => Line, code_line => CodeLine, debug => Debug}.
+  Pos => #{pos => Pos}
+  #{pos => Pos, code_pos => CodePos, debug => Debug}.
 ```
 
-*Line*
+*Pos*
 
   
-&emsp;&emsp; Line could be any expression, the ast will be transformed.
+&emsp;&emsp; Pos could be any expression, the ast will be transformed.
 
 ```erlang  
     quote(
@@ -280,22 +280,22 @@ SequenceChildren =
         ok
       end, 10). 
     =>
-    astranaut:replace_line_zero(quote(fun(_) -> ok end), 10).
+    astranaut:replace_pos_zero(quote(fun(_) -> ok end), 10).
     =>
     {'fun', 10, {clauses, [{clause, 10, [{var, 10, '_'}], [], [{atom, 10, ok}]}]}}.
 ```
 
-*CodeLine*
+*CodePos*
 
-&emsp;&emsp; if CodeLine is true
+&emsp;&emsp; if CodePos is true
 
 ```erlang
     10: quote(
     11:   fun(_) ->
     12:     ok
-    13: end, code_line).
+    13: end, code_pos).
     =>  
-    {'fun' 10, {clauses, [{clause, 11, [{var, 11, '_'}], [], [{atom, 12, ok}]}]}}.
+    {'fun', {11, 2}, {clauses, [{clause, {11,5}, [{var, {11,5}, '_'}], [], [{atom, {12, 3}, ok}]}]}}.
 ```
 
 *Debug*
@@ -521,13 +521,13 @@ macro.hrl add three attribute: use\_macro, exec\_macro debug\_macro
 ```
 -module(a).
 -behaviour(gen_server).
--use_macro({macro/2, [{attrs, [module, line, behaviour]}]}).
+-use_macro({macro/2, [{attrs, [module, pos, behaviour]}]}).
 
 hello() ->
   macro_a:macro(world).
 
-macro(Ast, #{module => Module, line => Line, behaviour => Behaviours} = Attributes) ->
-    {warning, Ast, {attributes, Module, Line, Behaviours}}.
+macro(Ast, #{module => Module, pos => Pos, behaviour => Behaviours} = Attributes) ->
+    {warning, Ast, {attributes, Module, Pos, Behaviours}}.
 ```
 
 *Order*

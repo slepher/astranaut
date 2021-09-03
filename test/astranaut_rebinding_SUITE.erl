@@ -1,16 +1,19 @@
 %%%-------------------------------------------------------------------
 %%% @author Chen Slepher <slepheric@gmail.com>
-%%% @copyright (C) 2018, Chen Slepher
+%%% @copyright (C) 2019, Chen Slepher
 %%% @doc
 %%%
 %%% @end
-%%% Created : 10 Dec 2018 by Chen Slepher <slepheric@gmail.com>
+%%% Created : 23 Sep 2019 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(disable_tco_SUITE).
+-module(astranaut_rebinding_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
+
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -27,7 +30,20 @@ suite() ->
 %% @end
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    Config.
+    erlang:system_flag(backtrace_depth, 20),
+    TestModules = [rebinding_example, rebinding_test],
+    astranaut_test_lib:load_data_modules(Config, TestModules),
+    Forms = astranaut_test_lib:test_module_forms(rebinding_test, Config),
+    Forms1 = astranaut_rebinding:parse_transform(Forms, astranaut_test_lib:compile_opts()),
+    Functions =
+        lists:foldl(
+            fun({function, _Pos, Name, _Arity, Clauses}, Acc) ->
+                    Clauses1 = astranaut_lib:replace_pos(Clauses, 0),
+                    maps:put(Name, Clauses1, Acc);
+               (_Form, Acc) ->
+                   Acc
+            end, #{}, Forms1),
+    [{functions, Functions}|Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -36,7 +52,6 @@ init_per_suite(Config) ->
 %%--------------------------------------------------------------------
 end_per_suite(_Config) ->
     ok.
-
 
 %%--------------------------------------------------------------------
 %% @spec init_per_group(GroupName, Config0) ->
@@ -106,14 +121,19 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [disable_tco].
+    [test_lc, test_function, test_case, test_if,
+     test_map, test_map_update,
+     test_rec, test_rec_update,
+     test_operator, test_list, test_tuple,
+     test_pattern_save_var, test_pattern_save_var_in_fun, test_pattern_save_var_in_case
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-disable_tco() -> 
+test_rebinding_lc() -> 
     [].
 
 %%--------------------------------------------------------------------
@@ -125,20 +145,108 @@ disable_tco() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-disable_tco(_Config) -> 
-    try
-        disable_tco_example:f(1)
-    catch
-        _:_:StackTraces ->
-            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(StackTraces))
-    end.
+test_lc(Config) ->
+    equal_functions(test_lc, test_lc_origin, Config),
+    A = rebinding_test:test_lc(10),
+    B = rebinding_test:test_lc_origin(10),
+    ?assertEqual(A, B),
+    ok.
 
-extract_stacktrace(StackTrace) ->
-    lists:reverse(
-      lists:foldl(
-        fun({disable_tco_example, Function, Arity, _Attrs}, Acc) ->
-                [{Function, Arity}|Acc];
-           (_, Acc) ->
-                Acc
-        end, [], StackTrace)).
-    
+test_function(Config) ->
+    equal_functions(test_function, test_function_origin, Config),
+    A = rebinding_test:test_function(10),
+    B = rebinding_test:test_function_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_case(Config) ->
+    equal_functions(test_case, test_case_origin, Config),
+    equal_functions(test_case_pinned, test_case_origin, Config),
+    A = rebinding_test:test_case(10),
+    B = rebinding_test:test_case_origin(10),
+    C = rebinding_test:test_case_pinned(10),
+    ?assertEqual(A, B),
+    ?assertEqual(A, C),
+    ok.
+
+test_if(Config) ->
+    equal_functions(test_if, test_if_origin, Config),
+    A = rebinding_test:test_if(10),
+    B = rebinding_test:test_if_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_rec(Config) ->
+    equal_functions(test_rec, test_rec_origin, Config),
+    A = rebinding_test:test_rec(10),
+    B = rebinding_test:test_rec_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_rec_update(Config) ->
+    equal_functions(test_rec_update, test_rec_update_origin, Config),
+    A = rebinding_test:test_rec_update(10),
+    B = rebinding_test:test_rec_update_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_map(Config) ->
+    equal_functions(test_map, test_map_origin, Config),
+    A = rebinding_test:test_map(10),
+    B = rebinding_test:test_map_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_map_update(Config) ->
+    equal_functions(test_map_update, test_map_update_origin, Config),
+    A = rebinding_test:test_map_update(10),
+    B = rebinding_test:test_map_update_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_operator(Config) ->
+    equal_functions(test_operator, test_operator_origin, Config),
+    A = rebinding_test:test_operator(10),
+    B = rebinding_test:test_operator_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_tuple(Config) ->
+    equal_functions(test_tuple, test_tuple_origin, Config),
+    A = rebinding_test:test_tuple(10),
+    B = rebinding_test:test_tuple_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_list(Config) ->
+    equal_functions(test_list, test_list_origin, Config),
+    A = rebinding_test:test_list(10),
+    B = rebinding_test:test_list_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_pattern_save_var(_Config) ->
+    A = rebinding_test:test_pattern_same_var(1, 2),
+    B = rebinding_test:test_pattern_same_var(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+test_pattern_save_var_in_fun(_Config) ->
+    A = rebinding_test:test_pattern_same_var_in_fun(1, 2),
+    B = rebinding_test:test_pattern_same_var_in_fun(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+test_pattern_save_var_in_case(_Config) ->
+    A = rebinding_test:test_pattern_same_var_in_case(1, 2),
+    B = rebinding_test:test_pattern_same_var_in_case(3, 3),
+    ?assertEqual(3, A),
+    ?assertEqual(7, B),
+    ok.
+
+
+equal_functions(F1, F2, Config) ->
+    Functions = proplists:get_value(functions, Config),
+    ?assertEqual(maps:get(F1, Functions), maps:get(F2, Functions)).

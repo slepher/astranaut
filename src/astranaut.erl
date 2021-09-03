@@ -1,417 +1,467 @@
 %%%-------------------------------------------------------------------
 %%% @author Chen Slepher <slepheric@gmail.com>
-%%% @copyright (C) 2017, Chen Slepher
+%%% @copyright (C) 2021, Chen Slepher
 %%% @doc
 %%%
 %%% @end
-%%% Created : 17 Oct 2017 by Chen Slepher <slepheric@gmail.com>
+%%% Created :  2 Apr 2021 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
 -module(astranaut).
 
-%% API exports
--export([attributes/2, attributes_with_line/2, attribute_nodes/2,  module_attributes/2, read/1]).
--export([is_mfa/1, is_opts/1]).
--export([attribute_node/3]).
--export([abstract/1, abstract/2]).
--export([file/1, module/1]).
--export([exports/1, exports/2, exported_function/2, function/2, function_fa/1, merge_clauses/1]).
--export([replace_line/2, replace_line_zero/2, safe_to_string/1, to_string/1]).
--export([replace_from_nth/3]).
--export([reorder_exports/1, reorder_attributes/2]).
--export([update_option_warnings/2, validate_options/2]).
--export([ast_to_options/1, ast_to_options/2]).
--export([relative_path/1]).
-%%====================================================================
-%% API functions
-%%====================================================================
+-include("astranaut_struct_name.hrl").
 
-%% this method is from https://github.com/efcasado/forms/blob/master/src/forms.erl
--spec read(atom() | iolist()) -> [erl_parse:abstract_form()].
-read(Module) when is_atom(Module) ->
-    case beam_lib:chunks(code:which(Module), [abstract_code]) of
-        {ok, {Module, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
-            Forms;
-        {ok, {no_debug_info, _}} ->
-            throw({forms_not_found, Module});
-        {error, beam_lib, {file_error, _, enoent}} ->
-            throw({module_not_found, Module})
-    end;
-read(File) ->
-    case epp:parse_file(File, []) of
-        {ok, Forms} ->
-            Forms;
-        {ok, Forms, _Extra} ->
-            Forms;
-        {error, enoent} ->
-            throw({file_not_found, File})
-    end.
+%% API
+-export([smap/3, sreduce/4, smapfold/4]).
+-export([map/3, reduce/4, mapfold/4]).
+-export([map_m/3]).
+-export([walk_return/1, traverse_return/1]).
+-export([uniplate/1]).
+-export([format_error/1]).
 
-abstract(Term) ->
-    erl_syntax:revert(erl_syntax:abstract(Term)).
+-type tree()   :: erl_syntax:syntaxTree().
+-type trees()  :: tree() | [erl_syntax:syntaxTree()].
+-type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | keep.
 
-abstract(Term, Line) ->
-    replace_line(abstract(Term), Line).
+-type traverse_opts() :: #{traverse => traverse_style(),
+                           formatter => module(),
+                           attr => traverse_attr()}.
 
--spec attributes(atom(), _Forms) -> [_Attribute].
+-type straverse_opts() :: #{traverse => traverse_style(),
+                           attr => traverse_attr()}.
 
-module_attributes(Attribute, Module) ->
-    Attributes = Module:module_info(attributes),
-    lists:reverse(
-      lists:foldl(
-        fun({Attr, Value}, Acc) when Attr == Attribute ->
-                [Value|Acc];
-           (_Other, Acc) ->
-                Acc
-        end, [], Attributes)).
+-type traverse_attr() :: #{_ => _}.
+-type traverse_style() :: traverse_step() | all | subtree.
+-type traverse_step() :: pre | post | leaf.
 
-file(Forms) ->
-    [{File, _}|_] = attributes(file, Forms),
-    File.
+-type common_walk_return(State, Value) :: astranaut_traverse:struct(State, Value) | astranaut_return:struct(Value) | walk_return(State, Value) | walk_return_tuple(Value).
 
-module(Forms) ->
-    [Module|_] = attributes(module, Forms),
-    Module.
+-type map_walk_return() :: common_walk_return(ok, rtrees()) | rtrees().
+-type map_walk() :: map_walk_1() | map_walk_2().
+-type map_walk_1() :: fun((tree()) -> map_walk_return()).
+-type map_walk_2() :: fun((tree(), traverse_attr()) -> map_walk_return()).
 
-attribute_nodes(Attribute, Forms) ->
-    lists:reverse(
-      lists:foldl(
-        fun({attribute, _Line, Attr, _Values} = Node, Acc) when Attr == Attribute ->
-                [Node|Acc];
-           (_Other, Acc) ->
-                Acc
-        end, [], Forms)).
+-type reduce_walk_return(State) :: common_walk_return(State, State) | State.
+-type reduce_walk(State) :: reduce_walk_2(State) | reduce_walk_3(State).
+-type reduce_walk_2(State) :: fun((tree(), State) -> reduce_walk_return(State)).
+-type reduce_walk_3(State) :: fun((tree(), State, traverse_attr()) -> reduce_walk_return(State)).
 
-attributes(Attribute, Forms) ->
-    lists:reverse(
-      lists:foldl(
-        fun({attribute, _Line, Attr, Values}, Acc) when Attr == Attribute ->
-                [Values|Acc];
-           (_Other, Acc) ->
-                Acc
-        end, [], Forms)).
+-type mapfold_walk_return(State) :: common_walk_return(State, rtrees()) | {rtrees() | State}.
+-type mapfold_walk(State) :: mapfold_walk_2(State) | mapfold_walk_3(State).
+-type mapfold_walk_2(State) :: fun((tree(), State) -> mapfold_walk_return(State)).
+-type mapfold_walk_3(State) :: fun((tree(), State, traverse_attr()) -> mapfold_walk_return(State)).
 
-attributes_with_line(Attribute, Forms) ->
-    lists:reverse(
-      lists:foldl(
-        fun({attribute, Line, Attr, Values}, Acc) when Attr == Attribute ->
-                [{Line, Values}|Acc];
-           (_Other, Acc) ->
-                Acc
-        end, [], Forms)).
 
-attribute_node(Name, Line, Value) when is_atom(Name), is_integer(Line) ->
-    {attribute, Line, Name, Value}.
+-type walk_return(S, A) :: #{?STRUCT_KEY => ?WALK_RETURN,
+                             return => A,
+                             state => S,
+                             node => trees(),
+                             errors => [any()],
+                             warnings => [any()],
+                             continue => boolean()}.
 
-is_mfa({Module, {Function, Arity}}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->
-    true;
-is_mfa({Function, Arity}) when is_atom(Function), is_integer(Arity) ->
-    true;
-is_mfa(Function) when is_atom(Function) ->
-    true;
-is_mfa(_) ->
-    false.
+-type walk_return_map(S, A) :: #{return => A,
+                                 state => S,
+                                 node => trees(),
+                                 error => error_term(),
+                                 warning => error_term(),
+                                 errors => [error_term()],
+                                 warnings => [error_term()],
+                                 continue => boolean()}.
 
-is_opts(Opts) when is_list(Opts) ->
-    lists:all(fun is_opts_element/1, Opts);
-is_opts(Opts) when is_map(Opts) ->
-    true;
-is_opts(Opts) when is_atom(Opts) ->
-    true;
-is_opts(_Opts) ->
-    false.
+-type error_term() :: term().
 
-is_opts_element(OptsElement) when is_atom(OptsElement) ->
-    true;
-is_opts_element({Key, _Value}) when is_atom(Key) ->
-    true;
-is_opts_element(_OptsElement) ->
-    false.
+-type walk_return_tuple(A) :: convertable_warning(A) | convertable_error(A) |
+                              continue | {continue, A} | {node, A | [A]}.
 
-replace_line(Ast, Line) ->
-    replace_line_cond(fun(_) -> true end, Ast, Line).
+-type convertable_warning(A) :: {warning, error_term()} | {warnings, [error_term()]} |
+                                {warning, A, error_term()} | {warnings, A, [error_term()]}.
 
-replace_line_zero(Ast, 0) ->
-    Ast;
-replace_line_zero(Ast, Line) ->
-    replace_line_cond(
-      fun(0) -> true;
-         (_) -> false
-      end, Ast, Line).
+-type convertable_error(A) :: {error, error_term()} | {errors, [error_term()]} |
+                              {error, A, error_term()} | {errors, A, [error_term()]}.
 
-replace_line_cond(Cond, Ast, Line) when is_integer(Line) ->
-    astranaut_traverse:map(
-      fun(Node, #{node := attribute}) ->
-              Node;
-         (Tuple, _Attr) when is_tuple(Tuple) ->
-              case tuple_to_list(Tuple) of
-                  [_Action, TupleLine|_Rest] when is_integer(TupleLine) ->
-                      case Cond(TupleLine) of
-                          true ->
-                              setelement(2, Tuple, Line);
-                          false ->
-                              Tuple
-                      end;
-                  _ ->
-                      Tuple
-              end;
-         (Node, _Attr) ->
-              Node
-         end, Ast, #{traverse => pre}).
+%%%===================================================================
+%%% API
+%%%===================================================================
+%% @doc
+%% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
+-spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
+smap(F, Nodes, Opts) ->
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Opts1 = maps:remove(uniplate, Opts),
+    astranaut_uniplate:map(F, Nodes, Uniplate, Opts1).
 
-exported_function(Name, {'fun', Line, {clauses, _Clauses}} = Fun) ->
-    Function = function(Name, Fun),
-    FunctionFa = function_fa(Function),
-    [exports([FunctionFa], Line), Function].
+%% @doc
+%% works same as reduce/4 and returns S, not astranant_return:struct(S).
+-spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
+sreduce(F, Init, Nodes, Opts) ->
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Opts1 = maps:remove(uniplate, Opts),
+    astranaut_uniplate:reduce(F, Init, Nodes, Uniplate, Opts1).
 
-function(Name, {'fun', Line, {clauses, Clauses}}) ->
-    Arity = clause_arity(Clauses),
-    {function, Line, Name, Arity, Clauses}.
+%% @doc
+%% works same as mapfold/4 and returns {trees(), S}, not astranant_return:struct({trees(), S}).
+-spec smapfold(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}),
+               S, trees(), straverse_opts()) -> {trees(), S}.
+smapfold(F, Init, Nodes, Opts) ->
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Opts1 = maps:remove(uniplate, Opts),
+    astranaut_uniplate:mapfold(F, Init, Nodes, Uniplate, Opts1).
 
-function_fa({function, _Line, Name, Arity, _Clauses}) ->
-    {Name, Arity}.
+-spec map(map_walk(), rtrees(), traverse_opts()) -> astranant_return:struct(trees()).
+%% @doc
+%% Takes a function from AstNodeA, {@link traverse_attr()} to AstNodeB, and a TopNodeA and produces a TopNodeB by applying the function to every subtree in the AST. This function is used to obtain the return values.
+%% @see mapfold/4
+map(F, TopNode, Opts) ->
+    F1 = fun(Node, _State, Attr) ->
+                 bind_return(
+                   apply_f(F, Node, Attr), #{without => [state]},
+                   fun(Node1) ->
+                           #{return => Node1}
+                   end)
+         end,
+    astranaut_return:lift_m(
+      fun({TopNode1, _State}) ->
+              TopNode1
+      end,
+      mapfold_1(F1, ok, TopNode, Opts#{use_traverse => true})).
 
-exports(Exports) ->
-    exports(Exports, 0).
+-spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
+%% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn == Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
+%% @see mapfold/4
+reduce(F, Init, TopNode, Opts) ->
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Uniplate1 = astranaut_uniplate:uniplate_static(Uniplate),
+    Opts1 = Opts#{uniplate => Uniplate1},
+    F1 = fun(Node, State, Attr) ->
+                 bind_return(
+                   apply_f_with_state(F, Node, State, Attr), #{without => [node]},
+                   fun(State1) ->
+                           #{return => keep, state => State1}
+                   end)
+         end,
+    astranaut_return:lift_m(
+      fun({_TopNode1, State}) ->
+              State
+      end,
+      mapfold_1(F1, Init, TopNode, Opts1#{use_traverse => true})).
 
-exports(Exports, Line) ->
-    {attribute, Line, export, Exports}.
+-spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
+%% @doc Combines the operations of map/3 and reduce/4 into one pass.
+mapfold(F, Init, TopNode, Opts) ->
+    mapfold_1(F, Init, TopNode, Opts).
 
-reorder_exports(Forms) ->
-    reorder_attributes(Forms, #{docks => [export], spec_as_fun => true, dock_spec => true}).
+mapfold_1(F, Init, TopNode, Opts) ->
+    Formatter = maps:get(formatter, Opts, ?MODULE),
+    InitAttr = maps:get(attr, Opts, #{}),
+    Opts1 = maps:without([formatter, attr, uniplate], Opts),
+    F1 = fun(Node) ->
+                 astranaut_traverse:with_state_attr(
+                   fun(State, Attr) ->
+                           bind_return(
+                             apply_f_with_state(F, Node, State, Attr), Opts,
+                             fun({Node1, State1}) ->
+                                     #{return => Node1, state => State1};
+                                (Return) ->
+                                     %% when return other value, we dont know which part is node and which part is state
+                                     %% just throw exception.
+                                     exit({invalid_mapfold_return, Return})
+                             end)
+                   end)
+         end,
+    TopNodeM = map_m(F1, TopNode, Opts1),
+    astranaut_traverse:run(TopNodeM, Formatter, InitAttr, Init).
 
-reorder_attributes(Forms, Options) ->
-    {_, GroupForms} =
-        lists:foldl(
-          fun(Form, {AccN, Acc}) ->
-                  {AccN + 1, [{AccN, Form}|Acc]}
-          end, {1, []}, Forms),
-    lists:foldl(
-      fun({N, {attribute, _, _, _} = Attribute}, Acc) ->
-              case astranaut_erl_syntax:is_file(Attribute) of
-                  {file, _File} ->
-                      Acc;
-                  _ ->
-                      replace_from_nth(Attribute, N, Acc, Options)
-              end;
-         (_, Acc) ->
-              Acc
-      end, Forms, lists:reverse(GroupForms)).
+apply_f(F, Node, _Attr) when is_function(F, 1) ->
+    F(Node);
+apply_f(F, Node, Attr) when is_function(F, 2) ->
+    F(Node, Attr).
 
-safe_to_string(Form) ->
-    try 
-        to_string(Form)
-    catch
-        _:Exception ->
-            io_lib:format("ast could not format ~p~n~p", [Exception, Form])
-    end.
+apply_f_with_state(F, Node, State, _Attr) when is_function(F, 2) ->
+    F(Node, State);
+apply_f_with_state(F, Node, State, Attr) when is_function(F, 3) ->
+    F(Node, State, Attr).
 
-to_string(Forms) when is_list(Forms) ->
-    erl_prettypr:format(erl_syntax:form_list(Forms));
-to_string(Form) ->
-    erl_prettypr:format(erl_syntax:form_list([Form])).
-
-merge_clauses([{'fun', Line, {clauses, _}}|_T] = Nodes) -> 
-    NClauses =
-        lists:flatten(
-          lists:map(
-            fun({'fun', _, {clauses, FClauses}}) ->
-                    FClauses
-            end, Nodes)),
-    {'fun', Line, {clauses, NClauses}}.
-
-replace_from_nth(Nodes, N, Forms) ->
-    replace_from_nth(Nodes, N, Forms, #{docks => [export]}).
-
-replace_from_nth(Nodes, N, Forms, #{docks := DockAttributesGroups} = Options) when is_list(Nodes) ->
-    DockMap =
-        lists:foldl(
-          fun(AttrributePos, Acc) ->
-                  case lists:nth(AttrributePos, DockAttributesGroups) of
-                      Attributes when is_list(Attributes) ->
-                          lists:foldl(
-                            fun(Attribute, Acc1) ->
-                                    maps:put(Attribute, AttrributePos, Acc1)
-                            end, Acc, Attributes);
-                      Attribute when is_atom(Attribute) ->
-                          maps:put(Attribute, AttrributePos, Acc)
-                  end
-          end, maps:new(), lists:seq(1, length(DockAttributesGroups))),
-    replace_from_nth(Nodes, N, Forms, [], Options#{dock_map => DockMap});
-replace_from_nth(Node, N, Forms, Options) when N > 0 ->
-    replace_from_nth([Node], N, Forms, Options).
-    
-replace_from_nth(Nodes, 1, [_|Forms], Heads, _Options) ->
-    lists:reverse(Heads) ++ Nodes ++ Forms;
-replace_from_nth(Nodes, N, [Form|Forms], Heads, #{dock_map := DockAttributes} = Options) ->
-    PartitionFun =
-        case Form of
-            {function, _Line0, NameF, ArityF, _Clauses} ->
-                fun({attribute, _Line1, spec, {{NameS, ArityS}, _SpecValue}}) ->
-                        case maps:get(dock_spec, Options, true) of
-                            true ->
-                                (NameS == NameF) and (ArityS == ArityF);
-                            false ->
-                                maps:is_key(spec, DockAttributes)
-                        end;
-                   ({attribute, _Line1, Attribute, _AttributeValue}) ->
-                        case maps:get(force, Options, false) of
-                            true ->
-                                true;
-                            false ->
-                                maps:is_key(Attribute, DockAttributes)
-                        end;
-                   (_) ->
-                        false
-                end;
-            {attribute, _line0, Attribute1, _AttributeValue1} ->
-                SpecAsFun = maps:get(spec_as_fun, Options, false),
-                if
-                   SpecAsFun and (Attribute1 == spec) ->
-                        fun({attribute, _Line1, Attribute, _AttributeValue}) ->
-                                case maps:get(force, Options, false) of
-                                    true ->
-                                        true;
-                                    false ->
-                                        maps:is_key(Attribute, DockAttributes)
-                                end;
-                           (_) ->
-                                false
-                        end;
-                    true ->
-                        case maps:find(Attribute1, DockAttributes) of
-                            {ok, AttributePos1} ->
-                                fun({attribute, _Line1, Attribute2, _AttributeValue2}) ->
-                                        case maps:find(Attribute2, DockAttributes) of
-                                            {ok, AttributePos2} ->
-                                                AttributePos1 > AttributePos2;
-                                            error ->
-                                                false
-                                        end;
-                                   (_) ->
-                                        false
-                                end;
-                            error ->
-                                fun(_) -> false end
-                        end
-                end;
-            {eof, _Line} ->
-                fun(_) -> true end;
-            _ ->
-                fun(_) -> false end
+bind_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Struct, #{use_traverse := true}, _Fun) ->
+    Struct;
+bind_return(#{?STRUCT_KEY := ?TRAVERSE_M}, #{}, _Fun) ->
+    exit(unsupported_traverse_struct);
+bind_return(#{?STRUCT_KEY := ?RETURN_OK, return := Return} = Struct, Opts, Fun) ->
+    astranaut_traverse:then(
+      astranaut_traverse:astranaut_traverse(Struct),
+      bind_return(Return, Opts, Fun));
+bind_return(#{?STRUCT_KEY := ?RETURN_FAIL} = Struct, _Opts, _Fun) ->
+    astranaut_traverse:astranaut_traverse(Struct);
+bind_return(#{?STRUCT_KEY := ?WALK_RETURN} = WalkReturn, Opts, Fun) ->
+    WalkReturn1 =
+        case Opts of
+            #{without := Keys} ->
+                maps:without(Keys, WalkReturn);
+            #{} ->
+                WalkReturn
         end,
-    {Docks, Rests} = lists:partition(PartitionFun, Nodes),
-    replace_from_nth(Rests, N - 1, Forms, [Form|lists:reverse(Docks) ++ Heads], Options);
-
-replace_from_nth(Nodes, N, [Head|Forms], Heads, WithExports) ->
-    replace_from_nth(Nodes, N - 1, Forms, [Head|Heads], WithExports).
-
-ast_to_options(Ast) ->
-    ast_to_options(Ast, []).
-
-ast_to_options(Ast, ExcepKeys) ->
-    Writer = astranaut_monad_writer_t:writer_t(astranaut_monad_identity:new()),
-    MonadWriter = ast_to_options(Ast, ExcepKeys, Writer),
-    astranaut_monad_identity:run(astranaut_monad_writer_t:run(MonadWriter)).
-
-ast_to_options({cons, _Line, Head, Tail}, Keys, Writer) ->
-    astranaut_monad:bind(
-      ast_to_value(Head, Writer),
-      fun(Head1) ->
-              astranaut_monad:bind(
-                ast_to_options(Tail, Keys, Writer),
-                fun(Tail1) ->
-                        astranaut_monad:return([Head1|Tail1], Writer)
-                end, Writer)
-      end, Writer);
-ast_to_options({nil, _Line}, _Keys, Writer) ->
-    astranaut_monad:return([], Writer);
-ast_to_options({map, _Line, MapAssocs}, Keys, Writer) ->
-    astranaut_monad:foldl_m(
-      fun({map_field_assoc, _, {atom, _LineA, Key}, Value}, Acc) ->
-              case lists:member(Key, Keys) of
-                  true ->
-                      astranaut_monad:return(maps:put(Key, Value, Acc), Writer);
-                  false ->
-                      astranaut_monad:bind(
-                        ast_to_value(Value, Writer),
-                        fun(Value1) ->
-                                astranaut_monad:return(maps:put(Key, Value1, Acc), Writer)
-                        end, Writer)
-              end;
-         ({map_field_assoc, _, Key, _Value}, Acc) ->
-              astranaut_monad:then(
-                astranaut_monad:tell([{invalid_option_key, Key}], Writer),
-                astranaut_monad:return(Acc, Writer),
-                Writer)
-      end, maps:new(), MapAssocs, Writer);
-ast_to_options(Value, _Keys, Warnings) ->
-    ast_to_value(Value, Warnings).
-
-ast_to_value({Type, _Line, Value}, Writer) when Type == atom ; Type == integer; Type == float; Type == string ->
-    astranaut_monad:return(Value, Writer);
-ast_to_value(Value, Writer) ->
-    astranaut_monad:return(Value, Writer).
-
-update_option_warnings(OptionName, Warnings) ->
-    lists:map(
-      fun({invalid_option, Value}) ->
-              {invalid_option_value, OptionName, Value};
-         ({invalid_option_value, Key, Value})  ->
-              {invalid_option_value, OptionName, Key, Value}
-      end, Warnings).
-
-validate_options(F, Options) ->
-    validate_options(F, Options, []).
-
-validate_options(F, Options, Warnings) when is_map(Options) ->
-    maps:fold(
-        fun(Key, Value, {OptionsAcc, WarningAcc} = Acc) ->
-                case apply_f(F, Key, Value, Options) of
-                    ok ->
-                        Acc;
+    %% when walk_return is returned directly, bind is empty, no need to apply Fun
+    %% when walk_return is generated in this function, bind is true, Fun should be applied.
+    WalkReturn2 =
+        case maps:find(bind, Opts) of
+            {ok, true} ->
+                case maps:find(return, WalkReturn) of
+                    {ok, Return} ->
+                        maps:merge(WalkReturn1, walk_return_up_map(Fun(Return)));
                     error ->
-                        NWarningsAcc = [{invalid_option_value, Key, Value}|WarningAcc],
-                        NOptsAcc = maps:remove(Key, OptionsAcc),
-                        {NOptsAcc, NWarningsAcc};
-                    {error, Reason} ->
-                        NWarningsAcc = [Reason|WarningAcc],
-                        NOptsAcc = maps:remove(Key, OptionsAcc),
-                        {NOptsAcc, NWarningsAcc}
-                end
-        end, {Options, Warnings}, Options);
-validate_options(F, Options, Warnings) when is_list(Options) ->
-    {Options1, Warnings1} = 
-        lists:foldl(
-          fun({Key, Value}, {OptionsAcc, WarningsAcc}) when is_atom(Key) ->
-                  {maps:put(Key, Value, OptionsAcc), WarningsAcc};
-             (Key, {OptionsAcc, WarningsAcc}) when is_atom(Key) ->
-                  {maps:put(Key, true, OptionsAcc), WarningsAcc};
-             (Value, {OptionsAcc, WarningsAcc}) ->
-                  {OptionsAcc, [{invalid_option_value, Value}|WarningsAcc]}
-          end, {maps:new(), Warnings}, Options),
-    validate_options(F, Options1, Warnings1);
-validate_options(F, Attr, Warings) when is_atom(Attr) ->
-    validate_options(F, #{Attr => true}, Warings);
-validate_options(F, {Key, Value}, Warings) when is_atom(Key) ->
-    validate_options(F, #{Key => Value}, Warings);
-validate_options(_F, Options, Warnings) ->
-    {maps:new(), [{invalid_option, Options}|Warnings]}.
+                        WalkReturn1
+                end;
+            error ->
+                WalkReturn1
+        end,
+    %% move validate_node here from constructor to use SyntaxLib:update_node.
+    WalkReturn3 = validate_walk_return_node(WalkReturn2),
+    astranaut_traverse:astranaut_traverse(WalkReturn3);
+bind_return(Return, Opts, Fun) ->
+    WalkReturn = walk_return(walk_return_map(Return)),
+    bind_return(WalkReturn, Opts#{bind => true}, Fun).
 
-relative_path(Path) ->
-    case file:get_cwd() of
-        {ok, BasePath} ->
-            string:replace(Path, BasePath ++ "/", "");
-        {error, _Reason} ->
-            Path
+%%===================================================================
+%% walk return functions
+%%===================================================================
+-spec walk_return(walk_return_map(S, A) | walk_return_tuple(A) | term()) -> walk_return(S, A).
+%% @doc generate walk_return(S, A) from walk function return in
+%% {@link map/3} {@link reduce/4}, {@link map_with_state/4}, {@link mapfold/4}
+%% @end
+walk_return(#{?STRUCT_KEY := ?WALK_RETURN} = Return) ->
+    Return;
+walk_return(#{} = Map) ->
+    Keys = [return, state, node, error, warning, errors, warnings, continue],
+    Map1 = walk_return_up_map(maps:with(Keys, Map)),
+    maps:merge(#{?STRUCT_KEY => ?WALK_RETURN, errors => [], warnings => []}, Map1);
+walk_return(Return) ->
+    walk_return(walk_return_map(Return)).
+
+walk_return_map(#{?STRUCT_KEY := ?WALK_RETURN} = Return) ->
+    Return;
+walk_return_map({warning, Warning}) ->
+    #{warnings => [Warning]};
+walk_return_map({warnings, Warnings}) ->
+    #{warnings => Warnings};
+walk_return_map({warning, A, Warning}) ->
+    #{return => A, warnings => [Warning]};
+walk_return_map({warnings, A, Warnings}) ->
+    #{return => A, warnings => Warnings};
+walk_return_map({error, Error}) ->
+    #{errors => [Error]};
+walk_return_map({errors, Errors}) when is_list(Errors) ->
+    #{errors => Errors};
+walk_return_map({error, A, Error}) ->
+    #{return => A, errors => [Error]};
+walk_return_map({errors, A, Errors}) when is_list(Errors) ->
+    #{return => A, errors => Errors};
+walk_return_map(continue) ->
+    #{continue => true};
+walk_return_map({continue, A}) ->
+    #{continue => true, return => A};
+walk_return_map({node, Node}) ->
+    #{node => Node};
+walk_return_map(A) ->
+    #{return => A}.
+
+%% update convertable_map to struct map.
+walk_return_up_map(#{errors := Errors}) when not is_list(Errors) ->
+    exit({errors_should_be_list, Errors});
+walk_return_up_map(#{warnings := Warnings}) when not is_list(Warnings) ->
+    exit({warnings_should_be_list, Warnings});
+walk_return_up_map(#{warning := Warning} = Map) ->
+    Map1 = maps:remove(warning, Map),
+    Warnings = maps:get(warnings, Map, []),
+    walk_return_up_map(Map1#{warnings => [Warning|Warnings]});
+walk_return_up_map(#{error := Error} = Map) ->
+    Map1 = maps:remove(error, Map),
+    Errors = maps:get(errors, Map, []),
+    walk_return_up_map(Map1#{errors => [Error|Errors]});
+walk_return_up_map(#{continue := true, node := Node} = Map) ->
+    maps:remove(continue, Map#{node => astranaut_uniplate:skip(Node)});
+walk_return_up_map(#{continue := true, return := Return} = Map) ->
+    maps:remove(continue, Map#{return => astranaut_uniplate:skip(Return)});
+walk_return_up_map(#{continue := true} = Map) ->
+    maps:remove(continue, Map#{return => astranaut_uniplate:skip(keep)});
+walk_return_up_map(#{} = Map) ->
+    Map.
+
+validate_walk_return_node(#{?STRUCT_KEY := ?WALK_RETURN, node := Node} = WalkReturn) ->
+    Errors = maps:get(errors, WalkReturn, []),
+    case validate_node(Node) of
+        ok ->
+            WalkReturn;
+        {error, Reason} ->
+            walk_return_up_map(maps:remove(node, WalkReturn#{errors => [{Reason, Node}|Errors]}))
+    end;
+validate_walk_return_node(WalkReturn) ->
+    WalkReturn.
+
+traverse_return(#{?STRUCT_KEY := ?RETURN_OK} = Return) ->
+    astranaut_traverse:astranaut_traverse(Return);
+traverse_return(#{?STRUCT_KEY := ?RETURN_FAIL} = Return) ->
+    astranaut_traverse:astranaut_traverse(Return);
+traverse_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Traverse) ->
+    Traverse;
+traverse_return(Return) ->
+    astranaut_traverse:astranaut_traverse(walk_return(Return)).
+
+validate_node([Node|T]) ->
+    case validate_node(Node) of
+        ok ->
+            validate_node(T);
+        {error, Reason} ->
+            {error, Reason}
+    end;
+validate_node([]) ->
+    ok;
+validate_node(Node) ->
+    case astranaut_uniplate:is_node_context(Node) of
+        true ->
+            ok;
+        false ->
+            try erl_syntax:type(Node) of
+                _Type ->
+                    ok
+            catch
+                _:{badarg, _}:_ ->
+                    {error, invalid_abstract_node}
+            end
     end.
 
-%%====================================================================
-%% Internal functions
-%%====================================================================
-clause_arity([{clause, _Line, Patterns, _Guards, _Body}|_T]) ->
-    length(Patterns).
+map_m(F, [Node|_T] = Nodes, Opts) ->
+    case erl_syntax:is_form(Node) of
+        true ->
+            astranaut_traverse:lift_m(
+              fun astranaut_syntax:reorder_updated_forms/1,
+              astranaut_traverse:map_m(
+                fun(Form) ->
+                        astranaut_traverse:lift_m(
+                          fun({Form1, true}) ->
+                                  {updated, Form, to_list(Form1)};
+                             ({_Form1, false}) ->
+                                  Form
+                          end, astranaut_traverse:listen_updated(map_form(F, Form, Opts)))
+                end, Nodes));
+        false ->
+            map_m_1(F, Nodes, Opts)
+    end;
+map_m(F, Node, Opts) ->
+    map_m_1(F, Node, Opts).
 
-apply_f(F, Key, Value, _Options) when is_function(F, 2) ->
-    F(Key, Value);
-apply_f(F, Key, Value, Options) when is_function(F, 3) ->
-    F(Key, Value, Options).
+to_list(Form1) when is_list(Form1) ->
+    Form1;
+to_list(Form1) ->
+    [Form1].
+
+map_form(F, Form, #{traverse := subtree}) ->
+    astranaut_traverse:bind(
+      traverse_map_node(F, Form),
+      fun(ok) ->
+              astranaut_traverse:return(Form);
+         (keep) ->
+              astranaut_traverse:return(Form);
+         (Form1) ->
+              astranaut_traverse:set_updated(astranaut_traverse:return(Form1))
+      end);
+map_form(F, Form, Opts) ->
+    map_m_1(F, Form, Opts).
+
+map_m_1(F, Node, Opts) ->
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    astranaut_uniplate:map_m(
+      fun(Node1) ->
+              traverse_map_node(F, Node1)
+      end, Node, Uniplate, traverse, Opts).
+
+traverse_map_node(F, Node) ->
+    Type = erl_syntax:type(Node),
+    case Type of
+	attribute ->
+            Name = erl_syntax:concrete(erl_syntax:attribute_name(Node)),
+            case Name of
+                file ->
+                    [FileTree, _PosTree] = erl_syntax:attribute_arguments(Node),
+                    File = erl_syntax:concrete(FileTree),
+                    astranaut_traverse:update_file(File);
+                _ ->
+                    Pos = erl_syntax:get_pos(Node),
+                    astranaut_traverse:update_pos(Pos, F(Node))
+            end;
+        function ->
+            Pos = erl_syntax:get_pos(Node),
+            astranaut_traverse:update_pos(Pos, F(Node));
+	eof_marker ->
+            astranaut_traverse:eof();
+        error_marker ->
+            astranaut_traverse:then(
+              astranaut_traverse:formatted_errors([erl_syntax:error_marker_info(Node)]),
+              astranaut_traverse:return([]));
+        warning_marker ->
+            astranaut_traverse:then(
+              astranaut_traverse:formatted_warnings([erl_syntax:warning_marker_info(Node)]),
+              astranaut_traverse:return([]));
+        _ ->
+            Pos = erl_syntax:get_pos(Node),
+            astranaut_traverse:update_pos(Pos, F(Node))
+    end.
+
+uniplate([]) ->
+    {[], fun(_) -> [] end};
+uniplate([Node|_T] = Nodes) ->
+    case erl_syntax:is_form(Node) of
+        true ->
+            {[Nodes], fun([Nodes1]) -> astranaut_syntax:reorder_updated_forms(Nodes1) end};
+        false ->
+            {[Nodes], fun([Nodes1]) -> Nodes1 end}
+    end;
+uniplate(Node) ->
+    case subtrees(Node) of
+        [] ->
+            {[], fun(_) -> Node end};
+        Subtrees ->
+            {Subtrees, fun(Subtrees1) ->
+                               Subtrees2 = lists:map(fun lists:flatten/1, Subtrees1),
+                               update_tree(Node, Subtrees2)
+                       end}
+    end.
+
+subtrees(Node) ->
+    with_badarg(fun() -> astranaut_syntax:subtrees(Node) end, Node).
+
+update_tree(Node, Subtrees) ->
+    try astranaut_syntax:revert(astranaut_syntax:update_tree(Node, Subtrees)) of
+        Node1 ->
+            Node1
+    catch
+        EType:Exception:StackTrace ->
+            erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, StackTrace)
+    end.
+
+with_badarg(Fun, Node) ->
+    try Fun() of
+        Value ->
+            Value
+    catch
+        EType:{badarg, _}:StackTrace ->
+            erlang:raise(EType, {invalid_node, Node}, StackTrace)
+    end.
+
+format_error({validate_key_failure, required, Key, _Value}) ->
+    io_lib:format("option key ~p is required", [Key]);
+format_error({validate_key_failure, {invalid_validator, Validator}, Key, _Value}) ->
+    io_lib:format("validator ~p for option key ~p is invalid", [Validator, Key]);
+format_error({validate_key_failure, {invalid_validator_arg, {Validator, Arg}}, Key, _Value}) ->
+    io_lib:format("argument ~p of validator ~p for option key ~p is invalid", [Arg, Validator, Key]);
+format_error({validate_key_failure, {invalid_validator_arg, Validator}, Key, _Value}) when is_atom(Validator) ->
+    io_lib:format("argument of validator ~p for option key ~p is empty", [Validator, Key]);
+format_error({validate_key_failure, {invalid_value, Validator}, Key, Value}) ->
+    io_lib:format("validator ~p for option key ~p's value ~p failed", [Validator, Key, Value]);
+format_error({validate_key_failuer, {invalid_validator_return, Validator, Return}, Key, _Value}) ->
+    io_lib:format("validator ~p for option key ~p returns a invalid_value ~p", [Validator, Key, Return]);
+format_error({invalid_option_value, Value}) ->
+    io_lib:format("~p is not a valid option value", [Value]);
+format_error(Message) ->
+    case io_lib:deep_char_list(Message) of
+        true -> Message;
+        _    -> io_lib:write(Message)
+    end.
