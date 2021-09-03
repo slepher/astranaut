@@ -12,7 +12,7 @@
 
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
-         analyze_module_attributes/2, analyze_forms_attributes/2, analyze_forms_file/1,
+         analyze_module_attributes/2, analyze_forms_attributes/1, analyze_forms_attributes/2, analyze_forms_file/1,
          analyze_forms_module/1, analyze_transform_file_pos/2,
          ast_safe_to_string/1, ast_to_string/1, relative_path/1,
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
@@ -204,6 +204,22 @@ analyze_module_attributes(AttributeName, Module) ->
            (_Other, Acc) ->
                 Acc
         end, [], Attributes)).
+
+-spec analyze_forms_attributes(astranaut:forms()) -> [term()] | no_return().
+%% @doc attributes with specific name of Analyzed Forms.
+%% @see erl_syntax_lib:analyze_forms/1.
+analyze_forms_attributes(Forms) ->
+    lists:reverse(
+      lists:foldl(
+        fun({attribute, _, Attr, AttrValue}, Acc) ->
+                [{Attr, AttrValue}|Acc];
+           (_Form, Acc) ->
+                Acc
+        end, [], Forms)).
+      %% with_attribute(
+      %%   fun(Attr, Acc) ->
+      %%           [Attr|Acc]
+      %%   end, [], Forms, AttributeName, #{simplify_return => true})).
 
 -spec analyze_forms_attributes(atom(), astranaut:forms()) -> [term()] | no_return().
 %% @doc attributes with specific name of Analyzed Forms.
@@ -596,8 +612,6 @@ remove_keys(Key, Validator, RestMapAcc) when is_list(Validator) ->
     end;
 remove_keys(Key, Validator, RestMapAcc) ->
     remove_keys(Key, [Validator], RestMapAcc).
-
-
 
 %% sort validator if there is validate dependency.
 validators_to_list(ValidatorMap) when is_map(ValidatorMap) ->

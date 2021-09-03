@@ -296,6 +296,12 @@ validate_walk_return_node(#{?STRUCT_KEY := ?WALK_RETURN, node := Node} = WalkRet
 validate_walk_return_node(WalkReturn) ->
     WalkReturn.
 
+traverse_return(#{?STRUCT_KEY := ?RETURN_OK} = Return) ->
+    astranaut_traverse:astranaut_traverse(Return);
+traverse_return(#{?STRUCT_KEY := ?RETURN_FAIL} = Return) ->
+    astranaut_traverse:astranaut_traverse(Return);
+traverse_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Traverse) ->
+    Traverse;
 traverse_return(Return) ->
     astranaut_traverse:astranaut_traverse(walk_return(Return)).
 

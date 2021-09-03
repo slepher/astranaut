@@ -131,7 +131,7 @@ parse_transform(Forms, Options) ->
 format_error({import_macro_failed, Module}) ->
     io_lib:format("could not import macro from ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.", [Module]);
 format_error({unimported_macro_module, Module}) ->
-    io_lib:format("-import_macro(~p) required.", [Module]);
+    io_lib:format("-import_macro(~p). required.", [Module]);
 format_error({unexported_macro, Module, Function, Arity}) ->
     io_lib:format("unexported macro ~p:~p/~p.", [Module, Function, Arity]);
 format_error({undefined_macro, Function, Arity}) ->
@@ -198,7 +198,7 @@ imported_macros(GlobalMacroOpts, Forms) ->
       end,
       astranaut_lib:with_attribute(
         fun(Module, {ModulesAcc, MacroMapAcc} = Acc) when is_atom(Module) ->
-                case code:is_loaded(Module) of
+                case is_loaded(Module) of
                     {file, _} ->
                         Macros = analyze_module_macros(Module),
                         Exports = Module:module_info(exports),
@@ -223,6 +223,10 @@ imported_macros(GlobalMacroOpts, Forms) ->
            (Attr, Acc) ->
                 astranaut_return:error_ok({invalid_import_macro_attr, Attr}, Acc)
         end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE})).
+
+is_loaded(Module) ->
+    code:ensure_loaded(Module),
+    code:is_loaded(Module).
 
 local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
     FormsProp = erl_syntax_lib:analyze_forms(Forms),
@@ -289,7 +293,7 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
                                               return(maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc))
                                           ]);
                                    error ->
-                                       astranaut_return:error_ok({unimported_macro_module, Module}, UsedMacrosAcc)
+                                       astranaut_return:error_ok({unimported_macro_module, ImportedModule}, UsedMacrosAcc)
                                end;
                            FAs ->
                                do([ return ||
