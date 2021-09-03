@@ -86,7 +86,6 @@ walk_body([H|T], Name, Variables) ->
 walk_body([], _Name, Variables) ->
     {[], Variables}.
 
--ifdef('OTP_RELEASE').
 add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     Class = 
         erl_syntax_lib:new_variable_name(
@@ -101,34 +100,25 @@ add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     ClassVar = {var, Pos, Class},
     ExceptionVar = {var, Pos, Exception},
     StackTraceVar = {var, Pos, StackTrace},
-    Vars = [ClassVar, ExceptionVar, StackTraceVar],
-    Node = 
-        quote(
-          try
-              unquote(Expr)
-          catch
-              _@ClassVar:_@ExceptionVar:_@StackTraceVar ->
-                  erlang:raise(_L@Vars)
-          end, Pos),
+    Node = try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar),
     {Node, NVariables}.
+
+-ifdef('OTP_RELEASE').
+try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar) ->
+    quote(
+      try
+          unquote(Expr)
+      catch
+          _@ClassVar:_@ExceptionVar:_@StackTraceVar ->
+              erlang:raise(_@ClassVar, _@ExceptionVar, _@StackTraceVar)
+      end, Pos).
 -else.
-add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
-    Class = 
-        erl_syntax_lib:new_variable_name(
-          fun(N) -> list_to_atom("Class" ++ integer_to_list(N)) end, Variables),
-    Exception = 
-        erl_syntax_lib:new_variable_name(
-          fun(N) -> list_to_atom("Exception" ++ integer_to_list(N)) end, Variables),
-    NVariables = sets:union(sets:from_list([Class, Exception]), Variables),
-    ClassVar = {var, Pos, Class},
-    ExceptionVar = {var, Pos, Exception},
-    Node = 
-        quote(
-          try
-              unquote(Expr)
-          catch
-              _@ClassVar:_@ExceptionVar:_@Stacktraces ->
-                  erlang:raise(_@ClassVar,_@ExceptionVar,erlang:get_stacktrace())
-          end, Pos),
-    {Node, NVariables}.
+try_catch_node(Expr, Pos, ClassVar, ExceptionVar, _StackTraceVar) ->
+    quote(
+      try
+          unquote(Expr)
+      catch
+          _@ClassVar:_@ExceptionVar ->
+              erlang:raise(_@ClassVar, _@ExceptionVar, erlang:get_stacktrace())
+      end, Pos).
 -endif.
