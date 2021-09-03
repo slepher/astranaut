@@ -122,6 +122,10 @@ parse_file(File, Opts) ->
 	    {error, Es, []}
     end.
 
+-ifndef(OTP_RELEASE).
+eppopts_add_location(_Opts, EppOpts) ->
+    EppOpts.
+-else.
 %% StartLocation Option is added after OTP-24, it's need to pass dialyzer before OTP-23.
 -if(?OTP_RELEASE >= 24).
 eppopts_add_location(Opts, EppOpts) ->
@@ -136,6 +140,7 @@ eppopts_add_location(Opts, EppOpts) ->
 -else.
 eppopts_add_location(_Opts, EppOpts) ->
     EppOpts.
+-endif.
 -endif.
 
 find_invalid_unicode([H|T], File0) ->
