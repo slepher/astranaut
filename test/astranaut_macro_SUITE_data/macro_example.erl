@@ -121,7 +121,6 @@ macro_try_catch() ->
 -else.
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
-    Expr = [Class, Exception, Stack],
     quote(
       try
           exit(throw)
