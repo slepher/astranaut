@@ -9,6 +9,7 @@
 -module(rebinding_test).
 
 -include("rebinding.hrl").
+-include("stacktrace.hrl").
 
 -rebinding_all([debug]).
 
@@ -159,8 +160,8 @@ test_try() ->
     try 
         A
     catch
-        Class:Exception:StackTrace ->
-            erlang:raise(Class, Exception, StackTrace)
+        Class:Exception?CAPTURE_STACKTRACE ->
+            erlang:raise(Class, Exception, ?GET_STACKTRACE)
     end.
 
 test_operator(A) ->
