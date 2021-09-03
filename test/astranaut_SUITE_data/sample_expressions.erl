@@ -3,8 +3,6 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
--include("stacktrace.hrl").
-
 -record(test, {a, b, c}).
 
 list() ->
@@ -51,10 +49,10 @@ try_catch_expr(A) ->
         A ->
             A
     catch
-        Error:badarg?CAPTURE_STACKTRACE ->
-            erlang:raise(Error, badarg, ?GET_STACKTRACE);
-        Error:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(Error, Exception, ?GET_STACKTRACE)
+        Error:badarg:StackTrace ->
+            erlang:raise(Error, badarg, StackTrace);
+        Error:Exception:StackTrace ->
+            erlang:raise(Error, Exception, StackTrace)
     after
         ok
     end.
