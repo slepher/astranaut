@@ -314,10 +314,21 @@ ast_to_string(Form) ->
 relative_path(Path) ->
     case file:get_cwd() of
         {ok, BasePath} ->
-            string:replace(Path, BasePath ++ "/", "");
+            replace_path(Path, BasePath ++ "/");
         {error, _Reason} ->
             Path
     end.
+
+-ifdef(OTP_RELEASE).
+%% string:replace is not avaliable before otp-20
+replace_path([H|T1], [H|T2]) ->
+    replace_path(T1, T2);
+replace_path(Str, _T) ->
+    Str.
+-else.
+replace_path(Path, BasePath) ->
+    string:replace(Path, BasePath).
+-endif.
 
 %% =====================================================================
 -spec gen_attribute_node(atom(), erl_anno:location(), term()) -> erl_parse:abstract_form().
