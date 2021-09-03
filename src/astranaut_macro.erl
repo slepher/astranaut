@@ -104,6 +104,7 @@
 -module(astranaut_macro).
 
 -include("do.hrl").
+-include("stacktrace.hrl").
 
 %% API
 -export([parse_transform/2, format_error/1]).
@@ -707,14 +708,14 @@ apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Op
         Return ->
             Return
     catch
-        Class:Exception:StackTraces ->
+        Class:Exception?CAPTURE_STACKTRACE ->
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) -> 
                           {M, F, A} =/= {?MODULE, apply_mfa, 1};
                      (_Stack) ->
                           false
-                  end, StackTraces),
+                  end, ?GET_STACKTRACE),
             macro_exception_error(Arguments, Class, Exception, StackTraces1, Opts)
     end.
 

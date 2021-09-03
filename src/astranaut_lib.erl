@@ -8,7 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_lib).
 
--include_lib("astranaut_struct_name.hrl").
+-include("astranaut_struct_name.hrl").
+-include("stacktrace.hrl").
 
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
