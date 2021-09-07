@@ -29,7 +29,7 @@
                          local => astranaut_monad:monad_local(M),
                          state => astranaut_monad:monad_state(M)}.
 
--record(node_context, {node, updated = false, withs = [], reduces = [],
+-record(node_context, {node, withs = [], reduces = [],
                        skip = false, up_attrs = [], entries = [], exits = []
                       }).
 

@@ -51,7 +51,6 @@
 -type mapfold_walk_2(State) :: fun((tree(), State) -> mapfold_walk_return(State)).
 -type mapfold_walk_3(State) :: fun((tree(), State, traverse_attr()) -> mapfold_walk_return(State)).
 
-
 -type walk_return(S, A) :: #{?STRUCT_KEY => ?WALK_RETURN,
                              return => A,
                              state => S,
