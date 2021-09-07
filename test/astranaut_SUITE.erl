@@ -16,8 +16,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
--record(node_context, {node, withs = [], reduces = [],
-                       skip = false, up_attrs = [], entries = [], exits = []
+-record(node_context, {node,
+                       withs = [],
+                       reduces = [],
+                       updated = true,
+                       skip = false,
+                       up_attrs = [],
+                       entries = [],
+                       exits = []
                       }).
 
 %%--------------------------------------------------------------------

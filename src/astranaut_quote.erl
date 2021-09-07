@@ -295,6 +295,7 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Deb
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_pos => QuotePos, quote_type => QuoteType, 
                             file => File, module => Module, debug => Debug}, Options),
+    %% TODO: remove astranaut_traverse:set_updated/1 and set updated in astranaut_traverse to true at default.
     astranaut_traverse:set_updated(astranaut_traverse:astranaut_traverse(quote(Value, Options1))).
 
 quote(Node, #{debug := true} = Opts) ->
