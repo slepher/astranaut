@@ -208,8 +208,8 @@ map_m_2(F, Node1, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node2 is node with context
     %% Node3 is node without entries, exits, up_attrs, skip context, but with withs, reduces
     %% SubNode1 is sub_node with context
-    %% context_node(SubNode2) is sub_node without context
-    %% context_node(Node4) is node without context
+    %% SubNode2 is sub_node without context
+    %% Node4 is node without context
     pre_apply_bind(
       F, Node1, MOpts, Opts,
       fun(Node2) ->
