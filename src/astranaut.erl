@@ -50,7 +50,6 @@
 -type mapfold_walk_2(State) :: fun((tree(), State) -> mapfold_walk_return(State)).
 -type mapfold_walk_3(State) :: fun((tree(), State, traverse_attr()) -> mapfold_walk_return(State)).
 
-
 -type walk_return(S, A) :: #{?STRUCT_KEY => ?WALK_RETURN,
                              return => A,
                              state => S,
@@ -86,26 +85,20 @@
 %% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
 -spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
 smap(F, Nodes, Opts) ->
-    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
-    Opts1 = maps:remove(uniplate, Opts),
-    astranaut_uniplate:map(F, Nodes, Uniplate, Opts1).
+    astranaut_uniplate:map(F, Nodes, fun uniplate/1, Opts).
 
 %% @doc
 %% works same as reduce/4 and returns S, not astranant_return:struct(S).
 -spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Nodes, Opts) ->
-    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
-    Opts1 = maps:remove(uniplate, Opts),
-    astranaut_uniplate:reduce(F, Init, Nodes, Uniplate, Opts1).
+    astranaut_uniplate:reduce(F, Init, Nodes, fun uniplate/1, Opts).
 
 %% @doc
 %% works same as mapfold/4 and returns {trees(), S}, not astranant_return:struct({trees(), S}).
 -spec smapfold(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}),
                S, trees(), straverse_opts()) -> {trees(), S}.
 smapfold(F, Init, Nodes, Opts) ->
-    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
-    Opts1 = maps:remove(uniplate, Opts),
-    astranaut_uniplate:mapfold(F, Init, Nodes, Uniplate, Opts1).
+    astranaut_uniplate:mapfold(F, Init, Nodes, fun uniplate/1, Opts).
 
 -spec map(map_walk(), rtrees(), traverse_opts()) -> astranant_return:struct(trees()).
 %% @doc
