@@ -31,6 +31,8 @@
                          updated_writer => astranaut_monad:monad_writer(M)
                         }.
 
+-type traverse_opts() :: #{traverse => traverse_style()}.
+
 -record(node_context, {node,
                        withs = [],
                        reduces = [],
@@ -47,7 +49,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec map(fun((A) -> A) | fun((A, #{}) -> A), A, uniplate(A), #{}) -> A.
+-spec map(fun((A) -> A) | fun((A, #{}) -> A), A, uniplate(A), traverse_opts()) -> A.
 map(F, Node, Uniplate, Opts) when is_function(F, 1) ->
     map_m(F, Node, Uniplate, identity, Opts);
 map(F, Node, Uniplate, Opts) when is_function(F, 2) ->
@@ -61,7 +63,7 @@ map(F, Node, Uniplate, Opts) when is_function(F, 2) ->
     Attr = maps:get(attr, Opts, #{}),
     RA(Attr).
 
--spec reduce(fun((A, S) -> S) | fun((A, S, #{}) -> S), S, A, uniplate(A), #{}) -> S.
+-spec reduce(fun((A, S) -> S) | fun((A, S, #{}) -> S), S, A, uniplate(A), traverse_opts()) -> S.
 reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2) ->
     SA =
         map_m_static(
@@ -88,7 +90,7 @@ reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 3) ->
     {_Node1, State1} = (SRA(Init))(Attr),
     State1.
 
--spec mapfold(fun((A, S) -> {A, S}) | fun((A, S, #{}) -> {A, S}), S,  A, uniplate(A), #{}) -> {A, S}.
+-spec mapfold(fun((A, S) -> {A, S}) | fun((A, S, #{}) -> {A, S}), S,  A, uniplate(A), traverse_opts()) -> {A, S}.
 mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2) ->
     SA =
         map_m(
@@ -130,7 +132,7 @@ uniplate_context(Uniplate) ->
             Uniplate(Node)
     end.
 
--spec map_m_static(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), #{traverse => traverse_style()}) -> monad(M, A).
+-spec map_m_static(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), traverse_opts()) -> monad(M, A).
 %% @doc works like map_m/5, but node will not be changed.
 map_m_static(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
@@ -139,7 +141,7 @@ map_m_static(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     MonadOpts1 = never_updated_writer(MonadOpts),
     map_m_1(F, Node, uniplate_static(Uniplate), MonadOpts1, Opts).
 
--spec map_m(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), #{traverse => traverse_style()}) -> monad(M, A).
+-spec map_m(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), traverse_opts()) -> monad(M, A).
 %% @doc traverse node with user defined monad with node changed detect.
 map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
@@ -226,7 +228,7 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
-    %% Node2 is node without context
+    %% Node1 is node without context
     Bind(
       step_apply(F, Node, pre, MOpts, Opts),
       %% F(Node) -> [Node] | Node
@@ -240,8 +242,8 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
                             fun(SubNode) ->
                                     sub_apply(F, SubNode, Uniplate, MOpts, Opts)
                             end, NodeContext1, Uniplate, MOpts),
-                          fun(Node2) ->
-                                  step_apply(F, Node2, post, MOpts, Opts)
+                          fun(Node1) ->
+                                  step_apply(F, Node1, post, MOpts, Opts)
                           end)
                 end, NodeOrNodes, MOpts)
       end).
@@ -277,44 +279,29 @@ map_subtreess_m(F, Subtreess, Bind, Return) ->
     %% list maybe returned when apply f over subtree, map_m_flatten is required.
     astranaut_monad:map_m(fun(Subtrees) -> map_m_flatten(F, Subtrees, Bind, Return) end, Subtreess, Bind, Return).
 
-map_m_flatten(F, [A|As], Bind, Return) ->
-    Bind(
-      F(A),
-      fun(A1) ->
-              Bind(
-                map_m_flatten(F, As, Bind, Return),
-                fun(As1) ->
-                        case A1 of
-                            AHs1 when is_list(AHs1) ->
-                                Return(AHs1 ++ As1);
-                            _ ->
-                                Return([A1|As1])
-                        end
-                end)
-      end);
-map_m_flatten(_F, [], _Bind, Return) ->
-    Return([]).
+map_m_flatten(F, As, Bind, Return) ->
+    Fold = fun(AHs1, As1) when is_list(AHs1) ->
+                   AHs1 ++ As1;
+              (A1, As1) ->
+                   [A1|As1]
+           end,
+    astranaut_monad:map_m_fold(F, As, Fold, Bind, Return).
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
     astranaut_monad:map_m(AFB, Nodes, Bind, Return);
 map_m_if_list(AFB, Node, #{}) ->
     AFB(Node).
 
-step_apply(F, Node, Step, MOpts, #{traverse := Step} = Opts) ->
-    step_context_node(updated_node_apply(F, Node, MOpts), MOpts, Opts);
+step_apply(F, Node, pre, MOpts, #{traverse := pre}) ->
+    updated_node_apply(F, Node, MOpts);
+step_apply(F, Node, post, #{bind := Bind, return := Return} = MOpts, #{traverse := post}) ->
+    astranaut_monad:lift_m(fun context_node/1, updated_node_apply(F, Node, MOpts), Bind, Return);
 step_apply(F, Node, Step, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
     context_up_attrs(NodeM, [#{step => Step}], MOpts);
 step_apply(_F, Node, _Step, #{return := Return}, #{}) ->
     Return(Node).
-
-step_context_node(NodeM, #{bind := Bind, return := Return}, #{step := post}) ->
-    %% TODO: return node with context is meaningless in step post
-    %% it's better to validate it, not just remove context.
-    astranaut_monad:lift_m(fun context_node/1, NodeM, Bind, Return);
-step_context_node(NodeM, #{}, #{}) ->
-    NodeM.
 
 sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
     updated_node_apply(F, Node, MOpts);

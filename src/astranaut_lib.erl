@@ -359,7 +359,7 @@ gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
                   {atom, FunNamePos, FunName2};
              (Node, _Attr) ->
                   Node
-          end, Clauses, #{traverse => leaf}),
+          end, Clauses, #{traverse => post}),
     gen_function(Name, Pos, Clauses1);
 gen_function(Name, [Clause|_T] = Forms) ->
     case erl_syntax:type(Clause) of
