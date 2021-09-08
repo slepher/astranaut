@@ -114,7 +114,7 @@ mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 3) ->
 
 -spec transform_m(fun((A) -> monad(M, A)), A, uniplate(A), monad_opts(M)) -> monad(M, A).
 transform_m(F, Node, Uniplate, #{} = Opts) ->
-    recursive_m(F, F, Node, Uniplate, Opts).
+    recursive_m(fun(SubNode) -> transform_m(F, SubNode, Uniplate, Opts) end, F, Node, Uniplate, Opts).
 
 -spec descend_m(fun((A) -> monad(M, A)), A, uniplate(A), monad_opts(M)) -> monad(M, A).
 descend_m(F, Node, Uniplate, #{return := Return} = Opts) ->
