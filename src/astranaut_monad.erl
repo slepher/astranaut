@@ -67,7 +67,6 @@ lift_m(F, MA, Bind, Return) ->
 map_m(F, As, Monad) ->
     map_m(F, As, monad_bind(Monad), monad_return(Monad)).
 
--spec map_m(fun((A) -> monad(M, B)), [A], monad_bind(M), monad_return(M)) -> monad(M, [B]).
 map_m(F, [A|As], Bind, Return) ->
     Bind(
       F(A),

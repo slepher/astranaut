@@ -414,8 +414,7 @@ uniplate(Node) ->
             {[], fun(_) -> Node end};
         Subtrees ->
             {Subtrees, fun(Subtrees1) ->
-                               Subtrees2 = lists:map(fun lists:flatten/1, Subtrees1),
-                               update_tree(Node, Subtrees2)
+                               update_tree(Node, Subtrees1)
                        end}
     end.
 
