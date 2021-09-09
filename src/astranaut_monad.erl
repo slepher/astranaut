@@ -11,7 +11,7 @@
 %% API
 -export([bind/3, return/2]).
 -export([lift_m/3, sequence_m/2, map_m/3]).
--export([lift_m/4, sequence_m/3, map_m/4, map_m_fold/5]).
+-export([lift_m/4, sequence_m/3, map_m/4, map_m_flatten/4]).
 -export([identity_bind/0, identity_return/0]).
 -export([maybe_bind/0, maybe_return/0]).
 -export([either_bind/0, either_return/0]).
@@ -69,6 +69,15 @@ map_m(F, As, Monad) ->
 
 map_m(F, As, Bind, Return) ->
     map_m_fold(F, As, fun(A1, As1) -> [A1|As1] end, Bind, Return).
+
+-spec map_m_flatten(fun((A) -> monad(M, B)), [A], monad_bind(M), monad_return(M)) -> monad(M, [B]).
+map_m_flatten(F, As, Bind, Return) ->
+    Fold = fun(AHs1, As1) when is_list(AHs1) ->
+                   AHs1 ++ As1;
+              (A1, As1) ->
+                   [A1|As1]
+           end,
+    map_m_fold(F, As, Fold, Bind, Return).
 
 map_m_fold(F, [A|As], Fold, Bind, Return) ->
     Bind(

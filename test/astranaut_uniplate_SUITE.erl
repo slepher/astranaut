@@ -110,7 +110,7 @@ groups() ->
 all() -> 
     [test_writer_or, test_map, test_map_attr,
      test_reduce, test_reduce_attr, test_reduce_traverse_all,
-     test_mapfold_attr, test_f_return_list].
+     test_mapfold_attr, test_f_return_list, test_all_return_list].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -309,5 +309,19 @@ test_f_return_list(_Config) ->
                   keep
           end, Ast, #{traverse => post}),
     Ast2 = merl:quote("hello(A_1, A_2, B_1, B_2, world(C_1, C_2))"),
+    ?assertEqual(Ast2, Ast1),
+    ok.
+
+test_all_return_list(_Config) ->
+    Ast = merl:quote("hello(A, B, world(C))"),
+    Ast1 =
+        astranaut:smap(
+          fun({var, Pos, Varname}) ->
+                  [{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
+                   {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
+             (_Node) ->
+                  keep
+          end, Ast, #{traverse => all}),
+    Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.
