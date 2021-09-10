@@ -44,99 +44,97 @@
                       }).
 
 -type traverse_style() :: pre | post | all | subtree.
-
 -type node_context(A) :: #node_context{node :: A} | A.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec map(fun((A) -> A) | fun((A, map()) -> A), A, uniplate(A), traverse_opts()) -> A.
+-spec map(fun((N) -> N) | fun((N, map()) -> N), N, uniplate(N), traverse_opts()) -> N.
 map(F, Node, Uniplate, Opts) when is_function(F, 1); is_function(F, 2) ->
     map_m_with_attr(
-      fun(A, R) ->
-              f_ar(F, A, R)
+      fun(N, A) ->
+              f_na(F, N, A)
       end, Node, Uniplate, identity, Opts, is_function(F, 2)).
 
--spec reduce(fun((A, S) -> S) | fun((A, S, map()) -> S), S, A, uniplate(A), traverse_opts()) -> S.
+-spec reduce(fun((N, S) -> S) | fun((N, S, map()) -> S), S, N, uniplate(N), traverse_opts()) -> S.
 reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
-    SA =
+    StateM =
         map_m_with_attr(
-          fun(A, R) ->
-                  fun(S) ->
-                          S1 = f_asr(F, A, S, R),
-                          {A, S1}
+          fun(N, A) ->
+                  fun(S0) ->
+                          S1 = f_nsa(F, N, S0, A),
+                          {N, S1}
                   end
           end, Node, Uniplate, state, Opts#{static => true}, is_function(F, 3)),
-    {Node, State1} = SA(Init),
-    State1.
+    {Node, Acc} = StateM(Init),
+    Acc.
 
--spec mapfold(fun((A, S) -> {A, S}) | fun((A, S, map()) -> {A, S}), S,  A, uniplate(A), traverse_opts()) -> {A, S}.
+-spec mapfold(fun((N, S) -> {N, S}) | fun((N, S, map()) -> {N, S}), S, N, uniplate(N), traverse_opts()) -> {N, S}.
 mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
     %% for more clear to read
-    %% this is the old version to get SA
+    %% this is the old version to get StateM
     %% while is_function(F, 2)
     %% =============================================
-    %% AFB :: fun((A) -> monad(state, A))
+    %% AFB :: fun((A) -> monad(state, B))
     %% AFB =
-    %%     fun(A) ->
-    %%             fun(S) ->
-    %%                     F(A, S)
+    %%     fun(N) ->         %% N is Node
+    %%             fun(S) -> %% S is State
+    %%                     F(N, S)
     %%             end
     %%     end,
-    %% SA :: monad(state, A)
-    %% SA = map_m(AFB, Node, Uniplate, state, Opts),
+    %% StateM :: monad(state, B)
+    %% StateM = map_m(AFB, Node, Uniplate, state, Opts),
     %% =============================================
     %% while is_function(F, 3)
     %% =============================================
-    %% AFB :: fun((A) -> monad({reader, state}, A))
+    %% AFB :: fun((A) -> monad({reader, state}, B))
     %% AFB =
-    %%     fun(A) ->
-    %%             fun(R) ->
-    %%                     fun(S) ->
-    %%                             F(A, S, R)
+    %%     fun(N) ->                 %% N is Node
+    %%             fun(A) ->         %% N is Attr
+    %%                     fun(S) -> %% S is State
+    %%                             F(N, S, A)
     %%                     end
     %%             end
     %%     end,
     %% Monad = {reader, state},
-    %% RSA :: monad({reader, state}, A)
-    %% RSA = map_m(AFB, Node, Uniplate, Monad, Opts),
-    %% SA = RSA(Attr),
+    %% ReaderTStateM :: monad({reader, state}, B)
+    %% ReaderTStateM = map_m(AFB, Node, Uniplate, Monad, Opts),
+    %% StateM = ReaderTStateM(Attr),
     %% =============================================
-    SA =
+    StateM =
         map_m_with_attr(
-          fun(A, R) ->
+          fun(N, A) ->
                   fun(S) ->
-                          f_asr(F, A, S, R)
+                          f_nsa(F, N, S, A)
                   end
           end, Node, Uniplate, state, Opts, is_function(F, 3)),
-    (SA)(Init).
+    (StateM)(Init).
 
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, false) ->
     map_m(
-     fun(A) ->
-             F(A, #{})
+     fun(N) ->         %% N is Node
+             F(N, #{}) %% #{} is empty Attr
      end, Node, Uniplate, Monad, Opts);
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
     Attr = maps:get(attr, Opts, #{}),
     Opts1 = maps:remove(attr, Opts),
-    RA =
+    ReaderT =
         map_m(
-          %% A is Node
-          fun(A) ->
-                  %% R is Attr
-                  fun(R) ->
-                          F(A, R)
+          fun(N) ->         %% N is Node
+                  fun(A) -> %% A is Attr
+                          F(N, A)
                   end
           end, Node, Uniplate, {reader, Monad}, Opts1),
-    RA(Attr).
+    ReaderT(Attr).
 
-f_ar(F, A, _R) when is_function(F, 1) ->
+f_na(F, A, _R) when is_function(F, 1) ->
     F(A);
-f_ar(F, A, R) when is_function(F, 2) ->
+f_na(F, A, R) when is_function(F, 2) ->
     F(A, R).
 
-f_asr(F, A, S, _R) when is_function(F, 2) ->
+f_nsa(F, A, S, _R) when is_function(F, 2) ->
     F(A, S);
-f_asr(F, A, S, R) when is_function(F, 3) ->
+f_nsa(F, A, S, R) when is_function(F, 3) ->
     F(A, S, R).
 
 -spec uniplate_static(uniplate(A)) -> uniplate(A).
@@ -158,13 +156,13 @@ uniplate_context(Uniplate) ->
             Uniplate(Node)
     end.
 
--spec map_m_static(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M), traverse_opts()) -> monad(M, A).
+-spec map_m_static(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M), traverse_opts()) -> monad(M, N).
 %% @doc works like map_m/5, but node will not be changed.
 map_m_static(F, Node, Uniplate, Monad, Opts) ->
     map_m(F, Node, Uniplate, Monad, Opts#{static => true}).
 
--spec map_m(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M),
-            #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, A).
+-spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
+            #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
 %% @doc traverse node with user defined monad with node changed detect.
 map_m(F, Node, Uniplate, Monad, Opts) ->
     Static = maps:get(static, Opts, false),
@@ -175,7 +173,7 @@ map_m(F, Node, Uniplate, Monad, Opts) ->
               map_m_1(F, Node, UniplateContext, MonadOpts, Opts2)
       end, Uniplate, Monad, Static).
 
--spec descend_m(fun((A) -> monad(M, A)), A, uniplate(A), M | monad_opts(M)) -> monad(M, A).
+-spec descend_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M)) -> monad(M, N).
 descend_m(F, Node, Uniplate, Monad) ->
     prepare(
       fun(UniplateContext, MonadOpts) ->

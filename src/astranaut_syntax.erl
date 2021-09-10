@@ -223,6 +223,8 @@ grforms_append({attribute, _Pos, file, _FileName} = File, {[], FRForms, ARForms,
     {[], [File|FRForms], ARForms, MForms};
 grforms_append({attribute, _Pos, export, _Exports} = Export, {[], FRForms, ARForms, MForms}) ->
     {[], FRForms, [Export|ARForms], MForms};
+grforms_append({attribute, _Pos, export_type, _Exports} = ExportType, {[], FRForms, ARForms, MForms}) ->
+    {[], FRForms, [ExportType|ARForms], MForms};
 grforms_append({attribute, _Pos, spec, _SpecValue} = Spec, {ERForms, FRForms, ARForms, MRForms}) ->
     {ERForms, [Spec|FRForms], ARForms, MRForms};
 grforms_append({function, _Pos, _Name, _Arity, _Clauses} = Function, {ERForms, FRForms, ARForms, MRForms}) ->
