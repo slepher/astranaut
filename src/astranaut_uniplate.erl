@@ -53,7 +53,7 @@
 map(F, Node, Uniplate, Opts) when is_function(F, 1); is_function(F, 2) ->
     map_m_with_attr(
       fun(A, R) ->
-              far(F, A, R)
+              f_ar(F, A, R)
       end, Node, Uniplate, identity, Opts, is_function(F, 2)).
 
 -spec reduce(fun((A, S) -> S) | fun((A, S, map()) -> S), S, A, uniplate(A), traverse_opts()) -> S.
@@ -62,7 +62,7 @@ reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) 
         map_m_with_attr(
           fun(A, R) ->
                   fun(S) ->
-                          S1 = fasr(F, A, S, R),
+                          S1 = f_asr(F, A, S, R),
                           {A, S1}
                   end
           end, Node, Uniplate, state, Opts#{static => true}, is_function(F, 3)),
@@ -105,7 +105,7 @@ mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3)
         map_m_with_attr(
           fun(A, R) ->
                   fun(S) ->
-                          fasr(F, A, S, R)
+                          f_asr(F, A, S, R)
                   end
           end, Node, Uniplate, state, Opts, is_function(F, 3)),
     (SA)(Init).
@@ -120,21 +120,23 @@ map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
     Opts1 = maps:remove(attr, Opts),
     RA =
         map_m(
+          %% A is Node
           fun(A) ->
+                  %% R is Attr
                   fun(R) ->
                           F(A, R)
                   end
           end, Node, Uniplate, {reader, Monad}, Opts1),
     RA(Attr).
 
-far(F, A, _R) when is_function(F, 1) ->
+f_ar(F, A, _R) when is_function(F, 1) ->
     F(A);
-far(F, A, R) when is_function(F, 2) ->
+f_ar(F, A, R) when is_function(F, 2) ->
     F(A, R).
 
-fasr(F, A, S, _R) when is_function(F, 2) ->
+f_asr(F, A, S, _R) when is_function(F, 2) ->
     F(A, S);
-fasr(F, A, S, R) when is_function(F, 3) ->
+f_asr(F, A, S, R) when is_function(F, 3) ->
     F(A, S, R).
 
 -spec uniplate_static(uniplate(A)) -> uniplate(A).
