@@ -577,7 +577,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
                             astranaut_traverse:warning(invalid_macro_attribute),
                             astranaut_traverse:return(Form));
                       not_macro ->
-                          astranaut_traverse:return(keep)
+                          astranaut_traverse:return(Form)
                   end
           end, Forms, #{traverse => subtree}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
@@ -671,10 +671,10 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                         true ->
                                             apply_macro(Macro#{rename_quoted_variables => true});
                                         false ->
-                                            astranaut_traverse:return(keep)
+                                            astranaut_traverse:return(Node)
                                     end;
                                 error ->
-                                    astranaut_traverse:return(keep)
+                                    astranaut_traverse:return(Node)
                             end
                         ])
              end, Clause, #{traverse => all, children => true})

@@ -13,8 +13,8 @@
 -export([uniplate_static/1, uniplate_context/1]).
 -export([map_m/5, map_m_static/5, descend_m/4]).
 -export([is_node_context/1]).
--export([with_subtrees/1, with_subtrees/2, with_subtrees/3]).
--export([skip/0, skip/1, up_attr/2, with/3, with_each/3]).
+-export([with_subtrees/2, with_subtrees/3]).
+-export([skip/1, up_attr/2, with/3, with_each/3]).
 -export([every_tree/2, clamp_trees/3, left_trees/2, right_trees/2]).
 
 -export_type([uniplate/1]).
@@ -36,7 +36,6 @@
 -record(node_context, {node,
                        withs = [],
                        reduces = [],
-                       updated = true,
                        skip = false,
                        up_attrs = [],
                        entries = [],
@@ -398,10 +397,6 @@ apply_functions([F|T], Value) when is_function(F, 1) ->
 
 updated_node(Node1, ok) ->
     {Node1, false};
-updated_node(Node1, keep) ->
-    {Node1, false};
-updated_node(Node1, #node_context{node = keep} = NodeContext2) ->
-    {NodeContext2#node_context{node = Node1}, false};
 updated_node(Node1, #node_context{node = Node1} = NodeContext2) ->
     {NodeContext2#node_context{node = Node1}, false};
 updated_node(Node1, Node1) ->
@@ -423,13 +418,7 @@ is_node_context(#node_context{}) ->
 is_node_context(_) ->
     false.
 
--spec with_subtrees(fun(([[Node]]) -> [[node_context(Node)]])) -> node_context(Node).
-with_subtrees(With) ->
-    with_subtrees(With, keep).
-
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) -> node_context(Node).
-with_subtrees(With, Reduce) when is_function(With), is_function(Reduce) ->
-    with_subtrees(With, Reduce, keep);
 with_subtrees(With, #node_context{withs = Withs} = Node) ->
     Node#node_context{withs = [With|Withs]};
 with_subtrees(With, Node) ->
@@ -440,9 +429,6 @@ with_subtrees(With, Reduce, #node_context{reduces = Reduces} = Node) ->
     with_subtrees(With, Node#node_context{reduces = [Reduce|Reduces]});
 with_subtrees(With, Reduce, Node) ->
     with_subtrees(With, Reduce, #node_context{node = Node}).
-
-skip() ->
-    #node_context{skip = true, updated = false}.
 
 -spec skip(maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 skip(Trees) ->

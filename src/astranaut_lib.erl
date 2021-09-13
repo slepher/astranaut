@@ -454,9 +454,7 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     F1 = fun(Value, {NodesAcc, StateAcc}, Attr1) ->
                  astranaut_return:bind(
                    values_apply_fun_m(F, Value, StateAcc, Attr1),
-                   fun({keep, State}) ->
-                           astranaut_return:return({NodesAcc, State});
-                      ({Nodes, State}) ->
+                   fun({Nodes, State}) ->
                            astranaut_return:return({Nodes ++ NodesAcc, State})
                    end)
          end,

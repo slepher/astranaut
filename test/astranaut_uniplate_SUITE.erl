@@ -191,7 +191,7 @@ test_map_attr(_Config) ->
                           astranaut_uniplate:with_subtrees(
                             fun([MatchLeft, MatchRight]) ->
                                     [MatchRight, astranaut_uniplate:up_attr(#{pattern => true}, MatchLeft)]
-                            end, fun lists:reverse/1);
+                            end, fun lists:reverse/1, Node);
                       _Type ->
                           Node
                   end

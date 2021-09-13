@@ -352,10 +352,9 @@ map_form(F, Form, #{traverse := subtree}) ->
       traverse_map_node(F, Form),
       fun(ok) ->
               astranaut_traverse:return(Form);
-         (keep) ->
-              astranaut_traverse:return(Form);
          (Form1) ->
-              astranaut_traverse:set_updated(astranaut_traverse:return(Form1))
+              astranaut_traverse:writer_updated({Form1, Form =/= Form1})
+              %% astranaut_traverse:set_updated(astranaut_traverse:return(Form1))
       end);
 map_form(F, Form, Opts) ->
     map_m_1(F, Form, Opts).

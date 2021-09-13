@@ -19,7 +19,6 @@
 -record(node_context, {node,
                        withs = [],
                        reduces = [],
-                       updated = true,
                        skip = false,
                        up_attrs = [],
                        entries = [],
@@ -392,6 +391,7 @@ test_map_forms(Config) ->
                   astranaut_traverse:return(ok)
           end, Forms, #{traverse => subtree}),
     Forms1 = astranaut_return:simplify(astranaut_traverse:eval(Forms1M, astranaut, #{}, ok)),
+    io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]),
     Result = astranaut_test_lib:compile_test_forms(Forms1),
     astranaut_return:with_error(
       fun(ErrorState) ->
@@ -548,7 +548,7 @@ check_node_without_tree(TopAst) ->
 test_with_subtrees(_Config) ->
     TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
     F =
-        fun(match_expr, _Node, Variables, _Attr) ->
+        fun(match_expr, Node, Variables, _Attr) ->
                 {astranaut_uniplate:with_subtrees(
                    fun([Patterns, Expressions]) ->
                            [astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
@@ -560,7 +560,7 @@ test_with_subtrees(_Config) ->
                                       [after_pattern|Variables1]
                               end,
                               astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
-                   end, fun lists:reverse/1), Variables};
+                   end, fun lists:reverse/1, Node), Variables};
            (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
                 {Var, [{pattern, VarName}|Variables]};
            (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->

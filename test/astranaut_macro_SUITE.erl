@@ -185,9 +185,9 @@ test_macro_with_warnings(Config) ->
     Local = macro_with_warnings__local_macro,
     ?assertEqual("macro_with_warnings.erl", filename:basename(File)),
     ?assertMatch(
-       [{3,  Local, noop_function},
-        {4,  astranaut_macro, invalid_macro_attribute},
-        {5,  astranaut_macro, invalid_macro_attribute},
+       [{2,  astranaut_macro, invalid_macro_attribute},
+        {3,  astranaut_macro, invalid_macro_attribute},
+        {5,  Local, noop_function},
         {12, Local, noop},
         {18, Local, noop},
         {20, Local, noop},

@@ -227,7 +227,7 @@ walk(Node, Attr, _File) ->
       astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
                 astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
-        end)).
+        end, Node)).
 
 %%%===================================================================
 %%% get options from quoted ast

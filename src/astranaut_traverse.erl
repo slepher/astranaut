@@ -186,7 +186,7 @@ bind_without_error(MA, KMB) ->
     bind(
       listen_error(MA),
       fun({A, ErrorStruct}) ->
-              case astranaut_error:is_empty(ErrorStruct) of
+              case astranaut_error:is_empty_error(ErrorStruct) of
                   true ->
                       KMB(A);
                   false ->
