@@ -62,7 +62,7 @@ astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
     Inner =
         fun(_Formatter, File, _Attr, State0) ->
                 State1 = maps:get(state, Map, State0),
-                Return = maps:get(return, Map, keep),
+                Return = maps:get(return, Map, ok),
                 Errors = maps:get(errors, Map, []),
                 Warnings = maps:get(warnings, Map, []),
                 Error1 = astranaut_error:append_ews(Errors, Warnings, astranaut_error:new(File)),

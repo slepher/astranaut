@@ -632,10 +632,10 @@ to_list(Arguments) ->
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
         astranaut:map_m(
-          fun({function, Pos, Name, Arity, Clauses}) ->
+          fun({function, Pos, Name, Arity, Clauses} = Function) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
-                          astranaut_traverse:return(keep);
+                          astranaut_traverse:return(Function);
                       true ->
                           astranaut_traverse:lift_m(
                             fun([]) ->
@@ -652,8 +652,8 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                               end, Clauses))
                             %%)
                   end;
-             (_Form) ->
-                  astranaut_traverse:return(keep)
+             (Form) ->
+                  astranaut_traverse:return(Form)
           end, Forms, #{traverse => subtree}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 

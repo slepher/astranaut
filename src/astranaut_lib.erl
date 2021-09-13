@@ -465,12 +465,12 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
               astranaut_return:bind(
                 values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Pos}),
                 fun({[], Acc1}) ->
-                        astranaut_return:return({keep, Acc1});
+                        astranaut_return:return({Node, Acc1});
                    ({Nodes, Acc1}) ->
                         astranaut_return:return({[Node|Nodes], Acc1})
                 end);
-         (_Node, Acc) ->
-              astranaut_return:return({keep, Acc})
+         (Node, Acc) ->
+              astranaut_return:return({Node, Acc})
       end, Init, Forms, Opts#{traverse => subtree}).
 
 values_apply_fun_m(F, AttrValues, Acc, Opts) when is_list(AttrValues) ->

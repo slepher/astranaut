@@ -457,6 +457,6 @@ update_call_name(OrignalName, NewName, Arity, Function) ->
       fun({call, Pos, {atom, Pos2, Name}, Arguments})
             when (Name == OrignalName) andalso (length(Arguments) == Arity) ->
               {call, Pos, {atom, Pos2, NewName}, Arguments};
-         (_Node) ->
-              keep
+         (Node) ->
+              Node
       end, Function, #{traverse => pre}).

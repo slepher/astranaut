@@ -172,8 +172,8 @@ test_map(_Config) ->
         astranaut:smap(
           fun({var, _Pos, Varname}) ->
                   {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
-             (_Node) ->
-                  keep
+             (Node) ->
+                  Node
           end, Ast, #{traverse => pre}),
     Ast2 = merl:quote("A_1 + (B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
@@ -193,7 +193,7 @@ test_map_attr(_Config) ->
                                     [MatchRight, astranaut_uniplate:up_attr(#{pattern => true}, MatchLeft)]
                             end, fun lists:reverse/1);
                       _Type ->
-                          keep
+                          Node
                   end
           end, Ast, #{traverse => pre}),
     Ast2 = merl:quote("E_1 = A + (D_1 = B + C)"),
@@ -266,9 +266,9 @@ test_mapfold(_Config) ->
                   case erl_syntax:type(Node) of
                       match_expr ->
                           {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
-                          {keep, [Var|Acc]};
+                          {Node, [Var|Acc]};
                       _ ->
-                          {keep, Acc}
+                          {Node, Acc}
                   end
           end, [], Ast, #{traverse => post}),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
@@ -286,12 +286,12 @@ test_mapfold_attr(_Config) ->
                   case erl_syntax:type(Node) of
                       match_expr ->
                           {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
-                          {keep, [{Step, Var}|Acc]};
+                          {Node, [{Step, Var}|Acc]};
                       _ ->
-                          {keep, Acc}
+                          {Node, Acc}
                   end;
-             (_Node, Acc, #{})->
-                  {keep, Acc}
+             (Node, Acc, #{})->
+                  {Node, Acc}
           end, [], Ast, #{traverse => all}),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
@@ -305,8 +305,8 @@ test_f_return_list(_Config) ->
           fun({var, Pos, Varname}) ->
                   [{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
                    {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
-             (_Node) ->
-                  keep
+             (Node) ->
+                  Node
           end, Ast, #{traverse => post}),
     Ast2 = merl:quote("hello(A_1, A_2, B_1, B_2, world(C_1, C_2))"),
     ?assertEqual(Ast2, Ast1),
@@ -319,8 +319,8 @@ test_all_return_list(_Config) ->
           fun({var, Pos, Varname}) ->
                   [{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
                    {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
-             (_Node) ->
-                  keep
+             (Node) ->
+                  Node
           end, Ast, #{traverse => all}),
     Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
     ?assertEqual(Ast2, Ast1),

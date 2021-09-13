@@ -257,15 +257,15 @@ walk_node_1(try_expr, _Try, #{}) ->
 walk_node_1(catch_expr, _Catch, #{}) ->
     walk_clause_parent_expression();
 
-walk_node_1(_NodeType, _Node, #{}) ->
-    keep.
+walk_node_1(_NodeType, Node, #{}) ->
+    Node.
 
 to_walk_return(Var, {Var, Context1}) ->
-    astranaut:walk_return(#{return => keep, state => Context1});
+    astranaut:walk_return(#{return => Var, state => Context1});
 to_walk_return(_Var, {Var1, Context1}) ->
     astranaut:walk_return(#{return => Var1, state => Context1});
 to_walk_return(Var, Var) ->
-    astranaut:walk_return(#{return => keep});
+    astranaut:walk_return(#{return => Var});
 to_walk_return(_Var, Var1) ->
     astranaut:walk_return(#{return => Var1}).
 

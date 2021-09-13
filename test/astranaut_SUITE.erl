@@ -561,12 +561,12 @@ test_with_subtrees(_Config) ->
                               end,
                               astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
                    end, fun lists:reverse/1), Variables};
-           (variable, {var, _Pos, Var}, Variables, #{match_pattern := true}) ->
-                {keep, [{pattern, Var}|Variables]};
-           (variable, {var, _Pos, Var}, Variables, #{match_pattern := false}) ->
-                {keep, [{expression, Var}|Variables]};
-           (_Type, _Node, Variables, #{}) ->
-                {keep, Variables}
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
+                {Var, [{pattern, VarName}|Variables]};
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->
+                {Var, [{expression, VarName}|Variables]};
+           (_Type, Node, Variables, #{}) ->
+                {Node, Variables}
         end,
     {TopNode1, State1} =
         astranaut:smapfold(

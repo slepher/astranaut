@@ -112,6 +112,6 @@ update_expression(Expression, Monad, #{monad := MonadModule, monad_fail := Monad
               %% Transformed to:
               %% "Monad:fail(Argument)" in monadic context
               quote(_A@MonadModule:return(unquote(Arg), unquote(Monad)), Pos);
-         (_Node) ->
-              keep
+         (Node) ->
+              Node
       end, Expression, #{traverse => pre}).

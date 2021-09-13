@@ -21,7 +21,7 @@
 
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
--type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | keep.
+-type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | ok.
 
 -type traverse_opts() :: #{traverse => traverse_style(),
                            formatter => module(),
@@ -130,7 +130,7 @@ reduce(F, Init, TopNode, Opts) ->
                  bind_return(
                    apply_f_with_state(F, Node, State, Attr), #{without => [node]},
                    fun(State1) ->
-                           #{return => keep, state => State1}
+                           #{return => Node, state => State1}
                    end)
          end,
     astranaut_return:lift_m(
@@ -275,7 +275,7 @@ walk_return_up_map(#{continue := true, node := Node} = Map) ->
 walk_return_up_map(#{continue := true, return := Return} = Map) ->
     maps:remove(continue, Map#{return => astranaut_uniplate:skip(Return)});
 walk_return_up_map(#{continue := true} = Map) ->
-    maps:remove(continue, Map#{return => astranaut_uniplate:skip(keep)});
+    maps:remove(continue, Map#{return => astranaut_uniplate:skip(ok)});
 walk_return_up_map(#{} = Map) ->
     Map.
 

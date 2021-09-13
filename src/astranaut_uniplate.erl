@@ -14,7 +14,7 @@
 -export([map_m/5, map_m_static/5, descend_m/4]).
 -export([is_node_context/1]).
 -export([with_subtrees/1, with_subtrees/2, with_subtrees/3]).
--export([keep/0, skip/0, skip/1, up_attr/2, with/3, with_each/3]).
+-export([skip/0, skip/1, up_attr/2, with/3, with_each/3]).
 -export([every_tree/2, clamp_trees/3, left_trees/2, right_trees/2]).
 
 -export_type([uniplate/1]).
@@ -45,6 +45,9 @@
 
 -type traverse_style() :: pre | post | all | subtree.
 -type node_context(A) :: #node_context{node :: A} | A.
+-type with_nodes(Node) :: fun(([[Node]]) -> [[node_context(Node)]]).
+-type reduce_nodes(Node) :: fun(([[node_context(Node)]]) -> [[node_context(Node)]]).
+-type maybe_list(A) :: [A] | A.
 
 %%%===================================================================
 %%% API
@@ -66,7 +69,8 @@ reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) 
                           {N, S1}
                   end
           end, Node, Uniplate, state, Opts#{static => true}, is_function(F, 3)),
-    {Node, Acc} = StateM(Init),
+    %% Node is never changed if static is true
+    {_Node, Acc} = StateM(Init),
     Acc.
 
 -spec mapfold(fun((N, S) -> {N, S}) | fun((N, S, map()) -> {N, S}), S, N, uniplate(N), traverse_opts()) -> {N, S}.
@@ -398,6 +402,10 @@ updated_node(Node1, keep) ->
     {Node1, false};
 updated_node(Node1, #node_context{node = keep} = NodeContext2) ->
     {NodeContext2#node_context{node = Node1}, false};
+updated_node(Node1, #node_context{node = Node1} = NodeContext2) ->
+    {NodeContext2#node_context{node = Node1}, false};
+updated_node(Node1, Node1) ->
+    {Node1, false};
 updated_node(_Node1, Node2) ->
     {Node2, true}.
 
@@ -409,14 +417,17 @@ context_node(Node) ->
 %%%===================================================================
 %%% Apply node with context series functions.
 %%%===================================================================
+-spec is_node_context(node_context(_Node)) -> boolean().
 is_node_context(#node_context{}) ->
     true;
 is_node_context(_) ->
     false.
 
+-spec with_subtrees(fun(([[Node]]) -> [[node_context(Node)]])) -> node_context(Node).
 with_subtrees(With) ->
     with_subtrees(With, keep).
 
+-spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) -> node_context(Node).
 with_subtrees(With, Reduce) when is_function(With), is_function(Reduce) ->
     with_subtrees(With, Reduce, keep);
 with_subtrees(With, #node_context{withs = Withs} = Node) ->
@@ -424,17 +435,16 @@ with_subtrees(With, #node_context{withs = Withs} = Node) ->
 with_subtrees(With, Node) ->
     with_subtrees(With, #node_context{node = Node}).
 
+-spec with_subtrees(with_nodes(Node), reduce_nodes(Node), node_context(Node)) -> node_context(Node).
 with_subtrees(With, Reduce, #node_context{reduces = Reduces} = Node) ->
     with_subtrees(With, Node#node_context{reduces = [Reduce|Reduces]});
 with_subtrees(With, Reduce, Node) ->
     with_subtrees(With, Reduce, #node_context{node = Node}).
 
-keep() ->
-    #node_context{node = ok, updated = false}.
-
 skip() ->
     #node_context{skip = true, updated = false}.
 
+-spec skip(maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 skip(Trees) ->
     every_tree(
       fun(#node_context{} = Context) ->
@@ -443,6 +453,7 @@ skip(Trees) ->
               #node_context{node = Node, skip = true}
       end, Trees).
 
+-spec up_attr(fun((map()) -> map()) | map(), maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 up_attr(Attr, Trees) ->
     every_tree(
       fun(#node_context{skip = true} = Context) ->
@@ -461,9 +472,11 @@ compose_up_attr(Attr0, [Attr1|T]) when is_map(Attr0), is_map(Attr1) ->
 compose_up_attr(Attr0, [Attr1|T]) ->
     [Attr0, Attr1|T].
 
+-spec with(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 with(Entry, Exit, Trees) ->
     with_exit(Exit, with_entry(Entry, Trees)).
 
+-spec with_each(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 with_each(Entry, Exit, Trees) ->
     every_tree(
       fun(#node_context{entries = Entries, exits = Exits} = Context) ->
