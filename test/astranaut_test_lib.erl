@@ -19,7 +19,7 @@
 get_baseline(Mark, Forms) ->
     case astranaut_return:run(
            astranaut_lib:with_attribute(
-             fun(Mark1, _Acc, #{pos := Pos}) when Mark == Mark1 ->
+             fun(Mark1, _Acc, #{pos := Pos}) when Mark =:= Mark1 ->
                      Pos;
                 (_Mark2, Acc, #{}) ->
                      Acc

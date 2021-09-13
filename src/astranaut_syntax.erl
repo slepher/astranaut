@@ -54,11 +54,11 @@ is_leaf(Node) ->
     erl_syntax:is_leaf(Node).
 
 -spec subtrees(erl_syntax:syntaxTree()) -> [[erl_syntax:syntaxTree()]].
-subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name == type; Name == opaque ->
+subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name =:= type; Name =:= opaque ->
     NameTree = name_arity_tree(Name, Pos),
     TypeNameTree = name_arity_tree(TypeName, Pos),
     [[NameTree], [TypeNameTree, TypeBody|TypeParams]];
-subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name == spec; Name == callback ->
+subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= callback ->
     NameTree = name_arity_tree(Name, Pos),
     MFATree = mfa_tree(MFA, Pos),
     [[NameTree], [MFATree|Specs]];
@@ -98,10 +98,10 @@ revert(Node) ->
             end
     end.
 
-revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name == type; Name == opaque ->
+revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name =:= type; Name =:= opaque ->
     TypeName = erl_syntax:atom_value(TypeNameTree),
     {attribute, Pos, Name, {TypeName, TypeTree, TypeParamTrees}};
-revert_attribute(Name, [MFATree|SpecTrees], Pos, _Node) when Name == spec; Name == callback ->
+revert_attribute(Name, [MFATree|SpecTrees], Pos, _Node) when Name =:= spec; Name =:= callback ->
     MFA = mfa_value(MFATree),
     {attribute, Pos, Name, {MFA, SpecTrees}};
 revert_attribute(_Name, _Subtrees, _Pos, Node) ->
@@ -125,11 +125,11 @@ subtrees_pge(_Type, Subtrees, #{node := pattern}) ->
     Subtrees;
 subtrees_pge(named_fun_expr, [Names, Clauses], #{}) ->
     [pattern_node(Names), Clauses];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type == match_expr; Type == clause ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= match_expr; Type =:= clause ->
     [pattern_node(Patterns), expression_node(Expressions)];
 subtrees_pge(clause, [Patterns, Guards, Expressions], #{}) ->
     [pattern_node(Patterns), guard_node(Guards), expression_node(Expressions)];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type == generator; Type == binary_generator ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= generator; Type =:= binary_generator ->
     [pattern_node(Patterns), expression_node(Expressions)];
 subtrees_pge(_Type, Subtrees, #{}) ->
     Subtrees.
@@ -142,9 +142,9 @@ attribute_subtrees_type(_Type, Subtrees, #{}) ->
 
 update_attribute_body_trees(record = Name, [RecordNameTree|RecordBodyTrees]) ->
     attribute(Name, [name_node(RecordNameTree)|RecordBodyTrees]);
-update_attribute_body_trees(Name, [TypeNameTree, TypeTree|TypeParamTrees]) when Name == type; Name == opaque ->
+update_attribute_body_trees(Name, [TypeNameTree, TypeTree|TypeParamTrees]) when Name =:= type; Name =:= opaque ->
     attribute(Name, [name_node(TypeNameTree), type_node(TypeTree)|type_param_node(TypeParamTrees)]);
-update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name == spec; Name == callback ->
+update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name =:= spec; Name =:= callback ->
     attribute(Name, [name_node(SpecMFATree)|type_node(SpecTrees)]);
 update_attribute_body_trees(Name, BodyTrees) ->
     attribute(Name, BodyTrees).
@@ -410,7 +410,7 @@ is_renamed(Arity, Form) ->
     Either =
         astranaut_uniplate:map_m_static(
           fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments} = Node) ->
-                  case length(Arguments) == Arity of
+                  case length(Arguments) =:= Arity of
                       true ->
                           {left, renamed};
                       false ->
@@ -441,7 +441,7 @@ new_function_name(FName, Arity, Functions, Counter) ->
 update_function_name(Name, Arity, NewName, Forms) ->
     lists:map(
       fun({function, Pos, FName, FArity, Clauses})
-            when (FName == Name) andalso (FArity == Arity) ->
+            when (FName =:= Name) andalso (FArity =:= Arity) ->
               Clauses1 =
                   lists:map(
                     fun(Clause) ->
@@ -455,7 +455,7 @@ update_function_name(Name, Arity, NewName, Forms) ->
 update_call_name(OrignalName, NewName, Arity, Function) ->
     astranaut:smap(
       fun({call, Pos, {atom, Pos2, Name}, Arguments})
-            when (Name == OrignalName) andalso (length(Arguments) == Arity) ->
+            when (Name =:= OrignalName) andalso (length(Arguments) =:= Arity) ->
               {call, Pos, {atom, Pos2, NewName}, Arguments};
          (Node) ->
               Node

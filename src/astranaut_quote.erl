@@ -443,11 +443,11 @@ quote_1({named_fun, Pos1, Name, Clauses}, #{} = Opts) ->
 
 %% quote values
 quote_1({LiteralType, _Pos, _Literal} = Tuple, Opts) 
-  when LiteralType == atom ;
-       LiteralType == integer ;
-       LiteralType == char ;
-       LiteralType == float ;
-       LiteralType == string ->
+  when LiteralType =:= atom ;
+       LiteralType =:= integer ;
+       LiteralType =:= char ;
+       LiteralType =:= float ;
+       LiteralType =:= string ->
     astranaut_return:return(quote_literal_tuple(Tuple, Opts));
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple_list(tuple_to_list(Tuple), Opts);

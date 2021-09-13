@@ -69,7 +69,7 @@ walk_clause({clause, Pos, Patterns, Guards, Body}, Name, Variables) ->
 
 walk_body([{call, _Pos, {Type, _Pos1, FName}, _Args} = Rep], Name, Variables) ->
     if
-        {Type, FName} == Name ->
+        {Type, FName} =:= Name ->
             {[Rep], Variables};
         true ->
             {NRep, NVariables} = add_try_catch(Rep, Variables), 

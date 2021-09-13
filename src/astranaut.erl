@@ -120,7 +120,7 @@ map(F, TopNode, Opts) ->
       mapfold_1(F1, ok, TopNode, Opts#{use_traverse => true})).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
-%% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn == Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
+%% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),

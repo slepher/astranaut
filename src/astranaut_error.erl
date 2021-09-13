@@ -112,7 +112,7 @@ is_empty(#{?STRUCT_KEY := ?ERROR_STATE,
            errors := Errors, warnings := Warnings,
            formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings,
            file_errors := FErrors, file_warnings := FWarnings}) 
-  when (map_size(FErrors) == 0) and (map_size(FWarnings) == 0) ->
+  when (map_size(FErrors) =:= 0) and (map_size(FWarnings) =:= 0) ->
     endo_is_empty(Errors) and endo_is_empty(Warnings)
     and endo_is_empty(FormattedErrors) and endo_is_empty(FormattedWarnings);
 is_empty(_ErrorState) ->
@@ -123,7 +123,7 @@ is_empty(_ErrorState) ->
 is_empty_error(#{errors := Errors,
                  formatted_errors := FormattedErrors,
                  file_errors := FErrors})
-  when (map_size(FErrors) == 0) ->
+  when (map_size(FErrors) =:= 0) ->
     endo_is_empty(Errors) and endo_is_empty(FormattedErrors);
 is_empty_error(_Struct) ->
     false.
@@ -135,7 +135,7 @@ realize(#{?STRUCT_KEY := ?MODULE, file_errors := FileErrors, file_warnings := Fi
 
 printable(#{?STRUCT_KEY := ?MODULE} = Struct) ->
     maps:fold(
-        fun(Key, FileErrors, Acc) when (Key == file_errors) or (Key == file_warnings) ->
+        fun(Key, FileErrors, Acc) when (Key =:= file_errors) or (Key =:= file_warnings) ->
             case maps:size(FileErrors) of
                 0 ->
                     Acc;
@@ -143,8 +143,8 @@ printable(#{?STRUCT_KEY := ?MODULE} = Struct) ->
                     FileErrors1 = maps:map(fun(_Key, Value) -> endo_run(Value) end, FileErrors),
                     maps:put(Key, FileErrors1, Acc)
             end;
-           (Key, Errors, Acc) when (Key == formatted_errors) or (Key == formatted_warnings)
-                                   or (Key == errors) or (Key == warnings) ->
+           (Key, Errors, Acc) when (Key =:= formatted_errors) or (Key =:= formatted_warnings)
+                                   or (Key =:= errors) or (Key =:= warnings) ->
                case endo_is_empty(Errors) of
                     true ->
                        Acc;
@@ -397,7 +397,7 @@ update_file(File0, File1, #{?STRUCT_KEY := ?ERROR_STATE,
                             formatted_warnings := Warnings,
                             file_errors := ErrorsWithFile,
                             file_warnings := WarningsWithFile} = Struct) ->
-    case File0 == File1 of
+    case File0 =:= File1 of
         true ->
             Struct#{file => File1};
         false ->

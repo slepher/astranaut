@@ -84,7 +84,7 @@ run(#{?STRUCT_KEY := ?RETURN_FAIL}) ->
 
 -spec run_error(struct(_A)) -> astranaut_error:struct().
 run_error(#{?STRUCT_KEY := StructKey, error := Error})
-  when (StructKey == ?RETURN_OK); (StructKey == ?RETURN_FAIL) ->
+  when (StructKey =:= ?RETURN_OK); (StructKey =:= ?RETURN_FAIL) ->
     Error.
 
 -spec lift_m(fun((A) -> B), struct(A)) -> struct(B).

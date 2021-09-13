@@ -682,8 +682,8 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
 
 match_macro_order(Macro, Step) ->
     Order = maps:get(order, Macro, inner),
-    ((Order == inner) and (Step == post))
-        or ((Order == outer) and (Step == pre)).
+    ((Order =:= inner) and (Step =:= post))
+        or ((Order =:= outer) and (Step =:= pre)).
 
 %%%===================================================================
 %%% apply macro functions
@@ -727,7 +727,7 @@ macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := Loca
                                                                  macro_module := Module, macro := Function}) ->
     StackTraces1 =
         lists:map(
-          fun({M, F, A, Pos}) when M == LocalModule ->
+          fun({M, F, A, Pos}) when M =:= LocalModule ->
                   {Module, F, A, Pos};
              (Val) ->
                   Val
@@ -860,7 +860,7 @@ update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) -
                   astranaut:smap(
                     fun({var, Pos, VarName} = Var) ->
                             case split_varname(atom_to_list(VarName)) of
-                                [Head, MacroNameStr1] when MacroNameStr == MacroNameStr1 ->
+                                [Head, MacroNameStr1] when MacroNameStr =:= MacroNameStr1 ->
                                     VarName1 = list_to_atom(Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
                                     {var, Pos, VarName1};
                                 _ ->
