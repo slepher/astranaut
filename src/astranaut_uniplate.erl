@@ -403,8 +403,6 @@ apply_functions([], Value) ->
 apply_functions([F|T], Value) when is_function(F, 1) ->
     apply_functions(T, F(Value)).
 
-updated_node(Node1, ok) ->
-    {Node1, false};
 updated_node(Node1, #node_context{node = Node1} = NodeContext2) ->
     {NodeContext2#node_context{node = Node1}, false};
 updated_node(Node1, Node1) ->

@@ -162,7 +162,7 @@ parse_transform(Forms, _Options) ->
                                         walk(Node, Attr, WalkOpts)
                                 end)
                       end, Forms, #{traverse => pre}),
-                    ?MODULE, #{}, ok))
+                    ?MODULE, #{}, undefined))
         end)).
 quote_validator() ->
     #{debug => [boolean, {default, false}], debug_module => [boolean, {default, false}]}.

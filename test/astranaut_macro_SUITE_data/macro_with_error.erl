@@ -26,7 +26,7 @@ exception_error() ->
     erlang:error(foo).
 
 return_error() ->
-    {error, bar}.
+    {error, quote(ok), bar}.
 
 format_error(bar) ->
     "oops, bar";

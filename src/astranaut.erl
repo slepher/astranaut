@@ -106,57 +106,51 @@ smapfold(F, Init, Nodes, Opts) ->
 %% Takes a function from AstNodeA, {@link traverse_attr()} to AstNodeB, and a TopNodeA and produces a TopNodeB by applying the function to every subtree in the AST. This function is used to obtain the return values.
 %% @see mapfold/4
 map(F, TopNode, Opts) ->
+    WithReturn = fun(_Node, Node1) -> #{return => Node1} end,
     F1 = fun(Node, _State, Attr) ->
-                 bind_return(
-                   apply_f(F, Node, Attr), #{without => [state]},
-                   fun(Node1) ->
-                           #{return => Node1}
-                   end)
+                 apply_f(F, Node, Attr)
          end,
     astranaut_return:lift_m(
       fun({TopNode1, _State}) ->
               TopNode1
       end,
-      mapfold_1(F1, ok, TopNode, Opts#{use_traverse => true})).
+      mapfold_1(F1, ok, TopNode, Opts#{with_return => WithReturn})).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
+    WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
     F1 = fun(Node, State, Attr) ->
-                 bind_return(
-                   apply_f_with_state(F, Node, State, Attr), #{without => [node]},
-                   fun(State1) ->
-                           #{return => Node, state => State1}
-                   end)
+                   apply_f_with_state(F, Node, State, Attr)
          end,
     astranaut_return:lift_m(
       fun({_TopNode1, State}) ->
               State
       end,
-      mapfold_1(F1, Init, TopNode, Opts#{use_traverse => true, static => true})).
+      mapfold_1(F1, Init, TopNode, Opts#{static => true, with_return => WithReturn})).
 
 -spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
 %% @doc Combines the operations of map/3 and reduce/4 into one pass.
 mapfold(F, Init, TopNode, Opts) ->
-    mapfold_1(F, Init, TopNode, Opts).
+    WithReturn =
+        fun(_Node, {Node1, State1}) ->
+                #{return => Node1, state => State1};
+           (_Node, Return) ->
+                %% when return other value, we dont know which part is node and which part is state
+                %% just throw exception.
+                exit({invalid_mapfold_return, Return})
+        end,
+    mapfold_1(F, Init, TopNode, Opts#{with_return => WithReturn}).
 
-mapfold_1(F, Init, TopNode, Opts) ->
+mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
     InitAttr = maps:get(attr, Opts, #{}),
     Opts1 = maps:without([formatter, attr, uniplate], Opts),
     F1 = fun(Node) ->
                  astranaut_traverse:with_state_attr(
                    fun(State, Attr) ->
-                           bind_return(
-                             apply_f_with_state(F, Node, State, Attr), Opts,
-                             fun({Node1, State1}) ->
-                                     #{return => Node1, state => State1};
-                                (Return) ->
-                                     %% when return other value, we dont know which part is node and which part is state
-                                     %% just throw exception.
-                                     exit({invalid_mapfold_return, Return})
-                             end)
+                           bind_return(Node, apply_f_with_state(F, Node, State, Attr), WithReturn)
                    end)
          end,
     TopNodeM = map_m(F1, TopNode, Opts1),
@@ -172,42 +166,27 @@ apply_f_with_state(F, Node, State, _Attr) when is_function(F, 2) ->
 apply_f_with_state(F, Node, State, Attr) when is_function(F, 3) ->
     F(Node, State, Attr).
 
-bind_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Struct, #{use_traverse := true}, _Fun) ->
-    Struct;
-bind_return(#{?STRUCT_KEY := ?TRAVERSE_M}, #{}, _Fun) ->
+bind_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _Fun) ->
     exit(unsupported_traverse_struct);
-bind_return(#{?STRUCT_KEY := ?RETURN_OK, return := Return} = Struct, Opts, Fun) ->
+bind_return(Node, #{?STRUCT_KEY := ?RETURN_OK, return := Return} = Struct, Fun) ->
     astranaut_traverse:then(
       astranaut_traverse:astranaut_traverse(Struct),
-      bind_return(Return, Opts, Fun));
-bind_return(#{?STRUCT_KEY := ?RETURN_FAIL} = Struct, _Opts, _Fun) ->
+      bind_return(Node, Return, Fun));
+bind_return(_Node, #{?STRUCT_KEY := ?RETURN_FAIL} = Struct, _Fun) ->
     astranaut_traverse:astranaut_traverse(Struct);
-bind_return(#{?STRUCT_KEY := ?WALK_RETURN} = WalkReturn, Opts, Fun) ->
-    WalkReturn1 =
-        case Opts of
-            #{without := Keys} ->
-                maps:without(Keys, WalkReturn);
-            #{} ->
-                WalkReturn
-        end,
-    %% when walk_return is returned directly, bind is empty, no need to apply Fun
-    %% when walk_return is generated in this function, bind is true, Fun should be applied.
+bind_return(Node, #{?STRUCT_KEY := ?WALK_RETURN} = WalkReturn, _Fun) ->
+    WalkReturn1 = walk_return_up_map(Node, WalkReturn),
+    astranaut_traverse:astranaut_traverse(WalkReturn1);
+bind_return(Node, Return, Fun) ->
+    WalkReturn1 = walk_return(walk_return_map(Return)),
     WalkReturn2 =
-        case maps:find(bind, Opts) of
-            {ok, true} ->
-                case maps:find(return, WalkReturn) of
-                    {ok, Return} ->
-                        maps:merge(WalkReturn1, walk_return_up_map(Fun(Return)));
-                    error ->
-                        WalkReturn1
-                end;
+        case maps:find(return, WalkReturn1) of
+            {ok, Return} ->
+                maps:merge(WalkReturn1, Fun(Node, Return));
             error ->
                 WalkReturn1
         end,
-    astranaut_traverse:astranaut_traverse(WalkReturn2);
-bind_return(Return, Opts, Fun) ->
-    WalkReturn = walk_return(walk_return_map(Return)),
-    bind_return(WalkReturn, Opts#{bind => true}, Fun).
+    bind_return(Node, WalkReturn2, Fun).
 
 %%===================================================================
 %% walk return functions
@@ -219,7 +198,7 @@ bind_return(Return, Opts, Fun) ->
 walk_return(#{?STRUCT_KEY := ?WALK_RETURN} = Return) ->
     Return;
 walk_return(#{} = Map) ->
-    Keys = [return, state, node, error, warning, errors, warnings, continue],
+    Keys = [return, state, error, warning, errors, warnings, continue],
     Map1 = walk_return_up_map(maps:with(Keys, Map)),
     maps:merge(#{?STRUCT_KEY => ?WALK_RETURN, errors => [], warnings => []}, Map1);
 walk_return(Return) ->
@@ -250,25 +229,35 @@ walk_return_map({continue, A}) ->
 walk_return_map(A) ->
     #{return => A}.
 
+walk_return_up_map(Map) ->
+    walk_return_up_map(undefined, Map).
+
 %% update convertable_map to struct map.
-walk_return_up_map(#{errors := Errors}) when not is_list(Errors) ->
+walk_return_up_map(_Node, #{errors := Errors}) when not is_list(Errors) ->
     exit({errors_should_be_list, Errors});
-walk_return_up_map(#{warnings := Warnings}) when not is_list(Warnings) ->
+walk_return_up_map(_Node, #{warnings := Warnings}) when not is_list(Warnings) ->
     exit({warnings_should_be_list, Warnings});
-walk_return_up_map(#{warning := Warning} = Map) ->
+walk_return_up_map(Node, #{warning := Warning} = Map) ->
     Map1 = maps:remove(warning, Map),
     Warnings = maps:get(warnings, Map, []),
-    walk_return_up_map(Map1#{warnings => [Warning|Warnings]});
-walk_return_up_map(#{error := Error} = Map) ->
+    walk_return_up_map(Node, Map1#{warnings => [Warning|Warnings]});
+walk_return_up_map(Node, #{error := Error} = Map) ->
     Map1 = maps:remove(error, Map),
     Errors = maps:get(errors, Map, []),
-    walk_return_up_map(Map1#{errors => [Error|Errors]});
-walk_return_up_map(#{continue := true, return := Return} = Map) ->
+    walk_return_up_map(Node, Map1#{errors => [Error|Errors]});
+walk_return_up_map(_Node, #{continue := true, return := Return} = Map) ->
     maps:remove(continue, Map#{return => astranaut_uniplate:skip(Return)});
-walk_return_up_map(#{continue := true} = Map) ->
-    maps:remove(continue, Map#{return => astranaut_uniplate:skip(ok)});
-walk_return_up_map(#{} = Map) ->
-    Map.
+walk_return_up_map(Node, #{continue := true} = Map) ->
+    maps:remove(continue, Map#{return => astranaut_uniplate:skip(Node)});
+walk_return_up_map(undefined, #{} = Map) ->
+    Map;
+walk_return_up_map(Node, #{} = Map) ->
+    case maps:is_key(return, Map) of
+        true ->
+            Map;
+        false ->
+            Map#{return => Node}
+    end.
 
 traverse_return(#{?STRUCT_KEY := ?RETURN_OK} = Return) ->
     astranaut_traverse:astranaut_traverse(Return);
@@ -331,7 +320,9 @@ traverse_map_node(F, Node) ->
                 file ->
                     [FileTree, _PosTree] = erl_syntax:attribute_arguments(Node),
                     File = erl_syntax:concrete(FileTree),
-                    astranaut_traverse:update_file(File);
+                    astranaut_traverse:then(
+                      astranaut_traverse:update_file(File),
+                      astranaut_traverse:return(Node));
                 _ ->
                     Pos = erl_syntax:get_pos(Node),
                     astranaut_traverse:update_pos(Pos, F(Node))
@@ -340,7 +331,9 @@ traverse_map_node(F, Node) ->
             Pos = erl_syntax:get_pos(Node),
             astranaut_traverse:update_pos(Pos, F(Node));
 	eof_marker ->
-            astranaut_traverse:eof();
+            astranaut_traverse:then(
+              astranaut_traverse:eof(),
+              astranaut_traverse:return(Node));
         error_marker ->
             astranaut_traverse:then(
               astranaut_traverse:formatted_errors([erl_syntax:error_marker_info(Node)]),
