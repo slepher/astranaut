@@ -16,7 +16,7 @@
 -define(STATE_OK, astranaut_traverse_state_ok).
 -define(STATE_FAIL, astranaut_traverse_state_fail).
 
--compile({no_auto_import, [error/1, get/0, put/1, nodes/1]}).
+-compile({no_auto_import, [error/1, get/0, put/1]}).
 %%%===================================================================
 %%% types
 %%%===================================================================
@@ -49,7 +49,7 @@
 -export([bind_without_error/2]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1]).
--export([with_error/2, catch_fail/2, set_fail/1, catched_nodes/1]).
+-export([with_error/2, catch_fail/2, set_fail/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
@@ -291,9 +291,6 @@ with_state_attr(F) ->
                         F(State, Attr)
                 end)
       end).
-%%%===================================================================
-%%% nodes updated related functions
-%%%===================================================================
 
 %%%===================================================================
 %%% error_state related functions
@@ -325,9 +322,6 @@ set_fail(MA) ->
         fun(_Formatter, #{?STRUCT_KEY := ?STATE_OK, state := State, error := Error}) ->
             state_fail(#{state => State, error => Error})
         end, MA).
-
-catched_nodes(MA) ->
-    catch_fail(fun() -> return([]) end, MA).
 
 -spec generate_error(astranaut_error:struct()) -> struct(_S, _A).
 generate_error(Error) ->

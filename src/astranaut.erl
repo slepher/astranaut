@@ -30,7 +30,7 @@
 -type straverse_opts() :: #{traverse => traverse_style(),
                            attr => traverse_attr()}.
 
--type traverse_attr() :: #{_ => _}.
+-type traverse_attr() :: map().
 -type traverse_style() :: traverse_step() | all | subtree.
 -type traverse_step() :: pre | post | leaf.
 
@@ -204,9 +204,7 @@ bind_return(#{?STRUCT_KEY := ?WALK_RETURN} = WalkReturn, Opts, Fun) ->
             error ->
                 WalkReturn1
         end,
-    %% move validate_node here from constructor to use SyntaxLib:update_node.
-    WalkReturn3 = validate_walk_return_node(WalkReturn2),
-    astranaut_traverse:astranaut_traverse(WalkReturn3);
+    astranaut_traverse:astranaut_traverse(WalkReturn2);
 bind_return(Return, Opts, Fun) ->
     WalkReturn = walk_return(walk_return_map(Return)),
     bind_return(WalkReturn, Opts#{bind => true}, Fun).
@@ -249,8 +247,6 @@ walk_return_map(continue) ->
     #{continue => true};
 walk_return_map({continue, A}) ->
     #{continue => true, return => A};
-walk_return_map({node, Node}) ->
-    #{node => Node};
 walk_return_map(A) ->
     #{return => A}.
 
@@ -267,25 +263,12 @@ walk_return_up_map(#{error := Error} = Map) ->
     Map1 = maps:remove(error, Map),
     Errors = maps:get(errors, Map, []),
     walk_return_up_map(Map1#{errors => [Error|Errors]});
-walk_return_up_map(#{continue := true, node := Node} = Map) ->
-    maps:remove(continue, Map#{node => astranaut_uniplate:skip(Node)});
 walk_return_up_map(#{continue := true, return := Return} = Map) ->
     maps:remove(continue, Map#{return => astranaut_uniplate:skip(Return)});
 walk_return_up_map(#{continue := true} = Map) ->
     maps:remove(continue, Map#{return => astranaut_uniplate:skip(ok)});
 walk_return_up_map(#{} = Map) ->
     Map.
-
-validate_walk_return_node(#{?STRUCT_KEY := ?WALK_RETURN, node := Node} = WalkReturn) ->
-    Errors = maps:get(errors, WalkReturn, []),
-    case validate_node(Node) of
-        ok ->
-            WalkReturn;
-        {error, Reason} ->
-            walk_return_up_map(maps:remove(node, WalkReturn#{errors => [{Reason, Node}|Errors]}))
-    end;
-validate_walk_return_node(WalkReturn) ->
-    WalkReturn.
 
 traverse_return(#{?STRUCT_KEY := ?RETURN_OK} = Return) ->
     astranaut_traverse:astranaut_traverse(Return);
@@ -295,29 +278,6 @@ traverse_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Traverse) ->
     Traverse;
 traverse_return(Return) ->
     astranaut_traverse:astranaut_traverse(walk_return(Return)).
-
-validate_node([Node|T]) ->
-    case validate_node(Node) of
-        ok ->
-            validate_node(T);
-        {error, Reason} ->
-            {error, Reason}
-    end;
-validate_node([]) ->
-    ok;
-validate_node(Node) ->
-    case astranaut_uniplate:is_node_context(Node) of
-        true ->
-            ok;
-        false ->
-            try erl_syntax:type(Node) of
-                _Type ->
-                    ok
-            catch
-                _:{badarg, _} ->
-                    {error, invalid_abstract_node}
-            end
-    end.
 
 map_m(F, [Node|_T] = Nodes, Opts) ->
     case erl_syntax:is_form(Node) of

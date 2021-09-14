@@ -239,7 +239,7 @@ test_map_with_state(Config) ->
     ReturnM =
         astranaut:mapfold(
           fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
+                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, return => Node});
              ({atom, _Pos, mark_error_1}, Acc, #{}) ->
                   {{atom, _Pos, mark_error_2}, Acc};
              (Node, Acc, #{}) ->
