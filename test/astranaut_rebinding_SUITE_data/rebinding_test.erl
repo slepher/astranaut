@@ -118,8 +118,8 @@ test_if(A) ->
     A = A + B,
     B = A + B,
     B = if
-            A == 10 -> A = A + 1, A = A + 1, A;
-            A == B -> B = A + 1, A = B + 1, A;
+            A =:= 10 -> A = A + 1, A = A + 1, A;
+            A =:= B -> B = A + 1, A = B + 1, A;
             true -> B = A + B, B
         end,
     B = A + B,
@@ -132,8 +132,8 @@ test_if_pinned(A) ->
     A = A + B,
     B = A + B,
     B = if
-            A == 10 -> A = A + 1, A = A + 1, A;
-            A == B -> B = A + 1, A = B + 1, A;
+            A =:= 10 -> A = A + 1, A = A + 1, A;
+            A =:= B -> B = A + 1, A = B + 1, A;
             true -> B = A + B, B
         end,
     B = A + B,
@@ -146,8 +146,8 @@ test_if_origin(A) ->
     A_2 = A_1 + B_1,
     B_2 = A_2 + B_1,
     B_4 = if
-              A_2 == 10 ->  A_3 = A_2 + 1,   A_4 = A_3 + 1, A_4;
-              A_2 == B_2 -> B_3 = A_2 + 1,   A_3 = B_3 + 1, A_3;
+              A_2 =:= 10 ->  A_3 = A_2 + 1,   A_4 = A_3 + 1, A_4;
+              A_2 =:= B_2 -> B_3 = A_2 + 1,   A_3 = B_3 + 1, A_3;
               true -> B_3 = A_2 + B_2, B_3
 	  end,
     B_5 = A_2 + B_4,

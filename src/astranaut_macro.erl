@@ -576,7 +576,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
                             astranaut_traverse:warning(invalid_macro_attribute),
                             astranaut_traverse:return(Form));
                       not_macro ->
-                          astranaut_traverse:return(keep)
+                          astranaut_traverse:return(Form)
                   end
           end, Forms, #{traverse => subtree}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
@@ -631,10 +631,10 @@ to_list(Arguments) ->
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
         astranaut:map_m(
-          fun({function, Pos, Name, Arity, Clauses}) ->
+          fun({function, Pos, Name, Arity, Clauses} = Function) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
-                          astranaut_traverse:return(keep);
+                          astranaut_traverse:return(Function);
                       true ->
                           astranaut_traverse:lift_m(
                             fun([]) ->
@@ -651,8 +651,8 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                               end, Clauses))
                             %%)
                   end;
-             (_Form) ->
-                  astranaut_traverse:return(keep)
+             (Form) ->
+                  astranaut_traverse:return(Form)
           end, Forms, #{traverse => subtree}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 
@@ -670,10 +670,10 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                         true ->
                                             apply_macro(Macro#{rename_quoted_variables => true});
                                         false ->
-                                            astranaut_traverse:return(keep)
+                                            astranaut_traverse:return(Node)
                                     end;
                                 error ->
-                                    astranaut_traverse:return(keep)
+                                    astranaut_traverse:return(Node)
                             end
                         ])
              end, Clause, #{traverse => all, children => true})
@@ -681,8 +681,8 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
 
 match_macro_order(Macro, Step) ->
     Order = maps:get(order, Macro, inner),
-    ((Order == inner) and (Step == post))
-        or ((Order == outer) and (Step == pre)).
+    ((Order =:= inner) and (Step =:= post))
+        or ((Order =:= outer) and (Step =:= pre)).
 
 %%%===================================================================
 %%% apply macro functions
@@ -726,7 +726,7 @@ macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := Loca
                                                                  macro_module := Module, macro := Function}) ->
     StackTraces1 =
         lists:map(
-          fun({M, F, A, Pos}) when M == LocalModule ->
+          fun({M, F, A, Pos}) when M =:= LocalModule ->
                   {Module, F, A, Pos};
              (Val) ->
                   Val
@@ -859,7 +859,7 @@ update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) -
                   astranaut:smap(
                     fun({var, Pos, VarName} = Var) ->
                             case split_varname(atom_to_list(VarName)) of
-                                [Head, MacroNameStr1] when MacroNameStr == MacroNameStr1 ->
+                                [Head, MacroNameStr1] when MacroNameStr =:= MacroNameStr1 ->
                                     VarName1 = list_to_atom(Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
                                     {var, Pos, VarName1};
                                 _ ->

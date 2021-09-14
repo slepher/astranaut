@@ -155,7 +155,7 @@ walk_function_clause(Clause, RebindingOptions) ->
 %% https://github.com/erlang/otp/pull/2951
 walk_node(prefix_expr, {op, _Pos1, '+', {var, _Pos3, _Varname} = Var},
           #{pattern := PatternType} = Context, #{node := pattern})
-  when PatternType == match_left; PatternType == clause_match ->
+  when PatternType =:= match_left; PatternType =:= clause_match ->
     Var1 = rename_var(Var, Context),
     astranaut:walk_return(#{return => Var1, continue => true});
 
@@ -197,75 +197,75 @@ walk_node(Type, Node, _Context, Attr) ->
                 astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
         end, Node1))).
 
-walk_node_1(infix_expr, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(infix_expr, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
 %% walk function call
-walk_node_1(application, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(application, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
-walk_node_1(tuple, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(tuple, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
-walk_node_1(list, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(list, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
-walk_node_1(map_expr, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(map_expr, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
-walk_node_1(record_expr, _Expr, #{node := expression, strict := true}) ->
-    walk_scope_group_expression();
+walk_node_1(record_expr, Expr, #{node := expression, strict := true}) ->
+    walk_scope_group_expression(Expr);
 
 %% walk comprehension
-walk_node_1(list_comp, _ListComp, #{}) ->
-    walk_comprehension();
+walk_node_1(list_comp, ListComp, #{}) ->
+    walk_comprehension(ListComp);
 
-walk_node_1(binary_comp, _BinaryComp, #{}) ->
-    walk_comprehension();
+walk_node_1(binary_comp, BinaryComp, #{}) ->
+    walk_comprehension(BinaryComp);
 
 %% walk comprehension generate
-walk_node_1(generator, _ListGenerator, #{}) ->
-    walk_generate();
+walk_node_1(generator, ListGenerator, #{}) ->
+    walk_generator(ListGenerator);
 
-walk_node_1(binary_generator, _BinaryGenerator, #{}) ->
-    walk_generate();
+walk_node_1(binary_generator, BinaryGenerator, #{}) ->
+    walk_generator(BinaryGenerator);
 
 %% walk match
-walk_node_1(match_expr, _Match,  #{node := expression}) ->
-    walk_match();
+walk_node_1(match_expr, Match,  #{node := expression}) ->
+    walk_match(Match);
 
 %% walk function clause and other clauses
-walk_node_1(clause, _Clause, #{} = Attr) ->
-    walk_clause(Attr);
+walk_node_1(clause, Clause, #{} = Attr) ->
+    walk_clause(Clause, Attr);
 
 %% walk named fun
-walk_node_1(named_fun_expr, _NamedFun, #{}) ->
-    walk_named_fun();
+walk_node_1(named_fun_expr, NamedFun, #{}) ->
+    walk_named_fun(NamedFun);
 
-walk_node_1(case_expr, _Case, #{}) ->
-    walk_clause_parent_expression();
+walk_node_1(case_expr, Case, #{}) ->
+    walk_clause_parent_expression(Case);
 
-walk_node_1(if_expr, _If, #{}) ->
-    walk_clause_parent_expression();
+walk_node_1(if_expr, If, #{}) ->
+    walk_clause_parent_expression(If);
 
-walk_node_1(receive_expr, _Receive, #{}) ->
-    walk_clause_parent_expression();
+walk_node_1(receive_expr, Receive, #{}) ->
+    walk_clause_parent_expression(Receive);
 
-walk_node_1(try_expr, _Try, #{}) ->
-    walk_clause_parent_expression();
+walk_node_1(try_expr, Try, #{}) ->
+    walk_clause_parent_expression(Try);
 
-walk_node_1(catch_expr, _Catch, #{}) ->
-    walk_clause_parent_expression();
+walk_node_1(catch_expr, Catch, #{}) ->
+    walk_clause_parent_expression(Catch);
 
-walk_node_1(_NodeType, _Node, #{}) ->
-    keep.
+walk_node_1(_NodeType, Node, #{}) ->
+    Node.
 
 to_walk_return(Var, {Var, Context1}) ->
-    astranaut:walk_return(#{return => keep, state => Context1});
+    astranaut:walk_return(#{return => Var, state => Context1});
 to_walk_return(_Var, {Var1, Context1}) ->
     astranaut:walk_return(#{return => Var1, state => Context1});
 to_walk_return(Var, Var) ->
-    astranaut:walk_return(#{return => keep});
+    astranaut:walk_return(#{return => Var});
 to_walk_return(_Var, Var1) ->
     astranaut:walk_return(#{return => Var1}).
 
@@ -276,15 +276,15 @@ clause_scope_type(named_fun_expr) ->
 clause_scope_type(_Other) ->
     nonfun_clause.
 
-walk_comprehension() ->
+walk_comprehension(Comprehension) ->
     Sequence =
         fun(Subtrees) ->
                 with_shadowed(lists:reverse(Subtrees))
         end,
     Reduce = fun lists:reverse/1,
-    astranaut_uniplate:with_subtrees(Sequence, Reduce).
+    astranaut_uniplate:with_subtrees(Sequence, Reduce, Comprehension).
 
-walk_generate() ->
+walk_generator(Generator) ->
     Sequence =
         fun([Patterns, Expressions]) ->
                 Patterns1 = with_comprehension_generate_pattern(Patterns),
@@ -293,9 +293,9 @@ walk_generate() ->
                 [Expressions1, Patterns1]
         end,
     Reduce = fun lists:reverse/1,
-    astranaut_uniplate:with_subtrees(Sequence, Reduce).
+    astranaut_uniplate:with_subtrees(Sequence, Reduce, Generator).
 
-walk_match() ->
+walk_match(Match) ->
     Sequence =
         fun([Patterns, Expressions]) ->
                 Patterns1 = with_match_left_pattern(Patterns),
@@ -303,9 +303,9 @@ walk_match() ->
                 [Expressions, Patterns1]
         end,
     Reduce = fun lists:reverse/1,
-    astranaut_uniplate:with_subtrees(Sequence, Reduce).
+    astranaut_uniplate:with_subtrees(Sequence, Reduce, Match).
 
-walk_clause(#{parent := Parent}) ->
+walk_clause(Clause, #{parent := Parent}) ->
     ScopeType = clause_scope_type(Parent),
     PatternType = scope_type_pattern(ScopeType),
     Sequence =
@@ -316,20 +316,20 @@ walk_clause(#{parent := Parent}) ->
                 Patterns1 = with_scope_type(PatternType, Patterns),
                 with_scope_type(ScopeType, [Patterns1, Expressions])
         end,
-    astranaut_uniplate:with_subtrees(Sequence).
+    astranaut_uniplate:with_subtrees(Sequence, Clause).
 
 %% Function Name in named fun should also be pattern and whole scope is shadowed.
-walk_named_fun() ->
+walk_named_fun(NamedFun) ->
     Sequence =
         fun([NameTree|RestTrees]) ->
                 NameTree1 = with_function_clause_pattern(NameTree),
                 with_shadowed([NameTree1|RestTrees])
         end,
-    astranaut_uniplate:with_subtrees(Sequence).
+    astranaut_uniplate:with_subtrees(Sequence, NamedFun).
 
-walk_clause_parent_expression() ->
+walk_clause_parent_expression(ClauseParent) ->
     Sequence = fun with_scope_group/1,
-    astranaut_uniplate:with_subtrees(Sequence).
+    astranaut_uniplate:with_subtrees(Sequence, ClauseParent).
 
 %% hello(A = 1, A1 = 2)
 %% [A = 1|[A1 = 2]]
@@ -348,9 +348,9 @@ walk_clause_parent_expression() ->
 %% 1> ((A = 1) + (A1 = 2)), A1.
 %% 2
 %% usually user dont write code this style, so variable rebinding only works in strict mode.
-walk_scope_group_expression() ->
+walk_scope_group_expression(Node) ->
     Sequence = fun sequence_scope_group_with_argument/1,
-    astranaut_uniplate:with_subtrees(Sequence).
+    astranaut_uniplate:with_subtrees(Sequence, Node).
 
 sequence_scope_group_subtrees(Subtrees) ->
     with_scope_group(Subtrees).

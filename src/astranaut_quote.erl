@@ -227,7 +227,7 @@ walk(Node, Attr, _File) ->
       astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
                 astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
-        end)).
+        end, Node)).
 
 %%%===================================================================
 %%% get options from quoted ast
@@ -295,8 +295,7 @@ quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Deb
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_pos => QuotePos, quote_type => QuoteType, 
                             file => File, module => Module, debug => Debug}, Options),
-    %% TODO: remove astranaut_traverse:set_updated/1 and set updated in astranaut_traverse to true at default.
-    astranaut_traverse:set_updated(astranaut_traverse:astranaut_traverse(quote(Value, Options1))).
+    astranaut_traverse:astranaut_traverse(quote(Value, Options1)).
 
 quote(Node, #{debug := true} = Opts) ->
     Opts1 = maps:remove(debug, Opts),
@@ -443,11 +442,11 @@ quote_1({named_fun, Pos1, Name, Clauses}, #{} = Opts) ->
 
 %% quote values
 quote_1({LiteralType, _Pos, _Literal} = Tuple, Opts) 
-  when LiteralType == atom ;
-       LiteralType == integer ;
-       LiteralType == char ;
-       LiteralType == float ;
-       LiteralType == string ->
+  when LiteralType =:= atom ;
+       LiteralType =:= integer ;
+       LiteralType =:= char ;
+       LiteralType =:= float ;
+       LiteralType =:= string ->
     astranaut_return:return(quote_literal_tuple(Tuple, Opts));
 quote_1(Tuple, Opts) when is_tuple(Tuple) ->
     quote_tuple_list(tuple_to_list(Tuple), Opts);

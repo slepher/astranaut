@@ -53,7 +53,7 @@
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
--export([listen_error/1, writer_updated/1, listen_updated/1, set_updated/1]).
+-export([listen_error/1, writer_updated/1, listen_updated/1]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
 
@@ -62,7 +62,7 @@ astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
     Inner =
         fun(_Formatter, File, _Attr, State0) ->
                 State1 = maps:get(state, Map, State0),
-                Return = maps:get(return, Map, keep),
+                Return = maps:get(return, Map, ok),
                 Errors = maps:get(errors, Map, []),
                 Warnings = maps:get(warnings, Map, []),
                 Error1 = astranaut_error:append_ews(Errors, Warnings, astranaut_error:new(File)),
@@ -186,7 +186,7 @@ bind_without_error(MA, KMB) ->
     bind(
       listen_error(MA),
       fun({A, ErrorStruct}) ->
-              case astranaut_error:is_empty(ErrorStruct) of
+              case astranaut_error:is_empty_error(ErrorStruct) of
                   true ->
                       KMB(A);
                   false ->
@@ -279,12 +279,6 @@ listen_updated(MA) ->
     map_m_state_ok(
       fun(#{return := Return, updated := Updated} = MState) ->
               update_m_state(MState, #{return => {Return, Updated}})
-      end, MA).
-
-set_updated(MA) ->
-    map_m_state_ok(
-      fun(MState) ->
-              update_m_state(MState, #{updated => true})
       end, MA).
 
 with_state_attr(F) ->

@@ -20,7 +20,7 @@
 
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
--type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | keep.
+-type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | ok.
 
 -type traverse_opts() :: #{traverse => traverse_style(),
                            formatter => module(),
@@ -119,7 +119,7 @@ map(F, TopNode, Opts) ->
       mapfold_1(F1, ok, TopNode, Opts#{use_traverse => true})).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
-%% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn == Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
+%% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
@@ -129,7 +129,7 @@ reduce(F, Init, TopNode, Opts) ->
                  bind_return(
                    apply_f_with_state(F, Node, State, Attr), #{without => [node]},
                    fun(State1) ->
-                           #{return => keep, state => State1}
+                           #{return => Node, state => State1}
                    end)
          end,
     astranaut_return:lift_m(
@@ -274,7 +274,7 @@ walk_return_up_map(#{continue := true, node := Node} = Map) ->
 walk_return_up_map(#{continue := true, return := Return} = Map) ->
     maps:remove(continue, Map#{return => astranaut_uniplate:skip(Return)});
 walk_return_up_map(#{continue := true} = Map) ->
-    maps:remove(continue, Map#{return => astranaut_uniplate:skip(keep)});
+    maps:remove(continue, Map#{return => astranaut_uniplate:skip(ok)});
 walk_return_up_map(#{} = Map) ->
     Map.
 
@@ -351,10 +351,8 @@ map_form(F, Form, #{traverse := subtree}) ->
       traverse_map_node(F, Form),
       fun(ok) ->
               astranaut_traverse:return(Form);
-         (keep) ->
-              astranaut_traverse:return(Form);
          (Form1) ->
-              astranaut_traverse:set_updated(astranaut_traverse:return(Form1))
+              astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
 map_form(F, Form, Opts) ->
     map_m_1(F, Form, Opts).
@@ -413,8 +411,7 @@ uniplate(Node) ->
             {[], fun(_) -> Node end};
         Subtrees ->
             {Subtrees, fun(Subtrees1) ->
-                               Subtrees2 = lists:map(fun lists:flatten/1, Subtrees1),
-                               update_tree(Node, Subtrees2)
+                               update_tree(Node, Subtrees1)
                        end}
     end.
 

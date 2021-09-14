@@ -11,6 +11,8 @@
 -include("quote.hrl").
 -include("macro.hrl").
 
+-macro_options([debug_module_ast]).
+
 %% API
 -export([test_cons/2]).
 
@@ -24,10 +26,10 @@
 
 -baseline(yep).
 
--exec_macro({function_macro, [a]}).
--exec_macro({function_macro, [b]}).
 -exec_macro({function_macro, [c, d]}).
 -cons_macro([e, f, g]).
+-exec_macro({function_macro, [a]}).
+-exec_macro({function_macro, [b]}).
 
 %%%===================================================================
 %%% API

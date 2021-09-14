@@ -53,12 +53,17 @@ is_pos(Pos) ->
 is_leaf(Node) ->
     erl_syntax:is_leaf(Node).
 
+%% as this issue mentioned, it's a bug, but will cause compatibility issue
+%% https://github.com/erlang/otp/issues/4529
+%% the goal of revert/1 is to fix this without cause compatibility issues.
+%% just use astranaut_syntax:subtrees/1 replace of erl_syntax:subtress/1,
+%% astranaut_syntax:revert/1 replace of erl_syntax:revert/1.
 -spec subtrees(erl_syntax:syntaxTree()) -> [[erl_syntax:syntaxTree()]].
-subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name == type; Name == opaque ->
+subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name =:= type; Name =:= opaque ->
     NameTree = name_arity_tree(Name, Pos),
     TypeNameTree = name_arity_tree(TypeName, Pos),
     [[NameTree], [TypeNameTree, TypeBody|TypeParams]];
-subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name == spec; Name == callback ->
+subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= callback ->
     NameTree = name_arity_tree(Name, Pos),
     MFATree = mfa_tree(MFA, Pos),
     [[NameTree], [MFATree|Specs]];
@@ -77,11 +82,6 @@ name_arity_tree(Arity, Pos) when is_integer(Arity) ->
 update_tree(Node, Subtrees) ->
     erl_syntax:update_tree(Node, Subtrees).
 
-%% as this issue mentioned, it's a bug, but will cause compatibility issue
-%% https://github.com/erlang/otp/issues/4529
-%% the goal of module is to fix this without cause compatibility issues.
-%% just use astranaut_syntax:subtrees/1 replace of erl_syntax:subtress/1,
-%% astranaut_syntax:revert/1 replace of erl_syntax:revert/1.
 revert(Node) ->
     case erl_syntax:is_tree(Node) of
         false ->
@@ -98,10 +98,10 @@ revert(Node) ->
             end
     end.
 
-revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name == type; Name == opaque ->
+revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name =:= type; Name =:= opaque ->
     TypeName = erl_syntax:atom_value(TypeNameTree),
     {attribute, Pos, Name, {TypeName, TypeTree, TypeParamTrees}};
-revert_attribute(Name, [MFATree|SpecTrees], Pos, _Node) when Name == spec; Name == callback ->
+revert_attribute(Name, [MFATree|SpecTrees], Pos, _Node) when Name =:= spec; Name =:= callback ->
     MFA = mfa_value(MFATree),
     {attribute, Pos, Name, {MFA, SpecTrees}};
 revert_attribute(_Name, _Subtrees, _Pos, Node) ->
@@ -125,11 +125,11 @@ subtrees_pge(_Type, Subtrees, #{node := pattern}) ->
     Subtrees;
 subtrees_pge(named_fun_expr, [Names, Clauses], #{}) ->
     [pattern_node(Names), Clauses];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type == match_expr; Type == clause ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= match_expr; Type =:= clause ->
     [pattern_node(Patterns), expression_node(Expressions)];
 subtrees_pge(clause, [Patterns, Guards, Expressions], #{}) ->
     [pattern_node(Patterns), guard_node(Guards), expression_node(Expressions)];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type == generator; Type == binary_generator ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= generator; Type =:= binary_generator ->
     [pattern_node(Patterns), expression_node(Expressions)];
 subtrees_pge(_Type, Subtrees, #{}) ->
     Subtrees.
@@ -142,9 +142,9 @@ attribute_subtrees_type(_Type, Subtrees, #{}) ->
 
 update_attribute_body_trees(record = Name, [RecordNameTree|RecordBodyTrees]) ->
     attribute(Name, [name_node(RecordNameTree)|RecordBodyTrees]);
-update_attribute_body_trees(Name, [TypeNameTree, TypeTree|TypeParamTrees]) when Name == type; Name == opaque ->
+update_attribute_body_trees(Name, [TypeNameTree, TypeTree|TypeParamTrees]) when Name =:= type; Name =:= opaque ->
     attribute(Name, [name_node(TypeNameTree), type_node(TypeTree)|type_param_node(TypeParamTrees)]);
-update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name == spec; Name == callback ->
+update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name =:= spec; Name =:= callback ->
     attribute(Name, [name_node(SpecMFATree)|type_node(SpecTrees)]);
 update_attribute_body_trees(Name, BodyTrees) ->
     attribute(Name, BodyTrees).
@@ -223,6 +223,8 @@ grforms_append({attribute, _Pos, file, _FileName} = File, {[], FRForms, ARForms,
     {[], [File|FRForms], ARForms, MForms};
 grforms_append({attribute, _Pos, export, _Exports} = Export, {[], FRForms, ARForms, MForms}) ->
     {[], FRForms, [Export|ARForms], MForms};
+grforms_append({attribute, _Pos, export_type, _Exports} = ExportType, {[], FRForms, ARForms, MForms}) ->
+    {[], FRForms, [ExportType|ARForms], MForms};
 grforms_append({attribute, _Pos, spec, _SpecValue} = Spec, {ERForms, FRForms, ARForms, MRForms}) ->
     {ERForms, [Spec|FRForms], ARForms, MRForms};
 grforms_append({function, _Pos, _Name, _Arity, _Clauses} = Function, {ERForms, FRForms, ARForms, MRForms}) ->
@@ -405,24 +407,12 @@ merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
 
 -spec is_renamed(integer(), erl_parse:abstract_form()) -> boolean().
 is_renamed(Arity, Form) ->
-    Either =
-        astranaut_uniplate:map_m_static(
-          fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments} = Node) ->
-                  case length(Arguments) == Arity of
-                      true ->
-                          {left, renamed};
-                      false ->
-                          {right, Node}
-                  end;
-             (Node) ->
-                  {right, Node}
-          end, Form, fun astranaut:uniplate/1, either, #{traverse => pre}),
-    case Either of
-        {left, renamed} ->
-            true;
-        {right, _Form} ->
-            false
-    end.
+    astranaut_uniplate:search(
+      fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
+              length(Arguments) =:= Arity;
+         (_Node) ->
+              false
+      end, Form, fun astranaut:uniplate/1, #{traverse => pre}).
   
 new_function_name(FName, Arity, Functions) ->
     new_function_name(FName, Arity, Functions, 1).
@@ -439,12 +429,8 @@ new_function_name(FName, Arity, Functions, Counter) ->
 update_function_name(Name, Arity, NewName, Forms) ->
     lists:map(
       fun({function, Pos, FName, FArity, Clauses})
-            when (FName == Name) andalso (FArity == Arity) ->
-              Clauses1 =
-                  lists:map(
-                    fun(Clause) ->
-                            update_call_name(Name, NewName, Arity, Clause)
-                    end, Clauses),
+            when FName =:= Name, FArity =:= Arity ->
+              Clauses1 = update_call_name(Name, NewName, Arity, Clauses),
               {function, Pos, NewName, Arity, Clauses1};
          (Form) ->
               Form
@@ -453,8 +439,8 @@ update_function_name(Name, Arity, NewName, Forms) ->
 update_call_name(OrignalName, NewName, Arity, Function) ->
     astranaut:smap(
       fun({call, Pos, {atom, Pos2, Name}, Arguments})
-            when (Name == OrignalName) andalso (length(Arguments) == Arity) ->
+            when Name =:= OrignalName, length(Arguments) =:= Arity ->
               {call, Pos, {atom, Pos2, NewName}, Arguments};
-         (_Node) ->
-              keep
+         (Node) ->
+              Node
       end, Function, #{traverse => pre}).

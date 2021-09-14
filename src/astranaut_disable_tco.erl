@@ -36,7 +36,7 @@ format_error(Message) ->
 walk({function, _Pos, _Name, _Arity, _Clauses} = Function, _Variables, #{step := pre}) ->
     Opts = #{traverse => pre},
     Variables = astranaut:sreduce(fun walk_variables/3, sets:new(), Function, Opts),
-    {keep, Variables};
+    {Function, Variables};
 walk({function, Pos, Name, Arity, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{function, Pos, Name, Arity, NClauses}, NVariables};
@@ -46,8 +46,8 @@ walk({'fun', Pos, {clauses, Clauses}}, Variables, #{step := post}) ->
 walk({named_fun, Pos, Name, Clauses}, Variables, #{step := post}) ->
     {NClauses, NVariables} = walk_clauses(Clauses, {atom, Name}, Variables),
     {{named_fun, Pos, Name, NClauses}, NVariables};
-walk(_Node, Variables, _Attr) ->
-    {keep, Variables}.
+walk(Node, Variables, _Attr) ->
+    {Node, Variables}.
 
 walk_variables({var, _Pos, Name}, Variables, _Attr) ->
     sets:add_element(Name, Variables);
@@ -69,7 +69,7 @@ walk_clause({clause, Pos, Patterns, Guards, Body}, Name, Variables) ->
 
 walk_body([{call, _Pos, {Type, _Pos1, FName}, _Args} = Rep], Name, Variables) ->
     if
-        {Type, FName} == Name ->
+        {Type, FName} =:= Name ->
             {[Rep], Variables};
         true ->
             {NRep, NVariables} = add_try_catch(Rep, Variables), 

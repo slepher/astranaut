@@ -383,11 +383,11 @@ test_spec(_Config) ->
 
 test_guard(_Config) ->
     Var = merl:quote(0, "A"),
-    Guard = merl:quote(0, "A == hello"),
+    Guard = merl:quote(0, "A =:= hello"),
     TestGuard = quote_example:guard(Var, Guard),
     Ast = merl:quote(
             ["case A of",
-             "  A when A == hello ->",
+             "  A when A =:= hello ->",
              "    A;",
              "  _ ->",
              "    {error, not_match}"

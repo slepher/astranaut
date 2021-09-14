@@ -204,7 +204,7 @@ analyze_module_attributes(AttributeName, Module) ->
     Attributes = Module:module_info(attributes),
     lists:reverse(
       lists:foldl(
-        fun({Attr, Value}, Acc) when Attr == AttributeName ->
+        fun({Attr, Value}, Acc) when Attr =:= AttributeName ->
                 [Value|Acc];
            (_Other, Acc) ->
                 Acc
@@ -232,7 +232,7 @@ analyze_forms_attributes(Forms) ->
 analyze_forms_attributes(AttributeName, Forms) ->
     lists:reverse(
       lists:foldl(
-        fun({attribute, _, Attr, AttrValue}, Acc) when Attr == AttributeName ->
+        fun({attribute, _, Attr, AttrValue}, Acc) when Attr =:= AttributeName ->
                 [AttrValue|Acc];
            (_Form, Acc) ->
                 Acc
@@ -346,11 +346,11 @@ gen_function(Name, {'fun', Pos, {clauses, Clauses}}) ->
 gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
     Clauses1 = 
         astranaut:smap(
-          fun({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 == FunName2 ->
+          fun({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 =:= FunName2 ->
                   {atom, FunNamePos, FunName2};
              (Node, _Attr) ->
                   Node
-          end, Clauses, #{traverse => leaf}),
+          end, Clauses, #{traverse => post}),
     gen_function(Name, Pos, Clauses1);
 gen_function(Name, [Clause|_T] = Forms) ->
     case erl_syntax:type(Clause) of
@@ -426,7 +426,7 @@ try_concerete(_A, []) ->
 %% @end
 with_attribute(F, Init, Forms, Attr, Opts) ->
     astranaut:reduce(
-      fun({attribute, Pos, Attr1, AttrValue}, Acc) when Attr1 == Attr ->
+      fun({attribute, Pos, Attr1, AttrValue}, Acc) when Attr1 =:= Attr ->
               values_apply_fun_m(F, AttrValue, Acc, #{pos => Pos});
          (_Node, Acc) ->
               Acc
@@ -445,23 +445,21 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     F1 = fun(Value, {NodesAcc, StateAcc}, Attr1) ->
                  astranaut_return:bind(
                    values_apply_fun_m(F, Value, StateAcc, Attr1),
-                   fun({keep, State}) ->
-                           astranaut_return:return({NodesAcc, State});
-                      ({Nodes, State}) ->
+                   fun({Nodes, State}) ->
                            astranaut_return:return({Nodes ++ NodesAcc, State})
                    end)
          end,
     astranaut:mapfold(
-      fun({attribute, Pos, Attr1, AttrValue} = Node, Acc) when Attr1 == Attr ->
+      fun({attribute, Pos, Attr1, AttrValue} = Node, Acc) when Attr1 =:= Attr ->
               astranaut_return:bind(
                 values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Pos}),
                 fun({[], Acc1}) ->
-                        astranaut_return:return({keep, Acc1});
+                        astranaut_return:return({Node, Acc1});
                    ({Nodes, Acc1}) ->
                         astranaut_return:return({[Node|Nodes], Acc1})
                 end);
-         (_Node, Acc) ->
-              astranaut_return:return({keep, Acc})
+         (Node, Acc) ->
+              astranaut_return:return({Node, Acc})
       end, Init, Forms, Opts#{traverse => subtree}).
 
 values_apply_fun_m(F, AttrValues, Acc, Opts) when is_list(AttrValues) ->
@@ -702,7 +700,7 @@ validate_map_value(Validator, Key, Value, ToValidate, ValidatedData, IsKey) ->
         false ->
             astranaut_return:lift_m(
               fun(Value1) ->
-                      case (not IsKey) and (Value1 == undefined) of
+                      case (not IsKey) and (Value1 =:= undefined) of
                           true ->
                               ValidatedData;
                           false ->
@@ -803,7 +801,7 @@ internal_to_validator_fun(InternalFun, Args) when is_function(InternalFun, 4) ->
     fun(Value, IsEmpty, Attrs) -> InternalFun(Value, Args, IsEmpty, Attrs) end.
 
 apply_validator_fun(ValidatorFun, Value, #{is_key := IsKey} = Attrs) when is_function(ValidatorFun, 3) ->
-    IsEmpty = (not IsKey) and (Value == undefined),
+    IsEmpty = (not IsKey) and (Value =:= undefined),
     ValidatorFun(Value, IsEmpty, Attrs);
 apply_validator_fun(_ValidatorFun, undefined = Value, #{is_key := false}) ->
     {ok, Value};
