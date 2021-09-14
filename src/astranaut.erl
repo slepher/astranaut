@@ -123,9 +123,6 @@ map(F, TopNode, Opts) ->
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
-    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
-    Uniplate1 = astranaut_uniplate:uniplate_static(Uniplate),
-    Opts1 = Opts#{uniplate => Uniplate1},
     F1 = fun(Node, State, Attr) ->
                  bind_return(
                    apply_f_with_state(F, Node, State, Attr), #{without => [node]},
@@ -137,7 +134,7 @@ reduce(F, Init, TopNode, Opts) ->
       fun({_TopNode1, State}) ->
               State
       end,
-      mapfold_1(F1, Init, TopNode, Opts1#{use_traverse => true})).
+      mapfold_1(F1, Init, TopNode, Opts#{use_traverse => true, static => true})).
 
 -spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
 %% @doc Combines the operations of map/3 and reduce/4 into one pass.
@@ -397,15 +394,6 @@ traverse_map_node(F, Node) ->
             astranaut_traverse:update_pos(Pos, F(Node))
     end.
 
-uniplate([]) ->
-    {[], fun(_) -> [] end};
-uniplate([Node|_T] = Nodes) ->
-    case erl_syntax:is_form(Node) of
-        true ->
-            {[Nodes], fun([Nodes1]) -> astranaut_syntax:reorder_updated_forms(Nodes1) end};
-        false ->
-            {[Nodes], fun([Nodes1]) -> Nodes1 end}
-    end;
 uniplate(Node) ->
     case subtrees(Node) of
         [] ->

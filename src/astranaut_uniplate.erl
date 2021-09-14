@@ -10,8 +10,8 @@
 
 %% API
 -export([map/4, reduce/5, mapfold/5, search/4]).
--export([uniplate_static/1, uniplate_context/1]).
--export([map_m/5, map_m_static/5, descend_m/4]).
+-export([uniplate_context/1]).
+-export([map_m/5, descend_m/4]).
 -export([is_node_context/1]).
 -export([with_subtrees/2, with_subtrees/3]).
 -export([skip/1, up_attr/2, with/3, with_each/3]).
@@ -160,13 +160,6 @@ f_nsa(F, A, S, _R) when is_function(F, 2) ->
 f_nsa(F, A, S, R) when is_function(F, 3) ->
     F(A, S, R).
 
--spec uniplate_static(uniplate(A)) -> uniplate(A).
-uniplate_static(Uniplate) ->
-    fun(Node) ->
-            {Subtrees, _MakeTree} = Uniplate(Node),
-            {Subtrees, fun(_) -> context_node(Node) end}
-    end.
-
 -spec uniplate_context(uniplate(A)) -> uniplate(A).
 uniplate_context(Uniplate) ->
     fun(#node_context{node = Node, withs = Withs, reduces = Reduces}) ->
@@ -178,11 +171,6 @@ uniplate_context(Uniplate) ->
        (Node) ->
             Uniplate(Node)
     end.
-
--spec map_m_static(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M), traverse_opts()) -> monad(M, N).
-%% @doc works like map_m/5, but node will not be changed.
-map_m_static(F, Node, Uniplate, Monad, Opts) ->
-    map_m(F, Node, Uniplate, Monad, Opts#{static => true}).
 
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
             #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
