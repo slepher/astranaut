@@ -9,7 +9,7 @@
 -module(astranaut_uniplate).
 
 %% API
--export([map/4, reduce/5, mapfold/5]).
+-export([map/4, reduce/5, mapfold/5, search/4]).
 -export([uniplate_static/1, uniplate_context/1]).
 -export([map_m/5, map_m_static/5, descend_m/4]).
 -export([is_node_context/1]).
@@ -113,12 +113,32 @@ mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3)
           end, Node, Uniplate, state, Opts, is_function(F, 3)),
     (StateM)(Init).
 
+-spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, uniplate(N), traverse_opts()) -> boolean().
+search(F, Node, Uniplate, Opts) ->
+    Either =
+        map_m_with_attr(
+          fun(N, A) ->
+                  case f_na(F, N, A) of
+                      true ->
+                          {left, match};
+                      false ->
+                          {right, N}
+                  end
+          end, Node, Uniplate, either, Opts#{static => true}, is_function(F, 2)),
+    case Either of
+        {left, match} ->
+            true;
+        {right, _Node} ->
+            false
+    end.
+
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, false) ->
     map_m(
      fun(N) ->         %% N is Node
              F(N, #{}) %% #{} is empty Attr
      end, Node, Uniplate, Monad, Opts);
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
+    %% to take benefit of attribute access, add a ReaderT monad transformer.
     Attr = maps:get(attr, Opts, #{}),
     Opts1 = maps:remove(attr, Opts),
     ReaderT =
@@ -208,7 +228,7 @@ with_updated_writer(Fun, #{updated_writer := _Writer, updated_listen := _Listen}
     Opts1 = Opts#{updated_writer_lift => fun(A) -> A end},
     Fun(Opts1);
 with_updated_writer(Fun, #{bind := Bind, return := Return} = MonadOpts, false) ->
-    %% if monad is not a monad writer, a default writer monad is lifted.
+    %% if monad is not a monad writer, a default WriterT is lifted.
     LiftedOpts = lifted_updated_writer_opts(MonadOpts),
     %% map_m_monads returns writer monad.
     NodeUpdated = Fun(LiftedOpts),

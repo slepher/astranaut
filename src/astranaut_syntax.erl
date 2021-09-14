@@ -53,6 +53,11 @@ is_pos(Pos) ->
 is_leaf(Node) ->
     erl_syntax:is_leaf(Node).
 
+%% as this issue mentioned, it's a bug, but will cause compatibility issue
+%% https://github.com/erlang/otp/issues/4529
+%% the goal of revert/1 is to fix this without cause compatibility issues.
+%% just use astranaut_syntax:subtrees/1 replace of erl_syntax:subtress/1,
+%% astranaut_syntax:revert/1 replace of erl_syntax:revert/1.
 -spec subtrees(erl_syntax:syntaxTree()) -> [[erl_syntax:syntaxTree()]].
 subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name =:= type; Name =:= opaque ->
     NameTree = name_arity_tree(Name, Pos),
@@ -77,11 +82,6 @@ name_arity_tree(Arity, Pos) when is_integer(Arity) ->
 update_tree(Node, Subtrees) ->
     erl_syntax:update_tree(Node, Subtrees).
 
-%% as this issue mentioned, it's a bug, but will cause compatibility issue
-%% https://github.com/erlang/otp/issues/4529
-%% the goal of module is to fix this without cause compatibility issues.
-%% just use astranaut_syntax:subtrees/1 replace of erl_syntax:subtress/1,
-%% astranaut_syntax:revert/1 replace of erl_syntax:revert/1.
 revert(Node) ->
     case erl_syntax:is_tree(Node) of
         false ->
@@ -407,24 +407,12 @@ merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
 
 -spec is_renamed(integer(), erl_parse:abstract_form()) -> boolean().
 is_renamed(Arity, Form) ->
-    Either =
-        astranaut_uniplate:map_m_static(
-          fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments} = Node) ->
-                  case length(Arguments) =:= Arity of
-                      true ->
-                          {left, renamed};
-                      false ->
-                          {right, Node}
-                  end;
-             (Node) ->
-                  {right, Node}
-          end, Form, fun astranaut:uniplate/1, either, #{traverse => pre}),
-    case Either of
-        {left, renamed} ->
-            true;
-        {right, _Form} ->
-            false
-    end.
+    astranaut_uniplate:search(
+      fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
+              length(Arguments) =:= Arity;
+         (_Node) ->
+              false
+      end, Form, fun astranaut:uniplate/1, #{traverse => pre}).
   
 new_function_name(FName, Arity, Functions) ->
     new_function_name(FName, Arity, Functions, 1).
@@ -441,12 +429,8 @@ new_function_name(FName, Arity, Functions, Counter) ->
 update_function_name(Name, Arity, NewName, Forms) ->
     lists:map(
       fun({function, Pos, FName, FArity, Clauses})
-            when (FName =:= Name) andalso (FArity =:= Arity) ->
-              Clauses1 =
-                  lists:map(
-                    fun(Clause) ->
-                            update_call_name(Name, NewName, Arity, Clause)
-                    end, Clauses),
+            when FName =:= Name, FArity =:= Arity ->
+              Clauses1 = update_call_name(Name, NewName, Arity, Clauses),
               {function, Pos, NewName, Arity, Clauses1};
          (Form) ->
               Form
@@ -455,7 +439,7 @@ update_function_name(Name, Arity, NewName, Forms) ->
 update_call_name(OrignalName, NewName, Arity, Function) ->
     astranaut:smap(
       fun({call, Pos, {atom, Pos2, Name}, Arguments})
-            when (Name =:= OrignalName) andalso (length(Arguments) =:= Arity) ->
+            when Name =:= OrignalName, length(Arguments) =:= Arity ->
               {call, Pos, {atom, Pos2, NewName}, Arguments};
          (Node) ->
               Node

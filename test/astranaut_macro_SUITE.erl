@@ -180,8 +180,8 @@ test_macro_with_warnings(Config) ->
     Forms = astranaut_test_lib:test_module_forms(macro_with_warnings, Config),
     Basepos = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
-    io:format("error is ~p~n", [astranaut_error:printable(ErrorStruct)]),
-    {[], [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Basepos, ErrorStruct),
+    {FileErrors, [{File, Warnings}]} = astranaut_test_lib:realize_with_baseline(Basepos, ErrorStruct),
+    ?assertEqual([], FileErrors),
     Local = macro_with_warnings__local_macro,
     ?assertEqual("macro_with_warnings.erl", filename:basename(File)),
     ?assertMatch(
