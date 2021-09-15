@@ -14,6 +14,16 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
+
+-record(node_context, {node,
+                       withs = [],
+                       reduces = [],
+                       skip = false,
+                       up_attrs = [],
+                       entries = [],
+                       exits = []
+                      }).
+
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -110,7 +120,8 @@ groups() ->
 all() -> 
     [test_writer_or, test_map, test_map_attr,
      test_reduce, test_reduce_attr, test_reduce_traverse_all,
-     test_mapfold_attr, test_f_return_list, test_all_return_list].
+     test_mapfold_attr, test_f_return_list, test_all_return_list,
+     test_with_subtrees, test_af_with].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -325,3 +336,54 @@ test_all_return_list(_Config) ->
     Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.
+
+test_with_subtrees(_Config) ->
+    TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
+    F =
+        fun(match_expr, Node, Variables, _Attr) ->
+                {astranaut_uniplate:with_subtrees(
+                   fun([Patterns, Expressions]) ->
+                           [astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
+                            astranaut_uniplate:with(
+                              fun(Variables1) ->
+                                      [before_pattern|Variables1]
+                              end,
+                              fun(Variables1) ->
+                                      [after_pattern|Variables1]
+                              end,
+                              astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
+                   end, fun lists:reverse/1, Node), Variables};
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
+                {Var, [{pattern, VarName}|Variables]};
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->
+                {Var, [{expression, VarName}|Variables]};
+           (_Type, Node, Variables, #{}) ->
+                {Node, Variables}
+        end,
+    {TopNode1, State1} =
+        astranaut:smapfold(
+          fun(Node, Acc, Attr) ->
+                  Type = erl_syntax:type(Node),
+                  F(Type, Node, Acc, Attr)
+          end, [], TopNode, #{traverse => pre}),
+    ?assertEqual([after_pattern, {pattern, 'D'}, before_pattern, {expression, 'C'}, after_pattern, {pattern, 'B'}, before_pattern, {expression, 'A'}], State1),
+    ?assertEqual(TopNode, TopNode1),
+    ok.
+
+test_af_with(_Config) ->
+    Datas1 = [[], [a, b], [c, d], []],
+    Datas2 = astranaut_uniplate:with(g, h, Datas1),
+    ?assertEqual([[], [#node_context{node = a, entries = [g]}, b],
+                  [c, #node_context{node = d, exits = [h]}], []], Datas2),
+    Datas3 = [[a, b], [c, d], []],
+    Datas4 = astranaut_uniplate:with(g, h, Datas3),
+
+    ?assertEqual([[#node_context{node = a, entries = [g]}, b],
+                  [c, #node_context{node = d, exits = [h]}], []], Datas4),
+    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [astranaut_uniplate:skip([a, b]), [c, d], []]),
+    Datas6 = astranaut_uniplate:with(g, h, Datas5),
+    ?assertEqual([[#node_context{node = a, entries = [g], skip = true},
+                   #node_context{node = b, skip = true}],
+                  [#node_context{node = c, up_attrs = [#{name => data}]},
+                   #node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
+                 ok.

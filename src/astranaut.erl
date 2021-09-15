@@ -296,9 +296,7 @@ to_list(Form1) ->
 map_form(F, Form, #{traverse := subtree}) ->
     astranaut_traverse:bind(
       traverse_map_node(F, Form),
-      fun(ok) ->
-              astranaut_traverse:return(Form);
-         (Form1) ->
+      fun(Form1) ->
               astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
 map_form(F, Form, Opts) ->
@@ -348,7 +346,7 @@ traverse_map_node(F, Node) ->
     end.
 
 uniplate(Node) ->
-    case subtrees(Node) of
+    case astranaut_syntax:subtrees(Node) of
         [] ->
             {[], fun(_) -> Node end};
         Subtrees ->
@@ -357,9 +355,6 @@ uniplate(Node) ->
                        end}
     end.
 
-subtrees(Node) ->
-    with_badarg(fun() -> astranaut_syntax:subtrees(Node) end, Node).
-
 update_tree(Node, Subtrees) ->
     try astranaut_syntax:revert(astranaut_syntax:update_tree(Node, Subtrees)) of
         Node1 ->
@@ -367,15 +362,6 @@ update_tree(Node, Subtrees) ->
     catch
         EType:Exception?CAPTURE_STACKTRACE ->
             erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, ?GET_STACKTRACE)
-    end.
-
-with_badarg(Fun, Node) ->
-    try Fun() of
-        Value ->
-            Value
-    catch
-        EType:{badarg, _}?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {invalid_node, Node}, ?GET_STACKTRACE)
     end.
 
 format_error({validate_key_failure, required, Key, _Value}) ->
