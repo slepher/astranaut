@@ -54,6 +54,7 @@
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
 -export([listen_error/1, writer_updated/1, listen_updated/1]).
+-export([listen_has_error/1]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
 
@@ -178,6 +179,12 @@ return(A) ->
                 state_ok(#{return => A, state => State, error => astranaut_error:new(File)})
         end,
     new(Inner).
+
+listen_has_error(MA) ->
+    map_m_state_ok(
+      fun(#{return := Return, error := Error} = MState) ->
+              MState#{return => {Return, not astranaut_error:is_empty_error(Error)}}
+      end, MA).
 
 -spec bind_without_error(struct(S, A) | ok, fun((A) -> struct(S, B))) -> struct(S, B).
 bind_without_error(ok, KMB) ->

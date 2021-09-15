@@ -571,7 +571,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
           fun(Form) ->
                   case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
                       {ok, Macro} ->
-                          apply_macro(Form, Macro);
+                          apply_macro(Macro);
                       error ->
                           astranaut_traverse:then(
                             astranaut_traverse:warning(invalid_macro_attribute),
@@ -646,10 +646,10 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                             %% error in astranaut_traverse should be monad write
                             %% current use as monad state is not right, should be changed.
                             %% astranaut_traverse:fail_on_error(
-                            astranaut_traverse:map_m(
+                            astranaut_monad:map_m_flatten(
                               fun(Clause) ->
                                       transform_call_macros_clause(Module, MacroMap, Clause)
-                              end, Clauses))
+                              end, Clauses, fun astranaut_traverse:bind/2, fun astranaut_traverse:return/1))
                             %%)
                   end;
              (Form) ->
@@ -669,7 +669,7 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                 {ok, Macro} ->
                                     case match_macro_order(Macro, Step) of
                                         true ->
-                                            apply_macro(Node, Macro#{rename_quoted_variables => true});
+                                            apply_macro(Macro#{rename_quoted_variables => true});
                                         false ->
                                             astranaut_traverse:return(Node)
                                     end;
@@ -688,9 +688,9 @@ match_macro_order(Macro, Step) ->
 %%%===================================================================
 %%% apply macro functions
 %%%===================================================================
-apply_macro(Node, #{pos := Pos} = Opts) ->
+apply_macro(#{pos := Pos} = Opts) ->
     astranaut_traverse:bind_without_error(
-      traverse_apply_mfa(Node, Opts),
+      traverse_apply_mfa(Opts),
       fun(Return) ->
               astranaut_traverse:lift_m(
                 fun(Return1) ->
@@ -700,10 +700,10 @@ apply_macro(Node, #{pos := Pos} = Opts) ->
                 end, update_quoted_variable_name(Return, Opts))
       end).
 
-traverse_apply_mfa(Node, #{pos := Pos, formatter := Formatter} = Opts) ->
-    astranaut_traverse:update_pos(Pos, Formatter, astranaut:traverse_return(apply_mfa(Node, Opts))).
+traverse_apply_mfa(#{pos := Pos, formatter := Formatter} = Opts) ->
+    astranaut_traverse:update_pos(Pos, Formatter, astranaut:traverse_return(apply_mfa(Opts))).
 
-apply_mfa(Node, #{module := Module, function := Function, arguments := Arguments} = Opts) ->
+apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Opts) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
             Return
@@ -716,15 +716,15 @@ apply_mfa(Node, #{module := Module, function := Function, arguments := Arguments
                      (_Stack) ->
                           false
                   end, ?GET_STACKTRACE),
-            macro_exception_error(Node, Arguments, Class, Exception, StackTraces1, Opts)
+            macro_exception_error(Arguments, Class, Exception, StackTraces1, Opts)
     end.
 
-macro_exception_error(Node, Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
+macro_exception_error(Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
     MFA = #{module => Module, function => Function, arity => length(Arguments)},
-    {error, Node, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
+    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
 %% replace `module`__local_macro with module in stacktrace
-macro_exception_error(Node, Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
-                                                                        macro_module := Module, macro := Function}) ->
+macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
+                                                                  macro_module := Module, macro := Function}) ->
     StackTraces1 =
         lists:map(
           fun({M, F, A, Pos}) when M =:= LocalModule ->
@@ -733,7 +733,7 @@ macro_exception_error(Node, Arguments, Class, Exception, StackTraces, #{module :
                   Val
           end, StackTraces),
     MFA = #{function => Function, arity => length(Arguments), local => true},
-    {error, Node, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}}.
+    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}}.
     
 should_transform_function(_Function, _Arity, all) ->
     true;

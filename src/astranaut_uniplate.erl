@@ -234,9 +234,10 @@ monad_opts(Monad) ->
     State = astranaut_monad:monad_state(Monad),
     Writer = astranaut_monad:monad_updated_writer(Monad),
     Listen = astranaut_monad:monad_updated_listen(Monad),
+    ListenHasError = astranaut_monad:monad_listen_has_error(Monad),
     MOpts = #{bind => Bind, return => Return,
               ask => Ask, local => Local,
-              state => State,
+              state => State, listen_has_error => ListenHasError,
               updated_writer => Writer, updated_listen => Listen},
     maps:filter(
       fun(_Key, Value) ->
@@ -269,12 +270,12 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
       fun(Node) ->
               sub_apply(F, Node, Uniplate, MOpts, Opts)
       end, Nodes, Bind, Return);
-map_m_1(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
+map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
     %% Node1 is node without context
-    Bind(
+    bind_without_error(
       step_apply(F, Node, pre, MOpts, Opts),
       %% F(Node) -> [Node] | Node
       %% returned value is node or list of node, use map_m_if_list to mapover nodes
@@ -282,16 +283,16 @@ map_m_1(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
               map_m_if_list(
                 %% after pre_apply, NodeContext1 is node with context
                 fun(NodeContext1) ->
-                        Bind(
+                        bind_without_error(
                           descend_m_1(
                             fun(SubNode) ->
                                     sub_apply(F, SubNode, Uniplate, MOpts, Opts)
                             end, NodeContext1, Uniplate, MOpts),
                           fun(Node1) ->
                                   step_apply(F, Node1, post, MOpts, Opts)
-                          end)
+                          end, MOpts)
                 end, NodeOrNodes, MOpts)
-      end).
+      end, MOpts).
 
 descend_m_1(F, NodeContext, Uniplate, #{} = Opts) ->
     context_apply(
@@ -308,20 +309,40 @@ descend_m_1(F, NodeContext, Uniplate, #{} = Opts) ->
                 end, NodeContext1, Uniplate, Opts)
       end, Opts).
 
-descend_m_2(F, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated}) ->
+descend_m_2(F, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated} = Opts) ->
     {Subtreess, MakeTree} = Uniplate(NodeContext),
     Bind(
-      ListenUpdated(
-        astranaut_monad:map_m(
-          fun(Subtrees) ->
-                  astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
-          end, Subtreess, Bind, Return)),
-      fun({Subtrees1, true}) ->
+      listen_has_error(
+        ListenUpdated(
+          astranaut_monad:map_m(
+            fun(Subtrees) ->
+                    astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
+            end, Subtreess, Bind, Return)), Opts),
+      fun({_Any, true}) ->
+              Return([]);
+         ({{Subtrees1, true}, false}) ->
               Return(MakeTree(Subtrees1));
-         ({_Subtrees1, false}) ->
+         ({{_Subtrees1, false}, false}) ->
               %% context should be removed if node is not updated.
               Return(context_node(NodeContext))
       end).
+
+bind_without_error(MA, KMB, #{bind := Bind, return := Return} = Opts) ->
+    Bind(
+      listen_has_error(MA, Opts),
+      fun({_A, true}) ->
+              Return([]);
+         ({A, false}) ->
+              KMB(A)
+      end).
+
+listen_has_error(MA, #{listen_has_error := ListenHasError}) ->
+    ListenHasError(MA);
+listen_has_error(MA, #{bind := Bind, return := Return}) ->
+    astranaut_monad:lift_m(
+      fun(A) ->
+              {A, false}
+      end, MA, Bind, Return).
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
     astranaut_monad:map_m_flatten(AFB, Nodes, Bind, Return);
