@@ -157,8 +157,8 @@ test_simple_map(_Config) ->
     Node0 = {atom, 1, ok},
     Monad =
         astranaut:map_m(
-          fun(_Node) ->
-                  astranaut_traverse:return(ok)
+          fun(Node) ->
+                  astranaut_traverse:return(Node)
           end, Node0, #{traverse => pre}),
     astranaut_traverse:bind(
       astranaut_traverse:listen_updated(Monad),
@@ -204,8 +204,8 @@ test_reduce(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     Return =
         astranaut:reduce(
-          fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
+          fun({atom, _Pos, mark_1}, Acc, #{}) ->
+                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1});
              ({atom, _Pos, mark_error_1}, _Acc, #{}) ->
                   {error, mark_error_1};
              (_Node, Acc, #{}) ->
@@ -239,7 +239,7 @@ test_map_with_state(Config) ->
     ReturnM =
         astranaut:mapfold(
           fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, node => Node});
+                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, return => Node});
              ({atom, _Pos, mark_error_1}, Acc, #{}) ->
                   {{atom, _Pos, mark_error_2}, Acc};
              (Node, Acc, #{}) ->
@@ -277,8 +277,8 @@ test_reduce_attr(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
         astranaut:reduce(
-          fun({attribute, _Pos, mark, mark_0} = Node, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_0, state => Acc + 1, node => Node});
+          fun({attribute, _Pos, mark, mark_0}, Acc, #{}) ->
+                  astranaut:walk_return(#{warning => mark_0, state => Acc + 1});
              ({attribute, _Pos, mark, mark_error_0}, _Acc, #{}) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->
@@ -363,8 +363,8 @@ test_traverse_m_updated(Config) ->
     Forms = proplists:get_value(forms, Config),
     TraverseM =
         astranaut:map_m(
-          fun(_Node) ->
-                  astranaut_traverse:return(ok)
+          fun(Node) ->
+                  astranaut_traverse:return(Node)
           end, Forms, #{traverse => post}),
     TraverseM1 =
         astranaut_traverse:lift_m(
@@ -437,33 +437,42 @@ test_continue_sequence_children(_Config) ->
                   Sequence = fun lists:reverse/1,
                   Reduce = fun lists:reverse/1,
                   astranaut_traverse:return(astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
-             ({atom, _Pos, Atom}) ->
-                  astranaut_traverse:modify(
-                    fun(Acc) ->
-                            [Atom|Acc]
-                    end);
-             ({var, _Pos, Var}) ->
-                  astranaut_traverse:modify(
-                    fun(Acc) ->
-                            [Var|Acc]
-                    end);
-             (_Node) ->
-                  astranaut_traverse:return(ok)
+             ({atom, _Pos, AtomValue} = Atom) ->
+                  astranaut_traverse:then(
+                    astranaut_traverse:modify(
+                      fun(Acc) ->
+                              [AtomValue|Acc]
+                      end),
+                    astranaut_traverse:return(Atom));
+             ({var, _Pos, VarName} = Var) ->
+                  astranaut_traverse:then(
+                    astranaut_traverse:modify(
+                      fun(Acc) ->
+                              [VarName|Acc]
+                      end),
+                    astranaut_traverse:return(Var));
+             (Node) ->
+                  astranaut_traverse:return(Node)
           end, TopNode, #{traverse => pre}),
     Monad1 =
         astranaut:map_m(
-          fun({atom, _Pos, Atom}) ->
-                  astranaut_traverse:modify(
-                    fun(Acc) ->
-                            [Atom|Acc]
-                    end);
-             ({var, _Pos, Var}) ->
-                  astranaut_traverse:modify(
-                    fun(Acc) ->
-                            [Var|Acc]
-                    end);
-             (_Node) ->
-                  astranaut_traverse:return(ok)
+          fun({atom, _Pos, AtomValue} = Atom) ->
+                  astranaut_traverse:then(
+                    astranaut_traverse:modify(
+                      fun(Acc) ->
+                              [AtomValue|Acc]
+                      end),
+                    astranaut_traverse:return(Atom));
+             ({var, _Pos, VarName} = Var) ->
+                  astranaut_traverse:then(
+                    astranaut_traverse:modify(
+                      fun(Acc) ->
+                              [VarName|Acc]
+                      end),
+                    astranaut_traverse:return(Var));
+
+             (Node) ->
+                  astranaut_traverse:return(Node)
           end, TopNode, #{traverse => pre}),
     Return = astranaut_traverse:exec(Monad, astranaut, #{}, []),
     Return1 = astranaut_traverse:exec(Monad1, astranaut, #{}, []),

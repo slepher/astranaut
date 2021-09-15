@@ -645,10 +645,10 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                             %% error in astranaut_traverse should be monad write
                             %% current use as monad state is not right, should be changed.
                             %% astranaut_traverse:fail_on_error(
-                            astranaut_traverse:map_m(
+                            astranaut_monad:map_m_flatten(
                               fun(Clause) ->
                                       transform_call_macros_clause(Module, MacroMap, Clause)
-                              end, Clauses))
+                              end, Clauses, fun astranaut_traverse:bind/2, fun astranaut_traverse:return/1))
                             %%)
                   end;
              (Form) ->
@@ -723,7 +723,7 @@ macro_exception_error(Arguments, Class, Exception, StackTraces, #{macro := {Modu
     {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
 %% replace `module`__local_macro with module in stacktrace
 macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
-                                                                 macro_module := Module, macro := Function}) ->
+                                                                  macro_module := Module, macro := Function}) ->
     StackTraces1 =
         lists:map(
           fun({M, F, A, Pos}) when M =:= LocalModule ->

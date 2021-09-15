@@ -200,13 +200,28 @@ test_macro_with_warnings(Config) ->
 test_macro_with_error(Config) ->
     Forms = astranaut_test_lib:test_module_forms(macro_with_error, Config),
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
-    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    Return = astranaut_test_lib:compile_test_forms(Forms),
+    ErrorStruct = astranaut_return:run_error(Return),
     {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+
     Local = macro_with_error__local_macro,
     ?assertMatch(
        [{3,  Local, {macro_exception, _MFA, [], _StackTrace}},
         {6,  Local, bar}
        ], Errors),
+    %% %% TODO: astranaut:map_m does not just return error, but inject error_maker to forms.
+    %% %% while fixing this, uncomment testcase below.
+    %% Forms1 = astranaut_return:run(Return),
+    %% ClauseNums =
+    %%     lists:foldl(
+    %%       fun({function, _Pos, Name, Arity, Clauses}, Acc) ->
+    %%               maps:put({Name, Arity}, length(Clauses), Acc);
+    %%          (_Form, Acc) ->
+    %%               Acc
+    %%       end, #{}, Forms1),
+    %% ErrorMacro1 = maps:get({error_macro_1, 0}, ClauseNums, 0),
+    %% ErrorMacro2 = maps:get({error_macro_2, 1}, ClauseNums, 1),
+    %% ?assertEqual({0, 1}, {ErrorMacro1, ErrorMacro2}),
     ok.
 
 test_macro_with_vars(_Config) ->

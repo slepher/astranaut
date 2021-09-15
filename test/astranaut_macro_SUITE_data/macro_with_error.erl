@@ -11,6 +11,8 @@
 -include("quote.hrl").
 -include("macro.hrl").
 
+-macro_options([debug_module_ast]).
+
 -export([format_error/1]).
 -local_macro([exception_error/0, return_error/0]).
 
@@ -19,8 +21,10 @@
 error_macro_1() ->
     exception_error().
 
-error_macro_2() ->
-    return_error().
+error_macro_2(hello) ->
+    return_error();
+error_macro_2(_Other) ->
+    at_least_one_clause.
 
 exception_error() ->
     erlang:error(foo).
