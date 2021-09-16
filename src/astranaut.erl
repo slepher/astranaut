@@ -108,7 +108,7 @@ smapfold(F, Init, Nodes, Opts) ->
 map(F, TopNode, Opts) ->
     WithReturn = fun(_Node, Node1) -> #{return => Node1} end,
     F1 = fun(Node, _State, Attr) ->
-                 apply_f(F, Node, Attr)
+                 astranaut_uniplate:apply_fun(F, [Node, Attr])
          end,
     astranaut_return:lift_m(
       fun({TopNode1, _State}) ->
@@ -122,7 +122,7 @@ map(F, TopNode, Opts) ->
 reduce(F, Init, TopNode, Opts) ->
     WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
     F1 = fun(Node, State, Attr) ->
-                   apply_f_with_state(F, Node, State, Attr)
+                   astranaut_uniplate:apply_fun(F, [Node, State, Attr])
          end,
     astranaut_return:lift_m(
       fun({_TopNode1, State}) ->
@@ -150,21 +150,11 @@ mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
     F1 = fun(Node) ->
                  astranaut_traverse:with_state_attr(
                    fun(State, Attr) ->
-                           bind_return(Node, apply_f_with_state(F, Node, State, Attr), WithReturn)
+                           bind_return(Node, astranaut_uniplate:apply_fun(F, [Node, State, Attr]), WithReturn)
                    end)
          end,
     TopNodeM = map_m(F1, TopNode, Opts1),
     astranaut_traverse:run(TopNodeM, Formatter, InitAttr, Init).
-
-apply_f(F, Node, _Attr) when is_function(F, 1) ->
-    F(Node);
-apply_f(F, Node, Attr) when is_function(F, 2) ->
-    F(Node, Attr).
-
-apply_f_with_state(F, Node, State, _Attr) when is_function(F, 2) ->
-    F(Node, State);
-apply_f_with_state(F, Node, State, Attr) when is_function(F, 3) ->
-    F(Node, State, Attr).
 
 bind_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _Fun) ->
     exit(unsupported_traverse_struct);

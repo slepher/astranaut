@@ -27,48 +27,59 @@
 
 -type traverse_opts() :: #{traverse => traverse_style(), attr => map()}.
 
--record(node_context, {node,
-                       withs = [],
-                       reduces = [],
-                       skip = false,
-                       up_attrs = [],
-                       entries = [],
-                       exits = []
-                      }).
+-record(uniplate_node_context, {node,
+                                withs = [],
+                                reduces = [],
+                                skip = false,
+                                up_attrs = [],
+                                entries = [],
+                                exits = []
+                               }).
 
 -type traverse_style() :: pre | post | all | subtree.
--type node_context(A) :: #node_context{node :: A} | A.
+-type node_context(A) :: #uniplate_node_context{node :: A} | A.
 -type with_nodes(Node) :: fun(([[Node]]) -> [[node_context(Node)]]).
 -type reduce_nodes(Node) :: fun(([[node_context(Node)]]) -> [[node_context(Node)]]).
 -type maybe_list(A) :: [A] | A.
 
 %% API
+-export([apply_fun/2]).
+%% 
 -export([map/4, reduce/5, mapfold/5, search/4]).
--export([uniplate_context/1]).
 -export([map_m/5]).
--export([is_node_context/1]).
+%% Apply node with context series functions.
 -export([with_subtrees/2, with_subtrees/3]).
 -export([skip/1, up_attr/2, with/3, with_each/3]).
 -export([every_tree/2, clamp_trees/3, left_trees/2, right_trees/2]).
--export([context_node/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+%%@doc a tool function works like erlang:apply/2, ignore extra number of args more than function arity number.
+-spec apply_fun(function(), [any()]) -> any().
+apply_fun(F, [N|_T]) when is_function(F, 1) ->
+    F(N);
+apply_fun(F, [A1, A2|_T]) when is_function(F, 2) ->
+    F(A1, A2);
+apply_fun(F, [A1, A2, A3|_T]) when is_function(F, 3) ->
+    F(A1, A2, A3).
+
+%% @doc traverse node with identity or {reader, identity} monad, returns new node
 -spec map(fun((N) -> N) | fun((N, map()) -> N), N, uniplate(N), traverse_opts()) -> N.
 map(F, Node, Uniplate, Opts) when is_function(F, 1); is_function(F, 2) ->
     map_m_with_attr(
       fun(N, A) ->
-              f_na(F, N, A)
+              apply_fun(F, [N, A])
       end, Node, Uniplate, identity, Opts, is_function(F, 2)).
 
+%% @doc traverse node with state or {reader, state} monad, returned new state.
 -spec reduce(fun((N, S) -> S) | fun((N, S, map()) -> S), S, N, uniplate(N), traverse_opts()) -> S.
 reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
     StateM =
         map_m_with_attr(
           fun(N, A) ->
                   fun(S0) ->
-                          S1 = f_nsa(F, N, S0, A),
+                          S1 = apply_fun(F, [N, S0, A]),
                           {N, S1}
                   end
           end, Node, Uniplate, state, Opts#{static => true}, is_function(F, 3)),
@@ -76,6 +87,7 @@ reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) 
     {_Node, Acc} = StateM(Init),
     Acc.
 
+%% @doc traverse node with state or {reader, state} monad, returned new node with new state.
 -spec mapfold(fun((N, S) -> {N, S}) | fun((N, S, map()) -> {N, S}), S, N, uniplate(N), traverse_opts()) -> {N, S}.
 mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
     %% for more clear to read
@@ -112,17 +124,18 @@ mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3)
         map_m_with_attr(
           fun(N, A) ->
                   fun(S) ->
-                          f_nsa(F, N, S, A)
+                          apply_fun(F, [N, S, A])
                   end
           end, Node, Uniplate, state, Opts, is_function(F, 3)),
     (StateM)(Init).
 
+%% @doc traverse node with either or {reader, either} monad, if F(Node, Attr) is true, traverse is stopped immediately and return true, else return false.
 -spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, uniplate(N), traverse_opts()) -> boolean().
 search(F, Node, Uniplate, Opts) ->
     Either =
         map_m_with_attr(
           fun(N, A) ->
-                  case f_na(F, N, A) of
+                  case apply_fun(F, [N, A]) of
                       true ->
                           {left, match};
                       false ->
@@ -154,31 +167,9 @@ map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
           end, Node, Uniplate, {reader, Monad}, Opts1),
     ReaderT(Attr).
 
-f_na(F, A, _R) when is_function(F, 1) ->
-    F(A);
-f_na(F, A, R) when is_function(F, 2) ->
-    F(A, R).
-
-f_nsa(F, A, S, _R) when is_function(F, 2) ->
-    F(A, S);
-f_nsa(F, A, S, R) when is_function(F, 3) ->
-    F(A, S, R).
-
--spec uniplate_context(uniplate(A)) -> uniplate(A).
-uniplate_context(Uniplate) ->
-    fun(#node_context{node = Node, withs = Withs, reduces = Reduces}) ->
-            {Subtrees, MakeTree} = Uniplate(Node),
-            Subtrees1 = apply_functions(Withs, Subtrees),
-            {Subtrees1, fun(Subtrees2) ->
-                                MakeTree(apply_functions(lists:reverse(Reduces), Subtrees2))
-                        end};
-       (Node) ->
-            Uniplate(Node)
-    end.
-
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
             #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
-%% @doc traverse node with user defined monad with node changed detect.
+%% @doc traverse node with user defined monad.
 map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
     map_m(F, Node, Uniplate, MonadOpts, Opts);
@@ -191,6 +182,18 @@ map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
       fun(MonadOpts1) ->
               map_m_1(F, Node, UniplateContext, MonadOpts1, Opts2)
       end, MonadOpts, Static).
+
+-spec uniplate_context(uniplate(A)) -> uniplate(A).
+uniplate_context(Uniplate) ->
+    fun(#uniplate_node_context{node = Node, withs = Withs, reduces = Reduces}) ->
+            {Subtrees, MakeTree} = Uniplate(Node),
+            Subtrees1 = apply_functions(Withs, Subtrees),
+            {Subtrees1, fun(Subtrees2) ->
+                                MakeTree(apply_functions(lists:reverse(Reduces), Subtrees2))
+                        end};
+       (Node) ->
+            Uniplate(Node)
+    end.
 
 with_writer_updated(Fun, #{bind := Bind, return := Return} = Opts, true) ->
     %% a writer monad just ignore the updated value.
@@ -402,26 +405,28 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
       end).
 
 validate_post_transform(Uniplate, Node, Nodes) when is_list(Nodes) ->
-    lists:map(fun(Node1) -> validate_post_transform(Uniplate, Node, Node1) end, Nodes);
+    lists:foreach(fun(Node1) -> validate_post_transform_1(Uniplate, Node, Node1) end, Nodes);
 validate_post_transform(Uniplate, Node, Node1) ->
-    case is_node_context(Node1) of
-        true ->
+    validate_post_transform_1(Uniplate, Node, Node1).
+
+validate_post_transform_1(Uniplate, Node, Node1) ->
+    case Node1 of
+        #uniplate_node_context{} ->
             erlang:error({invalid_post_transform_with_context, Node, Node1});
-        false ->
-            if
-                Node =/= Node1 ->
-                    uniplate(Uniplate, Node, Node1, invalid_post_transform, #{});
-                true ->
-                    ok
-            end,
-            Node1
+        Node ->
+            ok;
+        Node1 ->
+            uniplate(Uniplate, Node, Node1, invalid_post_transform, #{})
     end.
 
-context_apply(#node_context{node = Node, skip = true}, _F, #{return := Return}) ->
+%%%===================================================================
+%%% apply node context in map_m/5 series functions
+%%%===================================================================
+context_apply(#uniplate_node_context{node = Node, skip = true}, _F, #{return := Return}) ->
     Return(Node);
-context_apply(#node_context{entries = Entries, exits = Exits, up_attrs = UpAttrs} = Context1, F, MOpts) ->
+context_apply(#uniplate_node_context{entries = Entries, exits = Exits, up_attrs = UpAttrs} = Context1, F, MOpts) ->
     %% remove context after applied
-    Context2 = Context1#node_context{entries = [], exits = [], up_attrs = [], skip = false},
+    Context2 = Context1#uniplate_node_context{entries = [], exits = [], up_attrs = [], skip = false},
     context_up_attrs(context_state_changes(F(Context2), Entries, Exits, MOpts), UpAttrs, MOpts);
 context_apply(Node, F, #{}) ->
     F(Node).
@@ -467,14 +472,14 @@ apply_functions([], Value) ->
 apply_functions([F|T], Value) when is_function(F, 1) ->
     apply_functions(T, F(Value)).
 
-updated_node(Node1, #node_context{node = Node1} = NodeContext2) ->
-    {NodeContext2#node_context{node = Node1}, false};
+updated_node(Node1, #uniplate_node_context{node = Node1} = NodeContext2) ->
+    {NodeContext2#uniplate_node_context{node = Node1}, false};
 updated_node(Node1, Node1) ->
     {Node1, false};
 updated_node(_Node1, Node2) ->
     {Node2, true}.
 
-context_node(#node_context{node = Node}) ->
+context_node(#uniplate_node_context{node = Node}) ->
     Node;
 context_node(Node) ->
     Node.
@@ -482,43 +487,37 @@ context_node(Node) ->
 %%%===================================================================
 %%% Apply node with context series functions.
 %%%===================================================================
--spec is_node_context(node_context(_Node)) -> boolean().
-is_node_context(#node_context{}) ->
-    true;
-is_node_context(_) ->
-    false.
-
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) -> node_context(Node).
-with_subtrees(With, #node_context{withs = Withs} = Node) ->
-    Node#node_context{withs = [With|Withs]};
+with_subtrees(With, #uniplate_node_context{withs = Withs} = Node) ->
+    Node#uniplate_node_context{withs = [With|Withs]};
 with_subtrees(With, Node) ->
-    with_subtrees(With, #node_context{node = Node}).
+    with_subtrees(With, #uniplate_node_context{node = Node}).
 
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node), node_context(Node)) -> node_context(Node).
-with_subtrees(With, Reduce, #node_context{reduces = Reduces} = Node) ->
-    with_subtrees(With, Node#node_context{reduces = [Reduce|Reduces]});
+with_subtrees(With, Reduce, #uniplate_node_context{reduces = Reduces} = Node) ->
+    with_subtrees(With, Node#uniplate_node_context{reduces = [Reduce|Reduces]});
 with_subtrees(With, Reduce, Node) ->
-    with_subtrees(With, Reduce, #node_context{node = Node}).
+    with_subtrees(With, Reduce, #uniplate_node_context{node = Node}).
 
 -spec skip(maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 skip(Trees) ->
     every_tree(
-      fun(#node_context{} = Context) ->
-              Context#node_context{skip = true};
+      fun(#uniplate_node_context{} = Context) ->
+              Context#uniplate_node_context{skip = true};
          (Node) ->
-              #node_context{node = Node, skip = true}
+              #uniplate_node_context{node = Node, skip = true}
       end, Trees).
 
 -spec up_attr(fun((map()) -> map()) | map(), maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 up_attr(Attr, Trees) ->
     every_tree(
-      fun(#node_context{skip = true} = Context) ->
+      fun(#uniplate_node_context{skip = true} = Context) ->
               Context;
-         (#node_context{up_attrs = UpAttrs} = Context) ->
+         (#uniplate_node_context{up_attrs = UpAttrs} = Context) ->
               UpAttrs1 = compose_up_attr(Attr, UpAttrs),
-              Context#node_context{up_attrs = UpAttrs1};
+              Context#uniplate_node_context{up_attrs = UpAttrs1};
          (Node) ->
-              #node_context{node = Node, up_attrs = [Attr]}
+              #uniplate_node_context{node = Node, up_attrs = [Attr]}
       end, Trees).
 
 compose_up_attr(Attr, []) ->
@@ -535,26 +534,26 @@ with(Entry, Exit, Trees) ->
 -spec with_each(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 with_each(Entry, Exit, Trees) ->
     every_tree(
-      fun(#node_context{entries = Entries, exits = Exits} = Context) ->
-              Context#node_context{entries = [Entry|Entries], exits = [Exit|Exits]};
+      fun(#uniplate_node_context{entries = Entries, exits = Exits} = Context) ->
+              Context#uniplate_node_context{entries = [Entry|Entries], exits = [Exit|Exits]};
          (Node) ->
-              #node_context{node = Node, entries = [Entry], exits = [Exit]}
+              #uniplate_node_context{node = Node, entries = [Entry], exits = [Exit]}
       end, Trees).
 
 with_entry(Entry, Trees) ->
     left_trees(
-      fun(#node_context{entries = Entries} = Context) ->
-              Context#node_context{entries = [Entry|Entries]};
+      fun(#uniplate_node_context{entries = Entries} = Context) ->
+              Context#uniplate_node_context{entries = [Entry|Entries]};
          (Node) ->
-              #node_context{node = Node, entries = [Entry]}
+              #uniplate_node_context{node = Node, entries = [Entry]}
       end, Trees).
 
 with_exit(Exit, Trees) ->
     right_trees(
-      fun(#node_context{exits = Exits} = Context) ->
-              Context#node_context{exits = [Exit|Exits]};
+      fun(#uniplate_node_context{exits = Exits} = Context) ->
+              Context#uniplate_node_context{exits = [Exit|Exits]};
          (Node) ->
-              #node_context{node = Node, exits = [Exit]}
+              #uniplate_node_context{node = Node, exits = [Exit]}
       end, Trees).
 
 every_tree(F, Trees) when is_list(Trees) ->
