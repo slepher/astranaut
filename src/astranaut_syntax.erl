@@ -407,12 +407,12 @@ merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
 
 -spec is_renamed(integer(), erl_parse:abstract_form()) -> boolean().
 is_renamed(Arity, Form) ->
-    astranaut_uniplate:search(
+    astranaut:search(
       fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
               length(Arguments) =:= Arity;
          (_Node) ->
               false
-      end, Form, fun astranaut:uniplate/1, #{traverse => pre}).
+      end, Form, #{traverse => pre}).
   
 new_function_name(FName, Arity, Functions) ->
     new_function_name(FName, Arity, Functions, 1).
