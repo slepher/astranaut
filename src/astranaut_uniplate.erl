@@ -282,15 +282,16 @@ map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
                         bind_without_error(
                           descend_m_1(
                             fun(SubNode) ->
-                                    sub_apply(F, SubNode, Uniplate, MOpts, Opts)
-                            end, Node, NodeContext1, Uniplate, MOpts),
+                                    %% add parent to subtree incase of exception raised
+                                    sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
+                            end, Node, NodeContext1, Uniplate, MOpts, Opts),
                           fun(Node1) ->
                                   step_apply(F, Node1, post, Uniplate, MOpts, Opts)
                           end, MOpts)
                 end, NodeOrNodes, MOpts)
       end, MOpts).
 
-descend_m_1(F, Node, NodeContext, Uniplate, #{} = Opts) ->
+descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
     context_apply(
       %% apply entries, exits, up_attrs, skip in NodeContext
       NodeContext,
@@ -301,26 +302,21 @@ descend_m_1(F, Node, NodeContext, Uniplate, #{} = Opts) ->
               descend_m_2(
                 %% for uniplate_context/1, subtrees of NodeContext1 is also a node with context
                 fun(SubtreeContext) ->
-                        context_apply(SubtreeContext, fun(SubtreeContext1) -> F(context_node(SubtreeContext1)) end, Opts)
-                end, Node, NodeContext1, Uniplate, Opts)
-      end, Opts).
+                        context_apply(SubtreeContext, fun(SubtreeContext1) -> F(context_node(SubtreeContext1)) end, MOpts)
+                end, Node, NodeContext1, Uniplate, MOpts, Opts)
+      end, MOpts).
 
-descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated} = Opts) ->
-    ExceptionType =
-        case Node =:= context_node(NodeContext) of
-            true ->
-                invalid_node;
-            false ->
-                invalid_pre_transform
-        end,
-    {Subtreess, MakeTree} = uniplate(Uniplate, Node, NodeContext, ExceptionType),
+descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated} = MOpts, Opts) ->
+    %% it's not wise to generate subtrees twice,
+    %% validate_pre_transform chould be done here.
+    {Subtreess, MakeTree} = uniplate(Uniplate, Node, NodeContext, invalid_pre_transform, Opts),
     Bind(
       listen_has_error(
         ListenUpdated(
           astranaut_monad:map_m(
             fun(Subtrees) ->
                     astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
-            end, Subtreess, Bind, Return)), Opts),
+            end, Subtreess, Bind, Return)), MOpts),
       fun({_Any, true}) ->
               Return([]);
          ({{Subtrees1, true}, false}) ->
@@ -331,17 +327,22 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, up
       end).
 
 %% add extra info to exception raised from Uniplate
-uniplate(Uniplate, Node, NodeContext1, ExceptionType) ->
+uniplate(Uniplate, Node, NodeContext1, ExceptionType, Opts) ->
     try Uniplate(NodeContext1) of
         {Subtreess, MakeTree} ->
             {Subtreess, MakeTree}
     catch
         EType:Exception?CAPTURE_STACKTRACE ->
-            case ExceptionType of
-                invalid_node ->
-                    erlang:raise(EType, {ExceptionType, Node, Exception}, ?GET_STACKTRACE);
-                _ ->
-                    erlang:raise(EType, {ExceptionType, Node, context_node(NodeContext1), Exception}, ?GET_STACKTRACE)
+            case context_node(NodeContext1) of
+                Node ->
+                    case maps:find(parent, Opts) of
+                        {ok, Parent} ->
+                            erlang:raise(EType, {invalid_subnode, Parent, Node, Exception}, ?GET_STACKTRACE);
+                        error ->
+                            erlang:raise(EType, {invalid_node, Node, Exception}, ?GET_STACKTRACE)
+                        end;
+                Node1 ->
+                    erlang:raise(EType, {ExceptionType, Node, Node1, Exception}, ?GET_STACKTRACE)
             end
     end.
 
@@ -379,9 +380,13 @@ map_m_if_list(AFB, Node, #{}) ->
 
 step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre}) ->
     updated_node_apply(F, Node, MOpts);
-step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post}) ->
-    %%astranaut_monad:lift_m(fun context_node/1, updated_node_apply(F, Node, MOpts), Bind, Return);
-    validate_post(Node, updated_node_apply(F, Node, MOpts), Uniplate, MOpts);
+step_apply(F, Node, post, Uniplate, #{return := Return} = MOpts, #{traverse := post}) ->
+    bind_without_error(
+      updated_node_apply(F, Node, MOpts),
+      fun(NodeOrNodes) ->
+              validate_post_transform(Uniplate, Node, NodeOrNodes),
+              Return(NodeOrNodes)
+      end, MOpts);
 step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
@@ -394,33 +399,28 @@ sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_1(F, Node, Uniplate, MOpts, Opts).
 
-validate_post(Node, Node1M, Uniplate, #{return := Return} = MOpts) ->
-    bind_without_error(
-      Node1M,
-      fun(NodeOrNodes) ->
-              map_m_if_list(
-                fun(Node1) ->
-                        case is_node_context(Node1) of
-                            true ->
-                                erlang:error({invalid_post_transform_with_context, Node, Node1});
-                            false ->
-                                if
-                                    Node =/= Node1 ->
-                                        uniplate(Uniplate, Node, Node1, invalid_post_transform);
-                                    true ->
-                                        ok
-                                end,
-                                Return(Node1)
-                        end
-                end, NodeOrNodes, MOpts)
-      end, MOpts).
-
 updated_node_apply(F, Node1, #{updated_writer_lift := Lift, updated_writer := Writer, bind := Bind}) ->
     Bind(
       Lift(F(Node1)),
       fun(Node2) ->
                 Writer(updated_node(Node1, Node2))
       end).
+
+validate_post_transform(Uniplate, Node, Nodes) when is_list(Nodes) ->
+    lists:map(fun(Node1) -> validate_post_transform(Uniplate, Node, Node1) end, Nodes);
+validate_post_transform(Uniplate, Node, Node1) ->
+    case is_node_context(Node1) of
+        true ->
+            erlang:error({invalid_post_transform_with_context, Node, Node1});
+        false ->
+            if
+                Node =/= Node1 ->
+                    uniplate(Uniplate, Node, Node1, invalid_post_transform, #{});
+                true ->
+                    ok
+            end,
+            Node1
+    end.
 
 context_apply(#node_context{node = Node, skip = true}, _F, #{return := Return}) ->
     Return(Node);

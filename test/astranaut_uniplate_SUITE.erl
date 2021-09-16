@@ -126,7 +126,7 @@ all() ->
      test_with_subtrees, test_af_with,
      test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
      test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
-     test_invalid_node_exception
+     test_invalid_node_exception, test_invalid_subnode_exception
     ].
 
 %%--------------------------------------------------------------------
@@ -457,8 +457,25 @@ test_invalid_node_exception(_Config) ->
          end, undefined, fun uniplate/1, #{traverse => post})),
     ok.
 
+test_invalid_subnode_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
+       astranaut_uniplate:map(
+         fun(Node) ->
+                 Node
+         end, Forms, fun invalid_uniplate/1, #{traverse => pre})),
+    ok.
 
 uniplate(Node) ->
     Subtrees = erl_syntax:subtrees(Node),
     MakeTree = fun(Subtrees1) -> erl_syntax:make_tree(Node, Subtrees1) end,
     {Subtrees, MakeTree}.
+
+invalid_uniplate({var, _Pos, _Varname} = Node) ->
+    Subtrees = [[invalid_subnode_a]],
+    MakeTree = fun(_) -> Node end,
+    {Subtrees, MakeTree};
+invalid_uniplate(Node) ->
+    uniplate(Node).
