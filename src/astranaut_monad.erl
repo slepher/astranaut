@@ -22,12 +22,12 @@
 -export([writer_writer/1, writer_listen/2]).
 -export([monad_bind/1, monad_return/1, monad_lift/1]).
 -export([monad_state/1, monad_ask/1, monad_local/1]).
--export([monad_updated_writer/1, monad_updated_listen/1, monad_listen_has_error/1]).
+-export([monad_writer_updated/1, monad_listen_updated/1, monad_listen_has_error/1]).
 -export([mappend/1, mempty/1]).
 
 -export_type([maybe/1, either/2, state/2]).
 -export_type([monad/2, monad_bind/1, monad_return/1]).
--export_type([monad_ask/1, monad_local/1, monad_state/1, monad_updated_writer/1, monad_updated_listen/1, monad_lift/1]).
+-export_type([monad_ask/1, monad_local/1, monad_state/1, monad_writer/1, monad_listen/1, monad_lift/1]).
 
 -type maybe(A) :: {just, A} | nothing.
 -type either(E, A) :: {left, E} | {right, A}.
@@ -39,8 +39,8 @@
 -type monad_ask(M) :: fun(() -> monad(M, _A)).
 -type monad_local(M) :: fun((fun((R) -> R), monad(M, A)) -> monad(M, A)).
 -type monad_state(M) :: fun((fun((S) -> {A, S})) -> monad(M, A)).
--type monad_updated_writer(M) :: fun(({A, _W}) -> monad(M, A)).
--type monad_updated_listen(M) :: fun((monad(M, A)) -> monad(M, {A, _W})).
+-type monad_writer(M) :: fun(({A, _W}) -> monad(M, A)).
+-type monad_listen(M) :: fun((monad(M, A)) -> monad(M, {A, _W})).
 -type monad_lift(T) :: fun((monad(M, A)) -> monad({T, M}, A)).
 %%%===================================================================
 %%% API
@@ -398,14 +398,14 @@ monad_local(traverse) ->
 monad_local(return) ->
     undefined.
 
-monad_updated_writer(traverse) ->
+monad_writer_updated(traverse) ->
     fun astranaut_traverse:writer_updated/1;
-monad_updated_writer(_) ->
+monad_writer_updated(_) ->
     undefined.
 
-monad_updated_listen(traverse) ->
+monad_listen_updated(traverse) ->
     fun astranaut_traverse:listen_updated/1;
-monad_updated_listen(_) ->
+monad_listen_updated(_) ->
     undefined.
 
 monad_listen_has_error(traverse) ->

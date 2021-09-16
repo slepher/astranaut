@@ -107,7 +107,7 @@ smapfold(F, Init, Nodes, Opts) ->
 map(F, TopNode, Opts) ->
     WithReturn = fun(_Node, Node1) -> #{return => Node1} end,
     F1 = fun(Node, _State, Attr) ->
-                 apply_f(F, Node, Attr)
+                 astranaut_uniplate:apply_fun(F, [Node, Attr])
          end,
     astranaut_return:lift_m(
       fun({TopNode1, _State}) ->
@@ -121,7 +121,7 @@ map(F, TopNode, Opts) ->
 reduce(F, Init, TopNode, Opts) ->
     WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
     F1 = fun(Node, State, Attr) ->
-                   apply_f_with_state(F, Node, State, Attr)
+                   astranaut_uniplate:apply_fun(F, [Node, State, Attr])
          end,
     astranaut_return:lift_m(
       fun({_TopNode1, State}) ->
@@ -149,21 +149,11 @@ mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
     F1 = fun(Node) ->
                  astranaut_traverse:with_state_attr(
                    fun(State, Attr) ->
-                           bind_return(Node, apply_f_with_state(F, Node, State, Attr), WithReturn)
+                           bind_return(Node, astranaut_uniplate:apply_fun(F, [Node, State, Attr]), WithReturn)
                    end)
          end,
     TopNodeM = map_m(F1, TopNode, Opts1),
     astranaut_traverse:run(TopNodeM, Formatter, InitAttr, Init).
-
-apply_f(F, Node, _Attr) when is_function(F, 1) ->
-    F(Node);
-apply_f(F, Node, Attr) when is_function(F, 2) ->
-    F(Node, Attr).
-
-apply_f_with_state(F, Node, State, _Attr) when is_function(F, 2) ->
-    F(Node, State);
-apply_f_with_state(F, Node, State, Attr) when is_function(F, 3) ->
-    F(Node, State, Attr).
 
 bind_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _Fun) ->
     exit(unsupported_traverse_struct);
@@ -295,9 +285,7 @@ to_list(Form1) ->
 map_form(F, Form, #{traverse := subtree}) ->
     astranaut_traverse:bind(
       traverse_map_node(F, Form),
-      fun(ok) ->
-              astranaut_traverse:return(Form);
-         (Form1) ->
+      fun(Form1) ->
               astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
 map_form(F, Form, Opts) ->
@@ -347,7 +335,7 @@ traverse_map_node(F, Node) ->
     end.
 
 uniplate(Node) ->
-    case subtrees(Node) of
+    case astranaut_syntax:subtrees(Node) of
         [] ->
             {[], fun(_) -> Node end};
         Subtrees ->
@@ -356,9 +344,6 @@ uniplate(Node) ->
                        end}
     end.
 
-subtrees(Node) ->
-    with_badarg(fun() -> astranaut_syntax:subtrees(Node) end, Node).
-
 update_tree(Node, Subtrees) ->
     try astranaut_syntax:revert(astranaut_syntax:update_tree(Node, Subtrees)) of
         Node1 ->
@@ -366,15 +351,6 @@ update_tree(Node, Subtrees) ->
     catch
         EType:Exception:StackTrace ->
             erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, StackTrace)
-    end.
-
-with_badarg(Fun, Node) ->
-    try Fun() of
-        Value ->
-            Value
-    catch
-        EType:{badarg, _}:StackTrace ->
-            erlang:raise(EType, {invalid_node, Node}, StackTrace)
     end.
 
 format_error({validate_key_failure, required, Key, _Value}) ->

@@ -14,6 +14,16 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
+
+-record(uniplate_node_context, {node,
+                                withs = [],
+                                reduces = [],
+                                skip = false,
+                                up_attrs = [],
+                                entries = [],
+                                exits = []
+                               }).
+
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -30,7 +40,9 @@ suite() ->
 %% @end
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    Config.
+    erlang:system_flag(backtrace_depth, 20),
+    Forms = astranaut_test_lib:test_module_forms(sample_plus, Config),
+    [{forms, Forms}|Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -110,7 +122,12 @@ groups() ->
 all() -> 
     [test_writer_or, test_map, test_map_attr,
      test_reduce, test_reduce_attr, test_reduce_traverse_all,
-     test_mapfold_attr, test_f_return_list, test_all_return_list].
+     test_mapfold_attr, test_f_return_list, test_all_return_list,
+     test_with_subtrees, test_af_with,
+     test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
+     test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
+     test_invalid_node_exception, test_invalid_subnode_exception
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -325,3 +342,140 @@ test_all_return_list(_Config) ->
     Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.
+
+test_with_subtrees(_Config) ->
+    TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
+    F =
+        fun(match_expr, Node, Variables, _Attr) ->
+                {astranaut_uniplate:with_subtrees(
+                   fun([Patterns, Expressions]) ->
+                           [astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
+                            astranaut_uniplate:with(
+                              fun(Variables1) ->
+                                      [before_pattern|Variables1]
+                              end,
+                              fun(Variables1) ->
+                                      [after_pattern|Variables1]
+                              end,
+                              astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
+                   end, fun lists:reverse/1, Node), Variables};
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
+                {Var, [{pattern, VarName}|Variables]};
+           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->
+                {Var, [{expression, VarName}|Variables]};
+           (_Type, Node, Variables, #{}) ->
+                {Node, Variables}
+        end,
+    {TopNode1, State1} =
+        astranaut:smapfold(
+          fun(Node, Acc, Attr) ->
+                  Type = erl_syntax:type(Node),
+                  F(Type, Node, Acc, Attr)
+          end, [], TopNode, #{traverse => pre}),
+    ?assertEqual([after_pattern, {pattern, 'D'}, before_pattern, {expression, 'C'}, after_pattern, {pattern, 'B'}, before_pattern, {expression, 'A'}], State1),
+    ?assertEqual(TopNode, TopNode1),
+    ok.
+
+test_af_with(_Config) ->
+    Datas1 = [[], [a, b], [c, d], []],
+    Datas2 = astranaut_uniplate:with(g, h, Datas1),
+    ?assertEqual([[], [#uniplate_node_context{node = a, entries = [g]}, b],
+                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas2),
+    Datas3 = [[a, b], [c, d], []],
+    Datas4 = astranaut_uniplate:with(g, h, Datas3),
+
+    ?assertEqual([[#uniplate_node_context{node = a, entries = [g]}, b],
+                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas4),
+    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [astranaut_uniplate:skip([a, b]), [c, d], []]),
+    Datas6 = astranaut_uniplate:with(g, h, Datas5),
+    ?assertEqual([[#uniplate_node_context{node = a, entries = [g], skip = true},
+                   #uniplate_node_context{node = b, skip = true}],
+                  [#uniplate_node_context{node = c, up_attrs = [#{name => data}]},
+                   #uniplate_node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
+                 ok.
+test_invalid_pre_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
+       astranaut:map(
+         fun({var, _Pos, _Value}) ->
+                 invalid_node;
+            (Node) ->
+                 Node
+         end, Forms, #{})),
+    ok.
+
+test_invalid_post_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_post_transform, {var, _, _}, invalid_node, _OriginalException},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 invalid_node;
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_post_transform_context_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_post_transform_with_context, {var, _, _}, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value} = Atom) ->
+                 astranaut_uniplate:skip(Atom);
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_transform_maketree_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 [];
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_node_exception(_Config) ->
+    ?assertException(
+       error,
+       {invalid_node, undefined, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 [];
+            (Node) ->
+                 astranaut_uniplate:skip(Node)
+         end, undefined, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_subnode_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
+       astranaut_uniplate:map(
+         fun(Node) ->
+                 Node
+         end, Forms, fun invalid_uniplate/1, #{traverse => pre})),
+    ok.
+
+uniplate(Node) ->
+    Subtrees = erl_syntax:subtrees(Node),
+    MakeTree = fun(Subtrees1) -> erl_syntax:make_tree(Node, Subtrees1) end,
+    {Subtrees, MakeTree}.
+
+invalid_uniplate({var, _Pos, _Varname} = Node) ->
+    Subtrees = [[invalid_subnode_a]],
+    MakeTree = fun(_) -> Node end,
+    {Subtrees, MakeTree};
+invalid_uniplate(Node) ->
+    uniplate(Node).
