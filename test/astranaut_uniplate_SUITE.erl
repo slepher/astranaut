@@ -40,7 +40,9 @@ suite() ->
 %% @end
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    Config.
+    erlang:system_flag(backtrace_depth, 20),
+    Forms = astranaut_test_lib:test_module_forms(sample_plus, Config),
+    [{forms, Forms}|Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -121,7 +123,11 @@ all() ->
     [test_writer_or, test_map, test_map_attr,
      test_reduce, test_reduce_attr, test_reduce_traverse_all,
      test_mapfold_attr, test_f_return_list, test_all_return_list,
-     test_with_subtrees, test_af_with].
+     test_with_subtrees, test_af_with,
+     test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
+     test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
+     test_invalid_node_exception
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -387,3 +393,72 @@ test_af_with(_Config) ->
                   [#node_context{node = c, up_attrs = [#{name => data}]},
                    #node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
                  ok.
+test_invalid_pre_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
+       astranaut:map(
+         fun({var, _Pos, _Value}) ->
+                 invalid_node;
+            (Node) ->
+                 Node
+         end, Forms, #{})),
+    ok.
+
+test_invalid_post_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_post_transform, {var, _, _}, invalid_node, _OriginalException},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 invalid_node;
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_post_transform_context_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_post_transform_with_context, {var, _, _}, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value} = Atom) ->
+                 astranaut_uniplate:skip(Atom);
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_transform_maketree_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 [];
+            (Node) ->
+                 Node
+         end, Forms, fun uniplate/1, #{traverse => post})),
+    ok.
+
+test_invalid_node_exception(_Config) ->
+    ?assertException(
+       error,
+       {invalid_node, undefined, _},
+       astranaut_uniplate:map(
+         fun({var, _Pos, _Value}) ->
+                 [];
+            (Node) ->
+                 astranaut_uniplate:skip(Node)
+         end, undefined, fun uniplate/1, #{traverse => post})),
+    ok.
+
+
+uniplate(Node) ->
+    Subtrees = erl_syntax:subtrees(Node),
+    MakeTree = fun(Subtrees1) -> erl_syntax:make_tree(Node, Subtrees1) end,
+    {Subtrees, MakeTree}.

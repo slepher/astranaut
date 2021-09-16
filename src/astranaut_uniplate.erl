@@ -306,7 +306,14 @@ descend_m_1(F, Node, NodeContext, Uniplate, #{} = Opts) ->
       end, Opts).
 
 descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated} = Opts) ->
-    {Subtreess, MakeTree} = catched_uniplate(invalid_pre_transform, Node, NodeContext, Uniplate),
+    ExceptionType =
+        case Node =:= context_node(NodeContext) of
+            true ->
+                invalid_node;
+            false ->
+                invalid_pre_transform
+        end,
+    {Subtreess, MakeTree} = uniplate(Uniplate, Node, NodeContext, ExceptionType),
     Bind(
       listen_has_error(
         ListenUpdated(
@@ -317,28 +324,35 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, up
       fun({_Any, true}) ->
               Return([]);
          ({{Subtrees1, true}, false}) ->
-              Return(catched_make_tree(Node, MakeTree, Subtrees1));
+              Return(make_tree(MakeTree, Node, Subtreess, Subtrees1));
          ({{_Subtrees1, false}, false}) ->
               %% context should be removed if node is not updated.
               Return(context_node(NodeContext))
       end).
 
-catched_uniplate(Type, Node, NodeContext1, Uniplate) ->
+%% add extra info to exception raised from Uniplate
+uniplate(Uniplate, Node, NodeContext1, ExceptionType) ->
     try Uniplate(NodeContext1) of
         {Subtreess, MakeTree} ->
             {Subtreess, MakeTree}
     catch
         EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {Type, Node, context_node(NodeContext1), Exception}, ?GET_STACKTRACE)
+            case ExceptionType of
+                invalid_node ->
+                    erlang:raise(EType, {ExceptionType, Node, Exception}, ?GET_STACKTRACE);
+                _ ->
+                    erlang:raise(EType, {ExceptionType, Node, context_node(NodeContext1), Exception}, ?GET_STACKTRACE)
+            end
     end.
 
-catched_make_tree(Node, MakeTree, Subtrees) ->
-    try MakeTree(Subtrees) of
+%% add extra info to exception raised from MakeTree
+make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
+    try MakeTree(Subtrees1) of
         Node1 ->
             Node1
     catch
         EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {invalid_maketree_transform, Node, Subtrees, Exception}, ?GET_STACKTRACE)
+            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, ?GET_STACKTRACE)
     end.
 
 bind_without_error(MA, KMB, #{bind := Bind, return := Return} = Opts) ->
@@ -365,9 +379,9 @@ map_m_if_list(AFB, Node, #{}) ->
 
 step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre}) ->
     updated_node_apply(F, Node, MOpts);
-step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post} = Opts) ->
+step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post}) ->
     %%astranaut_monad:lift_m(fun context_node/1, updated_node_apply(F, Node, MOpts), Bind, Return);
-    validate_post(Node, updated_node_apply(F, Node, MOpts), Uniplate, MOpts, Opts);
+    validate_post(Node, updated_node_apply(F, Node, MOpts), Uniplate, MOpts);
 step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
@@ -380,7 +394,7 @@ sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_1(F, Node, Uniplate, MOpts, Opts).
 
-validate_post(Node, Node1M, Uniplate, #{return := Return} = MOpts, #{} = Opts) ->
+validate_post(Node, Node1M, Uniplate, #{return := Return} = MOpts) ->
     bind_without_error(
       Node1M,
       fun(NodeOrNodes) ->
@@ -390,10 +404,10 @@ validate_post(Node, Node1M, Uniplate, #{return := Return} = MOpts, #{} = Opts) -
                             true ->
                                 erlang:error({invalid_post_transform_with_context, Node, Node1});
                             false ->
-                                case maps:find(validate, Opts) of
-                                    {ok, true} ->
-                                        catched_uniplate(invalid_post_transform, Node, Node1, Uniplate);
-                                    _ ->
+                                if
+                                    Node =/= Node1 ->
+                                        uniplate(Uniplate, Node, Node1, invalid_post_transform);
+                                    true ->
                                         ok
                                 end,
                                 Return(Node1)

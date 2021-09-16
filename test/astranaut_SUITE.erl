@@ -126,8 +126,7 @@ all() ->
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_forms, test_sequence_nodes,
-     test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr,
-     test_invalid_pre_transform_exception, test_invalid_post_transform_exception, test_invalid_post_transform_context_exception
+     test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr
     ].
 
 %%--------------------------------------------------------------------
@@ -545,44 +544,3 @@ check_node_without_tree(TopAst) ->
          (Leaf, State, #{step := leaf}) ->
               {Leaf, State}
       end, [], TopAst, #{traverse => all}).
-
-test_invalid_pre_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
-    ?assertException(
-       error,
-       {invalid_pre_transform, {atom, _, _}, invalid_node, _OriginalException},
-       astranaut:map(
-         fun({atom, _Pos, _Value}) ->
-                 io:format("node is ~p~n", [atom]),
-                 invalid_node;
-            (Node) ->
-                 io:format("node is ~p~n", [Node]),
-                 Node
-         end, Forms, #{})),
-    ok.
-
-test_invalid_post_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
-    ?assertException(
-       error,
-       {invalid_post_transform, {atom, _, _}, invalid_node, _OriginalException},
-       astranaut:map(
-         fun({atom, _Pos, _Value}) ->
-                 invalid_node;
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post, validate => true})),
-    ok.
-
-test_invalid_post_transform_context_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
-    ?assertException(
-       error,
-       {invalid_post_transform_with_context, {atom, _, _}, _},
-       astranaut:map(
-         fun({atom, _Pos, _Value} = Atom) ->
-                 astranaut_uniplate:skip(Atom);
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post})),
-    ok.
