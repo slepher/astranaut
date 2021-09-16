@@ -9,7 +9,6 @@
 -module(astranaut).
 
 -include("astranaut_struct_name.hrl").
--include("stacktrace.hrl").
 
 %% API
 -export([smap/3, sreduce/4, smapfold/4, search/3]).
