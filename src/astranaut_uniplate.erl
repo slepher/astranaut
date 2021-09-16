@@ -44,7 +44,7 @@
 
 %% API
 -export([apply_fun/2]).
-%% 
+%% map_m series functions.
 -export([map/4, reduce/5, mapfold/5, search/4]).
 -export([map_m/5]).
 %% Apply node with context series functions.
