@@ -23,8 +23,6 @@
                          listen_updated => astranaut_monad:monad_listen(M)
                         }.
 
--type traverse_opts() :: #{traverse => traverse_style(), attr => map()}.
-
 -record(uniplate_node_context, {node,
                                 withs = [],
                                 reduces = [],
@@ -41,9 +39,6 @@
 -type maybe_list(A) :: [A] | A.
 
 %% API
--export([apply_fun/2]).
-%% 
--export([map/4, reduce/5, mapfold/5, search/4]).
 -export([map_m/5]).
 %% Apply node with context series functions.
 -export([with_subtrees/2, with_subtrees/3]).
@@ -53,118 +48,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-%%@doc a tool function works like erlang:apply/2, ignore extra number of args more than function arity number.
--spec apply_fun(function(), [any()]) -> any().
-apply_fun(F, [N|_T]) when is_function(F, 1) ->
-    F(N);
-apply_fun(F, [A1, A2|_T]) when is_function(F, 2) ->
-    F(A1, A2);
-apply_fun(F, [A1, A2, A3|_T]) when is_function(F, 3) ->
-    F(A1, A2, A3).
-
-%% @doc traverse node with identity or {reader, identity} monad, returns new node
--spec map(fun((N) -> N) | fun((N, map()) -> N), N, uniplate(N), traverse_opts()) -> N.
-map(F, Node, Uniplate, Opts) when is_function(F, 1); is_function(F, 2) ->
-    map_m_with_attr(
-      fun(N, A) ->
-              apply_fun(F, [N, A])
-      end, Node, Uniplate, identity, Opts, is_function(F, 2)).
-
-%% @doc traverse node with state or {reader, state} monad, returned new state.
--spec reduce(fun((N, S) -> S) | fun((N, S, map()) -> S), S, N, uniplate(N), traverse_opts()) -> S.
-reduce(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
-    StateM =
-        map_m_with_attr(
-          fun(N, A) ->
-                  fun(S0) ->
-                          S1 = apply_fun(F, [N, S0, A]),
-                          {N, S1}
-                  end
-          end, Node, Uniplate, state, Opts#{static => true}, is_function(F, 3)),
-    %% Node is never changed if static is true
-    {_Node, Acc} = StateM(Init),
-    Acc.
-
-%% @doc traverse node with state or {reader, state} monad, returned new node with new state.
--spec mapfold(fun((N, S) -> {N, S}) | fun((N, S, map()) -> {N, S}), S, N, uniplate(N), traverse_opts()) -> {N, S}.
-mapfold(F, Init, Node, Uniplate, Opts) when is_function(F, 2); is_function(F, 3) ->
-    %% for more clear to read
-    %% this is the old version to get StateM
-    %% while is_function(F, 2)
-    %% =============================================
-    %% AFB :: fun((A) -> monad(state, B))
-    %% AFB =
-    %%     fun(N) ->         %% N is Node
-    %%             fun(S) -> %% S is State
-    %%                     F(N, S)
-    %%             end
-    %%     end,
-    %% StateM :: monad(state, B)
-    %% StateM = map_m(AFB, Node, Uniplate, state, Opts),
-    %% =============================================
-    %% while is_function(F, 3)
-    %% =============================================
-    %% AFB :: fun((A) -> monad({reader, state}, B))
-    %% AFB =
-    %%     fun(N) ->                 %% N is Node
-    %%             fun(A) ->         %% N is Attr
-    %%                     fun(S) -> %% S is State
-    %%                             F(N, S, A)
-    %%                     end
-    %%             end
-    %%     end,
-    %% Monad = {reader, state},
-    %% ReaderTStateM :: monad({reader, state}, B)
-    %% ReaderTStateM = map_m(AFB, Node, Uniplate, Monad, Opts),
-    %% StateM = ReaderTStateM(Attr),
-    %% =============================================
-    StateM =
-        map_m_with_attr(
-          fun(N, A) ->
-                  fun(S) ->
-                          apply_fun(F, [N, S, A])
-                  end
-          end, Node, Uniplate, state, Opts, is_function(F, 3)),
-    (StateM)(Init).
-
-%% @doc traverse node with either or {reader, either} monad, if F(Node, Attr) is true, traverse is stopped immediately and return true, else return false.
--spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, uniplate(N), traverse_opts()) -> boolean().
-search(F, Node, Uniplate, Opts) ->
-    Either =
-        map_m_with_attr(
-          fun(N, A) ->
-                  case apply_fun(F, [N, A]) of
-                      true ->
-                          {left, match};
-                      false ->
-                          {right, N}
-                  end
-          end, Node, Uniplate, either, Opts#{static => true}, is_function(F, 2)),
-    case Either of
-        {left, match} ->
-            true;
-        {right, _Node} ->
-            false
-    end.
-
-map_m_with_attr(F, Node, Uniplate, Monad, Opts, false) ->
-    map_m(
-     fun(N) ->         %% N is Node
-             F(N, #{}) %% #{} is empty Attr
-     end, Node, Uniplate, Monad, Opts);
-map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
-    %% to take benefit of attribute access, add a ReaderT monad transformer.
-    Attr = maps:get(attr, Opts, #{}),
-    Opts1 = maps:remove(attr, Opts),
-    ReaderT =
-        map_m(
-          fun(N) ->         %% N is Node
-                  fun(A) -> %% A is Attr
-                          F(N, A)
-                  end
-          end, Node, Uniplate, {reader, Monad}, Opts1),
-    ReaderT(Attr).
-
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
             #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
 %% @doc traverse node with user defined monad.

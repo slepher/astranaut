@@ -232,12 +232,12 @@ test_reduce(_Config) ->
 test_reduce_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
-        astranaut_uniplate:reduce(
+        astranaut:sreduce(
           fun(#{node := {var, _Pos, Varname}, pattern := true}, Acc) ->
                   [Varname|Acc];
              (_Node, Acc) ->
                   Acc
-          end, [], Ast, fun uniplate_node_attr/1, #{traverse => pre}),
+          end, [], Ast, #{traverse => pre, uniplate => fun uniplate_node_attr/1}),
     ?assertEqual(['E', 'D'], lists:reverse(Acc1)),
     ok.
 
@@ -393,12 +393,13 @@ test_af_with(_Config) ->
                   [#uniplate_node_context{node = c, up_attrs = [#{name => data}]},
                    #uniplate_node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
                  ok.
+
 test_invalid_pre_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
        {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
-       astranaut:map(
+       astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  invalid_node;
             (Node) ->
@@ -411,12 +412,12 @@ test_invalid_post_transform_exception(Config) ->
     ?assertException(
        error,
        {invalid_post_transform, {var, _, _}, invalid_node, _OriginalException},
-       astranaut_uniplate:map(
+       astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  invalid_node;
             (Node) ->
                  Node
-         end, Forms, fun uniplate/1, #{traverse => post})),
+         end, Forms, #{traverse => post})),
     ok.
 
 test_invalid_post_transform_context_exception(Config) ->
@@ -424,12 +425,12 @@ test_invalid_post_transform_context_exception(Config) ->
     ?assertException(
        error,
        {invalid_post_transform_with_context, {var, _, _}, _},
-       astranaut_uniplate:map(
+       astranaut:smap(
          fun({var, _Pos, _Value} = Atom) ->
                  astranaut_uniplate:skip(Atom);
             (Node) ->
                  Node
-         end, Forms, fun uniplate/1, #{traverse => post})),
+         end, Forms, #{traverse => post})),
     ok.
 
 test_invalid_transform_maketree_exception(Config) ->
@@ -437,24 +438,24 @@ test_invalid_transform_maketree_exception(Config) ->
     ?assertException(
        error,
        {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
-       astranaut_uniplate:map(
+       astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  [];
             (Node) ->
                  Node
-         end, Forms, fun uniplate/1, #{traverse => post})),
+         end, Forms, #{traverse => post})),
     ok.
 
 test_invalid_node_exception(_Config) ->
     ?assertException(
        error,
        {invalid_node, undefined, _},
-       astranaut_uniplate:map(
+       astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  [];
             (Node) ->
                  astranaut_uniplate:skip(Node)
-         end, undefined, fun uniplate/1, #{traverse => post})),
+         end, undefined, #{traverse => post})),
     ok.
 
 test_invalid_subnode_exception(Config) ->
@@ -462,10 +463,10 @@ test_invalid_subnode_exception(Config) ->
     ?assertException(
        error,
        {invalid_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
-       astranaut_uniplate:map(
+       astranaut:smap(
          fun(Node) ->
                  Node
-         end, Forms, fun invalid_uniplate/1, #{traverse => pre})),
+         end, Forms, #{traverse => pre, uniplate => fun invalid_uniplate/1})),
     ok.
 
 uniplate(Node) ->
