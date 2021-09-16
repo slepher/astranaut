@@ -86,14 +86,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec apply_fun(function(), [any()]) -> any().
-apply_fun(F, [N|_T]) when is_function(F, 1) ->
-    F(N);
-apply_fun(F, [A1, A2|_T]) when is_function(F, 2) ->
-    F(A1, A2);
-apply_fun(F, [A1, A2, A3|_T]) when is_function(F, 3) ->
-    F(A1, A2, A3).
-
 %% @doc
 %% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
 -spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
@@ -260,6 +252,13 @@ mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
          end,
     TopNodeM = map_m(F1, TopNode, Opts1),
     astranaut_traverse:run(TopNodeM, Formatter, InitAttr, Init).
+
+apply_fun(F, [N|_T]) when is_function(F, 1) ->
+    F(N);
+apply_fun(F, [A1, A2|_T]) when is_function(F, 2) ->
+    F(A1, A2);
+apply_fun(F, [A1, A2, A3|_T]) when is_function(F, 3) ->
+    F(A1, A2, A3).
 
 bind_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _Fun) ->
     exit(unsupported_traverse_struct);
@@ -446,17 +445,8 @@ uniplate(Node) ->
             {[], fun(_) -> Node end};
         Subtrees ->
             {Subtrees, fun(Subtrees1) ->
-                               update_tree(Node, Subtrees1)
+                               astranaut_syntax:revert(astranaut_syntax:update_tree(Node, Subtrees1))
                        end}
-    end.
-
-update_tree(Node, Subtrees) ->
-    try astranaut_syntax:revert(astranaut_syntax:update_tree(Node, Subtrees)) of
-        Node1 ->
-            Node1
-    catch
-        EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {update_tree_failed, Node, Subtrees, Exception}, ?GET_STACKTRACE)
     end.
 
 format_error({validate_key_failure, required, Key, _Value}) ->
