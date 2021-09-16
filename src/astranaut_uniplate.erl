@@ -21,7 +21,8 @@
                          ask => astranaut_monad:monad_ask(M),
                          local => astranaut_monad:monad_local(M),
                          state => astranaut_monad:monad_state(M),
-                         updated_writer => astranaut_monad:monad_writer(M)
+                         writer_updated => astranaut_monad:monad_writer(M),
+                         listen_updated => astranaut_monad:monad_listen(M)
                         }.
 
 -type traverse_opts() :: #{traverse => traverse_style(), attr => map()}.
@@ -178,42 +179,36 @@ uniplate_context(Uniplate) ->
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
             #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
 %% @doc traverse node with user defined monad with node changed detect.
-map_m(F, Node, Uniplate, Monad, Opts) ->
+map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
+    MonadOpts = monad_opts(Monad),
+    map_m(F, Node, Uniplate, MonadOpts, Opts);
+map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
     Opts1 = maps:remove(static, Opts),
     Opts2 = maps:merge(#{traverse => pre}, Opts1),
-    prepare(
-      fun(UniplateContext, MonadOpts) ->
-              map_m_1(F, Node, UniplateContext, MonadOpts, Opts2)
-      end, Uniplate, Monad, Static).
-
-prepare(F, Uniplate, Monad, Static) when is_atom(Monad); is_tuple(Monad) ->
-    MonadOpts = monad_opts(Monad),
-    prepare(F, Uniplate, MonadOpts, Static);
-prepare(F, Uniplate, #{} = MonadOpts, Static) ->
-    Uniplate1 = uniplate_context(Uniplate),
-    with_updated_writer(
+    UniplateContext = uniplate_context(Uniplate),
+    with_writer_updated(
       fun(MonadOpts1) ->
-              F(Uniplate1, MonadOpts1)
+              map_m_1(F, Node, UniplateContext, MonadOpts1, Opts2)
       end, MonadOpts, Static).
 
-with_updated_writer(Fun, #{bind := Bind, return := Return} = Opts, true) ->
+with_writer_updated(Fun, #{bind := Bind, return := Return} = Opts, true) ->
     %% a writer monad just ignore the updated value.
     %% while listen to this monad always return false
     IdentityLift = fun(A) -> A end,
     IgnoreUpdatedWriter = fun({A, _Updated}) -> Return(A) end,
     ListenNeverUpdated = fun(MA) -> Bind(MA, fun(A) -> Return({A, false}) end) end,
-    Opts1 = Opts#{updated_writer => IgnoreUpdatedWriter, updated_listen => ListenNeverUpdated,
-                  updated_writer_lift => IdentityLift},
+    Opts1 = Opts#{writer_updated => IgnoreUpdatedWriter, listen_updated => ListenNeverUpdated,
+                  writer_updated_lift => IdentityLift},
     Fun(Opts1);
-with_updated_writer(Fun, #{updated_writer := _Writer, updated_listen := _Listen} = Opts, false) ->
+with_writer_updated(Fun, #{writer_updated := _Writer, listen_updated := _Listen} = Opts, false) ->
     %% if monad already a monad writer, it is not have to lift it
     %% lift function do nothing
-    Opts1 = Opts#{updated_writer_lift => fun(A) -> A end},
+    Opts1 = Opts#{writer_updated_lift => fun(A) -> A end},
     Fun(Opts1);
-with_updated_writer(Fun, #{bind := Bind, return := Return} = MonadOpts, false) ->
+with_writer_updated(Fun, #{bind := Bind, return := Return} = MonadOpts, false) ->
     %% if monad is not a monad writer, a default WriterT is lifted.
-    LiftedOpts = lifted_updated_writer_opts(MonadOpts),
+    LiftedOpts = lifted_writer_updated_opts(MonadOpts),
     %% map_m_monads returns writer monad.
     NodeUpdated = Fun(LiftedOpts),
     %% remove the lifted writer monad transformer.
@@ -228,19 +223,19 @@ monad_opts(Monad) ->
     Ask = astranaut_monad:monad_ask(Monad),
     Local = astranaut_monad:monad_local(Monad),
     State = astranaut_monad:monad_state(Monad),
-    Writer = astranaut_monad:monad_updated_writer(Monad),
-    Listen = astranaut_monad:monad_updated_listen(Monad),
+    Writer = astranaut_monad:monad_writer_updated(Monad),
+    Listen = astranaut_monad:monad_listen_updated(Monad),
     ListenHasError = astranaut_monad:monad_listen_has_error(Monad),
     MOpts = #{bind => Bind, return => Return,
               ask => Ask, local => Local,
               state => State, listen_has_error => ListenHasError,
-              updated_writer => Writer, updated_listen => Listen},
+              writer_updated => Writer, listen_updated => Listen},
     maps:filter(
       fun(_Key, Value) ->
               Value =/= undefined
       end, MOpts).
 
-lifted_updated_writer_opts(#{bind := Bind, return := Return} = MOpts) ->
+lifted_writer_updated_opts(#{bind := Bind, return := Return} = MOpts) ->
     Mempty = astranaut_monad:mempty('or'),
     Mappend = astranaut_monad:mappend('or'),
     BindW = astranaut_monad:writer_bind(Bind, Return, Mappend),
@@ -257,8 +252,8 @@ lifted_updated_writer_opts(#{bind := Bind, return := Return} = MOpts) ->
               astranaut_monad:writer_state(Lift, State);
          (_Key, Value) ->
               Value
-      end, MOpts#{updated_listen => Listen, updated_writer => Writer,
-                  updated_writer_lift => Lift, bind => BindW, return => ReturnW}).
+      end, MOpts#{listen_updated => Listen, writer_updated => Writer,
+                  writer_updated_lift => Lift, bind => BindW, return => ReturnW}).
 
 map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
     %% list maybe returned when traverse one node, map_m_flatten is required.
@@ -306,7 +301,7 @@ descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
                 end, Node, NodeContext1, Uniplate, MOpts, Opts)
       end, MOpts).
 
-descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, updated_listen := ListenUpdated} = MOpts, Opts) ->
+descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, listen_updated := ListenUpdated} = MOpts, Opts) ->
     %% it's not wise to generate subtrees twice,
     %% validate_pre_transform chould be done here.
     {Subtreess, MakeTree} = uniplate(Uniplate, Node, NodeContext, invalid_pre_transform, Opts),
@@ -399,11 +394,11 @@ sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_1(F, Node, Uniplate, MOpts, Opts).
 
-updated_node_apply(F, Node1, #{updated_writer_lift := Lift, updated_writer := Writer, bind := Bind}) ->
+updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind}) ->
     Bind(
       Lift(F(Node1)),
       fun(Node2) ->
-                Writer(updated_node(Node1, Node2))
+                WriterUpdated(updated_node(Node1, Node2))
       end).
 
 validate_post_transform(Uniplate, Node, Nodes) when is_list(Nodes) ->
