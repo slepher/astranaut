@@ -111,12 +111,11 @@ monad_opts(Monad) ->
     State = astranaut_monad:monad_state(Monad),
     Writer = astranaut_monad:monad_writer_updated(Monad),
     Listen = astranaut_monad:monad_listen_updated(Monad),
-    ListenHasError = astranaut_monad:monad_listen_has_error(Monad),
     FailOnError = astranaut_monad:monad_fail_on_error(Monad),
     CatchOnError = astranaut_monad:monad_catch_on_error(Monad),
     MOpts = #{bind => Bind, return => Return,
               ask => Ask, local => Local,
-              state => State, listen_has_error => ListenHasError,
+              state => State,
               writer_updated => Writer, listen_updated => Listen,
               fail_on_error => FailOnError, catch_on_error => CatchOnError
              },
@@ -258,22 +257,8 @@ make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
             erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, ?GET_STACKTRACE)
     end.
 
-bind_without_error(MA, KMB, #{bind := Bind, return := Return} = Opts) ->
-    Bind(
-      listen_has_error(MA, Opts),
-      fun({_A, true}) ->
-              Return([]);
-         ({A, false}) ->
-              KMB(A)
-      end).
-
-listen_has_error(MA, #{listen_has_error := ListenHasError}) ->
-    ListenHasError(MA);
-listen_has_error(MA, #{bind := Bind, return := Return}) ->
-    astranaut_monad:lift_m(
-      fun(A) ->
-              {A, false}
-      end, MA, Bind, Return).
+bind_without_error(MA, KMB, #{bind := Bind} = Opts) ->
+    Bind(fail_on_error(MA, Opts), KMB).
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
     astranaut_monad:map_m_flatten(AFB, Nodes, Bind, Return);
