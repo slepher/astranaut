@@ -112,10 +112,14 @@ monad_opts(Monad) ->
     Writer = astranaut_monad:monad_writer_updated(Monad),
     Listen = astranaut_monad:monad_listen_updated(Monad),
     ListenHasError = astranaut_monad:monad_listen_has_error(Monad),
+    FailOnError = astranaut_monad:monad_fail_on_error(Monad),
+    CatchOnError = astranaut_monad:monad_catch_on_error(Monad),
     MOpts = #{bind => Bind, return => Return,
               ask => Ask, local => Local,
               state => State, listen_has_error => ListenHasError,
-              writer_updated => Writer, listen_updated => Listen},
+              writer_updated => Writer, listen_updated => Listen,
+              fail_on_error => FailOnError, catch_on_error => CatchOnError
+             },
     maps:filter(
       fun(_Key, Value) ->
               Value =/= undefined
@@ -145,7 +149,7 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
     %% list maybe returned when traverse one node, map_m_flatten is required.
     astranaut_monad:map_m_flatten(
       fun(Node) ->
-              sub_apply(F, Node, Uniplate, MOpts, Opts)
+              catch_on_error(sub_apply(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
       end, Nodes, Bind, Return);
 map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
     %% Node is simple node
@@ -195,21 +199,34 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, li
             Return(context_node(NodeContext));
         {Subtreess, MakeTree} ->
             Bind(
-              listen_has_error(
-                ListenUpdated(
-                  astranaut_monad:map_m(
-                    fun(Subtrees) ->
-                            astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
-                    end, Subtreess, Bind, Return)), MOpts),
-              fun({_Any, true}) ->
-                      Return([]);
-                 ({{Subtrees1, true}, false}) ->
+              ListenUpdated(map_m_subtreess(F, Subtreess, MOpts)),
+              fun({Subtrees1, true}) ->
                       Return(make_tree(MakeTree, Node, Subtreess, Subtrees1));
-                 ({{_Subtrees1, false}, false}) ->
+                 ({_Subtrees1, false}) ->
                       %% context should be removed if node is not updated.
                       Return(context_node(NodeContext))
               end)
     end.
+
+map_m_subtreess(F, Subtreess, #{bind := Bind, return := Return} = MOpts) ->
+    fail_on_error(
+      astranaut_monad:map_m(
+        fun(Subtrees) ->
+                astranaut_monad:map_m_flatten(
+                  fun(Subtree) ->
+                          catch_on_error(F(Subtree), fun() -> Return([]) end, MOpts)
+                  end, Subtrees, Bind, Return)
+        end, Subtreess, Bind, Return), MOpts).
+
+fail_on_error(MA, #{fail_on_error := FailOnError}) ->
+    FailOnError(MA);
+fail_on_error(MA, #{}) ->
+    MA.
+
+catch_on_error(MA, FMA, #{catch_on_error := CatchOnError}) ->
+    CatchOnError(MA, FMA);
+catch_on_error(MA, _FMA, #{}) ->
+    MA.
 
 %% add extra info to exception raised from Uniplate
 uniplate(Uniplate, Node, NodeContext1, ExceptionType, Opts) ->

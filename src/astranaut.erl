@@ -388,12 +388,12 @@ to_list(Form1) ->
 
 map_form(F, Form, #{traverse := subtree}) ->
     astranaut_traverse:bind(
-      traverse_map_node(F, Form),
+      astranaut_traverse:catch_on_error(traverse_map_node(F, Form), fun() -> astranaut_traverse:return([]) end),
       fun(Form1) ->
               astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
 map_form(F, Form, Opts) ->
-    map_m_1(F, Form, Opts).
+    astranaut_traverse:catch_on_error(map_m_1(F, Form, Opts) , fun() -> astranaut_traverse:return([]) end).
 
 map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
