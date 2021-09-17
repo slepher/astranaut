@@ -22,7 +22,7 @@
 -export([writer_writer/1, writer_listen/2]).
 -export([monad_bind/1, monad_return/1, monad_lift/1]).
 -export([monad_state/1, monad_ask/1, monad_local/1]).
--export([monad_writer_updated/1, monad_listen_updated/1, monad_listen_has_error/1]).
+-export([monad_writer_updated/1, monad_listen_updated/1, monad_listen_has_error/1, monad_catch_fail/1]).
 -export([mappend/1, mempty/1]).
 
 -export_type([maybe/1, either/2, state/2]).
@@ -411,6 +411,11 @@ monad_listen_updated(_) ->
 monad_listen_has_error(traverse) ->
     fun astranaut_traverse:listen_has_error/1;
 monad_listen_has_error(_) ->
+    undefined.
+
+monad_catch_fail(traverse) ->
+    fun astranaut_traverse:catch_fail/2;
+monad_catch_fail(_) ->
     undefined.
 
 mappend('or') ->

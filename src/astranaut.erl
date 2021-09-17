@@ -210,7 +210,7 @@ map(F, TopNode, Opts) ->
       fun({TopNode1, _State}) ->
               TopNode1
       end,
-      mapfold_1(F1, ok, TopNode, Opts#{with_return => WithReturn})).
+      mapfold_1(F1, undefined, TopNode, Opts#{with_return => WithReturn})).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
@@ -242,7 +242,7 @@ mapfold(F, Init, TopNode, Opts) ->
 mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
     InitAttr = maps:get(attr, Opts, #{}),
-    Opts1 = maps:without([formatter, attr, uniplate], Opts),
+    Opts1 = maps:without([formatter, attr], Opts),
     F1 = fun(Node) ->
                  astranaut_traverse:with_state_attr(
                    fun(State, Attr) ->

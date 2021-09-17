@@ -157,7 +157,7 @@ walk_node(prefix_expr, {op, _Pos1, '+', {var, _Pos3, _Varname} = Var},
           #{pattern := PatternType} = Context, #{node := pattern})
   when PatternType =:= match_left; PatternType =:= clause_match ->
     Var1 = rename_var(Var, Context),
-    astranaut:walk_return(#{return => Var1, continue => true});
+    astranaut:walk_return(#{return => Var1});
 
 %% rename var if current node is expression.
 walk_node(variable, Var, #{} = Context, #{node := expression}) ->

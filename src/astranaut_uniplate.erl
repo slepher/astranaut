@@ -190,22 +190,26 @@ descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
 descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, listen_updated := ListenUpdated} = MOpts, Opts) ->
     %% it's not wise to generate subtrees twice,
     %% validate_pre_transform chould be done here.
-    {Subtreess, MakeTree} = uniplate(Uniplate, Node, NodeContext, invalid_pre_transform, Opts),
-    Bind(
-      listen_has_error(
-        ListenUpdated(
-          astranaut_monad:map_m(
-            fun(Subtrees) ->
-                    astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
-            end, Subtreess, Bind, Return)), MOpts),
-      fun({_Any, true}) ->
-              Return([]);
-         ({{Subtrees1, true}, false}) ->
-              Return(make_tree(MakeTree, Node, Subtreess, Subtrees1));
-         ({{_Subtrees1, false}, false}) ->
-              %% context should be removed if node is not updated.
-              Return(context_node(NodeContext))
-      end).
+    case uniplate(Uniplate, Node, NodeContext, invalid_pre_transform, Opts) of
+        {[], _MakeTree} ->
+            Return(context_node(NodeContext));
+        {Subtreess, MakeTree} ->
+            Bind(
+              listen_has_error(
+                ListenUpdated(
+                  astranaut_monad:map_m(
+                    fun(Subtrees) ->
+                            astranaut_monad:map_m_flatten(F, Subtrees, Bind, Return)
+                    end, Subtreess, Bind, Return)), MOpts),
+              fun({_Any, true}) ->
+                      Return([]);
+                 ({{Subtrees1, true}, false}) ->
+                      Return(make_tree(MakeTree, Node, Subtreess, Subtrees1));
+                 ({{_Subtrees1, false}, false}) ->
+                      %% context should be removed if node is not updated.
+                      Return(context_node(NodeContext))
+              end)
+    end.
 
 %% add extra info to exception raised from Uniplate
 uniplate(Uniplate, Node, NodeContext1, ExceptionType, Opts) ->
