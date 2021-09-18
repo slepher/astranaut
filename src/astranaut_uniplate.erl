@@ -150,12 +150,15 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
       fun(Node) ->
               catch_on_error(sub_apply(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
       end, Nodes, Bind, Return);
-map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
+map_m_1(F, Node, Uniplate, MOpts, Opts) ->
+    map_m_2(F, Node, Uniplate, MOpts, Opts).
+
+map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
     %% Node1 is node without context
-    bind_without_error(
+    Bind(
       step_apply(F, Node, pre, Uniplate, MOpts, Opts),
       %% F(Node) -> [Node] | Node
       %% returned value is node or list of node, use map_m_if_list to mapover nodes
@@ -163,7 +166,7 @@ map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
               map_m_if_list(
                 %% after pre_apply, NodeContext1 is node with context
                 fun(NodeContext1) ->
-                        bind_without_error(
+                        Bind(
                           descend_m_1(
                             fun(SubNode) ->
                                     %% add parent to subtree incase of exception raised
@@ -171,9 +174,14 @@ map_m_1(F, Node, Uniplate, #{} = MOpts, Opts) ->
                             end, Node, NodeContext1, Uniplate, MOpts, Opts),
                           fun(Node1) ->
                                   step_apply(F, Node1, post, Uniplate, MOpts, Opts)
-                          end, MOpts)
+                          end)
                 end, NodeOrNodes, MOpts)
-      end, MOpts).
+      end).
+
+sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
+    updated_node_apply(F, Node, MOpts);
+sub_apply(F, Node, Uniplate, MOpts, Opts) ->
+    map_m_2(F, Node, Uniplate, MOpts, Opts).
 
 descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
     context_apply(
@@ -257,9 +265,6 @@ make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
             erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, ?GET_STACKTRACE)
     end.
 
-bind_without_error(MA, KMB, #{bind := Bind} = Opts) ->
-    Bind(fail_on_error(MA, Opts), KMB).
-
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
     astranaut_monad:map_m_flatten(AFB, Nodes, Bind, Return);
 map_m_if_list(AFB, Node, #{}) ->
@@ -267,24 +272,19 @@ map_m_if_list(AFB, Node, #{}) ->
 
 step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre}) ->
     updated_node_apply(F, Node, MOpts);
-step_apply(F, Node, post, Uniplate, #{return := Return} = MOpts, #{traverse := post}) ->
-    bind_without_error(
+step_apply(F, Node, post, Uniplate, #{bind := Bind, return := Return} = MOpts, #{traverse := post}) ->
+    Bind(
       updated_node_apply(F, Node, MOpts),
       fun(NodeOrNodes) ->
               validate_post_transform(Uniplate, Node, NodeOrNodes),
               Return(NodeOrNodes)
-      end, MOpts);
+      end);
 step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
     context_up_attrs(NodeM, [#{step => Step}], MOpts);
 step_apply(_F, Node, _Step, _Uniplate, #{return := Return}, #{}) ->
     Return(Node).
-
-sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
-    updated_node_apply(F, Node, MOpts);
-sub_apply(F, Node, Uniplate, MOpts, Opts) ->
-    map_m_1(F, Node, Uniplate, MOpts, Opts).
 
 updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind}) ->
     Bind(

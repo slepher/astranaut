@@ -632,25 +632,25 @@ to_list(Arguments) ->
 transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
     Monad =
         astranaut:map_m(
-          fun({function, Pos, Name, Arity, Clauses} = Function) ->
+          fun({function, _Pos, Name, Arity, _Clauses} = Function) ->
                   case should_transform_function(Name, Arity, TransformFunctions) of
                       false ->
                           astranaut_traverse:return(Function);
                       true ->
-                          astranaut_traverse:lift_m(
-                            fun([]) ->
-                                    [];
-                               (Clauses1) ->
-                                    {function, Pos, Name, Arity, Clauses1}
-                            end,
-                            %% error in astranaut_traverse should be monad write
-                            %% current use as monad state is not right, should be changed.
-                            %% astranaut_traverse:fail_on_error(
-                            astranaut_monad:map_m_flatten(
-                              fun(Clause) ->
-                                      transform_call_macros_clause(Module, MacroMap, Clause)
-                              end, Clauses, fun astranaut_traverse:bind/2, fun astranaut_traverse:return/1))
-                            %%)
+                          %% astranaut_traverse:lift_m(
+                          %%   fun([]) ->
+                          %%           [];
+                          %%      (Clauses1) ->
+                          %%           {function, Pos, Name, Arity, Clauses1}
+                          %%   end,
+                          %%   astranaut_monad:map_m_flatten(
+                          %%     fun(Clause) ->
+                          %%             transform_call_macros_clause(Module, MacroMap, Clause)
+                          %%     end, Clauses, fun astranaut_traverse:bind/2, fun astranaut_traverse:return/1))
+                          astranaut:map_m(
+                            fun(Clause) ->
+                                    transform_call_macros_clause(Module, MacroMap, Clause)
+                            end, Function, #{traverse => subtree})
                   end;
              (Form) ->
                   astranaut_traverse:return(Form)
@@ -677,7 +677,7 @@ transform_call_macros_clause(Module, MacroMap, Clause) ->
                                     astranaut_traverse:return(Node)
                             end
                         ])
-             end, Clause, #{traverse => all, children => true})
+             end, Clause, #{traverse => all})
        ]).
 
 match_macro_order(Macro, Step) ->
@@ -688,25 +688,20 @@ match_macro_order(Macro, Step) ->
 %%%===================================================================
 %%% apply macro functions
 %%%===================================================================
-apply_macro(#{pos := Pos} = Opts) ->
-    astranaut_traverse:bind_without_error(
-      traverse_apply_mfa(Opts),
-      fun(Return) ->
-              astranaut_traverse:lift_m(
-                fun(Return1) ->
-                        Return2 = astranaut_lib:replace_pos_zero(Return1, Pos),
-                        format_node(Return2, Opts),
-                        Return2
-                end, update_quoted_variable_name(Return, Opts))
-      end).
-
-traverse_apply_mfa(#{pos := Pos, formatter := Formatter} = Opts) ->
-    astranaut_traverse:update_pos(Pos, Formatter, astranaut:traverse_return(apply_mfa(Opts))).
+apply_macro(#{pos := Pos, formatter := Formatter} = Opts) ->
+    do([ traverse ||
+           %% TODO: validate node1 as a erl_syntax node
+           Node1 <- astranaut_traverse:update_pos(Pos, Formatter, apply_mfa(Opts)),
+           Node2 <- update_quoted_variable_name(Node1, Opts),
+           Node3 = astranaut_lib:replace_pos_zero(Node2, Pos),
+           format_node(Node3, Opts),
+           return(Node3)
+       ]).
 
 apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Opts) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
-            Return
+            astranaut:traverse_return(Return)
     catch
         Class:Exception?CAPTURE_STACKTRACE ->
             StackTraces1 =
@@ -716,15 +711,16 @@ apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Op
                      (_Stack) ->
                           false
                   end, ?GET_STACKTRACE),
-            macro_exception_error(Arguments, Class, Exception, StackTraces1, Opts)
+            Error = macro_exception(Arguments, Class, Exception, StackTraces1, Opts),
+            astranaut_traverse:fail(Error)
     end.
 
-macro_exception_error(Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
+macro_exception(Arguments, Class, Exception, StackTraces, #{macro := {Module, Function}}) ->
     MFA = #{module => Module, function => Function, arity => length(Arguments)},
-    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}}};
+    {macro_exception, MFA, Arguments, {Class, Exception, StackTraces}};
 %% replace `module`__local_macro with module in stacktrace
-macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := LocalModule, 
-                                                                  macro_module := Module, macro := Function}) ->
+macro_exception(Arguments, Class, Exception, StackTraces,
+                #{module := LocalModule, macro_module := Module, macro := Function}) ->
     StackTraces1 =
         lists:map(
           fun({M, F, A, Pos}) when M =:= LocalModule ->
@@ -733,7 +729,7 @@ macro_exception_error(Arguments, Class, Exception, StackTraces, #{module := Loca
                   Val
           end, StackTraces),
     MFA = #{function => Function, arity => length(Arguments), local => true},
-    {error, {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}}.
+    {macro_exception, MFA, Arguments, {Class, Exception, StackTraces1}}.
     
 should_transform_function(_Function, _Arity, all) ->
     true;
@@ -871,7 +867,7 @@ update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) -
                     end, Nodes, #{traverse => post}),
               {Nodes1, Counter + 1}
       end);
-update_quoted_variable_name(Nodes, _Macro) ->
+update_quoted_variable_name(Nodes, #{}) ->
     astranaut_traverse:return(Nodes).
 
 split_varname(String) ->

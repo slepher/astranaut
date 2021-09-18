@@ -57,14 +57,12 @@
 -type walk_return(S, A) :: #{?STRUCT_KEY => ?WALK_RETURN,
                              return => A,
                              state => S,
-                             node => trees(),
                              errors => [any()],
                              warnings => [any()],
                              continue => boolean()}.
 
 -type walk_return_map(S, A) :: #{return => A,
                                  state => S,
-                                 node => trees(),
                                  error => error_term(),
                                  warning => error_term(),
                                  errors => [error_term()],
@@ -127,7 +125,7 @@ smapfold(F, Init, Node, Opts) ->
     %%             end
     %%     end,
     %% StateM :: monad(state, B)
-    %% StateM = map_m(AFB, Node, Uniplate, state, Opts),
+    %% StateM = map_m(AFB, Node, state, Opts),
     %% =============================================
     %% while is_function(F, 3)
     %% =============================================
@@ -142,7 +140,7 @@ smapfold(F, Init, Node, Opts) ->
     %%     end,
     %% Monad = {reader, state},
     %% ReaderTStateM :: monad({reader, state}, B)
-    %% ReaderTStateM = map_m(AFB, Node, Uniplate, Monad, Opts),
+    %% ReaderTStateM = map_m(AFB, Node, Monad, Opts),
     %% StateM = ReaderTStateM(Attr),
     %% =============================================
     StateM =
