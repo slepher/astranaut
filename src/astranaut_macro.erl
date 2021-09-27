@@ -579,7 +579,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
                       not_macro ->
                           astranaut_traverse:return(Form)
                   end
-          end, Forms, #{traverse => subtree}),
+          end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
 
 function_clauses_map([{function, _Pos, Name, Arity, Clauses}|T], Acc) ->
@@ -637,16 +637,6 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                       false ->
                           astranaut_traverse:return(Function);
                       true ->
-                          %% astranaut_traverse:lift_m(
-                          %%   fun([]) ->
-                          %%           [];
-                          %%      (Clauses1) ->
-                          %%           {function, Pos, Name, Arity, Clauses1}
-                          %%   end,
-                          %%   astranaut_monad:map_m_flatten(
-                          %%     fun(Clause) ->
-                          %%             transform_call_macros_clause(Module, MacroMap, Clause)
-                          %%     end, Clauses, fun astranaut_traverse:bind/2, fun astranaut_traverse:return/1))
                           astranaut:map_m(
                             fun(Clause) ->
                                     transform_call_macros_clause(Module, MacroMap, Clause)
@@ -654,7 +644,7 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                   end;
              (Form) ->
                   astranaut_traverse:return(Form)
-          end, Forms, #{traverse => subtree}),
+          end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 
 transform_call_macros_clause(Module, MacroMap, Clause) ->

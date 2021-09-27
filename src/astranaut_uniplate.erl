@@ -34,7 +34,7 @@
                                 exits = []
                                }).
 
--type traverse_style() :: pre | post | all | subtree.
+-type traverse_style() :: pre | post | all | subtree | none.
 -type node_context(A) :: #uniplate_node_context{node :: A} | A.
 -type with_nodes(Node) :: fun(([[Node]]) -> [[node_context(Node)]]).
 -type reduce_nodes(Node) :: fun(([[node_context(Node)]]) -> [[node_context(Node)]]).
@@ -147,11 +147,13 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
     %% list maybe returned when traverse one node, map_m_flatten is required.
     astranaut_monad:map_m_flatten(
       fun(Node) ->
-              catch_on_error(sub_apply(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
+              catch_on_error(map_m_2(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
       end, Nodes, Bind, Return);
 map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
+map_m_2(F, Node, Uniplate, MOpts, #{traverse := none}) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_transform);
 map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
@@ -177,8 +179,8 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
                 end, NodeOrNodes, MOpts)
       end).
 
-sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree}) ->
-    updated_node_apply(F, Node, MOpts);
+sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree}) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_subtree_transform);
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
@@ -245,7 +247,7 @@ uniplate(Uniplate, Node, NodeContext1, ExceptionType, Opts) ->
                 Node ->
                     case maps:find(parent, Opts) of
                         {ok, Parent} ->
-                            erlang:raise(EType, {invalid_subnode, Parent, Node, Exception}, ?GET_STACKTRACE);
+                            erlang:raise(EType, {invalid_uniplate_subnode, Parent, Node, Exception}, ?GET_STACKTRACE);
                         error ->
                             erlang:raise(EType, {invalid_node, Node, Exception}, ?GET_STACKTRACE)
                         end;
@@ -271,13 +273,8 @@ map_m_if_list(AFB, Node, #{}) ->
 
 step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre}) ->
     updated_node_apply(F, Node, MOpts);
-step_apply(F, Node, post, Uniplate, #{bind := Bind, return := Return} = MOpts, #{traverse := post}) ->
-    Bind(
-      updated_node_apply(F, Node, MOpts),
-      fun(NodeOrNodes) ->
-              validate_post_transform(Uniplate, Node, NodeOrNodes),
-              Return(NodeOrNodes)
-      end);
+step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post}) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_post_transform);
 step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
@@ -292,19 +289,28 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
                 WriterUpdated(updated_node(Node1, Node2))
       end).
 
-validate_post_transform(Uniplate, Node, Nodes) when is_list(Nodes) ->
-    lists:foreach(fun(Node1) -> validate_post_transform_1(Uniplate, Node, Node1) end, Nodes);
-validate_post_transform(Uniplate, Node, Node1) ->
-    validate_post_transform_1(Uniplate, Node, Node1).
+validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, ExceptionType) ->
+    Bind(
+      updated_node_apply(F, Node, MOpts),
+      fun(NodeOrNodes) ->
+              validate_transformed_node(Uniplate, Node, NodeOrNodes, ExceptionType),
+              Return(NodeOrNodes)
+      end).
 
-validate_post_transform_1(Uniplate, Node, Node1) ->
+validate_transformed_node(Uniplate, Node, Nodes, ExceptionType) when is_list(Nodes) ->
+    lists:foreach(fun(Node1) -> validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) end, Nodes);
+validate_transformed_node(Uniplate, Node, Node1, ExceptionType) ->
+    validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType).
+
+validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) ->
     case Node1 of
         #uniplate_node_context{} ->
-            erlang:error({invalid_post_transform_with_context, Node, Node1});
+            ContextExceptionType = list_to_atom(atom_to_list(ExceptionType) ++ "_with_context"),
+            erlang:error({ContextExceptionType, Node, Node1});
         Node ->
             ok;
         Node1 ->
-            uniplate(Uniplate, Node, Node1, invalid_post_transform, #{})
+            uniplate(Uniplate, Node, Node1, ExceptionType, #{})
     end.
 
 %%%===================================================================

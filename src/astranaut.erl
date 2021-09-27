@@ -348,9 +348,9 @@ to_list(Form1) when is_list(Form1) ->
 to_list(Form1) ->
     [Form1].
 
-map_form(F, Form, #{traverse := subtree}) ->
+map_form(F, Form, #{traverse := none}) ->
     astranaut_traverse:bind(
-      traverse_map_node(F, Form),
+      traverse_map_form(F, Form),
       fun(Form1) ->
               astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
@@ -361,10 +361,10 @@ map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     astranaut_uniplate:map_m(
       fun(Node1) ->
-              traverse_map_node(F, Node1)
+              traverse_map_form(F, Node1)
       end, Node, Uniplate, traverse, Opts).
 
-traverse_map_node(F, Node) ->
+traverse_map_form(F, Node) ->
     Type = erl_syntax:type(Node),
     case Type of
 	attribute ->
@@ -396,9 +396,12 @@ traverse_map_node(F, Node) ->
               astranaut_traverse:formatted_warnings([erl_syntax:warning_marker_info(Node)]),
               astranaut_traverse:return([]));
         _ ->
-            Pos = erl_syntax:get_pos(Node),
-            astranaut_traverse:update_pos(Pos, F(Node))
+            traverse_map_node(F, Node)
     end.
+
+traverse_map_node(F, Node) ->
+    Pos = erl_syntax:get_pos(Node),
+    astranaut_traverse:update_pos(Pos, F(Node)).
 
 uniplate(Node) ->
     case astranaut_syntax:subtrees(Node) of
