@@ -51,19 +51,18 @@
 %%% API
 %%%===================================================================
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
-            #{traverse => traverse_style(), attr => map(), static => boolean()}) -> monad(M, N).
+            #{traverse => traverse_style(), static => boolean()}) -> monad(M, N).
 %% @doc traverse node with user defined monad.
 map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
     map_m(F, Node, Uniplate, MonadOpts, Opts);
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
-    Opts1 = maps:remove(static, Opts),
-    Opts2 = maps:merge(#{traverse => pre}, Opts1),
+    Opts1 = maps:merge(#{traverse => pre}, maps:with([traverse], Opts)),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
-              map_m_1(F, Node, UniplateContext, MonadOpts1, Opts2)
+              map_m_1(F, Node, UniplateContext, MonadOpts1, Opts1)
       end, MonadOpts, Static).
 
 -spec uniplate_context(uniplate(A)) -> uniplate(A).
