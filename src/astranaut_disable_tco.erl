@@ -16,8 +16,7 @@
 %%%===================================================================
 parse_transform(Forms, _Opt) ->
     Opts = #{traverse => all},
-    {Forms1, _} = astranaut:smapfold(fun walk/3, sets:new(), Forms, Opts),
-    Forms1.
+    astranaut:smap_with_state(fun walk/3, sets:new(), Forms, Opts).
 
 format_error(Message) ->
     case io_lib:deep_char_list(Message) of
