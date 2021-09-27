@@ -51,7 +51,6 @@
 -export([with_error/2, catch_fail/2, set_fail/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
--export([with_state_attr/1]).
 -export([listen_error/1, writer_updated/1, listen_updated/1]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
@@ -285,18 +284,6 @@ listen_updated(MA) ->
       fun(#{return := Return, updated := Updated} = MState) ->
               update_m_state(MState, #{return => {Return, Updated}})
       end, MA).
-
-with_state_attr(F) ->
-    bind(
-      get(),
-      fun(State) ->
-              bind(
-                ask(),
-                fun(Attr) ->
-                        F(State, Attr)
-                end)
-      end).
-
 %%%===================================================================
 %%% error_state related functions
 %%%===================================================================

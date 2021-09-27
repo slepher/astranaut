@@ -202,7 +202,7 @@ descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
 descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, listen_updated := ListenUpdated} = MOpts, Opts) ->
     %% it's not wise to generate subtrees twice,
     %% validate_pre_transform chould be done here.
-    case uniplate(Uniplate, Node, NodeContext, invalid_pre_transform, Opts) of
+    case uniplate(Uniplate, Node, NodeContext, Opts, invalid_pre_transform) of
         {[], _MakeTree} ->
             Return(context_node(NodeContext));
         {Subtreess, MakeTree} ->
@@ -237,7 +237,7 @@ catch_on_error(MA, _FMA, #{}) ->
     MA.
 
 %% add extra info to exception raised from Uniplate
-uniplate(Uniplate, Node, NodeContext1, ExceptionType, Opts) ->
+uniplate(Uniplate, Node, NodeContext1, Opts, ExceptionType) ->
     try Uniplate(NodeContext1) of
         {Subtreess, MakeTree} ->
             {Subtreess, MakeTree}
@@ -310,7 +310,7 @@ validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) ->
         Node ->
             ok;
         Node1 ->
-            uniplate(Uniplate, Node, Node1, ExceptionType, #{})
+            uniplate(Uniplate, Node, Node1, #{}, ExceptionType)
     end.
 
 %%%===================================================================
