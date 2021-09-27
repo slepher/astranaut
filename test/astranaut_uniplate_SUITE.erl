@@ -126,7 +126,8 @@ all() ->
      test_with_subtrees, test_af_with,
      test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
      test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
-     test_invalid_node_exception, test_invalid_subnode_exception
+     test_invalid_node_exception, test_invalid_uniplate_subnode_exception,
+     test_invalid_transform_exception, test_invalid_subtree_transform_exception
     ].
 
 %%--------------------------------------------------------------------
@@ -458,15 +459,41 @@ test_invalid_node_exception(_Config) ->
          end, undefined, #{traverse => post})),
     ok.
 
-test_invalid_subnode_exception(Config) ->
+test_invalid_uniplate_subnode_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
+       {invalid_uniplate_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
        astranaut:smap(
          fun(Node) ->
                  Node
          end, Forms, #{traverse => pre, uniplate => fun invalid_uniplate/1})),
+    ok.
+
+test_invalid_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_transform, {function, _Pos, _Name, _Arity, _Clauses}, invalid_node, _OriginalException},
+       astranaut:smap(
+         fun({function, _Pos, _Name, _Arity, _Clauses}) ->
+                 invalid_node;
+            (Node) ->
+                 Node
+         end, Forms, #{traverse => none})),
+    ok.
+
+test_invalid_subtree_transform_exception(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    ?assertException(
+       error,
+       {invalid_subtree_transform, {clause, _Pos, _Pattern, _Guard, _Expression}, invalid_clause, _OriginalException},
+       astranaut:smap(
+         fun({clause, _Pos, _Pattern, _Guard, _Expression}) ->
+                 invalid_clause;
+            (Node) ->
+                 Node
+         end, Forms, #{traverse => subtree})),
     ok.
 
 uniplate(Node) ->

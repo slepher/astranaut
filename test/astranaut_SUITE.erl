@@ -274,7 +274,7 @@ test_reduce_attr(Config) ->
                   {error, mark_error_0};
              (_Node, Acc, #{}) ->
                   Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => subtree}),
+          end, 0, Forms, #{formatter => ?MODULE, traverse => none}),
     #{'__struct__' := ?RETURN_OK, error := Error} = ReturnM,
     io:format("get printable errors ~p~n", [astranaut_error:printable(Error)]),
     FileWarnings = [{File, [{2, ?MODULE, mark_0}]}],
@@ -380,7 +380,7 @@ test_map_forms(Config) ->
                           "end"])));
              (Node) ->
                   astranaut_traverse:return(Node)
-          end, Forms, #{traverse => subtree}),
+          end, Forms, #{traverse => none}),
     Forms1 = astranaut_return:simplify(astranaut_traverse:eval(Forms1M, astranaut, #{}, ok)),
     io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]),
     Result = astranaut_test_lib:compile_test_forms(Forms1),

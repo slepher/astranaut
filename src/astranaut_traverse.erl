@@ -46,15 +46,13 @@
 -export([run/4, eval/4, exec/4]).
 -export([lift_m/2, map_m/2, sequence_m/1]).
 -export([bind/2, then/2, return/1]).
--export([bind_without_error/2]).
 -export([fail/1, fail/2, fails/1]).
--export([fail_on_error/1]).
+-export([fail_on_error/1, catch_on_error/2]).
 -export([with_error/2, catch_fail/2, set_fail/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
 -export([with_state_attr/1]).
 -export([listen_error/1, writer_updated/1, listen_updated/1]).
--export([listen_has_error/1]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
 
@@ -63,11 +61,20 @@ astranaut_traverse(#{?STRUCT_KEY := ?WALK_RETURN} = Map) ->
     Inner =
         fun(_Formatter, File, _Attr, State0) ->
                 State1 = maps:get(state, Map, State0),
-                Return = maps:get(return, Map, ok),
                 Errors = maps:get(errors, Map, []),
                 Warnings = maps:get(warnings, Map, []),
                 Error1 = astranaut_error:append_ews(Errors, Warnings, astranaut_error:new(File)),
-                state_ok(#{return => Return, state => State1, error => Error1})
+                case maps:find(return, Map) of
+                    {ok, Return} ->
+                        state_ok(#{return => Return, state => State1, error => Error1});
+                    error ->
+                        case Errors of
+                            [] ->
+                                exit(no_return_with_empty_error);
+                            Errors ->
+                                state_fail(#{state => State1, error => Error1})
+                        end
+                end
         end,
     new(Inner);
 astranaut_traverse(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := ErrorStruct}) ->
@@ -180,27 +187,6 @@ return(A) ->
         end,
     new(Inner).
 
-listen_has_error(MA) ->
-    map_m_state_ok(
-      fun(#{return := Return, error := Error} = MState) ->
-              MState#{return => {Return, not astranaut_error:is_empty_error(Error)}}
-      end, MA).
-
--spec bind_without_error(struct(S, A) | ok, fun((A) -> struct(S, B))) -> struct(S, B).
-bind_without_error(ok, KMB) ->
-    KMB(ok);
-bind_without_error(MA, KMB) ->
-    bind(
-      listen_error(MA),
-      fun({A, ErrorStruct}) ->
-              case astranaut_error:is_empty_error(ErrorStruct) of
-                  true ->
-                      KMB(A);
-                  false ->
-                      return(A)
-              end
-      end).
-
 -spec fail_on_error(struct(S, A)) -> struct(S, A).
 fail_on_error(MA) ->
     map_m_state_ok(
@@ -212,6 +198,18 @@ fail_on_error(MA) ->
                       state_fail(#{state => State1, error => Error})
               end
         end, MA).
+
+-spec catch_on_error(struct(S, A), fun(() -> struct(S, A))) -> struct(S, A).
+catch_on_error(MA, FMA) ->
+    map_m_state(
+      fun(_Formatter, _Attr, #{?STRUCT_KEY := ?STATE_OK} = StateOk) ->
+              StateOk;
+         (Formatter, Attr, #{?STRUCT_KEY := ?STATE_FAIL, state := State, error := Error1}) ->
+              File = astranaut_error:file(Error1),
+              #{error := Error2} = MB = run_0(FMA(), Formatter, File, Attr, State),
+              Error3 = astranaut_error:merge(Error1, Error2),
+              update_m_state(MB, #{error => Error3})
+      end, fail_on_error(MA)).
 
 -spec fail(_E) -> struct(_S, _A).
 fail(E) ->

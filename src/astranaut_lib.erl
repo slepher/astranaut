@@ -430,7 +430,7 @@ with_attribute(F, Init, Forms, Attr, Opts) ->
               values_apply_fun_m(F, AttrValue, Acc, #{pos => Pos});
          (_Node, Acc) ->
               Acc
-      end, Init, Forms, Opts#{traverse => subtree}).
+      end, Init, Forms, Opts#{traverse => none}).
 
 -spec forms_with_attribute(WalkFun, State, Forms, atom(), Opts) ->
                                   astranaut_return:struct(Forms)
@@ -460,7 +460,7 @@ forms_with_attribute(F, Init, Forms, Attr, Opts) ->
                 end);
          (Node, Acc) ->
               astranaut_return:return({Node, Acc})
-      end, Init, Forms, Opts#{traverse => subtree}).
+      end, Init, Forms, Opts#{traverse => none}).
 
 values_apply_fun_m(F, AttrValues, Acc, Opts) when is_list(AttrValues) ->
     case maps:get(deep_attr, Opts, true) of

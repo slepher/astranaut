@@ -57,14 +57,12 @@
 -type walk_return(S, A) :: #{?STRUCT_KEY => ?WALK_RETURN,
                              return => A,
                              state => S,
-                             node => trees(),
                              errors => [any()],
                              warnings => [any()],
                              continue => boolean()}.
 
 -type walk_return_map(S, A) :: #{return => A,
                                  state => S,
-                                 node => trees(),
                                  error => error_term(),
                                  warning => error_term(),
                                  errors => [error_term()],
@@ -89,23 +87,15 @@
 %% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
 -spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
 smap(F, Node, Opts) ->
-    map_m_with_attr(
-      fun(N, A) ->
-              apply_fun(F, [N, A])
-      end, Node, identity, Opts, is_function(F, 2)).
+    F1 = fun(N, A) -> apply_fun(F, [N, A]) end,
+    map_m_with_attr(F1, Node, identity, Opts, is_function(F, 2)).
 
 %% @doc
 %% works same as reduce/4 and returns S, not astranant_return:struct(S).
 -spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Node, Opts) ->
-    StateM =
-        map_m_with_attr(
-          fun(N, A) ->
-                  fun(S0) ->
-                          S1 = apply_fun(F, [N, S0, A]),
-                          {N, S1}
-                  end
-          end, Node, state, Opts#{static => true}, is_function(F, 3)),
+    F1 = fun(N, A) -> fun(S) -> {N, apply_fun(F, [N, S, A])} end end,
+    StateM = map_m_with_attr(F1, Node, state, Opts#{static => true}, is_function(F, 3)),
     %% Node is never changed if static is true
     {_Node, Acc} = StateM(Init),
     Acc.
@@ -127,7 +117,7 @@ smapfold(F, Init, Node, Opts) ->
     %%             end
     %%     end,
     %% StateM :: monad(state, B)
-    %% StateM = map_m(AFB, Node, Uniplate, state, Opts),
+    %% StateM = map_m(AFB, Node, state, Opts),
     %% =============================================
     %% while is_function(F, 3)
     %% =============================================
@@ -142,37 +132,19 @@ smapfold(F, Init, Node, Opts) ->
     %%     end,
     %% Monad = {reader, state},
     %% ReaderTStateM :: monad({reader, state}, B)
-    %% ReaderTStateM = map_m(AFB, Node, Uniplate, Monad, Opts),
+    %% ReaderTStateM = map_m(AFB, Node, Monad, Opts),
     %% StateM = ReaderTStateM(Attr),
     %% =============================================
-    StateM =
-        map_m_with_attr(
-          fun(N, A) ->
-                  fun(S) ->
-                          apply_fun(F, [N, S, A])
-                  end
-          end, Node, state, Opts, is_function(F, 3)),
+    F1 = fun(N, A) -> fun(S) -> apply_fun(F, [N, S, A]) end end,
+    StateM = map_m_with_attr(F1, Node, state, Opts, is_function(F, 3)),
     (StateM)(Init).
 
 %% @doc traverse node with F, if F(Node, Attr) is true, traverse is stopped immediately and return true, else return false.
 -spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, straverse_opts()) -> boolean().
 search(F, Node, Opts) ->
-    Either =
-        map_m_with_attr(
-          fun(N, A) ->
-                  case apply_fun(F, [N, A]) of
-                      true ->
-                          {left, match};
-                      false ->
-                          {right, N}
-                  end
-          end, Node, either, Opts#{static => true}, is_function(F, 2)),
-    case Either of
-        {left, match} ->
-            true;
-        {right, _Node} ->
-            false
-    end.
+    F1 = fun(N, A) -> case apply_fun(F, [N, A]) of true -> {left, match}; false -> {right, N} end end,
+    Either = map_m_with_attr(F1, Node, either, Opts#{static => true}, is_function(F, 2)),
+    case Either of {left, match} -> true; {right, _Node} -> false end.
 
 map_m_with_attr(F, Node, Monad, Opts, WithAttr) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
@@ -180,21 +152,16 @@ map_m_with_attr(F, Node, Monad, Opts, WithAttr) ->
     map_m_with_attr(F, Node, Uniplate, Monad, Opts1, WithAttr).
 
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, false) ->
-    astranaut_uniplate:map_m(
-     fun(N) ->         %% N is Node
-             F(N, #{}) %% #{} is empty Attr
-     end, Node, Uniplate, Monad, Opts);
+    %% N is Node and #{} is empty Attr
+    F1 = fun(N) -> F(N, #{}) end,
+    astranaut_uniplate:map_m(F1, Node, Uniplate, Monad, Opts);
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
     %% to take benefit of attribute access, add a ReaderT monad transformer.
     Attr = maps:get(attr, Opts, #{}),
     Opts1 = maps:remove(attr, Opts),
-    ReaderT =
-        astranaut_uniplate:map_m(
-          fun(N) ->         %% N is Node
-                  fun(A) -> %% A is Attr
-                          F(N, A)
-                  end
-          end, Node, Uniplate, {reader, Monad}, Opts1),
+    %% N is Node and A is Attr
+    F1 = fun(N) -> fun(A) -> F(N, A) end end,
+    ReaderT = astranaut_uniplate:map_m(F1, Node, Uniplate, {reader, Monad}, Opts1),
     ReaderT(Attr).
 
 -spec map(map_walk(), rtrees(), traverse_opts()) -> astranant_return:struct(trees()).
@@ -203,28 +170,18 @@ map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
 %% @see mapfold/4
 map(F, TopNode, Opts) ->
     WithReturn = fun(_Node, Node1) -> #{return => Node1} end,
-    F1 = fun(Node, _State, Attr) ->
-                 apply_fun(F, [Node, Attr])
-         end,
-    astranaut_return:lift_m(
-      fun({TopNode1, _State}) ->
-              TopNode1
-      end,
-      mapfold_1(F1, ok, TopNode, Opts#{with_return => WithReturn})).
+    F1 = fun(Node, _State, Attr) -> apply_fun(F, [Node, Attr]) end,
+    Return = mapfold_1(F1, undefined, TopNode, Opts, WithReturn),
+    astranaut_return:lift_m(fun({TopNode1, _State}) -> TopNode1 end, Return).
 
 -spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
     WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
-    F1 = fun(Node, State, Attr) ->
-                   apply_fun(F, [Node, State, Attr])
-         end,
-    astranaut_return:lift_m(
-      fun({_TopNode1, State}) ->
-              State
-      end,
-      mapfold_1(F1, Init, TopNode, Opts#{static => true, with_return => WithReturn})).
+    F1 = fun(Node, State, Attr) -> apply_fun(F, [Node, State, Attr]) end,
+    Return = mapfold_1(F1, Init, TopNode, Opts#{static => true}, WithReturn),
+    astranaut_return:lift_m(fun({_TopNode1, State}) -> State end, Return).
 
 -spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
 %% @doc Combines the operations of map/3 and reduce/4 into one pass.
@@ -232,17 +189,17 @@ mapfold(F, Init, TopNode, Opts) ->
     WithReturn =
         fun(_Node, {Node1, State1}) ->
                 #{return => Node1, state => State1};
-           (_Node, Return) ->
+           (Node, Return) ->
                 %% when return other value, we dont know which part is node and which part is state
                 %% just throw exception.
-                exit({invalid_mapfold_return, Return})
+                exit({invalid_mapfold_return, Return, Node})
         end,
-    mapfold_1(F, Init, TopNode, Opts#{with_return => WithReturn}).
+    mapfold_1(F, Init, TopNode, Opts, WithReturn).
 
-mapfold_1(F, Init, TopNode, #{with_return := WithReturn} = Opts) ->
+mapfold_1(F, Init, TopNode, #{} = Opts, WithReturn) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
     InitAttr = maps:get(attr, Opts, #{}),
-    Opts1 = maps:without([formatter, attr, uniplate], Opts),
+    Opts1 = maps:without([formatter, attr], Opts),
     F1 = fun(Node) ->
                  astranaut_traverse:with_state_attr(
                    fun(State, Attr) ->
@@ -256,7 +213,7 @@ apply_fun(F, [N|_T]) when is_function(F, 1) ->
     F(N);
 apply_fun(F, [A1, A2|_T]) when is_function(F, 2) ->
     F(A1, A2);
-apply_fun(F, [A1, A2, A3|_T]) when is_function(F, 3) ->
+apply_fun(F, [A1, A2, A3]) when is_function(F, 3) ->
     F(A1, A2, A3).
 
 bind_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _Fun) ->
@@ -373,7 +330,12 @@ map_m(F, [Node|_T] = Nodes, Opts) ->
                                   {updated, Form, to_list(Form1)};
                              ({_Form1, false}) ->
                                   Form
-                          end, astranaut_traverse:listen_updated(map_form(F, Form, Opts)))
+                          end, astranaut_traverse:listen_updated(
+                                 astranaut_traverse:catch_on_error(
+                                   map_form(F, Form, Opts),
+                                   fun() ->
+                                           astranaut_traverse:return({[], true})
+                                   end)))
                 end, Nodes));
         false ->
             map_m_1(F, Nodes, Opts)
@@ -386,9 +348,9 @@ to_list(Form1) when is_list(Form1) ->
 to_list(Form1) ->
     [Form1].
 
-map_form(F, Form, #{traverse := subtree}) ->
+map_form(F, Form, #{traverse := none}) ->
     astranaut_traverse:bind(
-      traverse_map_node(F, Form),
+      traverse_map_form(F, Form),
       fun(Form1) ->
               astranaut_traverse:writer_updated({Form1, Form =/= Form1})
       end);
@@ -399,10 +361,10 @@ map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     astranaut_uniplate:map_m(
       fun(Node1) ->
-              traverse_map_node(F, Node1)
+              traverse_map_form(F, Node1)
       end, Node, Uniplate, traverse, Opts).
 
-traverse_map_node(F, Node) ->
+traverse_map_form(F, Node) ->
     Type = erl_syntax:type(Node),
     case Type of
 	attribute ->
@@ -434,9 +396,12 @@ traverse_map_node(F, Node) ->
               astranaut_traverse:formatted_warnings([erl_syntax:warning_marker_info(Node)]),
               astranaut_traverse:return([]));
         _ ->
-            Pos = erl_syntax:get_pos(Node),
-            astranaut_traverse:update_pos(Pos, F(Node))
+            traverse_map_node(F, Node)
     end.
+
+traverse_map_node(F, Node) ->
+    Pos = erl_syntax:get_pos(Node),
+    astranaut_traverse:update_pos(Pos, F(Node)).
 
 uniplate(Node) ->
     case astranaut_syntax:subtrees(Node) of
