@@ -116,27 +116,29 @@ parse_transform(Forms, Options) ->
     astranaut_return:to_compiler(
       do([ return ||
              Module = astranaut_lib:analyze_forms_module(Forms),
+             File = astranaut_lib:analyze_forms_file(Forms),
+             {MacroModules, Macros, GlobalMacroOpts} <- load_imported_macro_attributes(Module, File, Forms),
+             Forms1 <- transform_external_macros(MacroModules, Macros, Forms),
              %% load macros from attributes and transform -export_macro to -exported_macro
-             %% add nowarn_unused_function compile options to -local_macro if it's not exported
              %% -exported_macro is validated -export_macro attribute.
-             {Forms1, MacroModules, Macros, GlobalMacroOpts} <- load_attributes(Forms),
-             %% transform macros
-             astranaut_return:lift_m(
-               fun(Forms2) ->
-                       format_forms(Forms2, GlobalMacroOpts),
-                       Forms2
-               end, transform_macros(Module, MacroModules, Macros, Forms1, Options))
+             %% add nowarn_unused_function compile options to -local_macro if it's not exported
+             {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms1),
+             Forms3 <- transform_local_macros(Module, LocalMacros, Forms2, Options),
+             format_forms(Forms3, GlobalMacroOpts),
+             return(Forms3)
          ])).
 
 -spec format_error(term()) -> term().
 format_error({import_macro_failed, Module}) ->
-    io_lib:format("could not import macro from ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.", [Module]);
+    io_lib:format("could not import macro from module ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.", [Module]);
+format_error({invalid_import_macro_attr, Macro}) ->
+    io_lib:format("~p is not a valid module in -import_macro(~p). ", [Macro, Macro]);
 format_error({unimported_macro_module, Module}) ->
-    io_lib:format("-import_macro(~p). required.", [Module]);
+    io_lib:format("-import_macro(~p). is required before use of -use_macro", [Module]);
 format_error({unexported_macro, Module, Function, Arity}) ->
     io_lib:format("unexported macro ~p:~p/~p.", [Module, Function, Arity]);
 format_error({undefined_macro, Function, Arity}) ->
-    io_lib:format("undefined macro ~p/~p.", [Function, Arity]);
+    io_lib:format("macro ~p/~p undefined.", [Function, Arity]);
 format_error({invalid_use_macro, Opts}) ->
     io_lib:format("invalid use macro ~p.", [Opts]);
 format_error({non_exported_formatter, Module}) ->
@@ -153,18 +155,36 @@ format_error(Error) ->
 %%%===================================================================
 %%% analyze -export_macro -use_macro attributes functions
 %%%===================================================================
-load_attributes(Forms) ->
-    File = astranaut_lib:analyze_forms_file(Forms),
-    Module = astranaut_lib:analyze_forms_module(Forms),
+load_imported_macro_attributes(Module, File, Forms) ->
     do([ return ||
            Validator = global_macro_validator(),
            GlobalMacroOpts <- astranaut_lib:validate_attribute_option(Validator, ?MODULE, macro_options, Forms),
-           {Forms1, ExportedMacros} <- exported_macros(Forms),
            {ImportedModules, ImportedMacros} <- imported_macros(GlobalMacroOpts, Forms),
-           {Forms2, LocalMacros} <- local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms1),
-           UsedMacros <- used_macros(File, Module, ImportedMacros, LocalMacros, Forms2),
-           return({Forms2, ImportedModules, UsedMacros, GlobalMacroOpts})
+           UsedMacros <- used_macros(File, Module, ImportedMacros, Forms),
+           return({ImportedModules, UsedMacros, GlobalMacroOpts})
        ]).
+
+load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms) ->
+    do([ return ||
+           ClausesMap = function_clauses_map(Forms, maps:new()),
+           {Forms1, ExportedMacros} <- exported_macros(Forms, ClausesMap),
+           {Forms2, LocalMacros} <- local_macros(Module, GlobalMacroOpts, ExportedMacros, ClausesMap, Forms1),
+           LocalMacros1 = update_module_macros(File, Module, Forms2, LocalMacros),
+           return({Forms2, LocalMacros1})
+       ]).
+
+%% load_attributes(Forms) ->
+%%     File = astranaut_lib:analyze_forms_file(Forms),
+%%     Module = astranaut_lib:analyze_forms_module(Forms),
+%%     do([ return ||
+%%            Validator = global_macro_validator(),
+%%            GlobalMacroOpts <- astranaut_lib:validate_attribute_option(Validator, ?MODULE, macro_options, Forms),
+%%            {Forms1, ExportedMacros} <- exported_macros(Forms),
+%%            {ImportedModules, ImportedMacros} <- imported_macros(GlobalMacroOpts, Forms),
+%%            {Forms2, LocalMacros} <- local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms1),
+%%            UsedMacros <- used_macros(File, Module, ImportedMacros, LocalMacros, Forms2),
+%%            return({Forms2, ImportedModules, UsedMacros, GlobalMacroOpts})
+%%        ]).
 
 formatter_opts(Module, Functions, MacroOpts) ->
     FormatError = {format_error, 1},
@@ -175,21 +195,38 @@ formatter_opts(Module, Functions, MacroOpts) ->
             MacroOpts#{formatter => astranaut_macro}
     end.
 
-exported_macros(Forms) ->
+exported_macros(Forms, ClausesMap) ->
     astranaut_lib:forms_with_attribute(
       fun(Attr, Acc, #{pos := Pos}) ->
               do([ return ||
                      Validator = macro_definition_valitor(),
                      {FAs, Options} <-
                          validate_macro_attribute(fun macro_without_module_attr/1, Validator, export_macro, Attr),
-                     %% export_macro options for local usage
-                     ExportedMacros = lists:foldl(fun(FA, Acc1) -> maps:put(FA, Options, Acc1) end, Acc, FAs),
-                     %% exported_macro options for external usage
-                     ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options}]),
-                     ExportAttribute = astranaut_lib:gen_attribute_node(export, Pos, FAs),
-                     astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], ExportedMacros})
+                     FAs1 <- remove_undefined_macros(FAs, ClausesMap),
+                     case FAs1 of
+                         [] ->
+                             astranaut_return:return({[], Acc});
+                         _ ->
+                             %% export_macro options for local usage
+                             Acc2 = lists:foldl(fun(FA, Acc1) -> maps:put(FA, Options, Acc1) end, Acc, FAs1),
+                             %% exported_macro options for external usage
+                             ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options}]),
+                             ExportAttribute = astranaut_lib:gen_attribute_node(export, Pos, FAs),
+                             astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], Acc2})
+                     end
                  ])
       end, #{}, Forms, export_macro, #{formatter => ?MODULE}).
+
+remove_undefined_macros(FAs, ClausesMap) ->
+    astranaut_return:foldl_m(
+      fun({Function, Arity} = FA, Acc) ->
+              case maps:is_key(FA, ClausesMap) of
+                  true ->
+                      astranaut_return:return([FA|Acc]);
+                  false ->
+                      astranaut_return:error_ok({undefined_macro, Function, Arity}, Acc)
+              end
+      end, [], FAs).
 
 %% analyze -import_macro attributes.
 imported_macros(GlobalMacroOpts, Forms) ->
@@ -198,7 +235,7 @@ imported_macros(GlobalMacroOpts, Forms) ->
               {lists:reverse(Modules), MacroMap}
       end,
       astranaut_lib:with_attribute(
-        fun(Module, {ModulesAcc, MacroMapAcc} = Acc) when is_atom(Module) ->
+        fun(Module, {ModulesAcc, MacroMapAcc}) when is_atom(Module) ->
                 case is_loaded(Module) of
                     {file, _} ->
                         Macros = analyze_module_macros(Module),
@@ -219,17 +256,17 @@ imported_macros(GlobalMacroOpts, Forms) ->
                         ModulesAcc1 = [Module|ModulesAcc],
                         astranaut_return:return({ModulesAcc1, MacroMapAcc1});
                     false ->
-                        astranaut_return:error_ok({import_macro_failed, Module}, Acc)
+                        astranaut_return:error_fail({import_macro_failed, Module})
                 end;
-           (Attr, Acc) ->
-                astranaut_return:error_ok({invalid_import_macro_attr, Attr}, Acc)
+           (Attr, _Acc) ->
+                astranaut_return:error_fail({invalid_import_macro_attr, Attr})
         end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE})).
 
 is_loaded(Module) ->
     code:ensure_loaded(Module),
     code:is_loaded(Module).
 
-local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
+local_macros(Module, GlobalMacroOpts, ExportedMacros, ClauseMap, Forms) ->
     FormsProp = erl_syntax_lib:analyze_forms(Forms),
     Functions = proplists:get_value(functions, FormsProp, []),
     GlobalMacroOpts1 = formatter_opts(local_macro_module(Module), Functions, GlobalMacroOpts),
@@ -251,32 +288,40 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms) ->
                        Validator = macro_definition_valitor(),
                        {FAs, Options} <-
                            validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
-                       NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
-                       Acc2 = 
-                           lists:foldl(
-                             fun({Function, Arity}, Acc1) ->
-                                     Options1 = maps:get({Function, Arity}, Acc1, #{}),
-                                     Options2 = maps:merge(Options1, Options),
-                                     maps:put({Function, Arity}, Options2, Acc1)
-                             end, Acc, FAs),
-                       return({[NoWarnNodes], Acc2})
+                       FAs1 <- remove_undefined_macros(FAs, ClauseMap),
+                       case FAs1 of
+                           [] ->
+                               astranaut_return:return({[], Acc});
+                           _ ->
+                               NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
+                               Acc2 = 
+                                   lists:foldl(
+                                     fun({Function, Arity}, Acc1) ->
+                                             Options1 = maps:get({Function, Arity}, Acc1, #{}),
+                                             Options2 = maps:merge(Options1, Options),
+                                             maps:put({Function, Arity}, Options2, Acc1)
+                                     end, Acc, FAs),
+                               return({[NoWarnNodes], Acc2})
+                       end
                    ])
         end, ExportedMacros, Forms, local_macro, #{formatter => ?MODULE})).
 
-used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
-    UsedMacros = maps:put(Module, LocalMacros, ImportedMacros),
+update_module_macros(File, Module, Forms, ModuleMacros) ->
+    maps:fold(
+      fun(_MFA, MacroOptions, Acc) ->
+              MacroOptions1 = MacroOptions#{file => File, local_module => Module},
+              MacroOptions2 = update_as_attr(MacroOptions1),
+              MacroOptions3 = inject_attrs(MacroOptions2, Forms),
+              #{macro := Macro, call_arity := CallArity} = MacroOptions4 = update_call_arity(MacroOptions3),
+              maps:put({Macro, CallArity}, MacroOptions4, Acc)
+      end, #{}, ModuleMacros).
+
+used_macros(File, Module, ImportedMacros, Forms) ->
     astranaut_return:lift_m(
       fun(UsedMacros2) ->
               maps:map(
                 fun(_MacroModule, ModuleMacros) ->
-                        maps:fold(
-                          fun(_MFA, MacroOptions, Acc) ->
-                                  MacroOptions1 = MacroOptions#{file => File, local_module => Module},
-                                  MacroOptions2 = update_as_attr(MacroOptions1),
-                                  MacroOptions3 = inject_attrs(MacroOptions2, Forms),
-                                  #{macro := Macro, call_arity := CallArity} = MacroOptions4 = update_call_arity(MacroOptions3),
-                                  maps:put({Macro, CallArity}, MacroOptions4, Acc)
-                          end, #{}, ModuleMacros)
+                        update_module_macros(File, Module, Forms, ModuleMacros)
                 end, UsedMacros2)
       end,
       astranaut_lib:with_attribute(
@@ -294,7 +339,7 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
                                               return(maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc))
                                           ]);
                                    error ->
-                                       astranaut_return:error_ok({unimported_macro_module, ImportedModule}, UsedMacrosAcc)
+                                       astranaut_return:error_fail({unimported_macro_module, ImportedModule})
                                end;
                            FAs ->
                                do([ return ||
@@ -304,7 +349,7 @@ used_macros(File, Module, ImportedMacros, LocalMacros, Forms) ->
                                   ])
                        end
                    ])
-        end, UsedMacros, Forms, use_macro, #{formatter => ?MODULE})).
+        end, ImportedMacros, Forms, use_macro, #{formatter => ?MODULE})).
 
 update_used_macros(Module, FAs, UsedMacroOptions, MacroMap) ->
     astranaut_return:foldl_m(
@@ -477,17 +522,15 @@ macro_without_module_attr(_Other) ->
 %% Step 4. if local_macro_caller is empty, skip the rest step
 %% Step 5. compile local macro and it's related functions from forms1, load it as local_macro_module.
 %% Step 6. parse_transform forms1 with loaded local_macro_module as external macro.
-transform_macros(Module, MacroModules, Macros, Forms, CompileOpts) ->
+transform_local_macros(Module, LocalMacroMap, Forms, CompileOpts) ->
     do([ return ||
-           Forms1 <- transform_external_macros(MacroModules, Macros, Forms),
-           LocalMacroMap = maps:get(Module, Macros, #{}),
+           ClauseMap = function_clauses_map(Forms, maps:new()),
            LocalAttributeMacroMap = attribute_macro_map(LocalMacroMap),
            LocalMacroFunctions =
                maps:fold(
                  fun(_Macro, #{function := Function, arity := Arity}, Acc) ->
                          ordsets:add_element({Function, Arity}, Acc)
                  end, ordsets:new(), LocalMacroMap),
-           ClauseMap = function_clauses_map(Forms1, maps:new()),
            LocalMacroFunctions1 =
                case maps:is_key({format_error, 1}, ClauseMap) of
                    true ->
@@ -496,13 +539,13 @@ transform_macros(Module, MacroModules, Macros, Forms, CompileOpts) ->
                        LocalMacroFunctions
                end,
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           case local_macro_caller(Forms1, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
+           case local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
                [] ->
-                   astranaut_return:return(Forms1);
+                   astranaut_return:return(Forms);
                LocalMacroCaller ->
                    do([ return ||
-                          load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, Forms1, CompileOpts),
-                          Forms2 <- transform_attribute_macros(LocalMacroMap, LocalAttributeMacroMap, Forms1),
+                          load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, Forms, CompileOpts),
+                          Forms2 <- transform_attribute_macros(LocalMacroMap, LocalAttributeMacroMap, Forms),
                           transform_call_macros(Module, LocalMacroMap, Forms2, LocalMacroCaller)
                       ])
            end

@@ -14,9 +14,17 @@
 -macro_options([debug_module_ast]).
 
 -export([format_error/1]).
--local_macro([exception_error/0, return_error/0]).
 
 -baseline(yep).
+
+-import_macro({invalid_macro_tuple}).
+-import_macro(non_exists_module).
+-use_macro({unimported_macro_module, [macro_1/1]}).
+-local_macro([exception_error/0]).
+-local_macro([return_error/0, undefined_macro_0/0]).
+-local_macro([undefined_macro_1/0]).
+-export_macro([return_error/0, undefined_macro_2/0]).
+-export_macro([undefined_macro_3/0]).
 
 error_macro_1() ->
     exception_error().

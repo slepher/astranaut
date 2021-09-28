@@ -206,8 +206,15 @@ test_macro_with_error(Config) ->
 
     Local = macro_with_error__local_macro,
     ?assertMatch(
-       [{3,  Local, {macro_exception, _MFA, [], _StackTrace}},
-        {6,  Local, bar}
+       [{2,  astranaut_macro, {invalid_import_macro_attr, {invalid_macro_tuple}}},
+        {3,  astranaut_macro, {import_macro_failed, non_exists_module}},
+        {4,  astranaut_macro, {unimported_macro_module, unimported_macro_module}},
+        {6,  astranaut_macro, {undefined_macro, undefined_macro_0, 0}},
+        {7,  astranaut_macro, {undefined_macro, undefined_macro_1, 0}},
+        {8,  astranaut_macro, {undefined_macro, undefined_macro_2, 0}},
+        {9,  astranaut_macro, {undefined_macro, undefined_macro_3, 0}},
+        {12, Local, {macro_exception, _MFA, [], _StackTrace}},
+        {15, Local, bar}
        ], Errors),
     %% %% TODO: astranaut:map_m does not just return error, but inject error_maker to forms.
     %% %% while fixing this, uncomment testcase below.
