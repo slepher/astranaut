@@ -20,7 +20,7 @@
 
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
--type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())] | ok.
+-type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())].
 
 -type traverse_opts() :: #{traverse => traverse_style(),
                            formatter => module(),
@@ -39,7 +39,7 @@
 
 -type common_walk_return(State, Value) :: astranaut_traverse:struct(State, Value) | astranaut_return:struct(Value) | walk_return(State, Value) | walk_return_tuple(Value).
 
--type map_walk_return() :: common_walk_return(ok, rtrees()) | rtrees().
+-type map_walk_return() :: common_walk_return(undefined, rtrees()) | rtrees().
 -type map_walk() :: map_walk_1() | map_walk_2().
 -type map_walk_1() :: fun((tree()) -> map_walk_return()).
 -type map_walk_2() :: fun((tree(), traverse_attr()) -> map_walk_return()).
@@ -190,9 +190,10 @@ reduce(F, Init, TopNode, Opts) ->
     F1 = fun(Node, State, Attr) -> apply_fun(F, [Node, State, Attr]) end,
     Return = mapfold_1(F1, Init, TopNode, Opts#{static => true}, WithReturn),
     astranaut_return:lift_m(fun({_TopNode1, State}) -> State end, Return).
+
+-spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(trees()).
 %% @doc like mapfold/4, return astranant_return:struct(trees()) instead of astranant_return:struct({trees(), S}), just ignore state.
 %% @see mapfold/4
--spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(trees()).
 map_with_state(F, Init, TopNode, Opts) ->
     Return = mapfold(F, Init, TopNode, Opts),
     astranaut_return:lift_m(fun({TopNode1, _State}) -> TopNode1 end, Return).
@@ -206,7 +207,7 @@ mapfold(F, Init, TopNode, Opts) ->
            (Node, Return) ->
                 %% when return other value, we dont know which part is node and which part is state
                 %% just throw exception.
-                exit({invalid_mapfold_return, Return, Node})
+                erlang:error({invalid_mapfold_return, Return, Node})
         end,
     mapfold_1(F, Init, TopNode, Opts, WithReturn).
 
@@ -236,7 +237,7 @@ apply_fun(F, [A1, A2, A3]) when is_function(F, 3) ->
     F(A1, A2, A3).
 
 %% convert other types to type astranaut_traverse
-%% apply Fun if it's necessary.
+%% apply With if it's necessary.
 %% supported types is: astranaut_return, walk_return, and single value.
 with_return(_Node, #{?STRUCT_KEY := ?TRAVERSE_M}, _With) ->
     exit(unsupported_traverse_struct);
