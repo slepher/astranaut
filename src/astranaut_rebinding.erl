@@ -190,12 +190,12 @@ walk_node(variable, Var, #{pattern := comprehension_generate} = Context, #{node 
 walk_node(Type, Node, _Context, Attr) ->
     Node1 = walk_node_1(Type, Node, Attr),
     astranaut:walk_return(
-      astranaut_uniplate:up_attr(
-        #{parent => Type},
         astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
-                astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
-        end, Node1))).
+                astranaut_uniplate:up_attr(
+                  #{parent => Type},
+                  astranaut_syntax:subtrees_pge(Type, Subtrees, Attr))
+        end, Node1)).
 
 walk_node_1(infix_expr, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);

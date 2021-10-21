@@ -14,16 +14,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
-
--record(uniplate_node_context, {node,
-                                withs = [],
-                                reduces = [],
-                                skip = false,
-                                up_attrs = [],
-                                entries = [],
-                                exits = []
-                               }).
-
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -123,7 +113,7 @@ all() ->
     [test_writer_or, test_map, test_map_attr,
      test_reduce, test_reduce_attr, test_reduce_traverse_all,
      test_mapfold_attr, test_f_return_list, test_all_return_list,
-     test_with_subtrees, test_af_with,
+     test_with_subtrees,
      test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
      test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
      test_invalid_node_exception, test_invalid_uniplate_subnode_exception,
@@ -376,24 +366,6 @@ test_with_subtrees(_Config) ->
     ?assertEqual([after_pattern, {pattern, 'D'}, before_pattern, {expression, 'C'}, after_pattern, {pattern, 'B'}, before_pattern, {expression, 'A'}], State1),
     ?assertEqual(TopNode, TopNode1),
     ok.
-
-test_af_with(_Config) ->
-    Datas1 = [[], [a, b], [c, d], []],
-    Datas2 = astranaut_uniplate:with(g, h, Datas1),
-    ?assertEqual([[], [#uniplate_node_context{node = a, entries = [g]}, b],
-                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas2),
-    Datas3 = [[a, b], [c, d], []],
-    Datas4 = astranaut_uniplate:with(g, h, Datas3),
-
-    ?assertEqual([[#uniplate_node_context{node = a, entries = [g]}, b],
-                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas4),
-    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [astranaut_uniplate:skip([a, b]), [c, d], []]),
-    Datas6 = astranaut_uniplate:with(g, h, Datas5),
-    ?assertEqual([[#uniplate_node_context{node = a, entries = [g], skip = true},
-                   #uniplate_node_context{node = b, skip = true}],
-                  [#uniplate_node_context{node = c, up_attrs = [#{name => data}]},
-                   #uniplate_node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
-                 ok.
 
 test_invalid_pre_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
