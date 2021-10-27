@@ -410,7 +410,7 @@ test_invalid_transform_maketree_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
+       {invalid_transform_maketree, {op, _, _, _, _}, _, _},
        astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  [];

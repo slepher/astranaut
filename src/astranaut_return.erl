@@ -108,14 +108,8 @@ sequence_m(Xs) ->
     map_m(fun(A) -> A end, Xs).
 
 -spec foldl_m(fun((A, S) -> struct(S)), S, [A]) -> struct(S).
-foldl_m(F, Acc, [X|Xs]) ->
-    bind(
-      F(X, Acc),
-      fun(Acc1) ->
-              foldl_m(F, Acc1, Xs)
-      end);
-foldl_m(_F, Acc, []) ->
-    return(Acc).
+foldl_m(F, Acc, Xs) ->
+    astranaut_monad:foldl_m(F, Acc, Xs, fun bind/2, fun return/1).
 
 from_compiler(CompilerReturn) ->
     astranaut_lib:concerete(CompilerReturn, [fun from_compiler_1/1]).

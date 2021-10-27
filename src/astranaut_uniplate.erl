@@ -25,20 +25,20 @@
                          listen_updated => astranaut_monad:monad_listen(M)
                         }.
 
--record(unip_node_context, {node, skip = false, applies = []}).
+-record(uniplate_node_context, {node, skip = false, applies = []}).
 
 
--record(unip_subnode_context, {node, withs = [], reduces = []}).
+-record(uniplate_subnode_context, {node, withs = [], reduces = []}).
 
 -type traverse_style() :: pre | post | all | subtree | none.
--type node_context(A) :: #unip_subnode_context{node :: A} | A.
+-type node_context(A) :: #uniplate_subnode_context{node :: A} | A.
 -type with_nodes(Node) :: fun(([[Node]]) -> [[node_context(Node)]]).
 -type reduce_nodes(Node) :: fun(([[node_context(Node)]]) -> [[node_context(Node)]]).
 -type maybe_list(A) :: [A] | A.
 
 %% API
 -export([map_m/5]).
--export([descend_m/4]).
+-export([descend_m/4, uniplate_m/2, descend_uniplate_m/3]).
 %% Apply node with context series functions.
 -export([with_subtrees/2, with_subtrees/3]).
 -export([skip/1, up_attr/2, with/3, with_each/3]).
@@ -61,18 +61,6 @@ map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
       fun(MonadOpts1) ->
               map_m_1(F, Node, Uniplate, MonadOpts1, Opts1)
       end, MonadOpts, Static).
-
-%% -spec uniplate_context(uniplate(A)) -> uniplate(A).
-%% uniplate_context(Uniplate) ->
-%%     fun(#uniplate_node_context{node = Node, withs = Withs, reduces = Reduces}) ->
-%%             {Subtrees, MakeTree} = Uniplate(Node),
-%%             Subtrees1 = apply_functions(Withs, Subtrees),
-%%             {Subtrees1, fun(Subtrees2) ->
-%%                                 MakeTree(apply_functions(lists:reverse(Reduces), Subtrees2))
-%%                         end};
-%%        (Node) ->
-%%             Uniplate(Node)
-%%     end.
 
 with_writer_updated(Fun, #{bind := Bind, return := Return} = Opts, true) ->
     %% a writer monad just ignore the updated value.
@@ -151,27 +139,29 @@ map_m_1(F, Node, Uniplate, MOpts, Opts) ->
 
 map_m_2(F, Node, Uniplate, MOpts, #{traverse := none}) ->
     validated_transform(F, Node, Uniplate, MOpts, invalid_transform);
-map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
+map_m_2(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
-    %% Node1 is node without context
+    %% Node2 is node without context
     Bind(
       step_apply(F, Node, pre, Uniplate, MOpts, Opts),
       %% F(Node) -> [Node] | Node
       %% returned value is node or list of node, use map_m_if_list to mapover nodes
       fun(NodeOrNodes) ->
               map_m_if_list(
-                %% after pre_apply, NodeContext1 is node with context
-                fun(NodeContext1) ->
+                %% skip descend_m and post_apply when pre apply returns a skip node_context
+                fun(#uniplate_node_context{skip = true, node = Node1}) ->
+                        Return(Node1);
+                   (Node1) ->
                         Bind(
                           catched_descend_m(
                             fun(SubNode) ->
                                     %% add parent to subtree incase of exception raised
                                     sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
-                            end, Node, NodeContext1, Uniplate, MOpts, Opts),
-                          fun(Node1) ->
-                                  step_apply(F, Node1, post, Uniplate, MOpts, Opts)
+                            end, Node, Node1, Uniplate, MOpts, Opts),
+                          fun(Node2) ->
+                                  step_apply(F, Node2, post, Uniplate, MOpts, Opts)
                           end)
                 end, NodeOrNodes, MOpts)
       end).
@@ -183,8 +173,8 @@ sub_apply(F, Node, Uniplate, MOpts, Opts) ->
 
 catched_descend_m(F, Node, NodeContext, Uniplate, MOpts, Opts) ->
     try descend_m(F, NodeContext, Uniplate, MOpts) of
-        NodeContextM ->
-            NodeContextM
+        Node1M ->
+            Node1M
     catch
         EType:{invalid_uniplate_node, Exception}?CAPTURE_STACKTRACE ->
             case context_node(NodeContext) of
@@ -201,23 +191,21 @@ catched_descend_m(F, Node, NodeContext, Uniplate, MOpts, Opts) ->
             end
     end.
 
-descend_m(_F, #unip_node_context{node = Node, skip = true}, _Uniplate, #{return := Return}) ->
-    Return(Node);
-descend_m(F, #unip_subnode_context{node = Node, withs = Withs, reduces = Reduces}, Uniplate, Opts) ->
-    descend_m(F, Node, Withs, Reduces, Uniplate, Opts);
-descend_m(F, Node, Uniplate, Opts) ->
-    descend_m(F, Node, [], [], Uniplate, Opts).
-
-descend_m(F, Node, Withs, Reduces, Uniplate, #{return := Return} = Opts) ->
-    F1 =  fun(#unip_node_context{skip = true, node = SubNode}) ->
+descend_m(F, #uniplate_subnode_context{node = Node, withs = Withs, reduces = Reduces}, Uniplate, #{return := Return} = Opts) ->
+    F1 =  fun(#uniplate_node_context{skip = true, node = SubNode}) ->
                   Return(SubNode);
-             (#unip_node_context{applies = Applies, node = SubNode}) ->
+             (#uniplate_node_context{applies = Applies, node = SubNode}) ->
                   apply_functions_2(Applies, F(SubNode), Opts);
              (SubNode) ->
                   F(SubNode)
           end,
     UniplateM = uniplate_m(Uniplate, Withs, Reduces, Opts),
-    descend_uniplate_m(F1, Node, UniplateM).
+    descend_uniplate_m(F1, Node, UniplateM);
+descend_m(F, Node, Uniplate, Opts) ->
+    descend_m(F, #uniplate_subnode_context{node = Node}, Uniplate, Opts).
+
+uniplate_m(Uniplate, Opts) ->
+    uniplate_m(Uniplate, [], [], Opts).
 
 uniplate_m(Uniplate, Withs, Reduces, #{bind := Bind, return := Return} = Opts) ->
     fun(Node) ->
@@ -229,7 +217,7 @@ uniplate_m(Uniplate, Withs, Reduces, #{bind := Bind, return := Return} = Opts) -
                           listen_updated(sequence_m_subtreess(MSubtreess, Opts), Opts),
                           fun({Subtreess2, true}) ->
                                   Subtreess3 = apply_functions(lists:reverse(Reduces), Subtreess2),
-                                  Return(make_tree(MakeTree, Node, Subtreess, Subtreess3));
+                                  Return(make_tree(MakeTree, Node, Subtreess3));
                              ({_Subtreess2, false}) ->
                                   Return(Node)
                           end)
@@ -290,13 +278,13 @@ uniplate(Uniplate, Node) ->
     end.
 
 %% add extra info to exception raised from MakeTree
-make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
+make_tree(MakeTree, Node, Subtrees1) ->
     try MakeTree(Subtrees1) of
         Node1 ->
             Node1
     catch
         EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, ?GET_STACKTRACE)
+            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees1, Exception}, ?GET_STACKTRACE)
     end.
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
@@ -339,7 +327,7 @@ validate_transformed_node(Uniplate, Node, Node1, ExceptionType) ->
 
 validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) ->
     case Node1 of
-        #unip_node_context{} ->
+        #uniplate_node_context{} ->
             ContextExceptionType = list_to_atom(atom_to_list(ExceptionType) ++ "_with_context"),
             erlang:error({ContextExceptionType, Node, Node1});
         Node ->
@@ -367,14 +355,14 @@ apply_functions_2([], Value, _Args) ->
 apply_functions_2([F|T], Value, Args) when is_function(F, 2) ->
     apply_functions_2(T, F(Value, Args), Args).
 
-updated_node(Node1, #unip_subnode_context{node = Node1} = NodeContext2) ->
-    {NodeContext2#unip_subnode_context{node = Node1}, false};
+updated_node(Node1, #uniplate_subnode_context{node = Node1} = NodeContext2) ->
+    {NodeContext2#uniplate_subnode_context{node = Node1}, false};
 updated_node(Node1, Node1) ->
     {Node1, false};
 updated_node(_Node1, Node2) ->
     {Node2, true}.
 
-context_node(#unip_subnode_context{node = Node}) ->
+context_node(#uniplate_subnode_context{node = Node}) ->
     Node;
 context_node(Node) ->
     Node.
@@ -383,28 +371,28 @@ context_node(Node) ->
 %%% Apply node with context series functions.
 %%%===================================================================
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) -> node_context(Node).
-with_subtrees(With, #unip_subnode_context{withs = Withs} = Node) ->
-    Node#unip_subnode_context{withs = [With|Withs]};
+with_subtrees(With, #uniplate_subnode_context{withs = Withs} = Node) ->
+    Node#uniplate_subnode_context{withs = [With|Withs]};
 with_subtrees(With, Node) ->
-    with_subtrees(With, #unip_subnode_context{node = Node}).
+    with_subtrees(With, #uniplate_subnode_context{node = Node}).
 
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node), node_context(Node)) -> node_context(Node).
-with_subtrees(With, Reduce, #unip_subnode_context{reduces = Reduces} = Node) ->
-    with_subtrees(With, Node#unip_subnode_context{reduces = [Reduce|Reduces]});
+with_subtrees(With, Reduce, #uniplate_subnode_context{reduces = Reduces} = Node) ->
+    with_subtrees(With, Node#uniplate_subnode_context{reduces = [Reduce|Reduces]});
 with_subtrees(With, Reduce, Node) ->
-    with_subtrees(With, Reduce, #unip_subnode_context{node = Node}).
+    with_subtrees(With, Reduce, #uniplate_subnode_context{node = Node}).
 
 -spec skip(maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 skip(Trees) ->
     every_tree(
-      fun(#unip_node_context{} = Context) ->
-              Context#unip_node_context{skip = true};
+      fun(#uniplate_node_context{} = Context) ->
+              Context#uniplate_node_context{skip = true};
          (Node) ->
-              #unip_node_context{node = Node, skip = true}
+              #uniplate_node_context{node = Node, skip = true}
       end, Trees).
 
 -spec up_attr(fun((map()) -> map()) | map(), maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
-up_attr(Attr, Trees) ->
+up_attr(Attr, Trees) when is_function(Attr, 1); is_map(Attr) ->
     every_tree(
       fun(Node) ->
               prepend_apply(attr_up(Attr), Node)
@@ -421,31 +409,31 @@ with_each(Entry, Exit, Trees) ->
               prepend_apply(state_change_entry(Entry), append_apply(state_change_exit(Exit), Node))
       end, Trees).
 
-with_entry(Entry, Trees) ->
+with_entry(Entry, Trees) when is_function(Entry, 1); not is_function(Entry) ->
     left_trees(
       fun(Node) ->
               prepend_apply(state_change_entry(Entry), Node)
       end, Trees).
 
-with_exit(Exit, Trees) ->
+with_exit(Exit, Trees) when is_function(Exit, 1); not is_function(Exit) ->
     right_trees(
       fun(Node) ->
               append_apply(state_change_exit(Exit), Node)
       end, Trees).
 
-prepend_apply(_Apply, #unip_node_context{skip = true} = Node) ->
+prepend_apply(_Apply, #uniplate_node_context{skip = true} = Node) ->
     Node;
-prepend_apply(Apply, #unip_node_context{applies = Applies} = Node) ->
-    Node#unip_node_context{applies = [Apply|Applies]};
+prepend_apply(Apply, #uniplate_node_context{applies = Applies} = Node) ->
+    Node#uniplate_node_context{applies = [Apply|Applies]};
 prepend_apply(Apply, Node) ->
-    #unip_node_context{node = Node, applies = [Apply]}.
+    #uniplate_node_context{node = Node, applies = [Apply]}.
 
-append_apply(_Apply, #unip_node_context{skip = true} =  Node) ->
+append_apply(_Apply, #uniplate_node_context{skip = true} =  Node) ->
     Node;
-append_apply(Apply, #unip_node_context{applies = Applies} = Node) ->
-    Node#unip_node_context{applies = Applies ++ [Apply]};
+append_apply(Apply, #uniplate_node_context{applies = Applies} = Node) ->
+    Node#uniplate_node_context{applies = Applies ++ [Apply]};
 append_apply(Apply, Node) ->
-    #unip_node_context{node = Node, applies = [Apply]}.
+    #uniplate_node_context{node = Node, applies = [Apply]}.
 
 attr_up(UpAttr) ->
     fun(MA, #{local := Local}) ->
@@ -458,7 +446,6 @@ apply_up_attr(Attr1, Attr) when is_map(Attr1) ->
     maps:merge(Attr, Attr1);
 apply_up_attr(UpAttr, Attr) when is_function(UpAttr, 1) ->
     UpAttr(Attr).
-
 
 state_change_entry(Entry) ->
     fun(MA, #{bind := Bind, state := State}) ->
