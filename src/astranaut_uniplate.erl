@@ -56,10 +56,12 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
     Opts1 = maps:merge(#{traverse => pre}, maps:with([traverse], Opts)),
-    %% UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
-              map_m_1(F, Node, Uniplate, MonadOpts1, Opts1)
+              map_m_if_nodes(
+                fun(Node1) ->
+                        map_m_1(F, Node1, Uniplate, MonadOpts1, Opts1)
+                end, Node, MonadOpts1)
       end, MonadOpts, Static).
 
 with_writer_updated(Fun, #{bind := Bind, return := Return} = Opts, true) ->
@@ -128,18 +130,17 @@ lifted_writer_updated_opts(#{bind := Bind, return := Return} = MOpts) ->
       end, MOpts#{listen_updated => Listen, writer_updated => Writer,
                   writer_updated_lift => Lift, bind => BindW, return => ReturnW}).
 
-map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
-    %% list maybe returned when traverse one node, map_m_flatten is required.
+map_m_if_nodes(F, Nodes, #{bind := Bind, return := Return} = Opts) when is_list(Nodes) ->
     astranaut_monad:map_m_flatten(
       fun(Node) ->
-              catch_on_error(map_m_2(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
+              catch_on_error(F(Node), fun() -> Return([]) end, Opts)
       end, Nodes, Bind, Return);
-map_m_1(F, Node, Uniplate, MOpts, Opts) ->
-    map_m_2(F, Node, Uniplate, MOpts, Opts).
+map_m_if_nodes(F, Node, #{}) ->
+    F(Node).
 
-map_m_2(F, Node, Uniplate, MOpts, #{traverse := none}) ->
+map_m_1(F, Node, Uniplate, MOpts, #{traverse := none}) ->
     validated_transform(F, Node, Uniplate, MOpts, invalid_transform);
-map_m_2(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) ->
+map_m_1(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
@@ -169,7 +170,7 @@ map_m_2(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) ->
 sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree}) ->
     validated_transform(F, Node, Uniplate, MOpts, invalid_subtree_transform);
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
-    map_m_2(F, Node, Uniplate, MOpts, Opts).
+    map_m_1(F, Node, Uniplate, MOpts, Opts).
 
 catched_descend_m(F, Node, NodeContext, Uniplate, MOpts, Opts) ->
     try descend_m(F, NodeContext, Uniplate, MOpts) of

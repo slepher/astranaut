@@ -173,19 +173,6 @@ load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms) ->
            return({Forms2, LocalMacros1})
        ]).
 
-%% load_attributes(Forms) ->
-%%     File = astranaut_lib:analyze_forms_file(Forms),
-%%     Module = astranaut_lib:analyze_forms_module(Forms),
-%%     do([ return ||
-%%            Validator = global_macro_validator(),
-%%            GlobalMacroOpts <- astranaut_lib:validate_attribute_option(Validator, ?MODULE, macro_options, Forms),
-%%            {Forms1, ExportedMacros} <- exported_macros(Forms),
-%%            {ImportedModules, ImportedMacros} <- imported_macros(GlobalMacroOpts, Forms),
-%%            {Forms2, LocalMacros} <- local_macros(Module, GlobalMacroOpts, ExportedMacros, Forms1),
-%%            UsedMacros <- used_macros(File, Module, ImportedMacros, LocalMacros, Forms2),
-%%            return({Forms2, ImportedModules, UsedMacros, GlobalMacroOpts})
-%%        ]).
-
 formatter_opts(Module, Functions, MacroOpts) ->
     FormatError = {format_error, 1},
     case lists:member(FormatError, Functions) of
