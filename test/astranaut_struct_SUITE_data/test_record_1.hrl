@@ -1,0 +1,4 @@
+-include_lib("astranaut/include/struct.hrl").
+-record(test, {name, value}).
+-baseline(yep).
+-astranaut_struct(other_test).

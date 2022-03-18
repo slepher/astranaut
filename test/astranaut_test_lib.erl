@@ -12,6 +12,7 @@
 -include_lib("eunit/include/eunit.hrl").
 %% API
 -export([get_baseline/2, realize_with_baseline/2, test_module_forms/2, compile_test_module/2, compile_test_forms/1, load_data_modules/2]).
+-export([analyze_module_errors/3]).
 
 %%%===================================================================
 %%% API
@@ -33,6 +34,13 @@ get_baseline(Mark, Forms) ->
         {just, {Baseline, _Column}} when is_integer(Baseline) ->
             Baseline
     end.
+
+analyze_module_errors(Module, BaseLineMark, Config) ->
+    Forms = astranaut_test_lib:test_module_forms(Module, Config),
+    Return = astranaut_test_lib:compile_test_forms(Forms),
+    BaseLine = astranaut_test_lib:get_baseline(BaseLineMark, Forms),
+    ErrorStruct = astranaut_return:run_error(Return),
+    astranaut_test_lib:realize_with_baseline(BaseLine, ErrorStruct).
 
 realize_with_baseline(Baseline, ErrorStruct) ->
     ErrorStruct1 =

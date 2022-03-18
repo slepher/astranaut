@@ -108,6 +108,7 @@
 
 %% API
 -export([parse_transform/2, format_error/1]).
+-export([transform_macros/3]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -152,6 +153,18 @@ format_error({macro_exception, MFA, Arguments, Exception}) ->
                   [format_mfa(MFA), Arguments, eunit_lib:format_exception(Exception)]);
 format_error(Error) ->
     astranaut:format_error(Error).
+
+transform_macros(Forms, Module, Opts) ->
+    GlobalMacroOpts = maps:get(macro_opts, Opts, #{}),
+    do([ return ||
+           LocalModule = astranaut_lib:analyze_forms_module(Forms),
+           File = astranaut_lib:analyze_forms_file(Forms),
+           Macros <- import_macro_by_module(Module, GlobalMacroOpts),
+           Macros1 = maps:fold(fun({F, A}, Macro, Acc) -> maps:put({{Module, F}, A}, Macro, Acc) end, #{}, Macros),
+           Macros2 = update_module_macros(File, LocalModule, Forms, Macros1),
+           transform_external_module_macros(Module, Macros2, Forms)
+       ]).
+            
 %%%===================================================================
 %%% analyze -export_macro -use_macro attributes functions
 %%%===================================================================
@@ -223,31 +236,37 @@ imported_macros(GlobalMacroOpts, Forms) ->
       end,
       astranaut_lib:with_attribute(
         fun(Module, {ModulesAcc, MacroMapAcc}) when is_atom(Module) ->
-                case is_loaded(Module) of
-                    {file, _} ->
-                        Macros = analyze_module_macros(Module),
-                        Exports = Module:module_info(exports),
-                        GlobalMacroOpts1 = formatter_opts(Module, Exports, GlobalMacroOpts),
-                        Macros1 =
-                            maps:fold(
-                              fun({Function, Arity}, MacroOptions, MacrosAcc) ->
-                                      MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
-                                      MacroOptions2 = MacroOptions1#{module => Module,
-                                                                     macro_module => Module,
-                                                                     macro => {Module, Function},
-                                                                     function => Function,
-                                                                     arity => Arity},
-                                      maps:put({Function, Arity}, MacroOptions2, MacrosAcc)
-                              end, #{}, Macros),
-                        MacroMapAcc1 = maps:put(Module, Macros1, MacroMapAcc),
-                        ModulesAcc1 = [Module|ModulesAcc],
-                        astranaut_return:return({ModulesAcc1, MacroMapAcc1});
-                    false ->
-                        astranaut_return:error_fail({import_macro_failed, Module})
-                end;
+                do([ return ||
+                       Macros <- import_macro_by_module(Module, GlobalMacroOpts),
+                       MacroMapAcc1 = maps:put(Module, Macros, MacroMapAcc),
+                       ModulesAcc1 = [Module|ModulesAcc],
+                       astranaut_return:return({ModulesAcc1, MacroMapAcc1})
+                   ]);
            (Attr, _Acc) ->
                 astranaut_return:error_fail({invalid_import_macro_attr, Attr})
         end, {[], #{}}, Forms, import_macro, #{formatter => ?MODULE})).
+
+import_macro_by_module(Module, GlobalMacroOpts) ->
+    case is_loaded(Module) of
+        {file, _} ->
+            Macros = analyze_module_macros(Module),
+            Exports = Module:module_info(exports),
+            GlobalMacroOpts1 = formatter_opts(Module, Exports, GlobalMacroOpts),
+            Macros1 =
+                maps:fold(
+                  fun({Function, Arity}, MacroOptions, MacrosAcc) ->
+                          MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
+                          MacroOptions2 = MacroOptions1#{module => Module,
+                                                         macro_module => Module,
+                                                         macro => {Module, Function},
+                                                         function => Function,
+                                                         arity => Arity},
+                          maps:put({Function, Arity}, MacroOptions2, MacrosAcc)
+                  end, #{}, Macros),
+            astranaut_return:return(Macros1);
+        false ->
+            astranaut_return:error_fail({import_macro_failed, Module})
+    end.
 
 is_loaded(Module) ->
     code:ensure_loaded(Module),
@@ -439,6 +458,7 @@ validate_macro_attribute(Fun, Validator, AttrName, Attr) ->
         {MFAs, Options} ->
             do([ return ||
                    validate_mfas(MFAs),
+                   _ = io:format("get validator ~p~p~n", [Validator, Options]),
                    Options1 <- astranaut_lib:validate(Validator, Options),
                    return({MFAs, Options1})
                ])
@@ -542,12 +562,15 @@ transform_external_macros(MacroModules, ModuleMacroMap, Forms) ->
     astranaut_return:foldl_m(
       fun(MacroModule, FormsAcc) ->
               MacroMap = maps:get(MacroModule, ModuleMacroMap, #{}),
-              AttributeMacroMap = attribute_macro_map(MacroMap),
-              do([ return ||
-                     FormsAcc1 <- transform_attribute_macros(MacroMap, AttributeMacroMap, FormsAcc),
-                     transform_call_macros(MacroModule, MacroMap, FormsAcc1, all)
-                 ])
+              transform_external_module_macros(MacroModule, MacroMap, FormsAcc)
       end, Forms, MacroModules).
+
+transform_external_module_macros(Module, MacroMap, Forms) ->
+    AttributeMacroMap = attribute_macro_map(MacroMap),
+    do([ return ||
+           Forms1 <- transform_attribute_macros(MacroMap, AttributeMacroMap, Forms),
+           transform_call_macros(Module, MacroMap, Forms1, all)
+       ]).
 
 attribute_macro_map(MacroMap) ->
     AttributeMap =

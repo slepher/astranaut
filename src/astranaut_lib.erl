@@ -628,7 +628,7 @@ remove_keys(Key, Validator, RestMapAcc) when is_list(Validator) ->
 remove_keys(Key, Validator, RestMapAcc) ->
     remove_keys(Key, [Validator], RestMapAcc).
 
-%% sort validator if there is validate dependency.
+%% sort lidator if there is validate dependency.
 validators_to_list(ValidatorMap) when is_map(ValidatorMap) ->
     Deps = search_deps(ValidatorMap),
     OrderedDeps = order_deps(Deps),
@@ -888,10 +888,11 @@ required(Value, _Args, false, #{}) ->
     'or'(Value, Validators, IsKey, Attr, Validators).
 
 'or'(Value, [Validator|T], IsKey, Attr, Validators) ->
-    case validate_value(Validator, Value, Attr) of
-        #{?STRUCT_KEY := ?RETURN_OK} = ReturnOk ->
-            ReturnOk;
-        #{?STRUCT_KEY := ?RETURN_FAIL} ->
+    Return = validate_value(Validator, Value, Attr),
+    case astranaut_return:has_error(Return) of
+        false ->
+            Return;
+        true ->
             'or'(Value, T, IsKey, Attr, Validators)
     end;
 'or'(_Value, [], _IsKey, _Attr, Validators) ->
