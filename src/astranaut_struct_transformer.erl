@@ -31,7 +31,6 @@ parse_transform(Forms, _Options) ->
                          walk(Node, StructInitMap, Attrs)
                  end, Forms, #{traverse => pre, formatter => ?MODULE, attr => #{type => form}}),
                Forms <- transform_struct_macros(Forms),
-               _ = io:format("transform struct macros to ~p~n", [Forms]),
                remove_used_struct_records(Forms0, Forms)
            ]),
     astranaut_return:to_compiler(ReturnM).
@@ -60,9 +59,7 @@ format_error(Message) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
 %% Record abstract format is transformed to Map abstract format when RecordName is mentioned in -astranaut_struct([RecordName...]).
-
 walk({call, _Line1, {remote, _Line2, {atom, _Line2, astranaut_struct}, {atom, _Line3, record}, [Node]}}, _StructInitMap, #{}) ->
     astranaut:walk_return(#{return => Node, continue => true});
 
@@ -141,14 +138,11 @@ walk({remote_type, _Line1, [{atom, _Line2, astranaut_struct}, {atom, _Line3, rec
     astranaut:walk_return(#{return => TypeNode, continue => true});
 
 walk(Node, _StructInitMap, #{} = Attr) ->
-    io:format("walk node ~p~n", [Node]),
     Type = erl_syntax:type(Node),
     astranaut:walk_return(
         astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
-                astranaut_uniplate:up_attr(
-                  #{parent => Type},
-                  astranaut_syntax:subtrees_pge(Type, Subtrees, Attr))
+                astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
         end, Node)).
 
 

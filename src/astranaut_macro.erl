@@ -458,7 +458,6 @@ validate_macro_attribute(Fun, Validator, AttrName, Attr) ->
         {MFAs, Options} ->
             do([ return ||
                    validate_mfas(MFAs),
-                   _ = io:format("get validator ~p~p~n", [Validator, Options]),
                    Options1 <- astranaut_lib:validate(Validator, Options),
                    return({MFAs, Options1})
                ])
