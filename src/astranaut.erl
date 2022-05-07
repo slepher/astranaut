@@ -10,6 +10,7 @@
 
 -include("astranaut_struct_name.hrl").
 
+
 %% API
 -export([smap/3, sreduce/4, smap_with_state/4, smapfold/4, search/3]).
 -export([map/3, reduce/4, map_with_state/4, mapfold/4]).
