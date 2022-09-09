@@ -111,11 +111,11 @@ convertable_struct_key(_) ->
 new(Inner) when is_function(Inner, 4) ->
     #{?STRUCT_KEY => ?TRAVERSE_M, inner => Inner}.
 
-state_ok(Map) ->
-    update_m_state(#{?STRUCT_KEY => ?STATE_OK}, Map).
+state_ok(#{return := _Return, state := _State, error := _Error} = Map) ->
+    maps:merge(#{?STRUCT_KEY => ?STATE_OK, updated => false}, Map).
 
-state_fail(Map) ->
-    update_m_state(#{?STRUCT_KEY => ?STATE_FAIL}, Map).
+state_fail(#{state := _State, error := _Error} = Map) ->
+    Map#{?STRUCT_KEY => ?STATE_FAIL}.
 
 -spec run(struct(S, A), formatter(), #{}, S) -> astranaut_return:struct({A, S}).
 run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
@@ -437,25 +437,15 @@ merge_struct(#{?STRUCT_KEY := StructName} = Struct, Map, Keys, OptionalKeys) whe
     RestKeys = maps:keys(Map) -- Keys -- OptionalKeys -- [?STRUCT_KEY],
     case RestKeys of
         [] ->
-            lists:foldl(
-              fun(Key, Acc) ->
-                      case maps:find(Key, Map) of
-                          {ok, Value} ->
-                              case validate_struct_value(Key, Value) of
-                                  true ->
-                                      maps:put(Key, Value, Acc);
-                                  false ->
-                                      erlang:error({invalid_struct_value, StructName, Key, Value})
-                              end;
-                          error ->
-                              case maps:is_key(Key, Acc) of
-                                  true ->
-                                      Acc;
-                                  false ->
-                                      init_struct_value(Acc, Key)
-                              end
+            maps:fold(
+              fun(Key, Value, Acc) ->
+                      case validate_struct_value(Key, Value) of
+                          true ->
+                              maps:put(Key, Value, Acc);
+                          false ->
+                              erlang:error({invalid_struct_value, StructName, Key, Value})
                       end
-              end, Struct, Keys);
+              end, Struct, Map);
         _ ->
             erlang:error({invalid_merge_keys, StructName, RestKeys, Map})
     end.
@@ -470,10 +460,3 @@ validate_struct_value(updated, Updated) when is_boolean(Updated) ->
     true;
 validate_struct_value(_Key, _Value) ->
     false.
-
-init_struct_value(#{} = Struct, error) ->
-    Struct#{error => astranaut_error:new()};
-init_struct_value(#{} = Struct, updated) ->
-    Struct#{updated => false};
-init_struct_value(#{?STRUCT_KEY := StructName}, Key) ->
-    erlang:error({struct_value_required, StructName, Key}).
