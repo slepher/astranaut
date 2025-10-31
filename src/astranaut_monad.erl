@@ -26,11 +26,11 @@
 -export([monad_catch_on_error/1, monad_fail_on_error/1]).
 -export([mappend/1, mempty/1]).
 
--export_type([maybe/1, either/2, state/2]).
+-export_type([monad_maybe/1, either/2, state/2]).
 -export_type([monad/2, monad_bind/1, monad_return/1]).
 -export_type([monad_ask/1, monad_local/1, monad_state/1, monad_writer/1, monad_listen/1, monad_lift/1]).
 
--type maybe(A) :: {just, A} | nothing.
+-type monad_maybe(A) :: {just, A} | nothing.
 -type either(E, A) :: {left, E} | {right, A}.
 -type state(S, A) :: fun((S) -> {A, S}).
 
@@ -111,7 +111,7 @@ identity_bind() ->
 identity_return() ->
     fun(A) -> A end.
 
--spec maybe_bind() -> fun((maybe(A), fun((A) -> maybe(B))) -> maybe(B)).
+ -spec maybe_bind() -> fun((monad_maybe(A), fun((A) -> monad_maybe(B))) -> monad_maybe(B)).
 maybe_bind() ->
     fun(MA, AFB) ->
             case MA of
@@ -122,7 +122,7 @@ maybe_bind() ->
             end
     end.
 
--spec maybe_return() -> fun((A) -> maybe(A)).
+ -spec maybe_return() -> fun((A) -> monad_maybe(A)).
 maybe_return() ->
     fun(A) ->
             {just, A}
@@ -288,7 +288,7 @@ monad_bind({state, M}) ->
     state_bind(Bind);
 monad_bind(either) ->
     either_bind();
-monad_bind(maybe) ->
+monad_bind(monad_maybe) ->
     maybe_bind();
 monad_bind(identity) ->
     identity_bind();
@@ -310,7 +310,7 @@ monad_return({state, M}) ->
     state_return(Return);
 monad_return(either) ->
     either_return();
-monad_return(maybe) ->
+monad_return(monad_maybe) ->
     maybe_return();
 monad_return(identity) ->
     identity_return();
@@ -342,7 +342,7 @@ monad_state({state, M}) ->
     state_state(Return);
 monad_state(identity) ->
     undefined;
-monad_state(maybe) ->
+monad_state(monad_maybe) ->
     undefined;
 monad_state(either) ->
     undefined;
@@ -366,7 +366,7 @@ monad_ask({state, M}) ->
     end;
 monad_ask(identity) ->
     undefined;
-monad_ask(maybe) ->
+monad_ask(monad_maybe) ->
     undefined;
 monad_ask(either) ->
     undefined;
@@ -390,7 +390,7 @@ monad_local(state) ->
     undefined;
 monad_local(identity) ->
     undefined;
-monad_local(maybe) ->
+monad_local(monad_maybe) ->
     undefined;
 monad_local(either) ->
     undefined;
