@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(macro_test).
 
--quote_options(debug).
+%%-quote_options(debug).
 -macro_options(debug_module).
 
 -include("quote.hrl").
@@ -29,8 +29,10 @@
 -export([test_group_args/0]).
 -export([test_macro_with_vars/1]).
 -export([test_macro_order/0]).
+-export([test_nested_macro/1, test_recursive_macro/0, test_macro_literal/0]).
 
 -import_macro(?MACRO_MODULE).
+-import_macro(astranaut_macros).
 
 -use_macro({?MACRO_MODULE, macro_exported_function/2, [alias]}).
 -use_macro({?MACRO_MODULE, quote_code/0, #{alias => macro_quote_code}}).
@@ -142,11 +144,21 @@ test_merged_function_1(ok_3) ->
 test_merged_function(A, _B) ->
     A.
 
+test_nested_macro(N) ->
+    macro_example:nested_macro(N).
+
+test_recursive_macro() ->
+    macro_example:recursive_macro(4).
+
 quote_ok() ->
     quote(ok).
 
 one_plus() ->
     1 + 1.
+
+test_macro_literal() ->
+    astranaut_macros:literal(astranaut_macros:literal(macro_example:quote_ok())).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

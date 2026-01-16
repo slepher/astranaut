@@ -25,6 +25,7 @@
 -local_macro([undefined_macro_1/0]).
 -export_macro([return_error/0, undefined_macro_2/0]).
 -export_macro([undefined_macro_3/0]).
+-import_macro(macro_example).
 
 error_macro_1() ->
     exception_error().
@@ -39,6 +40,9 @@ exception_error() ->
 
 return_error() ->
     {error, bar}.
+
+max_depth_error() ->
+    macro_example:recursive_macro(6).
 
 format_error(bar) ->
     "oops, bar";

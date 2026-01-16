@@ -147,6 +147,12 @@ format_error({unloaded_formatter_module, Module}) ->
     io_lib:format("formatter module ~p could not be loaded.", [Module]);
 format_error(invalid_macro_attribute) ->
     io_lib:format("invalid attribute macro call: macro not found", []);
+format_error({max_macro_expansion_depth_exceeded, {MacroModule, Function}, Arguments}) ->
+    io_lib:format("maximum macro expansion depth exceeded when applying macro ~p:~p with arguments ~p.",
+        [MacroModule, Function, Arguments]);
+format_error({max_macro_expansion_depth_exceeded, Function, Arguments}) ->
+    io_lib:format("maximum macro expansion depth exceeded when applying macro ~p with arguments ~p.",
+        [Function, Arguments]);
 format_error({macro_exception, MFA, Arguments, Exception}) ->
     io_lib:format("apply macro ~s ~p failed:~n~s",
                   [format_mfa(MFA), Arguments, eunit_lib:format_exception(Exception)]);
@@ -469,14 +475,16 @@ global_macro_validator() ->
       debug => boolean,
       debug_ast => boolean,
       debug_module => boolean,
-      debug_module_ast => boolean
+      debug_module_ast => boolean,
+      max_depth => [uinteger, {default, 100}]
      }.
 
 macro_definition_valitor() ->
     #{as_attr => atom,
       order => {one_of, [outer, inner]},
       inject_attrs => {'or', [atom, {list_of, atom}]},
-      group_args => boolean
+      group_args => boolean,
+      max_depth => uinteger
      }.
 
 validate_mfas({Module, FAs}) when is_atom(Module) ->
@@ -539,14 +547,14 @@ transform_local_macros(Module, LocalMacroMap, Forms, CompileOpts) ->
                        LocalMacroFunctions
                end,
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           case local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
+           case find_macro_callers(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
                [] ->
                    astranaut_return:return(Forms);
                LocalMacroCaller ->
                    do([ return ||
                           load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, Forms, CompileOpts),
                           Forms2 <- transform_attribute_macros(LocalMacroMap, LocalAttributeMacroMap, Forms),
-                          transform_call_macros(Module, LocalMacroMap, Forms2, LocalMacroCaller)
+                          transform_functions(Module, LocalMacroMap, Forms2, LocalMacroCaller)
                       ])
            end
        ]).
@@ -558,7 +566,7 @@ transform_external_macros(MacroModules, ModuleMacroMap, Forms) ->
               AttributeMacroMap = attribute_macro_map(MacroMap),
               do([ return ||
                      FormsAcc1 <- transform_attribute_macros(MacroMap, AttributeMacroMap, FormsAcc),
-                     transform_call_macros(MacroModule, MacroMap, FormsAcc1, all)
+                     transform_functions(MacroModule, MacroMap, FormsAcc1, all)
                  ])
       end, Forms, MacroModules).
 
@@ -614,7 +622,7 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
           fun(Form) ->
                   case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
                       {ok, Macro} ->
-                          apply_macro(Macro);
+                          expand_macro(Macro);
                       error ->
                           astranaut_traverse:then(
                             astranaut_traverse:warning(invalid_macro_attribute),
@@ -669,10 +677,19 @@ to_list(Arguments) when is_list(Arguments) ->
     Arguments;
 to_list(Arguments) ->
     [Arguments].
+
 %%%===================================================================
 %%% transform macro MacroModule:MacroFun(Arguments) and it's help functions.
 %%%===================================================================
-transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
+-spec transform_functions(module(), map(), [astranaut:form()], all | list()) -> term().
+transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
+    %% just traverse function clauses, other nodes return directly
+    FunctionClausesUniplate = 
+        fun({function, Pos, Name, Arity, Clauses}) ->
+                { [Clauses], fun([NewClauses]) -> {function, Pos, Name, Arity, NewClauses} end };
+            (Node) -> 
+                {[[]], fun(_) -> Node end }
+        end,
     Monad =
         astranaut:map_m(
           fun({function, _Pos, Name, Arity, _Clauses} = Function) ->
@@ -682,56 +699,113 @@ transform_call_macros(Module, MacroMap, Forms, TransformFunctions) ->
                       true ->
                           astranaut:map_m(
                             fun(Clause) ->
-                                    transform_call_macros_clause(Module, MacroMap, Clause)
-                            end, Function, #{traverse => subtree})
+                                    transform_clause(Module, MacroMap, Clause)
+                            end, Function, #{traverse => subtree, uniplate => FunctionClausesUniplate})
                   end;
              (Form) ->
                   astranaut_traverse:return(Form)
           end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 
-transform_call_macros_clause(Module, MacroMap, Clause) ->
+transform_clause(Module, MacroMap, {clause, Pos, Patterns, Guards, Exprs}) ->
     do([ traverse ||
            %% counter is reseted in every function clause
            astranaut_traverse:put(1),
-           astranaut:map_m(
-             fun(Node) ->
-                     do([ traverse ||
-                            #{step := Step} <- astranaut_traverse:ask(),
-                            case call_find_macro(Module, Node, MacroMap) of
-                                {ok, Macro} ->
-                                    case match_macro_order(Macro, Step) of
-                                        true ->
-                                            apply_macro(Macro#{rename_quoted_variables => true});
-                                        false ->
-                                            astranaut_traverse:return(Node)
-                                    end;
-                                error ->
-                                    astranaut_traverse:return(Node)
-                            end
-                        ])
-             end, Clause, #{traverse => all})
-       ]).
+           Guards1 <- transform_exprs(Module, MacroMap, Guards, #{depth => 0}),
+           Exprs1 <- transform_exprs(Module, MacroMap, Exprs, #{depth => 0}),
+           return({clause, Pos, Patterns, Guards1, Exprs1})
+    ]).
+
+transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
+    astranaut:map_m(
+        fun(Node) ->
+            do([ traverse ||
+                #{step := Step} <- astranaut_traverse:ask(),
+                DepthOpts1 = DepthOpts#{rename_quoted_variables => true, step => Step},
+                case match_macro_call(Module, Node, MacroMap, Step) of
+                    {ok, Macro} ->
+                        expand_macro_recursive(Module, MacroMap, Macro, DepthOpts1);
+                    error ->
+                        astranaut_traverse:return(Node)
+                end
+            ])
+        end, Exprs, #{traverse => all}).
+
+%%%===================================================================
+%%% apply macro functions
+%%%===================================================================
+expand_macro_recursive(_Module, _MacroMap, #{ max_depth := MaxDepth },
+    #{depth := Depth, macro := MacroName, arguments := Arguments}) when Depth >= MaxDepth ->
+    astranaut_traverse:fail({max_macro_expansion_depth_exceeded, MacroName, Arguments});
+expand_macro_recursive(Module, MacroMap, Macro, #{step := post } = DepthOpts) ->
+    DepthOpts1 = update_depth_opts(Macro, DepthOpts),
+    do([traverse ||
+            Node1 <- expand_macro(Macro, DepthOpts1),
+            transform_exprs(Module, MacroMap, Node1, DepthOpts1)
+        ]);
+expand_macro_recursive(Module, MacroMap, Macro, #{step := pre } = DepthOpts) ->
+    DepthOpts1 = update_depth_opts(Macro, DepthOpts),
+    do([ traverse ||
+            Node1 <- expand_macro(Macro, DepthOpts1),
+            %% if node1 is calling another macro with outer order, apply it too
+            %% because astranaut_traverse:map_m will traverse children after this without node itself
+            case match_macro_call(Module, Node1, MacroMap, pre) of
+                {ok, Macro1} ->
+                    expand_macro_recursive(Module, MacroMap, Macro1, DepthOpts1);
+                error ->
+                    astranaut_traverse:return(Node1)
+            end
+        ]).
+
+match_macro_call(Module, Node, Macros, Step) ->
+    case call_find_macro(Module, Node, Macros) of
+        {ok, Macro} ->
+            case match_macro_order(Macro, Step) of
+                true ->
+                    {ok, Macro};
+                false ->
+                    error
+            end;
+        error ->
+            error
+    end.
+
+call_find_macro(_Module, {call, Pos1, {atom, _Pos2, Function}, Arguments}, Macros) ->
+    find_macro_with_arguments(Function, Arguments, Pos1, Macros);
+call_find_macro(Module, {call, Pos1, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments},
+                Macros) ->
+    find_macro_with_arguments({Module, Function}, Arguments, Pos1, Macros);
+call_find_macro(_Module, _Node, _Macros) ->
+    error.
 
 match_macro_order(Macro, Step) ->
     Order = maps:get(order, Macro, inner),
     ((Order =:= inner) and (Step =:= post))
         or ((Order =:= outer) and (Step =:= pre)).
 
-%%%===================================================================
-%%% apply macro functions
-%%%===================================================================
-apply_macro(#{pos := Pos, formatter := Formatter} = Opts) ->
+update_depth_opts(Macro, #{depth := Depth} = Opts) ->
+    Opts1 = update_top_macro(Macro, Opts),
+    Opts1#{depth => Depth + 1}.
+
+update_top_macro(#{macro := Macro, arguments := Arguments }, #{depth := 0} = Opts) ->
+    Opts#{macro => Macro, arguments => Arguments};
+update_top_macro(_Macro, Opts) ->
+    Opts.
+
+expand_macro(Macro) ->
+    expand_macro(Macro, #{}).
+
+expand_macro(#{pos := Pos, formatter := Formatter} = Macro, Opts) ->
     do([ traverse ||
            %% TODO: validate node1 as a erl_syntax node
-           Node1 <- astranaut_traverse:update_pos(Pos, Formatter, apply_mfa(Opts)),
-           Node2 <- update_quoted_variable_name(Node1, Opts),
+           Node1 <- astranaut_traverse:update_pos(Pos, Formatter, invoke_macro_function(Macro)),
+           Node2 <- update_quoted_variable_name(Node1, Macro, Opts),
            Node3 = astranaut_lib:replace_pos_zero(Node2, Pos),
-           format_node(Node3, Opts),
+           format_node(Node3, Macro),
            return(Node3)
        ]).
 
-apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Opts) ->
+invoke_macro_function(#{module := Module, function := Function, arguments := Arguments} = Macro) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
             astranaut:traverse_return(Return)
@@ -740,11 +814,11 @@ apply_mfa(#{module := Module, function := Function, arguments := Arguments} = Op
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) -> 
-                          {M, F, A} =/= {?MODULE, apply_mfa, 1};
+                          {M, F, A} =/= {?MODULE, invoke_macro_function, 1};
                      (_Stack) ->
                           false
                   end, ?GET_STACKTRACE),
-            Error = macro_exception(Arguments, Class, Exception, StackTraces1, Opts),
+            Error = macro_exception(Arguments, Class, Exception, StackTraces1, Macro),
             astranaut_traverse:fail(Error)
     end.
 
@@ -769,7 +843,7 @@ should_transform_function(_Function, _Arity, all) ->
 should_transform_function(Function, Arity, LocalMacroCaller) ->
     ordsets:is_element({function, Function, Arity}, LocalMacroCaller).
 
-local_macro_caller(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) ->
+find_macro_callers(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) ->
     case maps:size(LocalMacroMap) of
         0 ->
             ordsets:new();
@@ -828,13 +902,7 @@ find_attribute_macro_with_arguments(Function, Arguments, Pos, AttributeMacroMap)
             not_macro
     end.
 
-call_find_macro(_Module, {call, Pos1, {atom, _Pos2, Function}, Arguments}, Macros) ->
-    find_macro_with_arguments(Function, Arguments, Pos1, Macros);
-call_find_macro(Module, {call, Pos1, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments},
-                Macros) ->
-    find_macro_with_arguments({Module, Function}, Arguments, Pos1, Macros);
-call_find_macro(_Module, _Node, _Macros) ->
-    error.
+
 
 find_macro_with_arguments(MacroName, Arguments, Pos, Macros) ->
     Arguments1 = to_list(Arguments),
@@ -880,7 +948,7 @@ append_attrs(Arguments, #{attributes := Attrs, pos := Pos}) ->
 append_attrs(Arguments, #{}) ->
     Arguments.
 
-update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) ->
+update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true}) ->
     astranaut_traverse:state(
       fun(Counter) ->
               MacroNameStr = macro_name_str(Macro),
@@ -900,7 +968,7 @@ update_quoted_variable_name(Nodes, #{rename_quoted_variables := true} = Macro) -
                     end, Nodes, #{traverse => post}),
               {Nodes1, Counter + 1}
       end);
-update_quoted_variable_name(Nodes, #{}) ->
+update_quoted_variable_name(Nodes, _Macro, #{}) ->
     astranaut_traverse:return(Nodes).
 
 split_varname(String) ->

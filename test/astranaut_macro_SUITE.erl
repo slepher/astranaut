@@ -110,7 +110,8 @@ all() ->
     [test_ok_case, test_function_case, test_quote_case,
      test_unquote_splicing_case, test_pattern_case, test_other_case,
      test_macro_with_warnings, test_macro_with_error,
-     test_macro_with_vars, test_macro_order, test_merge_rename_function].
+     test_macro_with_vars, test_macro_order, test_merge_rename_function,
+     test_nested_macro, test_recursive_macro, test_macro_literal].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -213,8 +214,9 @@ test_macro_with_error(Config) ->
         {7,  astranaut_macro, {undefined_macro, undefined_macro_1, 0}},
         {8,  astranaut_macro, {undefined_macro, undefined_macro_2, 0}},
         {9,  astranaut_macro, {undefined_macro, undefined_macro_3, 0}},
-        {12, Local, {macro_exception, _MFA, [], _StackTrace}},
-        {15, Local, bar}
+        {13, Local, {macro_exception, _MFA, [], _StackTrace}},
+        {16, Local, bar},
+        {27,astranaut_macro, {max_macro_expansion_depth_exceeded, {macro_example,recursive_macro}, [{integer, _Pos, 6}]}}
        ], Errors),
     %% %% TODO: astranaut:map_m does not just return error, but inject error_maker to forms.
     %% %% while fixing this, uncomment testcase below.
@@ -241,4 +243,16 @@ test_merge_rename_function(_Config) ->
     Value3 = macro_test:test_merged_function(ok_3),
     Value4 = macro_test:test_merged_function(ok_4),
     ?assertEqual({ok_1, ok_2, ok_3, ok_4}, {Value1, Value2, Value3, Value4}),
+    ok.
+
+test_nested_macro(_Config) ->
+    Value = macro_test:test_nested_macro(7),
+    ?assertEqual(45, Value).
+
+test_recursive_macro(_Config) ->
+    Value = macro_test:test_recursive_macro(),
+    ?assertEqual({4, {3, {2, {1, blast_off}}}}, Value).
+
+test_macro_literal(_Config) ->
+    %%?assertMatch({atom, _, ok}, macro_test:test_macro_literal()).
     ok.

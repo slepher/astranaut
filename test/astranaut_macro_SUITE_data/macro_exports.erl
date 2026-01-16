@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(macro_exports).
 
--macro_options(debug_module).
+%%-macro_options(debug_module).
 
 %% API
 -export_macro({[macro_x/1], [as_attr]}).

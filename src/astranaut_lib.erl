@@ -782,6 +782,7 @@ apply_validator_by_name(Validator, Value, Args, Attrs) ->
                    atom => fun is_atom/1,
                    number => fun is_number/1,
                    integer => fun is_integer/1,
+                   uinteger => fun is_unsigned_integer/1,
                    binary => fun is_binary/1,
                    any => fun any/1,
                    'or' => fun 'or'/4,
@@ -821,6 +822,11 @@ apply_validator_fun(ValidatorFun, Value, #{}) when is_function(ValidatorFun, 1) 
 
 any(_Value) ->
     true.
+
+is_unsigned_integer(Value) when is_integer(Value), Value >= 0 ->
+    true;
+is_unsigned_integer(_Value) ->
+    false.
 
 one_of(Value, List) when is_list(List) ->
     lists:member(Value, List);

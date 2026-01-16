@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(macro_example).
 
--macro_options(debug_module).
+%%-macro_options(debug_module).
 
 -include("quote.hrl").
 -include("macro.hrl").
@@ -30,6 +30,8 @@
 -export_macro([macro_function/2]).
 -export_macro([macro_try_catch/0, macro_case/3]).
 -export_macro([macro_with_vars_1/1, macro_with_vars_2/1]).
+-export_macro([nested_macro/1, nested_macro_inner/1]).
+-export_macro({[recursive_macro/1], [{max_depth, 5}]}).
 
 -exec_macro({macro_exported_function, [hello, world]}).
 
@@ -193,6 +195,41 @@ macro_with_vars_2(Ast) ->
           A + B
       end
      ).
+
+nested_macro(Ast) ->
+    quote(
+      begin
+          A = 10,
+          B = macro_example:nested_macro_inner(unquote(Ast)),
+          A + B
+      end
+     ).
+
+nested_macro_inner(Ast) ->
+    quote(
+      begin
+          X = 5,
+          Y = unquote(Ast),
+          X * Y
+      end
+     ).
+
+%% 宏函数接收的是参数的 AST 列表
+recursive_macro({integer, _Pos, N} = Ast) ->
+    case N > 0 of
+        true ->
+            NextN = N - 1,
+            %% 递归情况：返回一个新的宏调用 AST
+            %% 构造 test_macros:countdown(N-1)
+            quote({unquote(Ast), macro_example:recursive_macro(_I@NextN)});
+        false ->
+            %% 退出条件：返回最终的原子节点
+            quote(blast_off)
+    end;
+recursive_macro(Other) ->
+    io:format("Received non-integer AST: ~p~n", [Other]),
+    %% 容错处理
+    Other.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
