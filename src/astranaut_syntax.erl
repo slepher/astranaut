@@ -125,12 +125,15 @@ subtrees_pge(_Type, Subtrees, #{node := pattern}) ->
     Subtrees;
 subtrees_pge(named_fun_expr, [Names, Clauses], #{}) ->
     [pattern_node(Names), Clauses];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= match_expr; Type =:= clause ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= match_expr; Type =:= maybe_match_expr; Type =:= clause ->
     [pattern_node(Patterns), expression_node(Expressions)];
 subtrees_pge(clause, [Patterns, Guards, Expressions], #{}) ->
     [pattern_node(Patterns), guard_node(Guards), expression_node(Expressions)];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= generator; Type =:= binary_generator ->
+subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= generator; Type =:= strict_generator;
+                                                      Type =:= binary_generator; Type =:= strict_binary_generator;
+                                                      Type =:= map_generator; Type =:= strict_map_generator ->
     [pattern_node(Patterns), expression_node(Expressions)];
+
 subtrees_pge(_Type, Subtrees, #{}) ->
     Subtrees.
 

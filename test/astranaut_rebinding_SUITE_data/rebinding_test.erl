@@ -13,13 +13,14 @@
 
 -rebinding_all([debug]).
 
--rebinding_fun({[test_lc, test_case, test_if], []}).
+-rebinding_fun({[test_lc, test_lc_zip, test_case], [debug]}).
 -rebinding_fun({[test_case_pinned], [clause_pinned]}).
 -rebinding_fun({[test_function], [strict]}).
 -rebinding_fun({[test_operator, test_tuple, test_list, test_try, test_function_guard], [strict]}).
 -rebinding_fun({[test_map, test_map_update], [strict, debug]}).
 -rebinding_fun({[test_rec, test_rec_update], [strict, debug]}).
--rebinding_fun({[test_lc_origin, test_function_origin, test_case_origin], no_rebinding}).
+-rebinding_fun({[test_lc_origin, test_lc_zip_origin, test_bc_origin, test_mc_origin], no_rebinding}).
+-rebinding_fun({[test_function_origin, test_case_origin, test_maybe_origin], no_rebinding}).
 -rebinding_fun({[test_operator_origin, test_tuple_origin, test_list_origin], no_rebinding}).
 -rebinding_fun({[test_map_origin, test_map_update_origin], no_rebinding}).
 -rebinding_fun({[test_rec_origin, test_rec_update_origin], no_rebinding}).
@@ -37,21 +38,84 @@
 
 test_lc(A) ->
     A = [{A, B} || 
+            A <- [begin A = A + 2, A + 1 end], 
             B <- [begin A = A + 2, A end], 
             begin A = A + 3, A, true end,
-            A <- [begin A = A + 1, A end],
+            A <:- [begin A = A + 1, A + 1 end],
             is_ok(A + 3, begin A = A + 4, A end),
             true
         ],
     A.
 
 test_lc_origin(A) ->
-    A_1 = [{A_3, B}
-	   || B <- [begin A_1 = A + 2, A_1 end],
-	      begin A_1 = A + 3, A_1, true end,
-	      A_2 <- [begin A_2 = A_1 + 1, A_2 end],
-              is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end),
-	      true],
+    A_1 = [{A_4, B}
+           || A_1 <- [begin A_1 = A + 2, A_1 + 1 end],
+              B <- [begin A_2 = A_1 + 2, A_2 end],
+              begin A_2 = A_1 + 3, A_2, true end,
+              A_3 <:- [begin A_3 = A_2 + 1, A_3 + 1 end],
+              is_ok(A_3 + 3, begin A_4 = A_3 + 4, A_4 end), true],
+    A_1.
+
+test_bc(A, Bin) ->
+    A = <<<<A>> || 
+            <<A>> <= begin A = A + 2, Bin end, 
+            begin A = A + 3, A, true end,
+            <<A>> <:= begin A = A + 1, Bin end,
+            is_ok(A + 3, begin A = A + 4, A end),
+            true
+    >>,
+    A.
+
+test_bc_origin(A, Bin) ->
+    A_5 = << <<A_4>>
+              || <<A_1>> <= begin A_1 = A + 2, Bin end,
+                 begin A_2 = A_1 + 3, A_2, true end,
+                 <<A_3>> <:= begin A_3 = A_2 + 1, Bin end,
+                 (is_ok(A_3 + 3, begin A_4 = A_3 + 4, A_4 end)), true >>,
+    A_5.
+
+test_mc(A, Map) ->
+    B = #{ A => A || 
+            _K := A <- begin A = A + 2, Map end, 
+            begin A = A + 3, A, true end,
+            is_ok(A + 3, begin A = A + 4, A end),
+            true
+        },
+    A = #{ A => A || 
+        _K := A <:- begin A = A + 2, Map end, 
+        begin A = A + 3, A, true end,
+        is_ok(A + 3, begin A = A + 4, A end),
+        true
+        },
+    {A, B}.
+
+test_mc_origin(A, Map) ->
+    B = #{A_3 => A_3
+          || _K := A_1 <- begin A_1 = A + 2, Map end,
+             begin A_2 = A_1 + 3, A_2, true end,
+             (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
+    A_1 = #{A_3 => A_3
+            || _K := A_1 <:- begin A_1 = A + 2, Map end,
+               begin A_2 = A_1 + 3, A_2, true end,
+               (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
+    {A_1, B}.
+
+test_lc_zip(A, B) ->
+    A = [{A, B} || 
+            A <- A && B <- B,
+            begin A = A + 3, A, true end,
+            is_ok(A + 3, begin A = A + 4, A end),
+            true
+        ],
+    A.
+
+test_lc_zip_origin(A, B) ->
+    A_1 = [{A_3, B_1} || 
+            A_1 <- A && B_1 <- B,
+            begin A_2 = A_1 + 3, A_2, true end,
+            is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end),
+            true
+        ],
     A_1.
 
 test_function(A) ->
@@ -154,6 +218,57 @@ test_if_origin(A) ->
     B_5 = A_2 + B_4,
     A_5 = A_2 + B_5,
     A_5.
+
+test_maybe(A) ->
+    B = 15,
+    {A, B} = {B, A},
+    A = A + B,
+    B = A + B,
+    {ok, B} = {ok, A},
+    B = maybe
+            {ok, B} = {ok, A + 1},
+            {ok, B} ?= {ok, A + 1},
+            A = B + 1,
+            B = A + B,
+            A = A + B,
+            B
+        else
+            {error, _} -> A = A + 1, A = A + 1, A = A + 1, C = A + B, A;
+            B -> B = A + B, A = A + B, C = A + B, C
+        end,
+    B = A + B,
+    A = A + B,
+    A.
+
+test_maybe_origin(A) ->
+    B = 15,
+    {A_1, B_1} = {B, A},
+    A_2 = A_1 + B_1,
+    B_2 = A_2 + B_1,
+    {ok, B_3} = {ok, A_2},
+    B_9 = maybe
+              {ok, B_4} = {ok, A_2 + 1},
+              {ok, B_5} ?= {ok, A_2 + 1},
+              A_3 = B_5 + 1,
+              B_6 = A_3 + B_5,
+              A_4 = A_3 + B_6,
+              B_6
+          else
+              {error, _} ->
+                  A_5 = A_2 + 1,
+                  A_6 = A_5 + 1,
+                  A_7 = A_6 + 1,
+                  C = A_7 + B_3,
+                  A_7;
+              B_7 ->
+                  B_8 = A_2 + B_7,
+                  A_5 = A_2 + B_8,
+                  C = A_5 + B_8,
+                  C
+          end,
+    B_10 = A_2 + B_9,
+    A_8 = A_2 + B_10,
+    A_8.
 
 test_try() ->
     A = 10,

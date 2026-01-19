@@ -35,8 +35,10 @@ test(ABC) ->
                 ABC = EFG + 2,
                 ABC
         end,
-    D = <<ABC || ABC <- <<"123">> >>,
-    io:format("d is ~p~n", [D]),
+    D = << <<ABC>> || 
+           <<ABC>> <= begin ABC = ABC + 1, <<"123">> end,
+           ABC = list_to_binary([ABC, <<"4">>])
+         >>,
     D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
     EFG = 
         case EFG of
@@ -74,7 +76,6 @@ test(ABC) ->
     io:format("d is ~p~n", [D]),
     io:format("c is ~p~n", [C]),
     F(10).
-
 
 hello(A, B) ->
   A = 

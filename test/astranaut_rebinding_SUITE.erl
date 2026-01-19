@@ -121,7 +121,10 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_lc, test_function, test_case, test_if,
+    [test_lc, test_lc_zip,
+     test_bc, test_mc,
+     test_function,
+     test_case, test_if, test_maybe,
      test_map, test_map_update,
      test_rec, test_rec_update,
      test_operator, test_list, test_tuple,
@@ -152,6 +155,27 @@ test_lc(Config) ->
     ?assertEqual(A, B),
     ok.
 
+test_lc_zip(Config) ->
+    equal_functions(test_lc_zip, test_lc_zip_origin, Config),
+    A = rebinding_test:test_lc_zip([10], [20]),
+    B = rebinding_test:test_lc_zip_origin([10], [20]),
+    ?assertEqual(A, B),
+    ok.
+
+test_bc(Config) ->
+    equal_functions(test_bc, test_bc_origin, Config),
+    B = rebinding_test:test_bc_origin(10, <<1,2,3,4,5>>),
+    A = rebinding_test:test_bc(10, <<1,2,3,4,5>>),
+    ?assertEqual(A, B),
+    ok.
+
+test_mc(Config) ->
+    equal_functions(test_mc, test_mc_origin, Config),
+    A = rebinding_test:test_mc(10, #{a => 1, b => 2, c => 3}),
+    B = rebinding_test:test_mc_origin(10, #{a => 1, b => 2, c => 3}),
+    ?assertEqual(A, B),
+    ok.
+
 test_function(Config) ->
     equal_functions(test_function, test_function_origin, Config),
     A = rebinding_test:test_function(10),
@@ -173,6 +197,13 @@ test_if(Config) ->
     equal_functions(test_if, test_if_origin, Config),
     A = rebinding_test:test_if(10),
     B = rebinding_test:test_if_origin(10),
+    ?assertEqual(A, B),
+    ok.
+
+test_maybe(Config) ->
+    equal_functions(test_maybe, test_maybe_origin, Config),
+    A = rebinding_test:test_maybe(10),
+    B = rebinding_test:test_maybe_origin(10),
     ?assertEqual(A, B),
     ok.
 

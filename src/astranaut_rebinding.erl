@@ -220,19 +220,37 @@ walk_node_1(record_expr, Expr, #{node := expression, strict := true}) ->
 walk_node_1(list_comp, ListComp, #{}) ->
     walk_comprehension(ListComp);
 
+walk_node_1(map_comp, MapComp, #{}) ->
+    walk_comprehension(MapComp);
+
 walk_node_1(binary_comp, BinaryComp, #{}) ->
-    walk_comprehension(BinaryComp);
+    walk_binary_comprehension(BinaryComp);
 
 %% walk comprehension generate
 walk_node_1(generator, ListGenerator, #{}) ->
     walk_generator(ListGenerator);
 
+walk_node_1(strict_generator, ListGenerator, #{}) ->
+    walk_generator(ListGenerator);
+
 walk_node_1(binary_generator, BinaryGenerator, #{}) ->
     walk_generator(BinaryGenerator);
+
+walk_node_1(strict_binary_generator, BinaryGenerator, #{}) ->
+    walk_generator(BinaryGenerator);
+
+walk_node_1(map_generator, MapGenerator, #{}) ->
+    walk_generator(MapGenerator);
+
+walk_node_1(strict_map_generator, MapGenerator, #{}) ->
+    walk_generator(MapGenerator);
 
 %% walk match
 walk_node_1(match_expr, Match,  #{node := expression}) ->
     walk_match(Match);
+
+walk_node_1(maybe_match_expr, MaybeMatch,  #{node := expression}) ->
+    walk_match(MaybeMatch);
 
 %% walk function clause and other clauses
 walk_node_1(clause, Clause, #{} = Attr) ->
@@ -257,6 +275,9 @@ walk_node_1(try_expr, Try, #{}) ->
 walk_node_1(catch_expr, Catch, #{}) ->
     walk_clause_parent_expression(Catch);
 
+walk_node_1(maybe_expr, Maybe, #{}) ->
+    walk_maybe(Maybe);
+
 walk_node_1(_NodeType, Node, #{}) ->
     Node.
 
@@ -277,12 +298,24 @@ clause_scope_type(_Other) ->
     nonfun_clause.
 
 walk_comprehension(Comprehension) ->
+    walk_comprehension(Comprehension, false).
+walk_comprehension(Comprehension, Leaky) ->
     Sequence =
         fun(Subtrees) ->
-                with_shadowed(lists:reverse(Subtrees))
+            Subtrees1 = lists:reverse(Subtrees),
+            case Leaky of
+                true ->
+                    with_shadowed_leaky(Subtrees1);
+                false ->
+                    with_shadowed(Subtrees1)
+            end
         end,
     Reduce = fun lists:reverse/1,
     astranaut_uniplate:with_subtrees(Sequence, Reduce, Comprehension).
+
+%% strange, variables in binary comprehension is not shadowed, but not usable in next expressions.
+walk_binary_comprehension(BinaryComprehension) ->
+    walk_comprehension(BinaryComprehension, true).
 
 walk_generator(Generator) ->
     Sequence =
@@ -326,6 +359,16 @@ walk_named_fun(NamedFun) ->
                 with_shadowed([NameTree1|RestTrees])
         end,
     astranaut_uniplate:with_subtrees(Sequence, NamedFun).
+
+walk_maybe(Maybe) ->
+    Sequence =
+        fun([MaybeBody|Elses]) ->
+            %% treat maybe body as shadowed_leaky scope like clause scope
+            MaybeBody1 = with_shadowed_leaky(MaybeBody),
+            %% walk expression first
+            [MaybeBody1|Elses]
+        end,
+    walk_clause_parent_expression(astranaut_uniplate:with_subtrees(Sequence, Maybe)).
 
 walk_clause_parent_expression(ClauseParent) ->
     Sequence = fun with_scope_group/1,
@@ -376,6 +419,9 @@ with_argument(Trees) ->
 
 with_shadowed(NodeM) ->
     with_scope_type(shadowed, NodeM).
+
+with_shadowed_leaky(NodeM) ->
+    with_scope_type(shadowed_leaky, NodeM).
 
 with_match_left_pattern(NodeM) ->
     with_scope_type(match_left, NodeM).
@@ -452,6 +498,8 @@ entry_scope_type(argument, Context) ->
     entry_argument(Context);
 entry_scope_type(shadowed, Context) ->
     entry_shadowed(Context);
+entry_scope_type(shadowed_leaky, Context) ->
+    entry_shadowed_leaky(Context);
 entry_scope_type(ScopeType, Context) ->
     entry_pattern(ScopeType, Context).
 
@@ -463,6 +511,8 @@ exit_scope_type(argument, Context) ->
     exit_argument(Context);
 exit_scope_type(shadowed, Context) ->
     exit_shadowed(Context);
+exit_scope_type(shadowed_leaky, Context) ->
+    exit_shadowed_leaky(Context);
 exit_scope_type(ScopeType, Context) ->
     exit_pattern(ScopeType, Context).
 
@@ -516,6 +566,12 @@ entry_shadowed(Context) ->
 exit_shadowed(Context) ->
     Context1 = pop_varname_stack(Context),
     pop_rename_stack(Context1).
+
+entry_shadowed_leaky(Context) ->
+    push_rename_stack(Context).
+
+exit_shadowed_leaky(Context) ->
+    pop_rename_stack(Context).
 
 entry_pattern(PatternType, #{} = Context) ->
     Context#{pattern => PatternType, pattern_varnames => ordsets:new()}.
