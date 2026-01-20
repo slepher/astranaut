@@ -2,14 +2,16 @@ test_task:
   container:
     matrix:
       - image: erlang:28
+      - image: erlang:27
       - image: erlang:26
       - image: erlang:25
+      - image: erlang:24
       - image: erlang:23
       - image: erlang:21
       - image: erlang:19
   rebar3_cache:
     folder: _build
-    fingerprint_script: cat rebar.lock
+    fingerprint_script: echo $CIRRUS_CHANGE_IN_REPO
     populate_script: rebar3 compile --deps_only
   compile_script: rebar3 compile
-  test_script: rebar3 as test clean; rebar3 ct
+  test_script: rebar3 as test clean && rebar3 ct
