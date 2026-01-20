@@ -12,4 +12,4 @@ test_task:
     fingerprint_script: cat rebar.lock
     populate_script: rebar3 compile --deps_only
   compile_script: rebar3 compile
-  test_script: rebar3 ct
+  test_script: rebar3 test clean; rebar3 ct

@@ -199,6 +199,7 @@ test_macro_with_warnings(Config) ->
     ok.
 
 test_macro_with_error(Config) ->
+    ct:pal("Verifying Test Code Integrity: Expecting Line 27 check to exist."),
     Forms = astranaut_test_lib:test_module_forms(macro_with_error, Config),
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     Return = astranaut_test_lib:compile_test_forms(Forms),
