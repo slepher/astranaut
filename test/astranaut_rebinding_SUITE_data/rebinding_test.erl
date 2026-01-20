@@ -8,14 +8,24 @@
 %%%-------------------------------------------------------------------
 -module(rebinding_test).
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 25).
+-define(OVER_OTP_25, true).
+-endif.
+-if(?OTP_RELEASE >= 26).
+-define(OVER_OTP_26, true).
+-endif.
+-if(?OTP_RELEASE >= 28).
+-define(OVER_OTP_28, true).
+-endif.
+-endif.
+
+-ifdef(OVER_OTP_25).
+-feature(maybe_expr, enable).
+-endif.
+
 -include("rebinding.hrl").
 -include("stacktrace.hrl").
-
--ifdef(OTP_RELEASE).
--define(IF_OTP(V), ?OTP_RELEASE >= V).
--else.
--define(IF_OTP(_V), false).
--endif.
 
 -rebinding_all([debug]).
 
@@ -32,19 +42,26 @@
 -rebinding_fun({[test_rec_origin, test_rec_update_origin], no_rebinding}).
 -rebinding_fun({[test_pattern_same_var, test_pattern_same_var_in_fun, test_pattern_same_var_in_case], []}).
 
--if(?IF_OTP(25)).
+-ifdef(OVER_OTP_25).
 -rebinding_fun({[test_maybe], [debug]}).
 -rebinding_fun({[test_maybe_origin], no_rebinding}).
 -else.
 -rebinding_fun({[test_maybe, test_maybe_origin], no_rebinding}).
 -endif.
 
--if(?IF_OTP(26)).
--rebinding_fun({[test_lc_rebinding, test_bc_rebinding, test_mc, test_lc_zip], [debug]}).
--rebinding_fun({[test_lc_rebinding_origin, test_bc_rebinding_origin, test_mc_origin, test_lc_zip_origin], no_rebinding}).
+-ifdef(OVER_OTP_26).
+-rebinding_fun({[test_mc], [debug]}).
+-rebinding_fun({[test_mc_origin], no_rebinding}).
 -else.
--rebinding_fun({[test_lc_rebinding, test_bc_rebinding, test_mc, test_lc_zip,
-                 test_lc_rebinding_origin, test_bc_rebinding_origin, test_mc_origin, test_lc_zip_origin], no_rebinding}).
+-rebinding_fun({[test_mc, test_mc_origin], no_rebinding}).
+-endif.
+
+-ifdef(OVER_OTP_28).
+-rebinding_fun({[test_lc_strict, test_bc_strict, test_mc_strict, test_lc_zip], [debug]}).
+-rebinding_fun({[test_lc_strict_origin, test_bc_strict_origin, test_mc_strict_origin, test_lc_zip_origin], no_rebinding}).
+-else.
+-rebinding_fun({[test_lc_strict, test_bc_strict, test_mc_strict, test_lc_zip,
+                 test_lc_strict_origin, test_bc_strict_origin, test_mc_strict_origin, test_lc_zip_origin], no_rebinding}).
 -endif.
 
 -record(rec, {a, b, c, d}).
@@ -299,7 +316,7 @@ test_pattern_same_var_in_case(Ax, B) ->
             Ax + B
     end.
 
--if(?IF_OTP(25)).
+-ifdef(OVER_OTP_25).
 test_maybe(A) ->
     B = 15,
     {A, B} = {B, A},
@@ -355,37 +372,7 @@ test_maybe(A) -> A.
 test_maybe_origin(A) -> A.
 -endif.
 
--if(?IF_OTP(26)).
-test_lc_rebinding(A) ->
-    A = [A || 
-            A <:- [begin A = A + 1, A + 1 end],
-            is_ok(A + 3, begin A = A + 4, A end),
-            true
-        ],
-    A.
-
-test_lc_rebinding_origin(A) ->
-    A_1 = [A_3 || 
-            A_2 <:- [begin A_1 = A + 1, A_1 + 1 end],
-            is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end),
-            true
-        ],
-    A_1.
-
-test_bc_rebinding(A, Bin) ->
-    A = <<<<A>> || 
-            <<A>> <:= begin A = A + 1, Bin end,
-            is_ok(A + 3, begin A = A + 4, A end),
-            true
-    >>,
-    A.
-
-test_bc_rebinding_origin(A, Bin) ->
-    A_3 = << <<A_2>>
-              || <<A_1>> <:= begin A_1 = A + 1, Bin end,
-                 (is_ok(A_1 + 3, begin A_2 = A_1 + 4, A_2 end)), true >>,
-    A_3.
-
+-ifdef(OVER_OTP_26).
 test_mc(A, Map) ->
     B = #{ A => A || 
             _K := A <- begin A = A + 2, Map end, 
@@ -393,24 +380,65 @@ test_mc(A, Map) ->
             is_ok(A + 3, begin A = A + 4, A end),
             true
         },
-    A = #{ A => A || 
-        _K := A <:- begin A = A + 2, Map end, 
-        begin A = A + 3, A, true end,
-        is_ok(A + 3, begin A = A + 4, A end),
-        true
-        },
-    {A, B}.
+    B.
 
 test_mc_origin(A, Map) ->
     B = #{A_3 => A_3
           || _K := A_1 <- begin A_1 = A + 2, Map end,
              begin A_2 = A_1 + 3, A_2, true end,
              (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
-    A_1 = #{A_3 => A_3
+    B.
+-else.
+test_mc(A, _Map) -> A.
+test_mc_origin(A, _Map) -> A.
+-endif.
+
+-ifdef(OVER_OTP_28).
+test_lc_strict(A) ->
+    A = [A || 
+            A <:- [begin A = A + 1, A + 1 end],
+            is_ok(A + 3, begin A = A + 4, A end),
+            true
+        ],
+    A.
+
+test_lc_strict_origin(A) ->
+    A_1 = [A_3 || 
+            A_2 <:- [begin A_1 = A + 1, A_1 + 1 end],
+            is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end),
+            true
+        ],
+    A_1.
+
+test_bc_strict(A, Bin) ->
+    A = <<<<A>> || 
+            <<A>> <:= begin A = A + 1, Bin end,
+            is_ok(A + 3, begin A = A + 4, A end),
+            true
+    >>,
+    A.
+
+test_bc_strict_origin(A, Bin) ->
+    A_3 = << <<A_2>>
+              || <<A_1>> <:= begin A_1 = A + 1, Bin end,
+                 (is_ok(A_1 + 3, begin A_2 = A_1 + 4, A_2 end)), true >>,
+    A_3.
+
+test_mc_strict(A, Map) ->
+    B = #{ A => A || 
+        _K := A <:- begin A = A + 2, Map end, 
+        begin A = A + 3, A, true end,
+        is_ok(A + 3, begin A = A + 4, A end),
+        true
+        },
+    B.
+
+test_mc_strict_origin(A, Map) ->
+    B = #{A_3 => A_3
             || _K := A_1 <:- begin A_1 = A + 2, Map end,
                begin A_2 = A_1 + 3, A_2, true end,
                (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
-    {A_1, B}.
+    B.
 
 test_lc_zip(A, B) ->
     A = [{A, B} || 
@@ -430,12 +458,12 @@ test_lc_zip_origin(A, B) ->
         ],
     A_1.
 -else.
-test_lc_rebinding(A) -> A.
-test_lc_rebinding_origin(A) -> A.
-test_bc_rebinding(A, _Bin) -> A.
-test_bc_rebinding_origin(A, _Bin) -> A.
-test_mc(A, _Map) -> {A, A}.
-test_mc_origin(A, _Map) -> {A, A}.
+test_lc_strict(A) -> A.
+test_lc_strict_origin(A) -> A.
+test_bc_strict(A, _Bin) -> A.
+test_bc_strict_origin(A, _Bin) -> A.
+test_mc_strict(A, _Map) -> A.
+test_mc_strict_origin(A, _Map) -> A.
 test_lc_zip(A, _B) -> A.
 test_lc_zip_origin(A, _B) -> A.
 -endif.

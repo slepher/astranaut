@@ -4,7 +4,6 @@ test_task:
       - image: erlang:28
       - image: erlang:26
       - image: erlang:25
-      - image: erlang:24
       - image: erlang:23
       - image: erlang:21
       - image: erlang:19
