@@ -1,1 +1,0 @@
-docker build -t local-ci:21 --build-arg ERLANG_VER=21 -f Dockerfile.local-ci .

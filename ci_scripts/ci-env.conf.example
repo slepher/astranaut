@@ -1,0 +1,19 @@
+ERLANG_VSNS=21,28
+
+# === 单个测试配置 ===
+# 如果要测试单个 SUITE，请取消注释并填写名称 (不需要加 .erl 后缀)
+# 例如: login_SUITE
+# 如果注释掉或留空，则默认运行所有测试
+# TEST_SUITE=astranaut_macro_SUITE
+
+# === 语言设置 / Language Settings ===
+# 选项/Options: auto, en, cn
+# auto: 根据系统语言自动选择 / Detect based on OS
+# en: 强制英文 / Force English
+# cn: 强制中文 / Force Chinese
+OUTPUT_LANG=auto
+
+# === 端口配置 / Port Settings ===
+# 日志查看器 Web 服务器的端口
+# Port for the Nginx Log Viewer
+LOG_PORT=8081

@@ -1,9 +1,0 @@
-# 接收构建参数，默认为 24 (你可以改)
-ARG ERLANG_VER=21
-FROM erlang:${ERLANG_VER}
-
-# 设置脚本
-COPY test/run_test_in_docker.sh /usr/local/bin/run_test.sh
-
-# 设置入口
-ENTRYPOINT ["bash", "/usr/local/bin/run_test.sh"]

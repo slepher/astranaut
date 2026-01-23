@@ -1,0 +1,11 @@
+# 接收构建参数，默认为 24 (你可以改)
+ARG ERLANG_VER=24
+FROM erlang:${ERLANG_VER}
+# 设置工作目录
+WORKDIR /app
+
+# [新增] 重置入口点，防止基础镜像的 ENTRYPOINT 干扰我们的命令
+ENTRYPOINT []
+
+# 默认命令 (会被 docker run 覆盖，所以这里保留 bash 即可)
+CMD ["bash"]
