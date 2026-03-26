@@ -1,4 +1,6 @@
 -ifndef(ASTRANAUT_STRUCT).
 -define(ASTRANAUT_STRUCT, true).
 -compile({parse_transform, astranaut_struct_transformer}).
+-import_macro(astranaut_struct).
+-include("macro.hrl").
 -endif.
