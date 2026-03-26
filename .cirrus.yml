@@ -9,9 +9,16 @@ test_task:
       - image: erlang:23
       - image: erlang:21
       - image: erlang:19
+  env:
+    REBAR_BASE_DIR: .rebar_cache
   rebar3_cache:
-    folder: _build
-    fingerprint_script: echo $CIRRUS_CHANGE_IN_REPO
+    folder: .rebar_cache
+    fingerprint_script: |
+      echo "otp=$(erl -noshell -eval 'io:format(\"~s\", [erlang:system_info(otp_release)]), halt().')"
+      rebar3 version | head -n 1
+      test -f rebar.lock && sha256sum rebar.lock || echo "no-rebar-lock"
     populate_script: rebar3 compile --deps_only
+  pre_compile_script: |
+    rm -f _build/default/lib/.rebar3/*.dag _build/default/lib/.rebar3/*.lock || true
   compile_script: rebar3 compile
   test_script: rebar3 as test clean && rebar3 ct

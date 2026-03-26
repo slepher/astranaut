@@ -9,6 +9,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_compile_meta_transformer).
 
+-include("stacktrace.hrl").
+
 %% API
 -export([parse_transform/2, format_error/1]).
 
@@ -124,8 +126,8 @@ apply_transformer(File, Transformer, Forms, Opts) ->
         error:undef ->
             Warn = warning_tuple(File, {undefined_transformer, Transformer}),
             {Forms, [], [Warn]};
-        Class:Reason:Stacktrace ->
-            Error = parse_transform_error(File, Transformer, {Class, Reason, Stacktrace}),
+        Class:Reason?CAPTURE_STACKTRACE ->
+            Error = parse_transform_error(File, Transformer, {Class, Reason, ?GET_STACKTRACE}),
             {Forms, [Error], []}
     end.
 
