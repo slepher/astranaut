@@ -23,3 +23,5 @@
 - [x] Add a test where a macro function directly calls another macro function.
 - [x] Add a test where `max_depth` limits a generated macro expansion chain.
 - [x] Add a test where an external attribute macro generates a local macro discovered by the new flow.
+- [x] Add a test where a local macro name collides with an external alias and reports macro_override.
+- [x] Add a test where force_override permits an intentional local macro override.

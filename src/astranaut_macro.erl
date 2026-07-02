@@ -558,7 +558,7 @@ transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, Forms, Compile
                        LocalMacroFunctions
                end,
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           _OverrideOk <- assert_no_macro_overrides(ExternalMacroMap, LocalMacroMap),
+           assert_no_macro_overrides(ExternalMacroMap, LocalMacroMap, Forms),
            load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts),
            FinalMacroMap <- merge_macro_maps(ExternalMacroMap, LocalMacroMap),
            FinalAttributeMacroMap = attribute_macro_map(FinalMacroMap),
@@ -567,7 +567,7 @@ transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, Forms, Compile
            transform_functions(Module, FinalMacroMap, Forms2, FinalMacroCallers)
        ]).
 
-assert_no_macro_overrides(ExistingMacroMap, OverridingMacroMap) ->
+assert_no_macro_overrides(ExistingMacroMap, OverridingMacroMap, Forms) ->
     astranaut_return:foldl_m(
       fun({MacroKey, Macro}, ok) ->
               case maps:find(MacroKey, ExistingMacroMap) of
@@ -576,7 +576,7 @@ assert_no_macro_overrides(ExistingMacroMap, OverridingMacroMap) ->
                           true ->
                               astranaut_return:return(ok);
                           false ->
-                              astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, Macro})
+                              macro_override_fail(MacroKey, ExistingMacro, Macro, Forms)
                       end;
                   error ->
                       astranaut_return:return(ok)
@@ -599,12 +599,59 @@ merge_macro_maps(First, Second) ->
                           true ->
                               astranaut_return:return(maps:put(MacroKey, Macro, Acc));
                           false ->
-                              astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, Macro})
+                              macro_override_fail(MacroKey, ExistingMacro, Macro)
                       end;
                   error ->
                       astranaut_return:return(maps:put(MacroKey, Macro, Acc))
               end
       end, First, maps:to_list(Second)).
+
+macro_override_fail(MacroKey, ExistingMacro, OverridingMacro) ->
+    macro_override_fail(MacroKey, ExistingMacro, OverridingMacro, []).
+
+macro_override_fail(MacroKey, ExistingMacro, OverridingMacro, Forms) ->
+    Reason = {macro_override, MacroKey, ExistingMacro, OverridingMacro},
+    case macro_error_file_pos(MacroKey, ExistingMacro, OverridingMacro, Forms) of
+        {File, Pos} ->
+            Error = astranaut_error:append_file_errors(
+                      [{File, [{Pos, ?MODULE, Reason}]}], astranaut_error:new()),
+            astranaut_return:fail(Error);
+        undefined ->
+            astranaut_return:error_fail(Reason)
+    end.
+
+macro_error_file_pos(MacroKey, ExistingMacro, OverridingMacro, Forms) ->
+    File = maps:get(file, OverridingMacro, maps:get(file, ExistingMacro, undefined)),
+    Pos = first_macro_call_pos(MacroKey, Forms),
+    case {File, Pos} of
+        {undefined, _} ->
+            undefined;
+        {_, undefined} ->
+            case maps:get(pos, OverridingMacro, maps:get(pos, ExistingMacro, undefined)) of
+                undefined -> undefined;
+                MacroPos -> {File, MacroPos}
+            end;
+        _ ->
+            {File, Pos}
+    end.
+
+first_macro_call_pos(MacroKey, Forms) ->
+    astranaut:sreduce(
+      fun(_Node, Pos) when Pos =/= undefined ->
+              Pos;
+         (Node, undefined) ->
+              macro_call_pos(MacroKey, Node)
+      end, undefined, Forms, #{traverse => pre}).
+
+macro_call_pos({Function, Arity}, {call, Pos, {atom, _Pos2, Function}, Arguments})
+  when length(Arguments) =:= Arity ->
+    Pos;
+macro_call_pos({{Module, Function}, Arity},
+               {call, Pos, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments})
+  when length(Arguments) =:= Arity ->
+    Pos;
+macro_call_pos(_MacroKey, _Node) ->
+    undefined.
 
 transform_external_attribute_macros(MacroMap, Forms) ->
     AttributeMacroMap = attribute_macro_map(MacroMap),
