@@ -118,12 +118,13 @@ parse_transform(Forms, Options) ->
              Module = astranaut_lib:analyze_forms_module(Forms),
              File = astranaut_lib:analyze_forms_file(Forms),
              {MacroModules, Macros, GlobalMacroOpts} <- load_imported_macro_attributes(Module, File, Forms),
-             Forms1 <- transform_external_macros(MacroModules, Macros, Forms),
+             ExternalMacroMap <- uniform_macro_map(MacroModules, Macros),
+             Forms1 <- transform_external_attribute_macros(ExternalMacroMap, Forms),
              %% load macros from attributes and transform -export_macro to -exported_macro
              %% -exported_macro is validated -export_macro attribute.
              %% add nowarn_unused_function compile options to -local_macro if it's not exported
              {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms1),
-             Forms3 <- transform_local_macros(Module, LocalMacros, Forms2, Options),
+             Forms3 <- transform_uniform_macros(Module, ExternalMacroMap, LocalMacros, Forms2, Options),
              format_forms(Forms3, GlobalMacroOpts),
              return(Forms3)
          ])).
@@ -141,6 +142,9 @@ format_error({undefined_macro, Function, Arity}) ->
     io_lib:format("macro ~p/~p undefined.", [Function, Arity]);
 format_error({invalid_use_macro, Opts}) ->
     io_lib:format("invalid use macro ~p.", [Opts]);
+format_error({macro_override, MacroKey, ExistingMacro, OverridingMacro}) ->
+    io_lib:format("macro ~p is already defined by ~p and cannot be overridden by ~p without force_override.",
+                  [MacroKey, format_macro_ref(ExistingMacro), format_macro_ref(OverridingMacro)]);
 format_error({non_exported_formatter, Module}) ->
     io_lib:format("format_error/1 is not exported from module ~p.", [Module]);
 format_error({unloaded_formatter_module, Module}) ->
@@ -158,6 +162,11 @@ format_error({macro_exception, MFA, Arguments, Exception}) ->
                   [format_mfa(MFA), Arguments, eunit_lib:format_exception(Exception)]);
 format_error(Error) ->
     astranaut:format_error(Error).
+
+format_macro_ref(#{macro_module := Module, function := Function, arity := Arity}) ->
+    {Module, Function, Arity};
+format_macro_ref(Macro) ->
+    Macro.
 %%%===================================================================
 %%% analyze -export_macro -use_macro attributes functions
 %%%===================================================================
@@ -467,7 +476,8 @@ use_macro_validator() ->
     #{
       debug => boolean,
       debug_ast => boolean,
-      alias => atom
+      alias => atom,
+      force_override => boolean
      }.
 
 global_macro_validator() ->
@@ -484,6 +494,7 @@ macro_definition_valitor() ->
       order => {one_of, [outer, inner]},
       inject_attrs => {'or', [atom, {list_of, atom}]},
       group_args => boolean,
+      force_override => boolean,
       max_depth => uinteger
      }.
 
@@ -524,51 +535,80 @@ macro_without_module_attr(_Other) ->
 %%%===================================================================
 %%% transform macros
 %%%===================================================================
-%% Step 1. transform forms with external macros to forms1
-%% Step 2. find local macro and it's related functions
-%% Step 3. find rest functions and attributes which call local macro, name it local_macro_caller
-%% Step 4. if local_macro_caller is empty, skip the rest step
-%% Step 5. compile local macro and it's related functions from forms1, load it as local_macro_module.
-%% Step 6. parse_transform forms1 with loaded local_macro_module as external macro.
-transform_local_macros(Module, LocalMacroMap, Forms, CompileOpts) ->
+%% Step 1. expand external attribute macros only.
+%% Step 2. find local macros and their related functions.
+%% Step 3. expand local macro source snapshots with external macros only.
+%% Step 4. compile and load the local macro module.
+%% Step 5. expand all non-local-macro forms with the final external + local macro map.
+transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, Forms, CompileOpts) ->
     do([ return ||
            ClauseMap = function_clauses_map(Forms, maps:new()),
-           LocalAttributeMacroMap = attribute_macro_map(LocalMacroMap),
            LocalMacroFunctions =
                maps:fold(
                  fun(_Macro, #{function := Function, arity := Arity}, Acc) ->
                          ordsets:add_element({Function, Arity}, Acc)
                  end, ordsets:new(), LocalMacroMap),
            LocalMacroFunctions1 =
-               case maps:is_key({format_error, 1}, ClauseMap) of
-                   true ->
+               case {LocalMacroFunctions, maps:is_key({format_error, 1}, ClauseMap)} of
+                   {[], _} ->
+                       LocalMacroFunctions;
+                   {_, true} ->
                        ordsets:add_element({format_error, 1}, LocalMacroFunctions);
-                   false ->
+                   {_, false} ->
                        LocalMacroFunctions
                end,
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           case find_macro_callers(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) of
-               [] ->
-                   astranaut_return:return(Forms);
-               LocalMacroCaller ->
-                   do([ return ||
-                          load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, Forms, CompileOpts),
-                          Forms2 <- transform_attribute_macros(LocalMacroMap, LocalAttributeMacroMap, Forms),
-                          transform_functions(Module, LocalMacroMap, Forms2, LocalMacroCaller)
-                      ])
-           end
+           _OverrideOk <- assert_no_macro_overrides(ExternalMacroMap, LocalMacroMap),
+           load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts),
+           FinalMacroMap <- merge_macro_maps(ExternalMacroMap, LocalMacroMap),
+           FinalAttributeMacroMap = attribute_macro_map(FinalMacroMap),
+           Forms2 <- transform_attribute_macros(FinalMacroMap, FinalAttributeMacroMap, Forms),
+           FinalMacroCallers = find_function_macro_callers(Forms2, FinalMacroMap, LocalMacroRelatedFunctions),
+           transform_functions(Module, FinalMacroMap, Forms2, FinalMacroCallers)
        ]).
 
-transform_external_macros(MacroModules, ModuleMacroMap, Forms) ->
+assert_no_macro_overrides(ExistingMacroMap, OverridingMacroMap) ->
     astranaut_return:foldl_m(
-      fun(MacroModule, FormsAcc) ->
+      fun({MacroKey, Macro}, ok) ->
+              case maps:find(MacroKey, ExistingMacroMap) of
+                  {ok, ExistingMacro} ->
+                      case maps:get(force_override, Macro, false) of
+                          true ->
+                              astranaut_return:return(ok);
+                          false ->
+                              astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, Macro})
+                      end;
+                  error ->
+                      astranaut_return:return(ok)
+              end
+      end, ok, maps:to_list(OverridingMacroMap)).
+
+uniform_macro_map(MacroModules, ModuleMacroMap) ->
+    astranaut_return:foldl_m(
+      fun(MacroModule, Acc) ->
               MacroMap = maps:get(MacroModule, ModuleMacroMap, #{}),
-              AttributeMacroMap = attribute_macro_map(MacroMap),
-              do([ return ||
-                     FormsAcc1 <- transform_attribute_macros(MacroMap, AttributeMacroMap, FormsAcc),
-                     transform_functions(MacroModule, MacroMap, FormsAcc1, all)
-                 ])
-      end, Forms, MacroModules).
+              merge_macro_maps(MacroMap, Acc)
+      end, #{}, MacroModules).
+
+merge_macro_maps(First, Second) ->
+    astranaut_return:foldl_m(
+      fun({MacroKey, Macro}, Acc) ->
+              case maps:find(MacroKey, Acc) of
+                  {ok, ExistingMacro} ->
+                      case maps:get(force_override, Macro, false) of
+                          true ->
+                              astranaut_return:return(maps:put(MacroKey, Macro, Acc));
+                          false ->
+                              astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, Macro})
+                      end;
+                  error ->
+                      astranaut_return:return(maps:put(MacroKey, Macro, Acc))
+              end
+      end, First, maps:to_list(Second)).
+
+transform_external_attribute_macros(MacroMap, Forms) ->
+    AttributeMacroMap = attribute_macro_map(MacroMap),
+    transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, ignore_missing).
 
 attribute_macro_map(MacroMap) ->
     AttributeMap =
@@ -585,28 +625,49 @@ attribute_macro_map(MacroMap) ->
               maps:put(Name, MacroNameMap1, Acc)
       end, #{}, AttributeMap).
 
-load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, Forms, CompileOpts) ->
-    Forms1 =
-        lists:reverse(
-          lists:foldl(
-            fun({attribute, Pos, module, Module}, Acc) ->
-                    [{attribute, Pos, module, local_macro_module(Module)}|Acc];
-               ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
-                    append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-               ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
-                    append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-               ({attribute,_Pos, export, _Exports}, Acc) ->
-                    Acc;
-               (Node, Acc) ->
-                    [Node|Acc]
-            end, [], Forms)),
-    ExtraExports =
-        lists:foldl(
-          fun(Export, Acc) ->
-                  [astranaut_lib:gen_exports([Export], 0)|Acc]
-          end, [], LocalMacroFunctions),
-    Forms2 = astranaut_syntax:sort_forms(Forms1 ++ ExtraExports),
-    astranaut_lib:load_forms(Forms2, [without_warnings|CompileOpts]).
+load_local_macro_forms([], _LocalMacroRelatedFunctions, _ExternalMacroMap, _Forms, _CompileOpts) ->
+    astranaut_return:return(ok);
+load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts) ->
+    do([ return ||
+           LocalExternalMacroCallers = find_function_macro_callers(Forms, ExternalMacroMap, ordsets:new()),
+           LocalMacroRelatedFunctionIds = function_ids(LocalMacroRelatedFunctions),
+           LocalSnapshotMacroCallers = ordsets:intersection(LocalExternalMacroCallers, LocalMacroRelatedFunctionIds),
+           Forms0 <- transform_functions_if_needed(uniform, ExternalMacroMap, Forms, LocalSnapshotMacroCallers),
+           Forms1 =
+               lists:reverse(
+                 lists:foldl(
+                   fun({attribute, Pos, module, Module}, Acc) ->
+                           [{attribute, Pos, module, local_macro_module(Module)}|Acc];
+                      ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
+                           append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+                      ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
+                           append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+                      ({attribute,_Pos, export, _Exports}, Acc) ->
+                           Acc;
+                      (Node, Acc) ->
+                           [Node|Acc]
+                   end, [], Forms0)),
+           ExtraExports =
+               lists:foldl(
+                 fun(Export, Acc) ->
+                         [astranaut_lib:gen_exports([Export], 0)|Acc]
+                 end, [], LocalMacroFunctions),
+           Forms2 = astranaut_syntax:sort_forms(Forms1 ++ ExtraExports),
+           astranaut_lib:load_forms(Forms2, [without_warnings|CompileOpts])
+       ]).
+
+function_ids(Functions) ->
+    lists:foldl(
+      fun({Function, Arity}, Acc) ->
+              ordsets:add_element({function, Function, Arity}, Acc)
+      end, ordsets:new(), Functions).
+
+transform_functions_if_needed(_Module, MacroMap, Forms, _TransformFunctions) when map_size(MacroMap) =:= 0 ->
+    astranaut_return:return(Forms);
+transform_functions_if_needed(_Module, _MacroMap, Forms, []) ->
+    astranaut_return:return(Forms);
+transform_functions_if_needed(Module, MacroMap, Forms, TransformFunctions) ->
+    transform_functions(Module, MacroMap, Forms, TransformFunctions).
 
 append_if(Boolean, Form, Forms) ->
     case Boolean of
@@ -617,6 +678,9 @@ append_if(Boolean, Form, Forms) ->
     end.
 
 transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
+    transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, warn_missing).
+
+transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, MissingMode) ->
     Monad =
         astranaut:map_m(
           fun(Form) ->
@@ -624,14 +688,19 @@ transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
                       {ok, Macro} ->
                           expand_macro(Macro);
                       error ->
-                          astranaut_traverse:then(
-                            astranaut_traverse:warning(invalid_macro_attribute),
-                            astranaut_traverse:return(Form));
+                          handle_missing_attribute_macro(Form, MissingMode);
                       not_macro ->
                           astranaut_traverse:return(Form)
                   end
           end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, ok).
+
+handle_missing_attribute_macro(Form, ignore_missing) ->
+    astranaut_traverse:return(Form);
+handle_missing_attribute_macro(Form, warn_missing) ->
+    astranaut_traverse:then(
+      astranaut_traverse:warning(invalid_macro_attribute),
+      astranaut_traverse:return(Form)).
 
 function_clauses_map([{function, _Pos, Name, Arity, Clauses}|T], Acc) ->
     NAcc = maps:put({Name, Arity}, Clauses, Acc),
@@ -673,6 +742,42 @@ with_local_function_call(Fun, Init, Exprs) ->
               Acc
       end, Init, Exprs, #{traverse => pre}).
 
+find_function_macro_callers(Forms, MacroMap, ExcludedFunctions) ->
+    case maps:size(MacroMap) of
+        0 ->
+            ordsets:new();
+        _ ->
+            lists:foldl(
+              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
+                      case ordsets:is_element({Function, Arity}, ExcludedFunctions) of
+                          true ->
+                              Acc;
+                          false ->
+                              case has_macro_call(Clauses, MacroMap) of
+                                  true ->
+                                      ordsets:add_element({function, Function, Arity}, Acc);
+                                  false ->
+                                      Acc
+                              end
+                      end;
+                 (_Form, Acc) ->
+                      Acc
+              end, ordsets:new(), Forms)
+    end.
+
+has_macro_call(Nodes, MacroMap) ->
+    astranaut:sreduce(
+      fun(_Node, true) ->
+              true;
+         (Node, false) ->
+              case call_find_macro(uniform, Node, MacroMap) of
+                  {ok, _Macro} ->
+                      true;
+                  error ->
+                      false
+              end
+      end, false, Nodes, #{traverse => pre}).
+
 to_list(Arguments) when is_list(Arguments) ->
     Arguments;
 to_list(Arguments) ->
@@ -681,7 +786,7 @@ to_list(Arguments) ->
 %%%===================================================================
 %%% transform macro MacroModule:MacroFun(Arguments) and it's help functions.
 %%%===================================================================
--spec transform_functions(module(), map(), [astranaut:form()], all | list()) -> term().
+-spec transform_functions(module(), map(), [astranaut:form()], all | {except, list()} | list()) -> term().
 transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
     %% just traverse function clauses, other nodes return directly
     FunctionClausesUniplate = 
@@ -772,9 +877,9 @@ match_macro_call(Module, Node, Macros, Step) ->
 
 call_find_macro(_Module, {call, Pos1, {atom, _Pos2, Function}, Arguments}, Macros) ->
     find_macro_with_arguments(Function, Arguments, Pos1, Macros);
-call_find_macro(Module, {call, Pos1, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments},
+call_find_macro(_Module, {call, Pos1, {remote, _Pos2, {atom, _Pos3, RemoteModule}, {atom, _Pos4, Function}}, Arguments},
                 Macros) ->
-    find_macro_with_arguments({Module, Function}, Arguments, Pos1, Macros);
+    find_macro_with_arguments({RemoteModule, Function}, Arguments, Pos1, Macros);
 call_find_macro(_Module, _Node, _Macros) ->
     error.
 
@@ -840,47 +945,10 @@ macro_exception(Arguments, Class, Exception, StackTraces,
     
 should_transform_function(_Function, _Arity, all) ->
     true;
+should_transform_function(Function, Arity, {except, Functions}) ->
+    not ordsets:is_element({Function, Arity}, Functions);
 should_transform_function(Function, Arity, LocalMacroCaller) ->
     ordsets:is_element({function, Function, Arity}, LocalMacroCaller).
-
-find_macro_callers(Forms, LocalMacroMap, LocalAttributeMacroMap, LocalMacroRelatedFunctions) ->
-    case maps:size(LocalMacroMap) of
-        0 ->
-            ordsets:new();
-        _ ->
-            lists:foldl(
-              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
-                      IsLocalMacroCaller = 
-                          case ordsets:is_element({function, Function, Arity}, LocalMacroRelatedFunctions) of
-                              true ->
-                                  false;
-                              false ->
-                                  with_local_function_call(
-                                    fun(CallFunction, CallArity, false) ->
-                                            maps:is_key({CallFunction, CallArity}, LocalMacroMap);
-                                       (_CallFunction, _CallArity, true) ->
-                                            true
-                                    end, false, Clauses)
-                          end,
-                      case IsLocalMacroCaller of
-                          true ->
-                              ordsets:add_element({function, Function, Arity}, Acc);
-                          false ->
-                              Acc
-                      end;
-                 ({attribute, _Pos, Attribute, AttributeValue} = Node, Acc) ->
-                      case attribute_find_macro(Node, LocalMacroMap, LocalAttributeMacroMap) of
-                          {ok, _} ->
-                              ordsets:add_element({attribute, Attribute, AttributeValue}, Acc);
-                          error ->
-                              Acc;
-                          not_macro ->
-                              Acc
-                      end;
-                 (_Node, Acc) ->
-                      Acc
-              end, ordsets:new(), Forms)
-    end.
 
 %% for -exec_macro, if there is no macro found, error is returned
 %% for other -Attr, if there is no macro with same name, not_macro is returned

@@ -29,7 +29,10 @@ suite() ->
 %% @end
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    TestModules = [macro_exports, macro_example, macro_test],
+    TestModules = [macro_exports, macro_example,
+                   macro_uniform_a, macro_uniform_b, macro_uniform_test,
+                   macro_uniform_override_test,
+                   macro_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -111,7 +114,13 @@ all() ->
      test_unquote_splicing_case, test_pattern_case, test_other_case,
      test_macro_with_warnings, test_macro_with_error,
      test_macro_with_vars, test_macro_order, test_merge_rename_function,
-     test_nested_macro, test_recursive_macro, test_macro_literal].
+     test_nested_macro, test_recursive_macro, test_macro_literal,
+     test_uniform_cross_import_order, test_uniform_nested_macros,
+     test_uniform_outer_macro, test_uniform_generated_macro_chain,
+     test_uniform_direct_macro_function_call, test_uniform_attribute_generates_local_macro,
+     test_uniform_local_generates_external, test_uniform_macro_override_error,
+     test_uniform_local_force_override, test_uniform_macro_error,
+     test_uniform_macro_max_depth].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -256,4 +265,79 @@ test_recursive_macro(_Config) ->
 
 test_macro_literal(_Config) ->
     %%?assertMatch({atom, _, ok}, macro_test:test_macro_literal()).
+    ok.
+
+test_uniform_cross_import_order(_Config) ->
+    ?assertEqual({b_generated, {a, {from_a, ok}}}, macro_uniform_test:later_generates_earlier()),
+    ?assertEqual({a_generated, {b, {from_b, ok}}}, macro_uniform_test:earlier_generates_later()),
+    ok.
+
+test_uniform_nested_macros(_Config) ->
+    ?assertEqual({a, {from_a, {b, {from_b, ok}}}}, macro_uniform_test:nested_external()),
+    ok.
+
+test_uniform_outer_macro(_Config) ->
+    ?assertEqual({outer_seen_raw_b_call}, macro_uniform_test:outer_preserves_raw_child()),
+    ok.
+
+test_uniform_generated_macro_chain(_Config) ->
+    ?assertEqual({a_generated_chain, {b_generated, {a, {from_a, ok}}}},
+                 macro_uniform_test:generated_chain()),
+    ok.
+
+test_uniform_direct_macro_function_call(_Config) ->
+    ?assertEqual({a_direct, {b, {from_b, ok}}}, macro_uniform_test:direct_macro_function_call()),
+    ok.
+
+test_uniform_attribute_generates_local_macro(_Config) ->
+    ?assertEqual({a, {from_a, attribute_generated}}, macro_uniform_test:attribute_generated_local_macro()),
+    ok.
+
+test_uniform_local_generates_external(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_uniform_test:local_generates_external()),
+    ok.
+
+test_uniform_macro_override_error(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_override_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro,
+         {macro_override,
+          {same_name, 1},
+          #{macro_module := macro_uniform_a, function := to_a, arity := 1},
+          #{macro_module := macro_uniform_override_error_test, function := same_name, arity := 1}}}],
+       Errors),
+    ok.
+
+test_uniform_local_force_override(_Config) ->
+    ?assertEqual({local_same_name, ok}, macro_uniform_override_test:same_name_call()),
+    ok.
+
+test_uniform_macro_error(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, macro_uniform_a,
+         {uniform_a_error,
+          {tuple, _,
+           [{atom, _, b},
+            {tuple, _, [{atom, _, from_b}, {atom, _, ok}]}]}}}],
+       Errors),
+    ok.
+
+test_uniform_macro_max_depth(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_depth_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro,
+         {max_macro_expansion_depth_exceeded,
+          {macro_uniform_a, recurse_a},
+          [{integer, _, 12}]}}],
+       Errors),
     ok.
