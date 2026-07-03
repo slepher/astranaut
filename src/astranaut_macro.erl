@@ -280,47 +280,48 @@ is_loaded(Module) ->
     code:is_loaded(Module).
 
 local_macros(Module, File, GlobalMacroOpts, ExternalMacroMap, ExportedMacros, ClauseMap, Forms) ->
-    FormsProp = erl_syntax_lib:analyze_forms(Forms),
-    Functions = proplists:get_value(functions, FormsProp, []),
-    GlobalMacroOpts1 = formatter_opts(local_macro_module(Module), Functions, GlobalMacroOpts),
-    ExportedMacroMap = local_macro_map(File, Module, Forms, GlobalMacroOpts1, ExportedMacros),
+    GlobalMacroOpts1 = local_macro_global_opts(Module, ClauseMap, GlobalMacroOpts),
+    Ctx = #{module => Module,
+            file => File,
+            forms => Forms,
+            global_macro_opts => GlobalMacroOpts1,
+            external_macro_map => ExternalMacroMap,
+            clause_map => ClauseMap},
+    ExportedMacroMap = build_local_macro_map(Ctx, ExportedMacros),
     astranaut_lib:forms_with_attribute(
       fun(Attr, Acc, #{pos := Pos}) ->
-              update_local_macros(
-                File, Module, Forms, GlobalMacroOpts1, ExternalMacroMap,
-                ClauseMap, Pos, Attr, Acc)
+              update_local_macro_attribute(Ctx, Pos, Attr, Acc)
       end, ExportedMacroMap, Forms, local_macro, #{formatter => ?MODULE}).
 
-update_local_macros(File, Module, Forms, GlobalMacroOpts, ExternalMacroMap, ClauseMap, Pos, Attr, Acc) ->
+update_local_macro_attribute(Ctx, Pos, Attr, Acc) ->
+    do([ return ||
+           {FAs, Options} <- validate_local_macro_attribute(Ctx, Attr),
+           update_local_macros(Ctx, Pos, FAs, Options, Acc)
+       ]).
+
+validate_local_macro_attribute(#{clause_map := ClauseMap}, Attr) ->
     do([ return ||
            Validator = macro_definition_valitor(),
            {FAs, Options} <- validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
            FAs1 <- remove_undefined_macros(FAs, ClauseMap),
-           update_local_macros(File, Module, Forms, GlobalMacroOpts, ExternalMacroMap, Pos, FAs, FAs1, Options, Acc)
+           return({FAs1, Options})
        ]).
 
-update_local_macros(_File, _Module, _Forms, _GlobalMacroOpts, _ExternalMacroMap, _Pos, _FAs, [], _Options, Acc) ->
+update_local_macros(_Ctx, _Pos, [], _Options, Acc) ->
     astranaut_return:return({[], Acc});
-update_local_macros(File, Module, Forms, GlobalMacroOpts, ExternalMacroMap, Pos, FAs, FAs1, Options, Acc) ->
+update_local_macros(Ctx, Pos, FAs, Options, Acc) ->
     do([ return ||
            NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
-           Acc1 <-
-               astranaut_return:foldl_m(
-                 fun({Function, Arity}, Acc0) ->
-                         put_local_macro(File, Module, Forms, GlobalMacroOpts, ExternalMacroMap,
-                                         Function, Arity, Options, Acc0)
-                 end, Acc, FAs1),
-           return({[NoWarnNodes], Acc1})
-       ]).
-
-put_local_macro(File, Module, Forms, GlobalMacroOpts, ExternalMacroMap, Function, Arity, Options, Acc) ->
-    do([ return ||
-           CurrentMacroMap = local_macro_map(File, Module, Forms, GlobalMacroOpts, Function, Arity, Options),
+           CurrentMacroMap = build_local_macro_map(Ctx, macro_options_by_fa(FAs, Options)),
+           #{external_macro_map := ExternalMacroMap} = Ctx,
            assert_macro_map_no_overrides(CurrentMacroMap, ExternalMacroMap),
-           return(maps:merge(Acc, CurrentMacroMap))
+           return({[NoWarnNodes], maps:merge(Acc, CurrentMacroMap)})
        ]).
 
-local_macro_map(File, Module, Forms, GlobalMacroOpts, ModuleMacros) ->
+build_local_macro_map(#{file := File,
+                        module := Module,
+                        forms := Forms,
+                        global_macro_opts := GlobalMacroOpts}, ModuleMacros) ->
     LocalModuleMacros =
         maps:map(
           fun({Function, Arity}, MacroOptions) ->
@@ -328,8 +329,16 @@ local_macro_map(File, Module, Forms, GlobalMacroOpts, ModuleMacros) ->
           end, ModuleMacros),
     update_module_macros(File, Module, Forms, LocalModuleMacros).
 
-local_macro_map(File, Module, Forms, GlobalMacroOpts, Function, Arity, MacroOptions) ->
-    local_macro_map(File, Module, Forms, GlobalMacroOpts, #{{Function, Arity} => MacroOptions}).
+macro_options_by_fa(FAs, Options) ->
+    lists:foldl(fun(FA, Acc) -> maps:put(FA, Options, Acc) end, #{}, FAs).
+
+local_macro_global_opts(Module, ClauseMap, GlobalMacroOpts) ->
+    case maps:is_key({format_error, 1}, ClauseMap) of
+        true ->
+            GlobalMacroOpts#{formatter => local_macro_module(Module)};
+        false ->
+            GlobalMacroOpts#{formatter => astranaut_macro}
+    end.
 
 local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
     MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
