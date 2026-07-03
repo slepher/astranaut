@@ -32,6 +32,7 @@ init_per_suite(Config) ->
     TestModules = [macro_exports, macro_example,
                    macro_uniform_a, macro_uniform_b, macro_uniform_test,
                    macro_uniform_override_test,
+                   macro_uniform_import_force_override_test,
                    macro_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 %%--------------------------------------------------------------------
@@ -119,7 +120,9 @@ all() ->
      test_uniform_outer_macro, test_uniform_generated_macro_chain,
      test_uniform_direct_macro_function_call, test_uniform_attribute_generates_local_macro,
      test_uniform_local_generates_external, test_uniform_macro_override_error,
-     test_uniform_local_force_override, test_uniform_macro_error,
+     test_uniform_import_override_error, test_uniform_local_force_override,
+     test_uniform_import_force_override,
+     test_uniform_macro_error,
      test_uniform_macro_max_depth].
 
 %%--------------------------------------------------------------------
@@ -303,7 +306,7 @@ test_uniform_macro_override_error(Config) ->
     ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
     {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
-       [{3, astranaut_macro,
+       [{2, astranaut_macro,
          {macro_override,
           {same_name, 1},
           #{macro_module := macro_uniform_a, function := to_a, arity := 1},
@@ -311,8 +314,26 @@ test_uniform_macro_override_error(Config) ->
        Errors),
     ok.
 
+test_uniform_import_override_error(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_import_override_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{2, astranaut_macro,
+         {macro_override,
+          {same_name, 1},
+          #{macro_module := macro_uniform_a, function := to_a, arity := 1},
+          #{macro_module := macro_uniform_b, function := to_b, arity := 1}}}],
+       Errors),
+    ok.
+
 test_uniform_local_force_override(_Config) ->
     ?assertEqual({local_same_name, ok}, macro_uniform_override_test:same_name_call()),
+    ok.
+
+test_uniform_import_force_override(_Config) ->
+    ?assertEqual({b, {from_b, ok}}, macro_uniform_import_force_override_test:same_name_call()),
     ok.
 
 test_uniform_macro_error(Config) ->

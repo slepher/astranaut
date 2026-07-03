@@ -25,3 +25,5 @@
 - [x] Add a test where an external attribute macro generates a local macro discovered by the new flow.
 - [x] Add a test where a local macro name collides with an external alias and reports macro_override.
 - [x] Add a test where force_override permits an intentional local macro override.
+- [x] Add a test where an imported alias collision reports macro_override.
+- [x] Add a test where force_override permits an intentional imported alias override.

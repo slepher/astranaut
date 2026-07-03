@@ -123,7 +123,7 @@ parse_transform(Forms, Options) ->
              %% load macros from attributes and transform -export_macro to -exported_macro
              %% -exported_macro is validated -export_macro attribute.
              %% add nowarn_unused_function compile options to -local_macro if it's not exported
-             {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms1),
+             {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts, ExternalMacroMap, Forms1),
              Forms3 <- transform_uniform_macros(Module, ExternalMacroMap, LocalMacros, Forms2, Options),
              format_forms(Forms3, GlobalMacroOpts),
              return(Forms3)
@@ -179,11 +179,11 @@ load_imported_macro_attributes(Module, File, Forms) ->
            return({ImportedModules, UsedMacros, GlobalMacroOpts})
        ]).
 
-load_local_macro_attributes(Module, File, GlobalMacroOpts, Forms) ->
+load_local_macro_attributes(Module, File, GlobalMacroOpts, ExternalMacroMap, Forms) ->
     do([ return ||
            ClausesMap = function_clauses_map(Forms, maps:new()),
            {Forms1, ExportedMacros} <- exported_macros(Forms, ClausesMap),
-           {Forms2, LocalMacros} <- local_macros(Module, GlobalMacroOpts, ExportedMacros, ClausesMap, Forms1),
+           {Forms2, LocalMacros} <- local_macros(Module, File, GlobalMacroOpts, ExternalMacroMap, ExportedMacros, ClausesMap, Forms1),
            LocalMacros1 = update_module_macros(File, Module, Forms2, LocalMacros),
            return({Forms2, LocalMacros1})
        ]).
@@ -281,7 +281,7 @@ is_loaded(Module) ->
     code:ensure_loaded(Module),
     code:is_loaded(Module).
 
-local_macros(Module, GlobalMacroOpts, ExportedMacros, ClauseMap, Forms) ->
+local_macros(Module, File, GlobalMacroOpts, ExternalMacroMap, ExportedMacros, ClauseMap, Forms) ->
     FormsProp = erl_syntax_lib:analyze_forms(Forms),
     Functions = proplists:get_value(functions, FormsProp, []),
     GlobalMacroOpts1 = formatter_opts(local_macro_module(Module), Functions, GlobalMacroOpts),
@@ -289,12 +289,7 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, ClauseMap, Forms) ->
       fun({Forms1, LocalMacros}) ->
               {Forms1, maps:map(
                          fun({Function, Arity}, MacroOptions) ->
-                                 MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
-                                 MacroOptions1#{module => local_macro_module(Module),
-                                                macro_module => Module,
-                                                macro => Function,
-                                                function => Function,
-                                                arity => Arity}
+                                 local_macro_options(Module, GlobalMacroOpts1, Function, Arity, MacroOptions)
                          end, LocalMacros)}
       end,
       astranaut_lib:forms_with_attribute(
@@ -308,18 +303,51 @@ local_macros(Module, GlobalMacroOpts, ExportedMacros, ClauseMap, Forms) ->
                            [] ->
                                astranaut_return:return({[], Acc});
                            _ ->
-                               NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
-                               Acc2 = 
-                                   lists:foldl(
-                                     fun({Function, Arity}, Acc1) ->
-                                             Options1 = maps:get({Function, Arity}, Acc1, #{}),
-                                             Options2 = maps:merge(Options1, Options),
-                                             maps:put({Function, Arity}, Options2, Acc1)
-                                     end, Acc, FAs),
-                               return({[NoWarnNodes], Acc2})
+                               do([ return ||
+                                      NoWarnNodes = astranaut_lib:gen_attribute_node(compile, Pos, {nowarn_unused_function, FAs}),
+                                      Acc2 <-
+                                          astranaut_return:foldl_m(
+                                            fun({Function, Arity}, Acc1) ->
+                                                    do([ return ||
+                                                           Options1 = maps:get({Function, Arity}, Acc1, #{}),
+                                                           Options2 = maps:merge(Options1, Options),
+                                                           assert_local_macro_no_overrides(
+                                                             File, Module, Forms, GlobalMacroOpts1,
+                                                             Function, Arity, Options2, ExternalMacroMap),
+                                                           return(maps:put({Function, Arity}, Options2, Acc1))
+                                                       ])
+                                            end, Acc, FAs1),
+                                      return({[NoWarnNodes], Acc2})
+                                  ])
                        end
                    ])
         end, ExportedMacros, Forms, local_macro, #{formatter => ?MODULE})).
+
+local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
+    MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
+    MacroOptions1#{module => local_macro_module(Module),
+                   macro_module => Module,
+                   macro => Function,
+                   function => Function,
+                   arity => Arity}.
+
+assert_local_macro_no_overrides(File, Module, Forms, GlobalMacroOpts, Function, Arity, MacroOptions, ExternalMacroMap) ->
+    LocalMacroOptions = local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions),
+    LocalMacroMap = update_module_macros(File, Module, Forms, #{{Function, Arity} => LocalMacroOptions}),
+    astranaut_return:foldl_m(
+      fun({MacroKey, Macro}, ok) ->
+              case maps:find(MacroKey, ExternalMacroMap) of
+                  {ok, ExistingMacro} ->
+                      case maps:get(force_override, Macro, false) of
+                          true ->
+                              astranaut_return:return(ok);
+                          false ->
+                              macro_override_fail(MacroKey, ExistingMacro, Macro)
+                      end;
+                  error ->
+                      astranaut_return:return(ok)
+              end
+      end, ok, maps:to_list(LocalMacroMap)).
 
 update_module_macros(File, Module, Forms, ModuleMacros) ->
     maps:fold(
@@ -351,7 +379,10 @@ used_macros(File, Module, ImportedMacros, Forms) ->
                                    {ok, ModuleMacros} ->
                                        do([ return ||
                                               ModuleMacros1 <- update_used_macros(ImportedModule, FAs, Options, ModuleMacros),
-                                              return(maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc))
+                                              UsedMacrosAcc1 = maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc),
+                                              assert_used_macro_no_overrides(
+                                                File, Module, Forms, ImportedModule, FAs, UsedMacrosAcc1),
+                                              return(UsedMacrosAcc1)
                                           ]);
                                    error ->
                                        astranaut_return:error_fail({unimported_macro_module, ImportedModule})
@@ -365,6 +396,49 @@ used_macros(File, Module, ImportedMacros, Forms) ->
                        end
                    ])
         end, ImportedMacros, Forms, use_macro, #{formatter => ?MODULE})).
+
+assert_used_macro_no_overrides(File, Module, Forms, ImportedModule, FAs, UsedMacros) ->
+    astranaut_return:foldl_m(
+      fun(FA, ok) ->
+              ModuleMacros = maps:get(ImportedModule, UsedMacros, #{}),
+              case maps:find(FA, ModuleMacros) of
+                  {ok, MacroOptions} ->
+                      MacroMap = update_module_macros(File, Module, Forms, #{FA => MacroOptions}),
+                      ExistingMacroMap = imported_macro_map_except(File, Module, Forms, UsedMacros, ImportedModule, FA),
+                      assert_macro_map_no_overrides(MacroMap, ExistingMacroMap);
+                  error ->
+                      astranaut_return:return(ok)
+              end
+      end, ok, FAs).
+
+imported_macro_map_except(File, Module, Forms, UsedMacros, ImportedModule, FA) ->
+    UsedMacros1 =
+        case maps:find(ImportedModule, UsedMacros) of
+            {ok, ModuleMacros} ->
+                maps:put(ImportedModule, maps:remove(FA, ModuleMacros), UsedMacros);
+            error ->
+                UsedMacros
+        end,
+    maps:fold(
+      fun(_MacroModule, ModuleMacros, Acc) ->
+              maps:merge(Acc, update_module_macros(File, Module, Forms, ModuleMacros))
+      end, #{}, UsedMacros1).
+
+assert_macro_map_no_overrides(MacroMap, ExistingMacroMap) ->
+    astranaut_return:foldl_m(
+      fun({MacroKey, Macro}, ok) ->
+              case maps:find(MacroKey, ExistingMacroMap) of
+                  {ok, ExistingMacro} ->
+                      case maps:get(force_override, Macro, false) of
+                          true ->
+                              astranaut_return:return(ok);
+                          false ->
+                              macro_override_fail(MacroKey, ExistingMacro, Macro)
+                      end;
+                  error ->
+                      astranaut_return:return(ok)
+              end
+      end, ok, maps:to_list(MacroMap)).
 
 update_used_macros(Module, FAs, UsedMacroOptions, MacroMap) ->
     astranaut_return:foldl_m(
@@ -558,36 +632,18 @@ transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, Forms, Compile
                        LocalMacroFunctions
                end,
            LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           assert_no_macro_overrides(ExternalMacroMap, LocalMacroMap, Forms),
            load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts),
            FinalMacroMap <- merge_macro_maps(ExternalMacroMap, LocalMacroMap),
-           FinalAttributeMacroMap = attribute_macro_map(FinalMacroMap),
-           Forms2 <- transform_attribute_macros(FinalMacroMap, FinalAttributeMacroMap, Forms),
+           Forms2 <- transform_attribute_macros(FinalMacroMap, Forms),
            FinalMacroCallers = find_function_macro_callers(Forms2, FinalMacroMap, LocalMacroRelatedFunctions),
            transform_functions(Module, FinalMacroMap, Forms2, FinalMacroCallers)
        ]).
-
-assert_no_macro_overrides(ExistingMacroMap, OverridingMacroMap, Forms) ->
-    astranaut_return:foldl_m(
-      fun({MacroKey, Macro}, ok) ->
-              case maps:find(MacroKey, ExistingMacroMap) of
-                  {ok, ExistingMacro} ->
-                      case maps:get(force_override, Macro, false) of
-                          true ->
-                              astranaut_return:return(ok);
-                          false ->
-                              macro_override_fail(MacroKey, ExistingMacro, Macro, Forms)
-                      end;
-                  error ->
-                      astranaut_return:return(ok)
-              end
-      end, ok, maps:to_list(OverridingMacroMap)).
 
 uniform_macro_map(MacroModules, ModuleMacroMap) ->
     astranaut_return:foldl_m(
       fun(MacroModule, Acc) ->
               MacroMap = maps:get(MacroModule, ModuleMacroMap, #{}),
-              merge_macro_maps(MacroMap, Acc)
+              merge_macro_maps(Acc, MacroMap)
       end, #{}, MacroModules).
 
 merge_macro_maps(First, Second) ->
@@ -607,55 +663,7 @@ merge_macro_maps(First, Second) ->
       end, First, maps:to_list(Second)).
 
 macro_override_fail(MacroKey, ExistingMacro, OverridingMacro) ->
-    macro_override_fail(MacroKey, ExistingMacro, OverridingMacro, []).
-
-macro_override_fail(MacroKey, ExistingMacro, OverridingMacro, Forms) ->
-    Reason = {macro_override, MacroKey, ExistingMacro, OverridingMacro},
-    case macro_error_file_pos(MacroKey, ExistingMacro, OverridingMacro, Forms) of
-        {File, Pos} ->
-            Error = astranaut_error:append_file_errors(
-                      [{File, [{Pos, ?MODULE, Reason}]}], astranaut_error:new()),
-            astranaut_return:fail(Error);
-        undefined ->
-            astranaut_return:error_fail(Reason)
-    end.
-
-macro_error_file_pos(MacroKey, ExistingMacro, OverridingMacro, Forms) ->
-    File = maps:get(file, OverridingMacro, maps:get(file, ExistingMacro, undefined)),
-    Pos = first_macro_call_pos(MacroKey, Forms),
-    case {File, Pos} of
-        {undefined, _} ->
-            undefined;
-        {_, undefined} ->
-            case maps:get(pos, OverridingMacro, maps:get(pos, ExistingMacro, undefined)) of
-                undefined -> undefined;
-                MacroPos -> {File, MacroPos}
-            end;
-        _ ->
-            {File, Pos}
-    end.
-
-first_macro_call_pos(MacroKey, Forms) ->
-    astranaut:sreduce(
-      fun(_Node, Pos) when Pos =/= undefined ->
-              Pos;
-         (Node, undefined) ->
-              macro_call_pos(MacroKey, Node)
-      end, undefined, Forms, #{traverse => pre}).
-
-macro_call_pos({Function, Arity}, {call, Pos, {atom, _Pos2, Function}, Arguments})
-  when length(Arguments) =:= Arity ->
-    Pos;
-macro_call_pos({{Module, Function}, Arity},
-               {call, Pos, {remote, _Pos2, {atom, _Pos3, Module}, {atom, _Pos4, Function}}, Arguments})
-  when length(Arguments) =:= Arity ->
-    Pos;
-macro_call_pos(_MacroKey, _Node) ->
-    undefined.
-
-transform_external_attribute_macros(MacroMap, Forms) ->
-    AttributeMacroMap = attribute_macro_map(MacroMap),
-    transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, ignore_missing).
+    astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, OverridingMacro}).
 
 attribute_macro_map(MacroMap) ->
     AttributeMap =
@@ -724,8 +732,15 @@ append_if(Boolean, Form, Forms) ->
             Forms
     end.
 
-transform_attribute_macros(MacroMap, AttributeMacroMap, Forms) ->
-    transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, warn_missing).
+transform_external_attribute_macros(MacroMap, Forms) ->
+    transform_attribute_macros(MacroMap, Forms, ignore_missing).
+
+transform_attribute_macros(MacroMap, Forms) ->
+    transform_attribute_macros(MacroMap, Forms, warn_missing).
+
+transform_attribute_macros(MacroMap, Forms, MissingMode) ->
+    AttributeMacroMap = attribute_macro_map(MacroMap),
+    transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, MissingMode).
 
 transform_attribute_macros(MacroMap, AttributeMacroMap, Forms, MissingMode) ->
     Monad =
