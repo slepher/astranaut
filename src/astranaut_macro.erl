@@ -360,111 +360,95 @@ update_module_macros(File, Module, Forms, ModuleMacros) ->
       end, #{}, ModuleMacros).
 
 used_macros(File, Module, ImportedMacros, Forms) ->
-    astranaut_return:lift_m(
-      fun(UsedMacros2) ->
-              maps:map(
-                fun(_MacroModule, ModuleMacros) ->
-                        update_module_macros(File, Module, Forms, ModuleMacros)
-                end, UsedMacros2)
-      end,
-      astranaut_lib:with_attribute(
-        fun(Attr, UsedMacrosAcc) ->
-                do([ return ||
-                       Validator = use_macro_validator(),
-                       {MFAs, Options}
-                           <- validate_macro_attribute(fun macro_attr/1, Validator, use_macro, Attr),
-                       case MFAs of
-                           {ImportedModule, FAs} ->
-                               case maps:find(ImportedModule, UsedMacrosAcc) of
-                                   {ok, ModuleMacros} ->
-                                       do([ return ||
-                                              ModuleMacros1 <- update_used_macros(ImportedModule, FAs, Options, ModuleMacros),
-                                              UsedMacrosAcc1 = maps:put(ImportedModule, ModuleMacros1, UsedMacrosAcc),
-                                              assert_used_macro_no_overrides(
-                                                File, Module, Forms, ImportedModule, FAs, UsedMacrosAcc1),
-                                              return(UsedMacrosAcc1)
-                                          ]);
-                                   error ->
-                                       astranaut_return:error_fail({unimported_macro_module, ImportedModule})
-                               end;
-                           FAs ->
-                               do([ return ||
-                                      LocalMacrosAcc = maps:get(Module, UsedMacrosAcc),
-                                      LocalMacrosAcc1 <- update_local_used_macros(FAs, Options, LocalMacrosAcc),
-                                      return(maps:put(Module, LocalMacrosAcc1, UsedMacrosAcc))
-                                  ])
-                       end
-                   ])
-        end, ImportedMacros, Forms, use_macro, #{formatter => ?MODULE})).
+    ImportedMacroMap = effective_module_macro_maps(File, Module, Forms, ImportedMacros),
+    astranaut_lib:with_attribute(
+      fun(Attr, UsedMacroMapAcc) ->
+              do([ return ||
+                     Validator = use_macro_validator(),
+                     {MFAs, Options}
+                         <- validate_macro_attribute(fun macro_attr/1, Validator, use_macro, Attr),
+                     case MFAs of
+                         {ImportedModule, FAs} ->
+                             case maps:is_key(ImportedModule, UsedMacroMapAcc) of
+                                 true ->
+                                     update_used_macro_maps(
+                                       File, Module, Forms, ImportedModule, FAs, Options,
+                                       UsedMacroMapAcc,
+                                       fun({Function, Arity}) ->
+                                               {macro_not_exported, {ImportedModule, Function, Arity}}
+                                       end);
+                                 false ->
+                                     astranaut_return:error_fail({unimported_macro_module, ImportedModule})
+                             end;
+                         FAs ->
+                             update_used_macro_maps(
+                               File, Module, Forms, Module, FAs, Options,
+                               UsedMacroMapAcc,
+                               fun({Function, Arity}) ->
+                                       {macro_not_defined, {Function, Arity}}
+                               end)
+                     end
+                 ])
+      end, ImportedMacroMap, Forms, use_macro, #{formatter => ?MODULE}).
 
-assert_used_macro_no_overrides(File, Module, Forms, ImportedModule, FAs, UsedMacros) ->
+effective_module_macro_maps(File, Module, Forms, ModuleMacros) ->
+    maps:map(
+      fun(_MacroModule, Macros) ->
+              update_module_macros(File, Module, Forms, Macros)
+      end, ModuleMacros).
+
+update_used_macro_maps(File, Module, Forms, MacroModule, FAs, UsedMacroOptions, UsedMacroMapAcc, MissingFun) ->
     astranaut_return:foldl_m(
-      fun(FA, ok) ->
-              ModuleMacros = maps:get(ImportedModule, UsedMacros, #{}),
-              case maps:find(FA, ModuleMacros) of
-                  {ok, MacroOptions} ->
-                      MacroMap = update_module_macros(File, Module, Forms, #{FA => MacroOptions}),
-                      ExistingMacroMap = imported_macro_map_except(File, Module, Forms, UsedMacros, ImportedModule, FA),
-                      assert_macro_map_no_overrides(MacroMap, ExistingMacroMap);
+      fun(FA, Acc) ->
+              ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
+              case find_used_macro(FA, ModuleMacroMap) of
+                  {ok, MacroKey, MacroOptions} ->
+                      MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
+                      MacroOptions2 = update_alias(MacroOptions1),
+                      CurrentMacroMap = update_module_macros(File, Module, Forms, #{FA => MacroOptions2}),
+                      ModuleMacroMapWithoutCurrent = maps:remove(MacroKey, ModuleMacroMap),
+                      ExistingUsedMacroMap = maps:put(MacroModule, ModuleMacroMapWithoutCurrent, Acc),
+                      ExistingMacroMap = uniform_imported_macro_map(ExistingUsedMacroMap),
+                      do([ return ||
+                             assert_macro_map_no_overrides(CurrentMacroMap, ExistingMacroMap),
+                             ModuleMacroMap1 = maps:merge(ModuleMacroMapWithoutCurrent, CurrentMacroMap),
+                             return(maps:put(MacroModule, ModuleMacroMap1, Acc))
+                         ]);
                   error ->
-                      astranaut_return:return(ok)
+                      astranaut_return:error_ok(MissingFun(FA), Acc)
               end
-      end, ok, FAs).
+      end, UsedMacroMapAcc, FAs).
 
-imported_macro_map_except(File, Module, Forms, UsedMacros, ImportedModule, FA) ->
-    UsedMacros1 =
-        case maps:find(ImportedModule, UsedMacros) of
-            {ok, ModuleMacros} ->
-                maps:put(ImportedModule, maps:remove(FA, ModuleMacros), UsedMacros);
-            error ->
-                UsedMacros
-        end,
+find_used_macro({Function, Arity}, ModuleMacroMap) ->
     maps:fold(
-      fun(_MacroModule, ModuleMacros, Acc) ->
-              maps:merge(Acc, update_module_macros(File, Module, Forms, ModuleMacros))
-      end, #{}, UsedMacros1).
+      fun(MacroKey, #{function := Function1, arity := Arity1} = MacroOptions, error)
+            when Function =:= Function1, Arity =:= Arity1 ->
+              {ok, MacroKey, MacroOptions};
+         (_MacroKey, _MacroOptions, Acc) ->
+              Acc
+      end, error, ModuleMacroMap).
 
 assert_macro_map_no_overrides(MacroMap, ExistingMacroMap) ->
     astranaut_return:foldl_m(
-      fun({MacroKey, Macro}, ok) ->
-              case maps:find(MacroKey, ExistingMacroMap) of
+      fun({MacroKey, Macro}, ExistingMacroMapAcc) ->
+              case maps:find(MacroKey, ExistingMacroMapAcc) of
                   {ok, ExistingMacro} ->
                       case maps:get(force_override, Macro, false) of
                           true ->
-                              astranaut_return:return(ok);
+                              astranaut_return:return(maps:put(MacroKey, Macro, ExistingMacroMapAcc));
                           false ->
                               macro_override_fail(MacroKey, ExistingMacro, Macro)
                       end;
                   error ->
-                      astranaut_return:return(ok)
+                      astranaut_return:return(maps:put(MacroKey, Macro, ExistingMacroMapAcc))
               end
-      end, ok, maps:to_list(MacroMap)).
+      end, ExistingMacroMap, maps:to_list(MacroMap)).
 
-update_used_macros(Module, FAs, UsedMacroOptions, MacroMap) ->
-    astranaut_return:foldl_m(
-      fun({Function, Arity}, Acc) ->
-              case maps:find({Function, Arity}, MacroMap) of
-                  {ok, MacroOptions} ->
-                      MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
-                      MacroOptions2 = update_alias(MacroOptions1),
-                      astranaut_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
-                  error ->
-                      astranaut_return:error_ok({macro_not_exported, {Module, Function, Arity}}, Acc)
-              end
-      end, MacroMap, FAs).
-
-update_local_used_macros(FAs, UsedMacroOptions, MacroMap) ->
-    astranaut_return:foldl_m(
-      fun({Function, Arity}, Acc) ->
-              case maps:find({Function, Arity}, Acc) of
-                  {ok, MacroOptions} ->
-                      MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
-                      MacroOptions2 = update_alias(MacroOptions1),
-                      astranaut_return:return(maps:put({Function, Arity}, MacroOptions2, Acc));
-                  error ->
-                      astranaut_return:error_ok({macro_not_defined, {Function, Arity}}, Acc)
-              end
-      end, MacroMap, FAs).
+uniform_imported_macro_map(UsedMacroMap) ->
+    maps:fold(
+      fun(_MacroModule, MacroMap, Acc) ->
+              maps:merge(Acc, MacroMap)
+      end, #{}, UsedMacroMap).
 
 update_alias(#{alias := true, function := Function} = Options) ->
     Options#{macro => Function};
