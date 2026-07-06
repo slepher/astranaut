@@ -122,6 +122,7 @@ all() ->
      test_uniform_local_generates_external, test_uniform_macro_override_error,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
+     test_use_macro_errors,
      test_uniform_macro_error,
      test_uniform_macro_max_depth].
 
@@ -334,6 +335,18 @@ test_uniform_local_force_override(_Config) ->
 
 test_uniform_import_force_override(_Config) ->
     ?assertEqual({b, {from_b, ok}}, macro_uniform_import_force_override_test:same_name_call()),
+    ok.
+
+test_use_macro_errors(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_use_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro, {unexported_macro, macro_uniform_a, missing_export, 1}},
+        {4, astranaut_macro, {undefined_macro, missing_local, 0}},
+        {5, astranaut_macro, {invalid_function_with_arity, {bad_arity, -1}}}],
+       Errors),
     ok.
 
 test_uniform_macro_error(Config) ->

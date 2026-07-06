@@ -212,7 +212,7 @@ exported_macros(Forms, ClausesMap) ->
     astranaut_lib:forms_with_attribute(
       fun(Attr, Acc, #{pos := Pos}) ->
               do([ return ||
-                     Validator = macro_definition_valitor(),
+                     Validator = macro_definition_validator(),
                      {FAs, Options} <-
                          validate_macro_attribute(fun macro_without_module_attr/1, Validator, export_macro, Attr),
                      FAs1 <- remove_undefined_macros(FAs, ClausesMap),
@@ -301,7 +301,7 @@ update_local_macro_attribute(Ctx, Pos, Attr, Acc) ->
 
 validate_local_macro_attribute(#{clause_map := ClauseMap}, Attr) ->
     do([ return ||
-           Validator = macro_definition_valitor(),
+           Validator = macro_definition_validator(),
            {FAs, Options} <- validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
            FAs1 <- remove_undefined_macros(FAs, ClauseMap),
            return({FAs1, Options})
@@ -374,7 +374,7 @@ used_macros(File, Module, ImportedMacros, Forms) ->
                                        File, Module, Forms, ImportedModule, FAs, Options,
                                        UsedMacroMapAcc,
                                        fun({Function, Arity}) ->
-                                               {macro_not_exported, {ImportedModule, Function, Arity}}
+                                               {unexported_macro, ImportedModule, Function, Arity}
                                        end);
                                  false ->
                                      astranaut_return:error_fail({unimported_macro_module, ImportedModule})
@@ -384,7 +384,7 @@ used_macros(File, Module, ImportedMacros, Forms) ->
                                File, Module, Forms, Module, FAs, Options,
                                UsedMacroMapAcc,
                                fun({Function, Arity}) ->
-                                       {macro_not_defined, {Function, Arity}}
+                                       {undefined_macro, Function, Arity}
                                end)
                      end
                  ])
@@ -546,7 +546,7 @@ global_macro_validator() ->
       max_depth => [uinteger, {default, 100}]
      }.
 
-macro_definition_valitor() ->
+macro_definition_validator() ->
     #{as_attr => atom,
       order => {one_of, [outer, inner]},
       inject_attrs => {'or', [atom, {list_of, atom}]},
@@ -560,7 +560,7 @@ validate_mfas({Module, FAs}) when is_atom(Module) ->
 validate_mfas(FAs) when is_list(FAs) ->
     validate_fas(FAs).
 
-validate_fas([{Function, Arity}|T]) when is_atom(Function), is_integer(Arity) ->
+validate_fas([{Function, Arity}|T]) when is_atom(Function), is_integer(Arity), Arity >= 0 ->
     validate_fas(T);
 validate_fas([FA|_T]) ->
     astranaut_return:error_fail({invalid_function_with_arity, FA});
