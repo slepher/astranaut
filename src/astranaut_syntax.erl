@@ -14,6 +14,7 @@
 -export([type/1, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
 -export([subtrees_pge/3, attribute_subtrees_type/3]).
+-export([validate/2, validate/3, child_specs/3, node_roles/1]).
 -export([pattern_node/1, guard_node/1, expression_node/1, update_node/2]).
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
@@ -121,21 +122,8 @@ name_arity_value(atom, NameTree) ->
 name_arity_value(integer, ArityTree) ->
     erl_syntax:integer_value(ArityTree).
 
-subtrees_pge(_Type, Subtrees, #{node := pattern}) ->
-    Subtrees;
-subtrees_pge(named_fun_expr, [Names, Clauses], #{}) ->
-    [pattern_node(Names), Clauses];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= match_expr; Type =:= maybe_match_expr; Type =:= clause ->
-    [pattern_node(Patterns), expression_node(Expressions)];
-subtrees_pge(clause, [Patterns, Guards, Expressions], #{}) ->
-    [pattern_node(Patterns), guard_node(Guards), expression_node(Expressions)];
-subtrees_pge(Type, [Patterns, Expressions], #{}) when Type =:= generator; Type =:= strict_generator;
-                                                      Type =:= binary_generator; Type =:= strict_binary_generator;
-                                                      Type =:= map_generator; Type =:= strict_map_generator ->
-    [pattern_node(Patterns), expression_node(Expressions)];
-
-subtrees_pge(_Type, Subtrees, #{}) ->
-    Subtrees.
+subtrees_pge(Type, Subtrees, Attr) ->
+    child_specs_subtrees(child_specs(Type, Subtrees, Attr)).
 
 attribute_subtrees_type(attribute, [[NameTree], BodyTrees], #{}) ->
     Name = erl_syntax:atom_value(NameTree),
@@ -175,6 +163,280 @@ attribute(Attribute, Subtree) ->
 
 update_node(Node, Subtree) ->
     astranaut_uniplate:up_attr(#{node => Node}, Subtree).
+
+%%===================================================================
+%% syntax validation functions
+%%===================================================================
+-spec validate(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], atom()) ->
+          ok | {error, map()}.
+validate(NodeOrNodes, ExpectedRole) ->
+    validate(NodeOrNodes, ExpectedRole, #{}).
+
+-spec validate(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], atom(), map()) ->
+          ok | {error, map()}.
+validate(NodeOrNodes, ExpectedRole, Opts) ->
+    Attr = maps:get(attr, Opts, #{}),
+    validate_nodes(NodeOrNodes, ExpectedRole, root, Attr, []).
+
+validate_nodes(Nodes, ExpectedRole, Slot, Attr, Path) when is_list(Nodes) ->
+    validate_node_list(Nodes, ExpectedRole, Slot, Attr, Path, 1);
+validate_nodes(Node, ExpectedRole, Slot, Attr, Path) ->
+    validate_node(Node, ExpectedRole, Slot, Attr, Path).
+
+validate_node_list([Node|Nodes], ExpectedRole, Slot, Attr, Path, Index) ->
+    Path1 = Path ++ [path_item(Slot, Index, ExpectedRole, Node)],
+    case validate_node(Node, ExpectedRole, Slot, Attr, Path1) of
+        ok ->
+            validate_node_list(Nodes, ExpectedRole, Slot, Attr, Path, Index + 1);
+        {error, Error} ->
+            {error, Error}
+    end;
+validate_node_list([], _ExpectedRole, _Slot, _Attr, _Path, _Index) ->
+    ok.
+
+validate_node(Node, ExpectedRole, Slot, Attr, Path) ->
+    case node_info(Node) of
+        {ok, Type, Pos, Subtrees} ->
+            case role_allowed(Type, ExpectedRole) of
+                true ->
+                    validate_child_specs(Type, Pos, child_specs(Type, Subtrees, Attr), Path);
+                false ->
+                    {error, invalid_role_error(ExpectedRole, Slot, Type, Pos, Node, Path)}
+            end;
+        {error, Exception} ->
+            {error, invalid_node_error(ExpectedRole, Slot, Node, Exception, Path)}
+    end.
+
+node_info(Node) ->
+    case Node of
+        {uniplate_node_context, Node1, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits} ->
+            node_info(Node1);
+        _ ->
+            node_info_1(Node)
+    end.
+
+node_info_1(Node) ->
+    try
+        Type = type(Node),
+        Pos = get_pos(Node),
+        Subtrees = subtrees(Node),
+        _Reverted = revert(Node),
+        {ok, Type, Pos, Subtrees}
+    catch
+        Class:Reason ->
+            {error, {Class, Reason}}
+    end.
+
+validate_child_specs(ParentType, ParentPos, [Spec|Specs], Path) ->
+    #{slot := Slot, role := Role, nodes := Nodes, attr := Attr} = Spec,
+    case validate_nodes(Nodes, Role, Slot, Attr, Path) of
+        ok ->
+            validate_child_specs(ParentType, ParentPos, Specs, Path);
+        {error, Error} ->
+            {error, Error#{parent_type => ParentType, parent_pos => ParentPos}}
+    end;
+validate_child_specs(_ParentType, _ParentPos, [], _Path) ->
+    ok.
+
+invalid_role_error(ExpectedRole, Slot, Type, Pos, Node, Path) ->
+    #{reason => invalid_role,
+      expected_role => ExpectedRole,
+      slot => Slot,
+      actual_type => Type,
+      pos => Pos,
+      node => Node,
+      path => Path}.
+
+invalid_node_error(ExpectedRole, Slot, Node, Exception, Path) ->
+    #{reason => invalid_node,
+      expected_role => ExpectedRole,
+      slot => Slot,
+      node => Node,
+      exception => Exception,
+      path => Path}.
+
+path_item(Slot, Index, ExpectedRole, Node) ->
+    Item0 = #{slot => Slot, index => Index, expected_role => ExpectedRole},
+    case node_info(Node) of
+        {ok, Type, Pos, _Subtrees} ->
+            Item0#{type => Type, pos => Pos};
+        {error, _Exception} ->
+            Item0#{type => invalid}
+    end.
+
+role_allowed(Type, ExpectedRole) ->
+    (ExpectedRole =:= attribute_body) orelse lists:member(ExpectedRole, node_roles(Type)).
+
+-spec node_roles(atom()) -> [atom()].
+node_roles(atom) -> [expression, pattern, guard, name];
+node_roles(char) -> [expression, pattern, guard];
+node_roles(float) -> [expression, pattern, guard];
+node_roles(integer) -> [expression, pattern, guard];
+node_roles(nil) -> [expression, pattern, guard, type];
+node_roles(string) -> [expression, pattern, guard];
+node_roles(variable) -> [expression, pattern, guard];
+node_roles(tuple) -> [expression, pattern, guard, type];
+node_roles(list) -> [expression, pattern, guard, type];
+node_roles(cons) -> [expression, pattern, guard, type];
+node_roles(binary) -> [expression, pattern, guard, type];
+node_roles(binary_field) -> [expression, pattern, guard];
+node_roles(map_expr) -> [expression, pattern, guard];
+node_roles(map_field_assoc) -> [expression, guard];
+node_roles(map_field_exact) -> [expression, pattern, guard];
+node_roles(record_expr) -> [expression, pattern, guard];
+node_roles(record_field) -> [expression, pattern, guard];
+node_roles(record_index_expr) -> [expression, guard];
+node_roles(application) -> [expression, guard];
+node_roles(module_qualifier) -> [expression, guard];
+node_roles(infix_expr) -> [expression, guard];
+node_roles(prefix_expr) -> [expression, guard];
+node_roles(operator) -> [expression, guard];
+node_roles(underscore) -> [pattern];
+node_roles(class_qualifier) -> [pattern];
+node_roles(match_expr) -> [expression];
+node_roles(maybe_match_expr) -> [expression];
+node_roles(case_expr) -> [expression];
+node_roles(if_expr) -> [expression];
+node_roles(receive_expr) -> [expression];
+node_roles(fun_expr) -> [expression];
+node_roles(named_fun_expr) -> [expression];
+node_roles(try_expr) -> [expression];
+node_roles(catch_expr) -> [expression];
+node_roles(block_expr) -> [expression];
+node_roles(parentheses) -> [expression, pattern, guard, type];
+node_roles(generator) -> [expression];
+node_roles(strict_generator) -> [expression];
+node_roles(binary_generator) -> [expression];
+node_roles(strict_binary_generator) -> [expression];
+node_roles(map_generator) -> [expression];
+node_roles(strict_map_generator) -> [expression];
+node_roles(clause) -> [clause];
+node_roles(function) -> [form];
+node_roles(attribute) -> [form];
+node_roles(eof_marker) -> [form];
+node_roles(error_marker) -> [form];
+node_roles(warning_marker) -> [form];
+node_roles(comment) -> [form];
+node_roles(text) -> [form];
+node_roles(form_list) -> [form];
+node_roles(type_application) -> [type];
+node_roles(type_union) -> [type];
+node_roles(type_fun) -> [type];
+node_roles(type_tuple) -> [type];
+node_roles(type_record) -> [type];
+node_roles(typed_record_field) -> [type];
+node_roles(type_binary) -> [type];
+node_roles(type_integer_range) -> [type];
+node_roles(type_map) -> [type];
+node_roles(type_map_field) -> [type];
+node_roles(user_type_application) -> [type];
+node_roles(remote_type) -> [type];
+node_roles(_) -> [].
+
+-spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [map()].
+child_specs(_Type, Subtrees, #{node := pattern} = Attr) ->
+    [child_spec(elements, pattern, Subtrees, Attr, false)];
+child_specs(named_fun_expr, [Names, Clauses], Attr) ->
+    [child_spec(name, pattern, Names, Attr, true),
+     child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(Type, [Patterns, Expressions], Attr) when Type =:= match_expr; Type =:= maybe_match_expr ->
+    [child_spec(left, pattern, Patterns, Attr, true),
+     child_spec(right, expression, Expressions, Attr, true)];
+child_specs(clause, [Patterns, Expressions], Attr) ->
+    [child_spec(patterns, pattern, Patterns, Attr, true),
+     child_spec(body, expression, Expressions, Attr, true)];
+child_specs(clause, [Patterns, Guards, Expressions], Attr) ->
+    [child_spec(patterns, pattern, Patterns, Attr, true),
+     child_spec(guards, guard, Guards, Attr, true),
+     child_spec(body, expression, Expressions, Attr, true)];
+child_specs(Type, [Patterns, Expressions], Attr) when Type =:= generator; Type =:= strict_generator;
+                                                      Type =:= binary_generator; Type =:= strict_binary_generator;
+                                                      Type =:= map_generator; Type =:= strict_map_generator ->
+    [child_spec(pattern, pattern, Patterns, Attr, true),
+     child_spec(expression, expression, Expressions, Attr, true)];
+child_specs(fun_expr, [Clauses], Attr) ->
+    [child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(case_expr, [Argument, Clauses], Attr) ->
+    [child_spec(argument, expression, Argument, Attr, false),
+     child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(if_expr, [Clauses], Attr) ->
+    [child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(receive_expr, [Clauses], Attr) ->
+    [child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(receive_expr, [Clauses, Timeout, Action], Attr) ->
+    [child_spec(clauses, clause, Clauses, Attr, false),
+     child_spec(timeout, expression, Timeout, Attr, false),
+     child_spec(action, expression, Action, Attr, false)];
+child_specs(try_expr, [Body, Clauses, Handlers, After], Attr) ->
+    [child_spec(body, expression, Body, Attr, false),
+     child_spec(clauses, clause, Clauses, Attr, false),
+     child_spec(handlers, clause, Handlers, Attr, false),
+     child_spec('after', expression, After, Attr, false)];
+child_specs(try_expr, [Body, Clauses, Handlers], Attr) ->
+    [child_spec(body, expression, Body, Attr, false),
+     child_spec(clauses, clause, Clauses, Attr, false),
+     child_spec(handlers, clause, Handlers, Attr, false)];
+child_specs(function, [Name, Clauses], Attr) ->
+    [child_spec(name, name, Name, Attr, false),
+     child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(function, [Clauses], Attr) ->
+    [child_spec(clauses, clause, Clauses, Attr, false)];
+child_specs(form_list, Subtrees, Attr) ->
+    [child_spec(forms, form, Subtrees, Attr, false)];
+child_specs(attribute, [[NameTree], BodyTrees], Attr) ->
+    Attribute = erl_syntax:atom_value(NameTree),
+    [child_spec(name, name, [NameTree], Attr, false),
+     child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr#{attribute => Attribute}, false)];
+child_specs(_Type, Subtrees, #{node := Role} = Attr) ->
+    [child_spec(elements, Role, Subtrees, Attr, false)];
+child_specs(_Type, Subtrees, Attr) ->
+    [child_spec(elements, expression, Subtrees, Attr, false)].
+
+child_spec(Slot, Role, Nodes, Attr, Annotate) ->
+    #{slot => Slot,
+      role => Role,
+      nodes => child_nodes(Nodes),
+      subtrees => Nodes,
+      annotate => Annotate,
+      attr => Attr#{node => Role}}.
+
+child_nodes([]) ->
+    [];
+child_nodes([Node|_Nodes] = Nodes) when is_tuple(Node) ->
+    Nodes;
+child_nodes([Node|_Nodes] = Nodes) ->
+    case erl_syntax:is_tree(Node) of
+        true ->
+            Nodes;
+        false ->
+            lists:append(Nodes)
+    end.
+
+attribute_body_role(record) -> attribute_body;
+attribute_body_role(type) -> type;
+attribute_body_role(opaque) -> type;
+attribute_body_role(spec) -> type;
+attribute_body_role(callback) -> type;
+attribute_body_role(_) -> attribute_body.
+
+child_specs_subtrees(Specs) ->
+    lists:append(lists:map(fun child_spec_subtreess/1, Specs)).
+
+child_spec_subtreess(#{slot := Slot, subtrees := Subtrees, annotate := false})
+  when Slot =:= elements; Slot =:= forms ->
+    Subtrees;
+child_spec_subtreess(#{subtrees := Subtrees, annotate := false}) ->
+    [Subtrees];
+child_spec_subtreess(#{role := Role, subtrees := Subtrees, annotate := true}) ->
+    [role_node(Role, Subtrees)].
+
+role_node(pattern, Nodes) -> pattern_node(Nodes);
+role_node(guard, Nodes) -> guard_node(Nodes);
+role_node(expression, Nodes) -> expression_node(Nodes);
+role_node(name, Nodes) -> name_node(Nodes);
+role_node(type, Nodes) -> type_node(Nodes);
+role_node(type_param, Nodes) -> type_param_node(Nodes);
+role_node(_Role, Nodes) -> Nodes.
 
 %%===================================================================
 %% update forms related functions

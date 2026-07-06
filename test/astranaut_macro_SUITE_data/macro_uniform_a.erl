@@ -8,7 +8,8 @@
 
 -export([format_error/1]).
 
--export_macro([to_a/1, gen_b/1, gen_b_to_a/1, direct_b/1, recurse_a/1, fail_after_b/1]).
+-export_macro([to_a/1, gen_b/1, gen_b_to_a/1, direct_b/1, recurse_a/1,
+               fail_after_b/1, gen_invalid/1, invalid_return/1]).
 -export_macro({[outer_capture/1], [{order, outer}]}).
 
 to_a(Ast) ->
@@ -19,6 +20,12 @@ gen_b(Ast) ->
 
 gen_b_to_a(Ast) ->
     quote({a_generated_chain, macro_uniform_b:gen_a(unquote(Ast))}).
+
+gen_invalid(Ast) ->
+    quote(macro_uniform_a:invalid_return(unquote(Ast))).
+
+invalid_return(_Ast) ->
+    {not_ast}.
 
 direct_b(Ast) ->
     B = macro_uniform_b:to_b(Ast),

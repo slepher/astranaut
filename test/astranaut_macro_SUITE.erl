@@ -124,6 +124,8 @@ all() ->
      test_uniform_import_force_override,
      test_use_macro_errors,
      test_uniform_macro_error,
+     test_uniform_macro_invalid_return,
+     test_uniform_local_macro_invalid_return,
      test_uniform_macro_max_depth].
 
 %%--------------------------------------------------------------------
@@ -360,6 +362,52 @@ test_uniform_macro_error(Config) ->
           {tuple, _,
            [{atom, _, b},
             {tuple, _, [{atom, _, from_b}, {atom, _, ok}]}]}}}],
+       Errors),
+    ok.
+
+test_uniform_macro_invalid_return(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_invalid_return_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro,
+         {invalid_macro_return,
+          #{macro := #{mfa := #{module := macro_uniform_a,
+                                function := invalid_return,
+                                arity := 1},
+                       ast := {call, _, _, _}},
+            reason := invalid_node,
+            expected_role := expression}}},
+        {6, astranaut_macro,
+         {invalid_macro_return,
+          #{origin_macro := #{mfa := #{module := macro_uniform_a,
+                                       function := gen_invalid,
+                                       arity := 1},
+                              ast := {call, _, _, _}},
+            current_macro := #{mfa := #{module := macro_uniform_a,
+                                        function := invalid_return,
+                                        arity := 1},
+                               ast := {call, _, _, _}},
+            reason := invalid_node,
+            expected_role := expression}}}],
+       Errors),
+    ok.
+
+test_uniform_local_macro_invalid_return(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_uniform_invalid_local_return_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro,
+         {invalid_macro_return,
+          #{macro := #{mfa := #{function := bad_local,
+                                arity := 0,
+                                local := true},
+                       ast := {call, _, _, _}},
+            reason := invalid_node,
+            expected_role := expression}}}],
        Errors),
     ok.
 
