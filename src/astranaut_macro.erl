@@ -667,32 +667,44 @@ load_local_macro_forms([], _LocalMacroRelatedFunctions, _ExternalMacroMap, _Form
     astranaut_return:return(ok);
 load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts) ->
     do([ return ||
-           LocalExternalMacroCallers = find_function_macro_callers(Forms, ExternalMacroMap, ordsets:new()),
-           LocalMacroRelatedFunctionIds = function_ids(LocalMacroRelatedFunctions),
-           LocalSnapshotMacroCallers = ordsets:intersection(LocalExternalMacroCallers, LocalMacroRelatedFunctionIds),
-           Forms0 <- transform_functions_if_needed(uniform, ExternalMacroMap, Forms, LocalSnapshotMacroCallers),
-           Forms1 =
-               lists:reverse(
-                 lists:foldl(
-                   fun({attribute, Pos, module, Module}, Acc) ->
-                           [{attribute, Pos, module, local_macro_module(Module)}|Acc];
-                      ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
-                           append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-                      ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
-                           append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-                      ({attribute,_Pos, export, _Exports}, Acc) ->
-                           Acc;
-                      (Node, Acc) ->
-                           [Node|Acc]
-                   end, [], Forms0)),
-           ExtraExports =
-               lists:foldl(
-                 fun(Export, Acc) ->
-                         [astranaut_lib:gen_exports([Export], 0)|Acc]
-                 end, [], LocalMacroFunctions),
-           Forms2 = astranaut_syntax:sort_forms(Forms1 ++ ExtraExports),
-           astranaut_lib:load_forms(Forms2, [without_warnings|CompileOpts])
+           Forms1 <- prepare_local_macro_snapshot(LocalMacroRelatedFunctions, ExternalMacroMap, Forms),
+           Forms2 = select_local_macro_forms(LocalMacroRelatedFunctions, Forms1),
+           compile_local_macro_forms(LocalMacroFunctions, Forms2, CompileOpts)
        ]).
+
+prepare_local_macro_snapshot(LocalMacroRelatedFunctions, ExternalMacroMap, Forms) ->
+    LocalSnapshotMacroCallers = local_macro_snapshot_callers(LocalMacroRelatedFunctions, ExternalMacroMap, Forms),
+    transform_functions_if_needed(uniform, ExternalMacroMap, Forms, LocalSnapshotMacroCallers).
+
+local_macro_snapshot_callers(LocalMacroRelatedFunctions, ExternalMacroMap, Forms) ->
+    LocalExternalMacroCallers = find_function_macro_callers(Forms, ExternalMacroMap, ordsets:new()),
+    LocalMacroRelatedFunctionIds = function_ids(LocalMacroRelatedFunctions),
+    ordsets:intersection(LocalExternalMacroCallers, LocalMacroRelatedFunctionIds).
+
+select_local_macro_forms(LocalMacroRelatedFunctions, Forms) ->
+    lists:reverse(
+      lists:foldl(
+        fun({attribute, Pos, module, Module}, Acc) ->
+                [{attribute, Pos, module, local_macro_module(Module)}|Acc];
+           ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
+                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+           ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
+                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+           ({attribute,_Pos, export, _Exports}, Acc) ->
+                Acc;
+           (Node, Acc) ->
+                [Node|Acc]
+        end, [], Forms)).
+
+compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts) ->
+    Forms1 = astranaut_syntax:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
+    astranaut_lib:load_forms(Forms1, [without_warnings|CompileOpts]).
+
+local_macro_exports(LocalMacroFunctions) ->
+    lists:foldl(
+      fun(Export, Acc) ->
+              [astranaut_lib:gen_exports([Export], 0)|Acc]
+      end, [], LocalMacroFunctions).
 
 function_ids(Functions) ->
     lists:foldl(
