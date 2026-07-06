@@ -420,6 +420,6 @@ test_uniform_macro_max_depth(Config) ->
        [{3, astranaut_macro,
          {max_macro_expansion_depth_exceeded,
           {macro_uniform_a, recurse_a},
-          [{integer, _, 12}]}}],
+           [{integer, _, 12}]}}],
        Errors),
     ok.

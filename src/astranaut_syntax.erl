@@ -273,13 +273,17 @@ role_allowed(Type, ExpectedRole) ->
                           parentheses]).
 
 -define(EXPR_GUARD, [application, module_qualifier, infix_expr, prefix_expr,
-                     operator, record_index_expr, map_field_assoc]).
+                     operator, record_index_expr, map_field_assoc,
+                     record_access]).
 
 -define(EXPR_ONLY, [match_expr, maybe_match_expr, case_expr, if_expr,
                     receive_expr, fun_expr, named_fun_expr, try_expr,
                     catch_expr, block_expr, generator, strict_generator,
                     binary_generator, strict_binary_generator,
-                    map_generator, strict_map_generator]).
+                    map_generator, strict_map_generator,
+                    implicit_fun, list_comp, binary_comp, map_comp,
+                    zip_generator, maybe_expr,
+                    arity_qualifier, size_qualifier]).
 
 -define(PAT_ONLY, [underscore, class_qualifier]).
 -define(CLAUSE_ONLY, [clause]).
@@ -288,7 +292,10 @@ role_allowed(Type, ExpectedRole) ->
 -define(TYPE_ONLY, [fun_type, type_application, type_union, type_fun, type_tuple,
                     type_record, typed_record_field, type_binary,
                     type_integer_range, type_map, type_map_field,
-                    user_type_application, remote_type]).
+                    user_type_application, remote_type,
+                    annotated_type, bitstring_type, constrained_function_type,
+                    function_type, constraint, map_type_assoc, map_type_exact,
+                    record_type_field, conjunction, disjunction]).
 -define(FORM_ONLY, [function, attribute, eof_marker, error_marker,
                     warning_marker, comment, text, form_list]).
 
@@ -371,6 +378,28 @@ child_specs(attribute, [[NameTree], BodyTrees], Attr) ->
     Attribute = erl_syntax:atom_value(NameTree),
     [child_spec(name, name, [NameTree], Attr, false),
      child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr#{attribute => Attribute}, false)];
+child_specs(list_comp, [Template, Body], Attr) ->
+    [child_spec(template, expression, Template, Attr, true),
+     child_spec(body, expression, Body, Attr, false)];
+child_specs(map_comp, [Template, Body], Attr) ->
+    [child_spec(template, expression, Template, Attr, true),
+     child_spec(body, expression, Body, Attr, false)];
+child_specs(binary_comp, [Template, Body], Attr) ->
+    [child_spec(template, expression, Template, Attr, true),
+     child_spec(body, expression, Body, Attr, false)];
+child_specs(maybe_expr, [Body], Attr) ->
+    [child_spec(body, expression, Body, Attr, false)];
+child_specs(maybe_expr, [Body, Else], Attr) ->
+    [child_spec(body, expression, Body, Attr, false),
+     child_spec(else_clause, clause, Else, Attr, false)];
+child_specs(implicit_fun, [Name], Attr) ->
+    [child_spec(name, expression, Name, Attr, false)];
+child_specs(record_access, [Argument, Field, Type], Attr) ->
+    [child_spec(argument, expression, Argument, Attr, false),
+     child_spec(field, expression, Field, Attr, false),
+     child_spec(type, expression, Type, Attr, false)];
+child_specs(zip_generator, [Body], Attr) ->
+    [child_spec(body, expression, Body, Attr, false)];
 child_specs(_Type, Subtrees, #{node := Role} = Attr) ->
     [child_spec(elements, Role, Subtrees, Attr, false)];
 child_specs(_Type, Subtrees, Attr) ->
