@@ -267,71 +267,55 @@ path_item(Slot, Index, ExpectedRole, Node) ->
 role_allowed(Type, ExpectedRole) ->
     (ExpectedRole =:= attribute_body) orelse lists:member(ExpectedRole, node_roles(Type)).
 
+-define(EXPR_PAT_GUARD, [atom, char, float, integer, nil, string, variable,
+                          tuple, list, cons, binary, binary_field,
+                          map_expr, map_field_exact, record_expr, record_field,
+                          parentheses]).
+
+-define(EXPR_GUARD, [application, module_qualifier, infix_expr, prefix_expr,
+                     operator, record_index_expr, map_field_assoc]).
+
+-define(EXPR_ONLY, [match_expr, maybe_match_expr, case_expr, if_expr,
+                    receive_expr, fun_expr, named_fun_expr, try_expr,
+                    catch_expr, block_expr, generator, strict_generator,
+                    binary_generator, strict_binary_generator,
+                    map_generator, strict_map_generator]).
+
+-define(PAT_ONLY, [underscore, class_qualifier]).
+-define(CLAUSE_ONLY, [clause]).
+-define(NAME_ALSO, [atom]).
+-define(TYPE_ALSO, [nil, parentheses, tuple, list, cons, binary]).
+-define(TYPE_ONLY, [fun_type, type_application, type_union, type_fun, type_tuple,
+                    type_record, typed_record_field, type_binary,
+                    type_integer_range, type_map, type_map_field,
+                    user_type_application, remote_type]).
+-define(FORM_ONLY, [function, attribute, eof_marker, error_marker,
+                    warning_marker, comment, text, form_list]).
+
+-define(ROLE_ORDER, [{?FORM_ONLY, [form]},
+                     {?TYPE_ONLY, [type]},
+                     {?CLAUSE_ONLY, [clause]},
+                     {?PAT_ONLY, [pattern]},
+                     {?EXPR_ONLY, [expression]},
+                     {?EXPR_GUARD, [expression, guard]},
+                     {?EXPR_PAT_GUARD, [expression, pattern, guard]}]).
+
 -spec node_roles(atom()) -> [atom()].
-node_roles(atom) -> [expression, pattern, guard, name];
-node_roles(char) -> [expression, pattern, guard];
-node_roles(float) -> [expression, pattern, guard];
-node_roles(integer) -> [expression, pattern, guard];
-node_roles(nil) -> [expression, pattern, guard, type];
-node_roles(string) -> [expression, pattern, guard];
-node_roles(variable) -> [expression, pattern, guard];
-node_roles(tuple) -> [expression, pattern, guard, type];
-node_roles(list) -> [expression, pattern, guard, type];
-node_roles(cons) -> [expression, pattern, guard, type];
-node_roles(binary) -> [expression, pattern, guard, type];
-node_roles(binary_field) -> [expression, pattern, guard];
-node_roles(map_expr) -> [expression, pattern, guard];
-node_roles(map_field_assoc) -> [expression, guard];
-node_roles(map_field_exact) -> [expression, pattern, guard];
-node_roles(record_expr) -> [expression, pattern, guard];
-node_roles(record_field) -> [expression, pattern, guard];
-node_roles(record_index_expr) -> [expression, guard];
-node_roles(application) -> [expression, guard];
-node_roles(module_qualifier) -> [expression, guard];
-node_roles(infix_expr) -> [expression, guard];
-node_roles(prefix_expr) -> [expression, guard];
-node_roles(operator) -> [expression, guard];
-node_roles(underscore) -> [pattern];
-node_roles(class_qualifier) -> [pattern];
-node_roles(match_expr) -> [expression];
-node_roles(maybe_match_expr) -> [expression];
-node_roles(case_expr) -> [expression];
-node_roles(if_expr) -> [expression];
-node_roles(receive_expr) -> [expression];
-node_roles(fun_expr) -> [expression];
-node_roles(named_fun_expr) -> [expression];
-node_roles(try_expr) -> [expression];
-node_roles(catch_expr) -> [expression];
-node_roles(block_expr) -> [expression];
-node_roles(parentheses) -> [expression, pattern, guard, type];
-node_roles(generator) -> [expression];
-node_roles(strict_generator) -> [expression];
-node_roles(binary_generator) -> [expression];
-node_roles(strict_binary_generator) -> [expression];
-node_roles(map_generator) -> [expression];
-node_roles(strict_map_generator) -> [expression];
-node_roles(clause) -> [clause];
-node_roles(function) -> [form];
-node_roles(attribute) -> [form];
-node_roles(eof_marker) -> [form];
-node_roles(error_marker) -> [form];
-node_roles(warning_marker) -> [form];
-node_roles(comment) -> [form];
-node_roles(text) -> [form];
-node_roles(form_list) -> [form];
-node_roles(type_application) -> [type];
-node_roles(type_union) -> [type];
-node_roles(type_fun) -> [type];
-node_roles(type_tuple) -> [type];
-node_roles(type_record) -> [type];
-node_roles(typed_record_field) -> [type];
-node_roles(type_binary) -> [type];
-node_roles(type_integer_range) -> [type];
-node_roles(type_map) -> [type];
-node_roles(type_map_field) -> [type];
-node_roles(user_type_application) -> [type];
-node_roles(remote_type) -> [type];
-node_roles(_) -> [].
+node_roles(Type) ->
+    Roles = find_roles(Type, ?ROLE_ORDER, [expression, pattern, guard]),
+    Extra = lists:append([add_if(Type, ?TYPE_ALSO, [type]),
+                          add_if(Type, ?NAME_ALSO, [name])]),
+    lists:usort(Roles ++ Extra).
+
+find_roles(_Type, [], Default) -> Default;
+find_roles(Type, [{Set, Roles}|T], Default) ->
+    case lists:member(Type, Set) of
+        true -> Roles;
+        false -> find_roles(Type, T, Default)
+    end.
+
+add_if(Type, Set, Roles) ->
+    case lists:member(Type, Set) of true -> Roles; false -> [] end.
 
 -spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [map()].
 child_specs(_Type, Subtrees, #{node := pattern} = Attr) ->
