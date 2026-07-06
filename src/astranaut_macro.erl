@@ -599,27 +599,51 @@ macro_without_module_attr(_Other) ->
 %% Step 5. expand all non-local-macro forms with the final external + local macro map.
 transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, Forms, CompileOpts) ->
     do([ return ||
-           ClauseMap = function_clauses_map(Forms, maps:new()),
-           LocalMacroFunctions =
-               maps:fold(
-                 fun(_Macro, #{function := Function, arity := Arity}, Acc) ->
-                         ordsets:add_element({Function, Arity}, Acc)
-                 end, ordsets:new(), LocalMacroMap),
-           LocalMacroFunctions1 =
-               case {LocalMacroFunctions, maps:is_key({format_error, 1}, ClauseMap)} of
-                   {[], _} ->
-                       LocalMacroFunctions;
-                   {_, true} ->
-                       ordsets:add_element({format_error, 1}, LocalMacroFunctions);
-                   {_, false} ->
-                       LocalMacroFunctions
-               end,
-           LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
-           load_local_macro_forms(LocalMacroFunctions1, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts),
+           Ctx = uniform_macro_context(Module, ExternalMacroMap, LocalMacroMap, Forms, CompileOpts),
+           #{local_macro_functions := LocalMacroFunctions,
+             local_macro_related_functions := LocalMacroRelatedFunctions} = Ctx,
+           load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions,
+                                  ExternalMacroMap, Forms, CompileOpts),
            FinalMacroMap <- merge_macro_maps(ExternalMacroMap, LocalMacroMap),
-           Forms2 <- transform_attribute_macros(FinalMacroMap, Forms),
-           FinalMacroCallers = find_function_macro_callers(Forms2, FinalMacroMap, LocalMacroRelatedFunctions),
-           transform_functions(Module, FinalMacroMap, Forms2, FinalMacroCallers)
+           transform_uniform_macro_forms(Ctx, FinalMacroMap)
+       ]).
+
+uniform_macro_context(Module, ExternalMacroMap, LocalMacroMap, Forms, CompileOpts) ->
+    ClauseMap = function_clauses_map(Forms, maps:new()),
+    LocalMacroFunctions = local_macro_functions(LocalMacroMap),
+    LocalMacroFunctions1 = maybe_add_local_formatter(LocalMacroFunctions, ClauseMap),
+    LocalMacroRelatedFunctions = local_macro_related_functions(LocalMacroFunctions1, ClauseMap),
+    #{module => Module,
+      external_macro_map => ExternalMacroMap,
+      forms => Forms,
+      compile_opts => CompileOpts,
+      local_macro_functions => LocalMacroFunctions1,
+      local_macro_related_functions => LocalMacroRelatedFunctions}.
+
+local_macro_functions(LocalMacroMap) ->
+    maps:fold(
+      fun(_Macro, #{function := Function, arity := Arity}, Acc) ->
+              ordsets:add_element({Function, Arity}, Acc)
+      end, ordsets:new(), LocalMacroMap).
+
+maybe_add_local_formatter([], _ClauseMap) ->
+    [];
+maybe_add_local_formatter(LocalMacroFunctions, ClauseMap) ->
+    case maps:is_key({format_error, 1}, ClauseMap) of
+        true ->
+            ordsets:add_element({format_error, 1}, LocalMacroFunctions);
+        false ->
+            LocalMacroFunctions
+    end.
+
+transform_uniform_macro_forms(
+  #{module := Module,
+    forms := Forms,
+    local_macro_related_functions := LocalMacroRelatedFunctions}, FinalMacroMap) ->
+    do([ return ||
+           Forms1 <- transform_attribute_macros(FinalMacroMap, Forms),
+           FinalMacroCallers = find_function_macro_callers(Forms1, FinalMacroMap, LocalMacroRelatedFunctions),
+           transform_functions(Module, FinalMacroMap, Forms1, FinalMacroCallers)
        ]).
 
 uniform_macro_map(MacroModules, ModuleMacroMap) ->
