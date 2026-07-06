@@ -274,7 +274,7 @@ role_allowed(Type, ExpectedRole) ->
 
 -define(EXPR_GUARD, [application, module_qualifier, infix_expr, prefix_expr,
                      operator, record_index_expr, map_field_assoc,
-                     record_access]).
+                     record_access, conjunction, disjunction]).
 
 -define(EXPR_ONLY, [match_expr, maybe_match_expr, case_expr, if_expr,
                     receive_expr, fun_expr, named_fun_expr, try_expr,
@@ -295,7 +295,7 @@ role_allowed(Type, ExpectedRole) ->
                     user_type_application, remote_type,
                     annotated_type, bitstring_type, constrained_function_type,
                     function_type, constraint, map_type_assoc, map_type_exact,
-                    record_type_field, conjunction, disjunction]).
+                    record_type_field]).
 -define(FORM_ONLY, [function, attribute, eof_marker, error_marker,
                     warning_marker, comment, text, form_list]).
 
