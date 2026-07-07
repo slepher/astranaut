@@ -895,7 +895,6 @@ transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
                   astranaut_traverse:return(Form)
           end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
-
 transform_clause(Module, MacroMap, {clause, Pos, Patterns, Guards, Exprs}) ->
     Bindings = clause_bindings(Patterns),
     do([ traverse ||
@@ -1067,98 +1066,11 @@ validate_macro_return(Return, Macro, Opts) ->
               {invalid_macro_return, macro_return_detail(Macro, Opts, Detail1)})
     end.
 
-unwrap_node({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}) ->
-    Node;
-unwrap_node(Node) ->
-    Node.
-
-revert_for_lint(Return) ->
-    Node = unwrap_node(Return),
-    case erl_syntax:is_tree(Node) of
-        true -> astranaut_syntax:revert(Node);
-        false -> Node
-    end.
-
-lint_macro_return(Return, expression, Opts) ->
-    Bindings = maps:get(bindings, Opts, []),
-    BodyBindings = maps:get(body_bindings, Opts, []),
-    Node = revert_for_lint(Return),
-    case catch erl_lint:exprs([Node], Bindings ++ BodyBindings) of
-        {ok, _Ws} -> ok;
-        {error, Es, _Ws} ->
-            NonContextErrs =
-                lists:filtermap(
-                  fun({File, ErrList}) ->
-                          Filtered =
-                              lists:filter(fun({_Pos, _Mod, Reason}) ->
-                                                   not is_context_error(Reason)
-                                           end, ErrList),
-                          case Filtered of [] -> false; _ -> {true, {File, Filtered}} end
-                  end, Es),
-            case NonContextErrs of
-                [] -> ok;
-                [_|_] -> {error, lint_to_detail(NonContextErrs, expression)}
-            end;
-        {'EXIT', _} ->
-            {error, lint_invalid_node(Return, expression)}
-    end;
-lint_macro_return(Return, pattern, _Opts) ->
-    Node = revert_for_lint(Return),
-    case catch erl_lint:is_pattern_expr(Node) of
-        true -> ok;
-        false ->
-            {error, lint_invalid_role(Return, pattern)};
-        {'EXIT', _} ->
-            %% revert failed — fallback to node_roles
-            astranaut_syntax:validate(Return, pattern)
-    end;
-lint_macro_return(Return, guard, _Opts) ->
-    Node = revert_for_lint(Return),
-    case catch erl_lint:is_guard_expr(Node) of
-        true -> ok;
-        false ->
-            {error, lint_invalid_role(Return, guard)};
-        {'EXIT', _} ->
-            %% revert failed — fallback to node_roles
-            astranaut_syntax:validate(Return, guard)
-    end;
 lint_macro_return(Return, ExpectedRole, _Opts) ->
     case astranaut_syntax:validate(Return, ExpectedRole) of
         ok -> ok;
         {error, Detail} -> {error, Detail}
     end.
-
-type_pos_of(Node) ->
-    try
-        {astranaut_syntax:type(Node), astranaut_syntax:get_pos(Node)}
-    catch _:_ -> {invalid, none}
-    end.
-
-is_context_error({undefined_record, _}) -> true;
-is_context_error(_) -> false.
-
-lint_to_detail(Es, ExpectedRole) ->
-    case Es of
-        [{_File, [{_Pos, _Mod, Reason}|_]}|_] ->
-            {Type, Pos} = type_pos_of(Reason),
-            #{reason => Reason, expected_role => ExpectedRole,
-              actual_type => Type, pos => Pos, path => [], slot => root};
-        _ ->
-            lint_invalid_node_detail(ExpectedRole)
-    end.
-
-lint_invalid_node_detail(ExpectedRole) ->
-    #{reason => invalid_node, expected_role => ExpectedRole, path => [], slot => root}.
-
-lint_invalid_role(Return, ExpectedRole) ->
-    {Type, Pos} = type_pos_of(Return),
-    #{reason => invalid_role, expected_role => ExpectedRole,
-      actual_type => Type, pos => Pos, node => Return, path => [], slot => root}.
-
-lint_invalid_node(Return, ExpectedRole) ->
-    {_Type, Pos} = type_pos_of(Return),
-    #{reason => invalid_node, expected_role => ExpectedRole,
-      pos => Pos, node => Return, path => [], slot => root}.
 
 macro_return_detail(Macro, Opts, Detail) ->
     Current = macro_call_ref(Macro),

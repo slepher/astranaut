@@ -33,7 +33,7 @@ init_per_suite(Config) ->
                    macro_uniform_a, macro_uniform_b, macro_uniform_test,
                    macro_uniform_override_test,
                    macro_uniform_import_force_override_test,
-                   macro_node_roles, macro_node_role_test,
+                   macro_node_role_test,
                    macro_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 %%--------------------------------------------------------------------

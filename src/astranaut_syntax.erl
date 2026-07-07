@@ -174,6 +174,8 @@ validate(NodeOrNodes, ExpectedRole) ->
 
 -spec validate(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], atom(), map()) ->
           ok | {error, map()}.
+validate([], _ExpectedRole, _Opts) ->
+    ok;
 validate(NodeOrNodes, ExpectedRole, Opts) ->
     Attr = maps:get(attr, Opts, #{}),
     validate_nodes(NodeOrNodes, ExpectedRole, root, Attr, []).

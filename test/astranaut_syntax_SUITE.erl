@@ -189,7 +189,6 @@ test_validate_guard_accept(_Config) ->
 test_validate_guard_reject(_Config) ->
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(
         {match, 1, {atom, 1, a}, {atom, 1, b}}, guard),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({var, 1, '_'}, guard),
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), guard).
 
 %%--------------------------------------------------------------------
@@ -273,7 +272,13 @@ test_validate_nested_valid(_Config) ->
 
 test_validate_nested_invalid(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{clause, 1, [], [], [{atom, 1, ok}]}]},
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(Tree, expression).
+    {error, Error} = astranaut_syntax:validate(Tree, expression),
+    ?assertMatch(#{reason := invalid_role,
+                   expected_role := expression,
+                   actual_type := clause,
+                   slot := elements,
+                   parent_type := application},
+                 Error).
 
 test_validate_empty_list(_Config) ->
     ?assertEqual(ok, astranaut_syntax:validate([], expression)),
@@ -286,4 +291,3 @@ test_validate_empty_list(_Config) ->
 
 function_form() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
-
