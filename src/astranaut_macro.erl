@@ -897,62 +897,18 @@ transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
           end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
 transform_clause(Module, MacroMap, {clause, Pos, Patterns, Guards, Exprs}, RecordForms) ->
-    Bindings = clause_bindings(Patterns),
     do([ traverse ||
-           %% counter and bindings reseted in every function clause
-           astranaut_traverse:put({1, Bindings}),
+           %% counter reseted in every function clause
+           astranaut_traverse:put(1),
            Guards1 <- transform_exprs(Module, MacroMap, Guards, #{depth => 0, expected_role => guard,
-                                                                   bindings => Bindings,
                                                                    forms => RecordForms}),
            Exprs1 <- transform_exprs(Module, MacroMap, Exprs, #{depth => 0, expected_role => expression,
-                                                                 bindings => Bindings,
                                                                  forms => RecordForms}),
            return({clause, Pos, Patterns, Guards1, Exprs1})
     ]).
 
 record_forms(Forms) ->
     [Form || {attribute, _Anno, record, {_Name, _Fields}} = Form <- Forms].
-
-clause_bindings(Patterns) ->
-    Vars = lists:foldl(fun pattern_vars/2, ordsets:new(), Patterns),
-    [{V, ok} || V <- Vars].
-
-pattern_vars({var, _, V}, Acc) when V =/= '_' -> ordsets:add_element(V, Acc);
-pattern_vars({match, _, P1, P2}, Acc) ->
-    pattern_vars(P2, pattern_vars(P1, Acc));
-pattern_vars({tuple, _, Ps}, Acc) ->
-    lists:foldl(fun pattern_vars/2, Acc, Ps);
-pattern_vars({cons, _, H, T}, Acc) ->
-    pattern_vars(T, pattern_vars(H, Acc));
-pattern_vars({nil, _}, Acc) -> Acc;
-pattern_vars({bin, _, Fs}, Acc) ->
-    lists:foldl(fun({bin_element, _, E, _, _}, A) -> pattern_vars(E, A);
-                  (_, A) -> A
-               end, Acc, Fs);
-pattern_vars({map, _, Fs}, Acc) ->
-    lists:foldl(fun({map_field_exact, _, _, V}, A) -> pattern_vars(V, A);
-                  (_, A) -> A
-               end, Acc, Fs);
-pattern_vars({map, _, Src, Fs}, Acc) ->
-    Acc1 = pattern_vars(Src, Acc),
-    lists:foldl(fun({map_field_exact, _, _, V}, A) -> pattern_vars(V, A);
-                  (_, A) -> A
-               end, Acc1, Fs);
-pattern_vars({record, _, _, Fs}, Acc) ->
-    lists:foldl(fun({record_field, _, _, V}, A) -> pattern_vars(V, A);
-                  (_, A) -> A
-               end, Acc, Fs);
-pattern_vars({alias, _, P, V}, Acc) ->
-    pattern_vars(V, pattern_vars(P, Acc));
-pattern_vars(_, Acc) -> Acc.
-
-accumulate_body_bindings({match, _, {var, _, V}, _Body}, Bindings) ->
-    ordsets:add_element({V, ok}, ordsets:from_list(Bindings));
-accumulate_body_bindings({match, _, Pattern, _Body}, Bindings) ->
-    pattern_vars(Pattern, ordsets:from_list(Bindings));
-accumulate_body_bindings({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}, Bindings) ->
-    accumulate_body_bindings(Node, Bindings);
-accumulate_body_bindings(_Node, Bindings) -> Bindings.
 
 transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
     ExpectedRole = maps:get(expected_role, DepthOpts, expression),
@@ -962,18 +918,14 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
         fun(Node) ->
             do([ traverse ||
                 Attr = #{step := Step} <- astranaut_traverse:ask(),
-                {_Counter, BodyBindings} <- astranaut_traverse:get(),
                 DepthOpts1 = DepthOpts#{rename_quoted_variables => true, step => Step,
-                                        attr => Attr,
-                                        body_bindings => BodyBindings},
+                                        attr => Attr},
                 Node1 <- case match_macro_call(Module, Node, MacroMap, Step) of
                              {ok, Macro} ->
                                  expand_macro_recursive(Module, MacroMap, Macro, DepthOpts1);
                              error ->
                                  astranaut_traverse:return(Node)
                          end,
-                {Counter1, _} <- astranaut_traverse:get(),
-                astranaut_traverse:put({Counter1, accumulate_body_bindings(Node1, BodyBindings)}),
                 return(annotate_traversal_node(Node1, Attr))
             ])
         end, Exprs, #{traverse => all}),
@@ -1275,7 +1227,7 @@ append_attrs(Arguments, #{}) ->
 
 update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true}) ->
     astranaut_traverse:state(
-      fun({Counter, Bindings}) ->
+      fun(Counter) ->
               MacroNameStr = macro_name_str(Macro),
               CounterStr = integer_to_list(Counter),
               Nodes1 =
@@ -1291,7 +1243,7 @@ update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true}) ->
                        (Node) ->
                             Node
                     end, Nodes, #{traverse => post}),
-              {Nodes1, {Counter + 1, Bindings}}
+              {Nodes1, Counter + 1}
       end);
 update_quoted_variable_name(Nodes, _Macro, #{}) ->
     astranaut_traverse:return(Nodes).
