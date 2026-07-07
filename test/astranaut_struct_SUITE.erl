@@ -228,6 +228,7 @@ test_compile_enforce_fail(Config) ->
     ?assertEqual(Line, error_line(Error)),
     ?assertEqual(astranaut_struct_transformer, error_formatter(Error)),
     ?assertEqual({enforce_keys_not_in_struct,test,[desc]}, error_reason(Error)),
+    astranaut_test_lib:assert_formatted_messages([Error]),
     ok.
 
 test_compile_non_record_fail(Config) ->
@@ -242,6 +243,7 @@ test_compile_non_record_fail(Config) ->
     ?assertEqual(Line, error_line(Error)),
     ?assertEqual(astranaut_struct_transformer, error_formatter(Error)),
     ?assertEqual({undefined_record,other_test}, error_reason(Error)),
+    astranaut_test_lib:assert_formatted_messages([Error]),
     ok.
 
 attributes_with_line(Attribute, Forms) ->

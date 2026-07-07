@@ -53,20 +53,20 @@ Initial validator forms:
 {role, type}
 {role, clause}
 {role, name}
-{slot, ParentType, Slot}
+{slot, ParentType, Slot, Role}
 ```
 
-The slot form allows parent-specific rules such as:
+The slot form allows parent-specific rules while carrying the broad role used for current-node checks:
 
 ```erlang
-{slot, binary_generator, pattern}
-{slot, binary_generator, body}
-{slot, generator, pattern}
-{slot, generator, body}
-{slot, match_expr, left}
-{slot, match_expr, right}
-{slot, clause, guards}
-{slot, clause, body}
+{slot, binary_generator, pattern, pattern}
+{slot, binary_generator, body, expression}
+{slot, generator, pattern, pattern}
+{slot, generator, body, expression}
+{slot, match_expr, left, pattern}
+{slot, match_expr, right, expression}
+{slot, clause, guards, guard}
+{slot, clause, body, expression}
 ```
 
 The validator dispatcher may map a slot validator to a role plus direct child slot rules, but callers should not need to know that mapping.

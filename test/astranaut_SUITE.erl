@@ -53,6 +53,9 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+format_error(Message) ->
+    io_lib:format("~p", [Message]).
+
 %%--------------------------------------------------------------------
 %% @spec init_per_group(GroupName, Config0) ->
 %%               Config1 | {skip,Reason} | {skip_and_save,Reason,Config1}
@@ -205,8 +208,15 @@ test_reduce(Config) ->
     ErrorStruct = astranaut_return:run_error(Return),
     io:format("get printable errors ~p~n", [ astranaut_error:printable(ErrorStruct)]),
     ?assertEqual(#{}, maps:without([file_errors, file_warnings], astranaut_error:printable(ErrorStruct))),
+    {FileErrors, FileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch({[{File, [{2, ?MODULE, mark_error_1}]}], [{File, [{5, ?MODULE, mark_1}]}]},
-                 astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct)),
+                 {FileErrors, FileWarnings}),
+    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Error}
+                                                  || {_File, Errors} <- FileErrors,
+                                                     {Line, Formatter, Error} <- Errors]),
+    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
+                                                  || {_File, Warnings} <- FileWarnings,
+                                                     {Line, Formatter, Warning} <- Warnings]),
     ?assertEqual({just, 1}, astranaut_return:run(Return)),
     ok.
 
@@ -238,7 +248,11 @@ test_map_with_state(Config) ->
           end, 0, Forms, #{formatter => ?MODULE, traverse => pre, simplify_return => false}),
     FileWarnings = [{File, [{5, ?MODULE, mark_1}]}],
     #{'__struct__' := ?RETURN_OK, error := Error, return := _Return} = ReturnM,
-    ?assertMatch({[], FileWarnings}, astranaut_test_lib:realize_with_baseline(Baseline, Error)),
+    {[], ActualFileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, Error),
+    ?assertMatch(FileWarnings, ActualFileWarnings),
+    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
+                                                  || {_File, Warnings} <- ActualFileWarnings,
+                                                     {Line, Formatter, Warning} <- Warnings]),
     ok.
 
 test_map_spec(_Config) ->
@@ -279,20 +293,29 @@ test_reduce_attr(Config) ->
     io:format("get printable errors ~p~n", [astranaut_error:printable(Error)]),
     FileWarnings = [{File, [{2, ?MODULE, mark_0}]}],
     FileErrors = [{File, [{1, ?MODULE, mark_error_0}]}],
-    ?assertMatch({FileErrors, FileWarnings}, astranaut_test_lib:realize_with_baseline(Baseline, Error)),
+    {ActualFileErrors, ActualFileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, Error),
+    ?assertMatch({FileErrors, FileWarnings}, {ActualFileErrors, ActualFileWarnings}),
+    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Error1}
+                                                  || {_File, Errors} <- ActualFileErrors,
+                                                     {Line, Formatter, Error1} <- Errors]),
+    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
+                                                  || {_File, Warnings} <- ActualFileWarnings,
+                                                     {Line, Formatter, Warning} <- Warnings]),
     ok.
 
 test_with_formatter(_Config) ->
     MA =
         astranaut_traverse:with_formatter(
-          formatter_1,
+          sample_transformer_1,
           astranaut_traverse:update_pos(
             10,
             astranaut_traverse:astranaut_traverse(
               astranaut:walk_return(#{return => 10, error => error_0})
              ))),
     #{error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, ok),
-    ?assertMatch([{10, formatter_1, error_0}], astranaut_error:formatted_errors(Error)),
+    FormattedErrors = astranaut_error:formatted_errors(Error),
+    ?assertMatch([{10, sample_transformer_1, error_0}], FormattedErrors),
+    astranaut_test_lib:assert_formatted_messages(FormattedErrors),
     ok.
 
 test_options(_Config) ->

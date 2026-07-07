@@ -872,6 +872,7 @@ to_list(Arguments) ->
 %%%===================================================================
 -spec transform_functions(module(), map(), [astranaut:form()], all | {except, list()} | list()) -> term().
 transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
+    RecordForms = record_forms(Forms),
     %% just traverse function clauses, other nodes return directly
     FunctionClausesUniplate = 
         fun({function, Pos, Name, Arity, Clauses}) ->
@@ -888,22 +889,29 @@ transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
                       true ->
                           astranaut:map_m(
                             fun(Clause) ->
-                                    transform_clause(Module, MacroMap, Clause)
+                                    transform_clause(Module, MacroMap, Clause, RecordForms)
                             end, Function, #{traverse => subtree, uniplate => FunctionClausesUniplate})
                   end;
              (Form) ->
                   astranaut_traverse:return(Form)
           end, Forms, #{traverse => none}),
     astranaut_traverse:eval(Monad, ?MODULE, #{}, 0).
-transform_clause(Module, MacroMap, {clause, Pos, Patterns, Guards, Exprs}) ->
+transform_clause(Module, MacroMap, {clause, Pos, Patterns, Guards, Exprs}, RecordForms) ->
     Bindings = clause_bindings(Patterns),
     do([ traverse ||
            %% counter and bindings reseted in every function clause
            astranaut_traverse:put({1, Bindings}),
-           Guards1 <- transform_exprs(Module, MacroMap, Guards, #{depth => 0, expected_role => guard, bindings => Bindings}),
-           Exprs1 <- transform_exprs(Module, MacroMap, Exprs, #{depth => 0, expected_role => expression, bindings => Bindings}),
+           Guards1 <- transform_exprs(Module, MacroMap, Guards, #{depth => 0, expected_role => guard,
+                                                                   bindings => Bindings,
+                                                                   forms => RecordForms}),
+           Exprs1 <- transform_exprs(Module, MacroMap, Exprs, #{depth => 0, expected_role => expression,
+                                                                 bindings => Bindings,
+                                                                 forms => RecordForms}),
            return({clause, Pos, Patterns, Guards1, Exprs1})
     ]).
+
+record_forms(Forms) ->
+    [Form || {attribute, _Anno, record, {_Name, _Fields}} = Form <- Forms].
 
 clause_bindings(Patterns) ->
     Vars = lists:foldl(fun pattern_vars/2, ordsets:new(), Patterns),
@@ -942,15 +950,21 @@ accumulate_body_bindings({match, _, {var, _, V}, _Body}, Bindings) ->
     ordsets:add_element({V, ok}, ordsets:from_list(Bindings));
 accumulate_body_bindings({match, _, Pattern, _Body}, Bindings) ->
     pattern_vars(Pattern, ordsets:from_list(Bindings));
+accumulate_body_bindings({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}, Bindings) ->
+    accumulate_body_bindings(Node, Bindings);
 accumulate_body_bindings(_Node, Bindings) -> Bindings.
 
 transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
-    astranaut:map_m(
+    ExpectedRole = maps:get(expected_role, DepthOpts, expression),
+    InitAttr = #{node => ExpectedRole,
+                 validator => {role, ExpectedRole}},
+    Monad = astranaut:map_m(
         fun(Node) ->
             do([ traverse ||
-                #{step := Step} <- astranaut_traverse:ask(),
+                Attr = #{step := Step} <- astranaut_traverse:ask(),
                 {_Counter, BodyBindings} <- astranaut_traverse:get(),
                 DepthOpts1 = DepthOpts#{rename_quoted_variables => true, step => Step,
+                                        attr => Attr,
                                         body_bindings => BodyBindings},
                 Node1 <- case match_macro_call(Module, Node, MacroMap, Step) of
                              {ok, Macro} ->
@@ -960,9 +974,26 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
                          end,
                 {Counter1, _} <- astranaut_traverse:get(),
                 astranaut_traverse:put({Counter1, accumulate_body_bindings(Node1, BodyBindings)}),
-                return(Node1)
+                return(annotate_traversal_node(Node1, Attr))
             ])
-        end, Exprs, #{traverse => all}).
+        end, Exprs, #{traverse => all}),
+    astranaut_traverse:local(fun(_) -> InitAttr end, Monad).
+
+annotate_traversal_node(Nodes, Attr) when is_list(Nodes) ->
+    lists:map(fun(Node) -> annotate_traversal_node(Node, Attr) end, Nodes);
+annotate_traversal_node(Node, #{step := post}) ->
+    Node;
+annotate_traversal_node(Node, Attr) ->
+    Type = astranaut_syntax:type(Node),
+    case astranaut_syntax:subtrees(Node) of
+        [] ->
+            Node;
+        _Subtrees ->
+            astranaut_uniplate:with_subtrees(
+              fun(Subtrees) ->
+                      astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
+              end, Node)
+    end.
 
 %%%===================================================================
 %%% apply macro functions
@@ -977,20 +1008,15 @@ expand_macro_recursive(Module, MacroMap, Macro, #{step := post } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     do([traverse ||
             Node1 <- expand_macro(Macro, DepthOpts1),
-            transform_exprs(Module, MacroMap, Node1, DepthOpts1)
+            Node2 <- transform_exprs(Module, MacroMap, Node1, DepthOpts1),
+            validate_macro_return(Node2, Macro, DepthOpts1)
         ]);
 expand_macro_recursive(Module, MacroMap, Macro, #{step := pre } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     do([ traverse ||
             Node1 <- expand_macro(Macro, DepthOpts1),
-            %% if node1 is calling another macro with outer order, apply it too
-            %% because astranaut_traverse:map_m will traverse children after this without node itself
-            case match_macro_call(Module, Node1, MacroMap, pre) of
-                {ok, Macro1} ->
-                    expand_macro_recursive(Module, MacroMap, Macro1, DepthOpts1);
-                error ->
-                    astranaut_traverse:return(Node1)
-            end
+            Node2 <- transform_exprs(Module, MacroMap, Node1, DepthOpts1),
+            validate_macro_return(Node2, Macro, DepthOpts1)
         ]).
 
 match_macro_call(Module, Node, Macros, Step) ->
@@ -1031,7 +1057,7 @@ update_macro_context(Macro, Opts) ->
 expand_macro(#{pos := Pos, formatter := Formatter} = Macro, Opts) ->
     do([ traverse ||
            Return <- astranaut_traverse:update_pos(Pos, Formatter, invoke_macro_function(Macro)),
-           Node1 <- validate_macro_return(Return, Macro, Opts),
+           Node1 <- precheck_macro_return_tree(Return, Macro, Opts),
            Node2 <- update_quoted_variable_name(Node1, Macro, Opts),
            Node3 = astranaut_lib:replace_pos_zero(Node2, Pos),
            format_node(Node3, Macro),
@@ -1057,19 +1083,61 @@ invoke_macro_function(#{module := Module, function := Function, arguments := Arg
 
 validate_macro_return(Return, Macro, Opts) ->
     ExpectedRole = maps:get(expected_role, Opts, form),
-    case lint_macro_return(Return, ExpectedRole, Opts) of
+    Attr = maps:get(attr, Opts, #{}),
+    Validator = maps:get(validator, Attr, {role, ExpectedRole}),
+    case lint_macro_return(Return, Validator, Opts) of
         ok ->
             astranaut_traverse:return(Return);
         {error, Detail} ->
-            Detail1 = Detail#{expected_role => ExpectedRole},
+            astranaut_traverse:fail(
+              {invalid_macro_return, macro_return_detail(Macro, Opts, Detail)})
+    end.
+
+lint_macro_return(Return, Validator, Opts) ->
+    Attr = maps:get(attr, Opts, #{}),
+    ValidateOpts = #{attr => Attr, forms => maps:get(forms, Opts, [])},
+    case astranaut_syntax:validate_recursive(Return, Validator, ValidateOpts) of
+        ok -> ok;
+        {error, Detail} -> {error, Detail}
+    end.
+
+precheck_macro_return_tree(Return, Macro, Opts) ->
+    case macro_return_tree(Return) of
+        ok ->
+            astranaut_traverse:return(Return);
+        {error, Detail} ->
+            ExpectedRole = maps:get(expected_role, Opts, form),
+            Attr = maps:get(attr, Opts, #{}),
+            Validator = maps:get(validator, Attr, {role, ExpectedRole}),
+            Detail1 = Detail#{validator => Validator,
+                               expected_role => ExpectedRole},
             astranaut_traverse:fail(
               {invalid_macro_return, macro_return_detail(Macro, Opts, Detail1)})
     end.
 
-lint_macro_return(Return, ExpectedRole, _Opts) ->
-    case astranaut_syntax:validate(Return, ExpectedRole) of
-        ok -> ok;
+macro_return_tree([]) ->
+    ok;
+macro_return_tree([Node|Nodes]) ->
+    case macro_return_tree(Node) of
+        ok -> macro_return_tree(Nodes);
         {error, Detail} -> {error, Detail}
+    end;
+macro_return_tree({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}) ->
+    macro_return_tree(Node);
+macro_return_tree(Node) ->
+    try
+        _Type = astranaut_syntax:type(Node),
+        _IsLeaf = astranaut_syntax:is_leaf(Node),
+        _Subtrees = astranaut_syntax:subtrees(Node),
+        _Reverted = astranaut_syntax:revert(Node),
+        ok
+    catch
+        Class:Reason ->
+            {error, #{reason => invalid_node,
+                      slot => root,
+                      node => Node,
+                      exception => {Class, Reason},
+                      path => []}}
     end.
 
 macro_return_detail(Macro, Opts, Detail) ->

@@ -34,6 +34,7 @@ init_per_suite(Config) ->
                    macro_uniform_override_test,
                    macro_uniform_import_force_override_test,
                    macro_node_role_test,
+                   macro_validator_slots,
                    macro_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 %%--------------------------------------------------------------------
@@ -124,9 +125,11 @@ all() ->
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
      test_use_macro_errors,
+     test_macro_format_error_predefined_errors,
      test_uniform_macro_error,
      test_uniform_macro_invalid_return,
      test_uniform_local_macro_invalid_return,
+     test_macro_validator_slot_errors,
      test_uniform_macro_max_depth,
      test_macro_node_roles].
 
@@ -212,6 +215,7 @@ test_macro_with_warnings(Config) ->
         {25, astranaut_quote,{unquote_splicing_pattern_non_empty_tail,[{atom, _, tail}]}}
        ],
        Warnings),
+    assert_formatted_messages(Warnings),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
     ok.
 
@@ -236,6 +240,7 @@ test_macro_with_error(Config) ->
         {16, Local, bar},
         {27,astranaut_macro, {max_macro_expansion_depth_exceeded, {macro_example,recursive_macro}, [{integer, _Pos, 6}]}}
        ], Errors),
+    assert_formatted_messages(Errors),
     %% %% TODO: astranaut:map_m does not just return error, but inject error_maker to forms.
     %% %% while fixing this, uncomment testcase below.
     %% Forms1 = astranaut_return:run(Return),
@@ -317,6 +322,7 @@ test_uniform_macro_override_error(Config) ->
           #{macro_module := macro_uniform_a, function := to_a, arity := 1},
           #{macro_module := macro_uniform_override_error_test, function := same_name, arity := 1}}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_uniform_import_override_error(Config) ->
@@ -331,6 +337,7 @@ test_uniform_import_override_error(Config) ->
           #{macro_module := macro_uniform_a, function := to_a, arity := 1},
           #{macro_module := macro_uniform_b, function := to_b, arity := 1}}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_uniform_local_force_override(_Config) ->
@@ -349,9 +356,45 @@ test_use_macro_errors(Config) ->
     ?assertMatch(
        [{3, astranaut_macro, {unexported_macro, macro_uniform_a, missing_export, 1}},
         {4, astranaut_macro, {undefined_macro, missing_local, 0}},
-        {5, astranaut_macro, {invalid_function_with_arity, {bad_arity, -1}}}],
+       {5, astranaut_macro, {invalid_function_with_arity, {bad_arity, -1}}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
+
+test_macro_format_error_predefined_errors(_Config) ->
+    ExistingMacro = #{macro_module => macro_a, function => to_a, arity => 1},
+    OverridingMacro = #{macro_module => macro_b, function => to_b, arity => 1},
+    DirectInvalidReturn =
+        #{macro => #{mfa => #{module => macro_a, function => bad, arity => 1}},
+          reason => invalid_role,
+          expected_role => expression,
+          actual_type => function},
+    NestedInvalidReturn =
+        #{origin_macro => #{mfa => #{module => macro_a, function => outer, arity => 0}},
+          current_macro => #{mfa => #{module => macro_a, function => inner, arity => 0}},
+          reason => invalid_role,
+          expected_role => guard,
+          actual_type => application},
+    Errors =
+        [{import_macro_failed, missing_macro_module},
+         {invalid_import_macro_attr, {invalid_macro_tuple}},
+         {unimported_macro_module, macro_a},
+         {unexported_macro, macro_a, missing, 1},
+         {undefined_macro, missing, 0},
+         {invalid_use_macro, #{macro_module => macro_a, function => to_a, arity => 1}},
+         {macro_override, {macro_a, to_a, 1}, ExistingMacro, OverridingMacro},
+         {non_exported_formatter, macro_formatter},
+         {unloaded_formatter_module, missing_formatter},
+         invalid_macro_attribute,
+         {max_macro_expansion_depth_exceeded, {macro_a, recurse}, [{integer, 1, 3}]},
+         {max_macro_expansion_depth_exceeded, recurse, [{integer, 1, 3}]},
+         {macro_exception,
+          #{module => macro_a, function => explode, arity => 1},
+          [{atom, 1, ok}],
+          {error, bad_macro, []}},
+         {invalid_macro_return, DirectInvalidReturn},
+         {invalid_macro_return, NestedInvalidReturn}],
+    lists:foreach(fun assert_macro_format_error/1, Errors).
 
 test_uniform_macro_error(Config) ->
     Forms = astranaut_test_lib:test_module_forms(macro_uniform_error_test, Config),
@@ -365,6 +408,7 @@ test_uniform_macro_error(Config) ->
            [{atom, _, b},
             {tuple, _, [{atom, _, from_b}, {atom, _, ok}]}]}}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_uniform_macro_invalid_return(Config) ->
@@ -394,6 +438,7 @@ test_uniform_macro_invalid_return(Config) ->
             reason := invalid_node,
             expected_role := expression}}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_uniform_local_macro_invalid_return(Config) ->
@@ -411,6 +456,50 @@ test_uniform_local_macro_invalid_return(Config) ->
             reason := invalid_node,
             expected_role := expression}}}],
        Errors),
+    assert_formatted_messages(Errors),
+    ok.
+
+test_macro_validator_slot_errors(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_validator_slot_error_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{3, astranaut_macro,
+         {invalid_macro_return,
+          #{origin_macro := #{mfa := #{module := macro_validator_slots,
+                                       function := pattern_outer,
+                                       arity := 0}},
+            current_macro := #{mfa := #{module := macro_validator_slots,
+                                        function := pattern_inner,
+                                        arity := 0}},
+            validator := {slot, clause, patterns, pattern},
+            expected_role := pattern,
+            actual_type := application}}},
+        {6, astranaut_macro,
+         {invalid_macro_return,
+          #{origin_macro := #{mfa := #{module := macro_validator_slots,
+                                       function := guard_outer,
+                                       arity := 0}},
+            current_macro := #{mfa := #{module := macro_validator_slots,
+                                        function := guard_inner,
+                                        arity := 0}},
+            validator := {slot, conjunction, elements, guard},
+            expected_role := guard,
+            actual_type := application}}},
+        {9, astranaut_macro,
+         {invalid_macro_return,
+          #{origin_macro := #{mfa := #{module := macro_validator_slots,
+                                       function := expression_outer,
+                                       arity := 0}},
+            current_macro := #{mfa := #{module := macro_validator_slots,
+                                        function := expression_inner,
+                                        arity := 0}},
+            validator := {role, expression},
+            expected_role := expression,
+            actual_type := function}}}],
+       Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_uniform_macro_max_depth(Config) ->
@@ -424,8 +513,22 @@ test_uniform_macro_max_depth(Config) ->
           {macro_uniform_a, recurse_a},
            [{integer, _, 12}]}}],
        Errors),
+    assert_formatted_messages(Errors),
     ok.
 
 test_macro_node_roles(_Config) ->
     ?assertEqual(ok, macro_node_role_test:test_node_roles()),
     ok.
+
+assert_macro_format_error(Error) ->
+    Message = astranaut_macro:format_error(Error),
+    ?assert(io_lib:deep_char_list(Message)),
+    ?assertNotEqual([], lists:flatten(Message)).
+
+assert_formatted_messages(Messages) ->
+    lists:foreach(fun assert_formatted_message/1, Messages).
+
+assert_formatted_message({_Line, Formatter, Error}) ->
+    Message = Formatter:format_error(Error),
+    ?assert(io_lib:deep_char_list(Message)),
+    ?assertNotEqual([], lists:flatten(Message)).

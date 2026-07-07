@@ -52,6 +52,7 @@ all() ->
      test_validate_pattern_accept, test_validate_pattern_reject,
      %% guard role
      test_validate_guard_accept, test_validate_guard_reject,
+     test_validate_guard_uses_record_forms,
      %% type role
      test_validate_type_accept, test_validate_type_reject,
      %% clause role
@@ -62,6 +63,15 @@ all() ->
      test_validate_attribute_body_accept,
      %% new types from node_roles additions (using erl_parse format)
      test_validate_list_comp,
+     %% validator metadata and validation scopes
+     test_child_specs_include_slot_validators,
+     test_all_child_specs_emit_expected_validators,
+     test_all_child_spec_validators_accept_and_reject_ast,
+     test_slot_validators_reject_wrong_structural_identity,
+     test_slot_validators_reject_malformed_structural_nodes,
+     test_validate_local_does_not_recurse_grandchildren,
+     test_validate_recursive_recurse_grandchildren,
+     test_traverse_validate_changed_node,
      %% edge cases
      test_validate_nested_valid, test_validate_nested_invalid,
      test_validate_empty_list].
@@ -189,7 +199,25 @@ test_validate_guard_accept(_Config) ->
 test_validate_guard_reject(_Config) ->
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(
         {match, 1, {atom, 1, a}, {atom, 1, b}}, guard),
+    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+        {call, 1, {atom, 1, helper}, []}, guard),
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), guard).
+
+test_validate_guard_uses_record_forms(_Config) ->
+    GuardRecord = {record, 1, guard_rec, []},
+    ValidRecordForms = [{attribute, 1, record,
+                         {guard_rec, [{record_field, 1, {atom, 1, field}, {integer, 1, 1}}]}}],
+    InvalidRecordForms = [{attribute, 1, record,
+                           {guard_rec, [{record_field, 1, {atom, 1, field},
+                                         {call, 1, {atom, 1, helper}, []}}]}}],
+    ?assertEqual(ok, astranaut_syntax:validate(GuardRecord, guard,
+                                               #{forms => ValidRecordForms})),
+    {error, Error} = astranaut_syntax:validate(GuardRecord, guard,
+                                               #{forms => InvalidRecordForms}),
+    ?assertMatch(#{reason := invalid_role,
+                   expected_role := guard,
+                   actual_type := record_expr},
+                 Error).
 
 %%--------------------------------------------------------------------
 %% type role — use erl_parse format: {type, Pos, Name, Args}
@@ -261,6 +289,121 @@ test_validate_list_comp(_Config) ->
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(Lc, pattern).
 
 %%--------------------------------------------------------------------
+%% validator metadata and validation scopes
+%%--------------------------------------------------------------------
+
+test_child_specs_include_slot_validators(_Config) ->
+    Pattern = {bin, 1, []},
+    Body = {var, 1, 'Bin'},
+    Specs = astranaut_syntax:child_specs(binary_generator, [[Pattern], [Body]], #{node => expression}),
+    ?assertMatch(
+       [#{slot := pattern,
+          validator := {slot, binary_generator, pattern, pattern},
+          attr := #{validator := {slot, binary_generator, pattern, pattern},
+                    parent_type := binary_generator,
+                    parent_slot := pattern}},
+        #{slot := body,
+          validator := {slot, binary_generator, body, expression},
+          attr := #{validator := {slot, binary_generator, body, expression},
+                    parent_type := binary_generator,
+                    parent_slot := body}}],
+       Specs).
+
+test_all_child_specs_emit_expected_validators(_Config) ->
+    lists:foreach(
+      fun({ParentType, Subtrees, Attr, ExpectedSlots}) ->
+              Specs = astranaut_syntax:child_specs(ParentType, Subtrees, Attr),
+              ActualSlots = [{Slot, Role, Validator, maps:with([node, validator, parent_type, parent_slot], SpecAttr)}
+                             || #{slot := Slot, role := Role, validator := Validator, attr := SpecAttr} <- Specs],
+              Expected =
+                  [{Slot, Role, {slot, ParentType, Slot, Role},
+                    #{node => Role,
+                      validator => {slot, ParentType, Slot, Role},
+                      parent_type => ParentType,
+                      parent_slot => Slot}}
+                   || {Slot, Role} <- ExpectedSlots],
+              ?assertEqual(Expected, ActualSlots)
+      end, child_spec_cases()).
+
+test_all_child_spec_validators_accept_and_reject_ast(_Config) ->
+    Validators =
+        lists:append(
+          [[Validator || #{validator := Validator} <- astranaut_syntax:child_specs(ParentType, Subtrees, Attr)]
+           || {ParentType, Subtrees, Attr, _ExpectedSlots} <- child_spec_cases()]),
+    lists:foreach(
+      fun(Validator) ->
+              Role = validator_role(Validator),
+              ?assertEqual(ok, astranaut_syntax:validate_local(valid_ast(Role), Validator)),
+              case invalid_ast(Role) of
+                  none ->
+                      ok;
+                  InvalidAst ->
+                      {error, #{reason := invalid_role,
+                                validator := Validator,
+                                expected_role := Role}} =
+                          astranaut_syntax:validate_local(InvalidAst, Validator)
+              end
+      end, Validators).
+
+test_slot_validators_reject_wrong_structural_identity(_Config) ->
+    BinElement = valid_ast(binary_field),
+    MapField = {map_field_exact, 1, {atom, 1, key}, {atom, 1, value}},
+    ?assertEqual(ok, astranaut_syntax:validate_local(BinElement, {slot, binary, elements, binary_field})),
+    ?assertEqual(ok, astranaut_syntax:validate_local({atom, 1, value},
+                                                     {slot, map_field_exact, map_field_exact_value, expression})),
+    {error, BinError} = astranaut_syntax:validate_local(BinElement, {slot, tuple, elements, expression}),
+    ?assertMatch(#{reason := invalid_role,
+                   validator := {slot, tuple, elements, expression},
+                   actual_type := binary_field},
+                 BinError),
+    {error, MapError} = astranaut_syntax:validate_local(MapField,
+                                                        {slot, map_field_exact,
+                                                         map_field_exact_value, expression}),
+    ?assertMatch(#{reason := invalid_role,
+                   validator := {slot, map_field_exact, map_field_exact_value, expression},
+                   actual_type := map_field_exact},
+                 MapError).
+
+test_slot_validators_reject_malformed_structural_nodes(_Config) ->
+    MalformedMapField = {map_field_exact, 1, {atom, 1, key}},
+    MalformedBinElement = {bin_element, 1, {atom, 1, value}},
+    {error, MapError} = astranaut_syntax:validate_local(MalformedMapField,
+                                                        {slot, map_expr, fields, map_field}),
+    ?assertMatch(#{reason := invalid_node,
+                   validator := {slot, map_expr, fields, map_field}},
+                 MapError),
+    {error, BinError} = astranaut_syntax:validate_local(MalformedBinElement,
+                                                        {slot, binary, elements, binary_field}),
+    ?assertMatch(#{reason := invalid_node,
+                   validator := {slot, binary, elements, binary_field}},
+                 BinError).
+
+test_validate_local_does_not_recurse_grandchildren(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
+    ?assertEqual(ok, astranaut_syntax:validate_local(Tree, {role, expression})).
+
+test_validate_recursive_recurse_grandchildren(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
+    {error, Error} = astranaut_syntax:validate_recursive(Tree, {role, expression}),
+    ?assertMatch(#{reason := invalid_role,
+                   actual_type := clause,
+                   parent_type := tuple},
+                 Error).
+
+test_traverse_validate_changed_node(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
+    try astranaut:smap(
+          fun({atom, 1, bad}) -> function_form();
+             (Node) -> Node
+          end, Tree, #{traverse => pre, validate => true}) of
+        _ -> error(unexpected_ok)
+    catch
+        error:{invalid_transform_validation, #{reason := invalid_role,
+                                               actual_type := function}} ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
 %% edge cases
 %%--------------------------------------------------------------------
 
@@ -291,3 +434,149 @@ test_validate_empty_list(_Config) ->
 
 function_form() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
+
+child_spec_cases() ->
+    Pattern = valid_ast(pattern),
+    Expr = valid_ast(expression),
+    Guard = valid_ast(guard),
+    MapField = valid_ast(map_field),
+    Clause = valid_ast(clause),
+    Form = function_form(),
+    Name = valid_ast(name),
+    Type = valid_ast(type),
+    AttributeBody = valid_ast(attribute_body),
+    [{named_fun_expr, [[Name], [Clause]], #{node => expression},
+      [{name, pattern}, {clauses, clause}]},
+     {match_expr, [[Pattern], [Expr]], #{node => expression},
+      [{left, pattern}, {right, expression}]},
+     {maybe_match_expr, [[Pattern], [Expr]], #{node => expression},
+      [{left, pattern}, {right, expression}]},
+     {clause, [[Pattern], [Expr]], #{node => clause},
+     [{patterns, pattern}, {body, expression}]},
+     {clause, [[Pattern], [Guard], [Expr]], #{node => clause},
+      [{patterns, pattern}, {guards, guard}, {body, expression}]},
+     {binary, [[valid_ast(binary_field)]], #{node => expression},
+      [{elements, binary_field}]},
+     {map_expr, [[MapField]], #{node => expression},
+      [{fields, map_field}]},
+     {map_expr, [[Expr], [MapField]], #{node => expression},
+      [{argument, expression}, {fields, map_field}]},
+     {map_expr, [[MapField]], #{node => pattern},
+      [{fields, map_field}]},
+     {map_field_assoc, [[Expr], [Expr]], #{node => expression},
+      [{map_field_assoc_key, expression}, {map_field_assoc_value, expression}]},
+     {map_field_exact, [[Expr], [Expr]], #{node => expression},
+      [{map_field_exact_key, expression}, {map_field_exact_value, expression}]},
+     {map_field_exact, [[Expr], [Pattern]], #{node => pattern},
+      [{map_field_exact_key, expression}, {map_field_exact_value, pattern}]},
+     {generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {strict_generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {binary_generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {strict_binary_generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {map_generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {strict_map_generator, [[Pattern], [Expr]], #{node => expression},
+      [{pattern, pattern}, {body, expression}]},
+     {fun_expr, [[Clause]], #{node => expression},
+      [{clauses, clause}]},
+     {case_expr, [[Expr], [Clause]], #{node => expression},
+      [{argument, expression}, {clauses, clause}]},
+     {if_expr, [[Clause]], #{node => expression},
+      [{clauses, clause}]},
+     {receive_expr, [[Clause]], #{node => expression},
+      [{clauses, clause}]},
+     {receive_expr, [[Clause], [Expr], [Expr]], #{node => expression},
+      [{clauses, clause}, {timeout, expression}, {action, expression}]},
+     {try_expr, [[Expr], [Clause], [Clause], [Expr]], #{node => expression},
+      [{body, expression}, {clauses, clause}, {handlers, clause}, {'after', expression}]},
+     {try_expr, [[Expr], [Clause], [Clause]], #{node => expression},
+      [{body, expression}, {clauses, clause}, {handlers, clause}]},
+     {function, [[Name], [Clause]], #{node => form},
+      [{name, name}, {clauses, clause}]},
+     {function, [[Clause]], #{node => form},
+      [{clauses, clause}]},
+     {form_list, [[Form]], #{node => form},
+      [{forms, form}]},
+     {attribute, [[{atom, 1, custom}], [AttributeBody]], #{node => form},
+      [{name, name}, {body, attribute_body}]},
+     {attribute, [[{atom, 1, type}], [Name, Type]], #{node => form},
+      [{name, name}, {body, type}]},
+     {attribute, [[{atom, 1, opaque}], [Name, Type]], #{node => form},
+      [{name, name}, {body, type}]},
+     {attribute, [[{atom, 1, spec}], [Name, Type]], #{node => form},
+      [{name, name}, {body, type}]},
+     {attribute, [[{atom, 1, callback}], [Name, Type]], #{node => form},
+      [{name, name}, {body, type}]},
+     {list_comp, [[Expr], [Expr]], #{node => expression},
+      [{template, expression}, {body, expression}]},
+     {map_comp, [[Expr], [Expr]], #{node => expression},
+      [{template, expression}, {body, expression}]},
+     {binary_comp, [[Expr], [Expr]], #{node => expression},
+      [{template, expression}, {body, expression}]},
+     {maybe_expr, [[Expr]], #{node => expression},
+      [{body, expression}]},
+     {maybe_expr, [[Expr], [Clause]], #{node => expression},
+      [{body, expression}, {else_clause, clause}]},
+     {implicit_fun, [[Expr]], #{node => expression},
+      [{name, expression}]},
+     {record_access, [[Expr], [Expr], [Expr]], #{node => expression},
+      [{argument, expression}, {field, expression}, {type, expression}]},
+     {zip_generator, [[Expr]], #{node => expression},
+      [{body, expression}]},
+     {tuple, [[Pattern]], #{node => pattern},
+      [{elements, pattern}]},
+     {tuple, [[Expr]], #{node => expression},
+      [{elements, expression}]},
+     {tuple, [[Expr]], #{},
+      [{elements, expression}]}].
+
+validator_role({role, Role}) ->
+    Role;
+validator_role({slot, _ParentType, _Slot, Role}) ->
+    Role.
+
+valid_ast(expression) ->
+    {atom, 1, ok};
+valid_ast(pattern) ->
+    {var, 1, 'X'};
+valid_ast(guard) ->
+    {op, 1, '>', {var, 1, 'X'}, {integer, 1, 0}};
+valid_ast(map_field) ->
+    {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
+valid_ast(binary_field) ->
+    {bin_element, 1, {atom, 1, value}, {integer, 1, 8}, default};
+valid_ast(clause) ->
+    {clause, 1, [{var, 1, 'X'}], [], [{atom, 1, ok}]};
+valid_ast(form) ->
+    function_form();
+valid_ast(name) ->
+    {atom, 1, foo};
+valid_ast(type) ->
+    {type, 1, integer, []};
+valid_ast(attribute_body) ->
+    {atom, 1, ok}.
+
+invalid_ast(expression) ->
+    function_form();
+invalid_ast(pattern) ->
+    {call, 1, {atom, 1, f}, []};
+invalid_ast(guard) ->
+    {match, 1, {var, 1, 'X'}, {integer, 1, 1}};
+invalid_ast(map_field) ->
+    {atom, 1, not_a_map_field};
+invalid_ast(binary_field) ->
+    {atom, 1, not_a_binary_field};
+invalid_ast(clause) ->
+    {atom, 1, ok};
+invalid_ast(form) ->
+    {atom, 1, ok};
+invalid_ast(name) ->
+    {var, 1, 'X'};
+invalid_ast(type) ->
+    {atom, 1, ok};
+invalid_ast(attribute_body) ->
+    none.

@@ -58,7 +58,7 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     map_m(F, Node, Uniplate, MonadOpts, Opts);
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
-    Opts1 = maps:merge(#{traverse => pre}, maps:with([traverse], Opts)),
+    Opts1 = maps:merge(#{traverse => pre}, maps:with([traverse, validate], Opts)),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
@@ -271,10 +271,10 @@ map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes)
 map_m_if_list(AFB, Node, #{}) ->
     AFB(Node).
 
-step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre}) ->
-    updated_node_apply(F, Node, MOpts);
-step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post}) ->
-    validated_transform(F, Node, Uniplate, MOpts, invalid_post_transform);
+step_apply(F, Node, pre, _Uniplate, MOpts, #{traverse := pre} = Opts) ->
+    updated_node_apply(F, Node, MOpts, Opts);
+step_apply(F, Node, post, Uniplate, #{} = MOpts, #{traverse := post} = Opts) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_post_transform, Opts);
 step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = step_apply(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
@@ -282,20 +282,52 @@ step_apply(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
 step_apply(_F, Node, _Step, _Uniplate, #{return := Return}, #{}) ->
     Return(Node).
 
-updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind}) ->
+updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind} = MOpts, Opts) ->
     Bind(
       Lift(F(Node1)),
       fun(Node2) ->
-                WriterUpdated(updated_node(Node1, Node2))
+              {Node3, Updated} = updated_node(Node1, Node2),
+              Bind(
+                validate_updated_node(Node3, Updated, MOpts, Opts),
+                fun(ok) ->
+                        WriterUpdated({Node3, Updated})
+                end)
       end).
 
-validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, ExceptionType) ->
+validated_transform(F, Node, Uniplate, MOpts, ExceptionType) ->
+    validated_transform(F, Node, Uniplate, MOpts, ExceptionType, #{}).
+
+validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, ExceptionType, Opts) ->
     Bind(
-      updated_node_apply(F, Node, MOpts),
+      updated_node_apply(F, Node, MOpts, Opts),
       fun(NodeOrNodes) ->
               validate_transformed_node(Uniplate, Node, NodeOrNodes, ExceptionType),
               Return(NodeOrNodes)
       end).
+
+validate_updated_node(_Node, false, #{return := Return}, _Opts) ->
+    Return(ok);
+validate_updated_node(Node, true, #{bind := Bind, return := Return, ask := Ask}, #{validate := true}) ->
+    Bind(
+      Ask(),
+      fun(Attr) ->
+              validate_updated_node_1(Node, Attr),
+              Return(ok)
+      end);
+validate_updated_node(Node, true, #{return := Return}, #{validate := true}) ->
+    validate_updated_node_1(Node, #{}),
+    Return(ok);
+validate_updated_node(_Node, true, #{return := Return}, _Opts) ->
+    Return(ok).
+
+validate_updated_node_1(Node, Attr) ->
+    Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),
+    case astranaut_syntax:validate_recursive(Node, Validator) of
+        ok ->
+            ok;
+        {error, Detail} ->
+            erlang:error({invalid_transform_validation, Detail})
+    end.
 
 validate_transformed_node(Uniplate, Node, Nodes, ExceptionType) when is_list(Nodes) ->
     lists:foreach(fun(Node1) -> validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) end, Nodes);

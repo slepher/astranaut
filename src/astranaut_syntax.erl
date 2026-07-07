@@ -14,7 +14,9 @@
 -export([type/1, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
 -export([subtrees_pge/3, attribute_subtrees_type/3]).
--export([validate/2, validate/3, child_specs/3, node_roles/1]).
+-export([validate/2, validate/3, validate_local/2, validate_local/3,
+         validate_recursive/2, validate_recursive/3,
+         child_specs/3, node_roles/1]).
 -export([pattern_node/1, guard_node/1, expression_node/1, update_node/2]).
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
@@ -178,35 +180,100 @@ validate([], _ExpectedRole, _Opts) ->
     ok;
 validate(NodeOrNodes, ExpectedRole, Opts) ->
     Attr = maps:get(attr, Opts, #{}),
-    validate_nodes(NodeOrNodes, ExpectedRole, root, Attr, []).
+    Env = validation_env(Opts),
+    validate_recursive(NodeOrNodes, {role, ExpectedRole}, root, Attr, Env, []).
 
-validate_nodes(Nodes, ExpectedRole, Slot, Attr, Path) when is_list(Nodes) ->
-    validate_node_list(Nodes, ExpectedRole, Slot, Attr, Path, 1);
-validate_nodes(Node, ExpectedRole, Slot, Attr, Path) ->
-    validate_node(Node, ExpectedRole, Slot, Attr, Path).
+-spec validate_local(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term()) ->
+          ok | {error, map()}.
+validate_local(NodeOrNodes, Validator) ->
+    validate_local(NodeOrNodes, Validator, #{}).
 
-validate_node_list([Node|Nodes], ExpectedRole, Slot, Attr, Path, Index) ->
-    Path1 = Path ++ [path_item(Slot, Index, ExpectedRole, Node)],
-    case validate_node(Node, ExpectedRole, Slot, Attr, Path1) of
+-spec validate_local(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
+          ok | {error, map()}.
+validate_local(NodeOrNodes, Validator, Opts) ->
+    Attr = maps:get(attr, Opts, #{}),
+    Env = validation_env(Opts),
+    validate_local(NodeOrNodes, Validator, root, Attr, Env, []).
+
+-spec validate_recursive(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term()) ->
+          ok | {error, map()}.
+validate_recursive(NodeOrNodes, Validator) ->
+    validate_recursive(NodeOrNodes, Validator, #{}).
+
+-spec validate_recursive(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
+          ok | {error, map()}.
+validate_recursive(NodeOrNodes, Validator, Opts) ->
+    Attr = maps:get(attr, Opts, #{}),
+    Env = validation_env(Opts),
+    validate_recursive(NodeOrNodes, Validator, root, Attr, Env, []).
+
+validation_env(Opts) ->
+    #{forms => maps:get(forms, Opts, [])}.
+
+validate_recursive([], _Validator, _Slot, _Attr, _Env, _Path) ->
+    ok;
+validate_recursive(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
+    validate_node_list(fun validate_recursive_node/6, Nodes, Validator, Slot, Attr, Env, Path, 1);
+validate_recursive(Node, Validator, Slot, Attr, Env, Path) ->
+    validate_recursive_node(Node, Validator, Slot, Attr, Env, Path).
+
+validate_local([], _Validator, _Slot, _Attr, _Env, _Path) ->
+    ok;
+validate_local(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
+    validate_node_list(fun validate_local_node/6, Nodes, Validator, Slot, Attr, Env, Path, 1);
+validate_local(Node, Validator, Slot, Attr, Env, Path) ->
+    validate_local_node(Node, Validator, Slot, Attr, Env, Path).
+
+validate_node_list(ValidateNode, [Node|Nodes], Validator, Slot, Attr, Env, Path, Index) ->
+    Path1 = Path ++ [path_item(Slot, Index, Validator, Node)],
+    case ValidateNode(Node, Validator, Slot, Attr, Env, Path1) of
         ok ->
-            validate_node_list(Nodes, ExpectedRole, Slot, Attr, Path, Index + 1);
+            validate_node_list(ValidateNode, Nodes, Validator, Slot, Attr, Env, Path, Index + 1);
         {error, Error} ->
             {error, Error}
     end;
-validate_node_list([], _ExpectedRole, _Slot, _Attr, _Path, _Index) ->
+validate_node_list(_ValidateNode, [], _Validator, _Slot, _Attr, _Env, _Path, _Index) ->
     ok.
 
-validate_node(Node, ExpectedRole, Slot, Attr, Path) ->
+validate_recursive_node(Node, Validator, Slot, Attr, Env, Path) ->
     case node_info(Node) of
         {ok, Type, Pos, Subtrees} ->
-            case role_allowed(Type, ExpectedRole) of
+            case role_allowed(Validator, Type, Node, Env) of
                 true ->
-                    validate_child_specs(Type, Pos, child_specs(Type, Subtrees, Attr), Path);
+                    validate_recursive_child_specs(Type, Pos, child_specs(Type, Subtrees, Attr), Env, Path);
                 false ->
-                    {error, invalid_role_error(ExpectedRole, Slot, Type, Pos, Node, Path)}
+                    ExpectedRole = validator_role(Validator),
+                    {error, invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path)}
             end;
         {error, Exception} ->
-            {error, invalid_node_error(ExpectedRole, Slot, Node, Exception, Path)}
+            {error, invalid_node_error(Validator, validator_role(Validator), Slot, Node, Exception, Path)}
+    end.
+
+validate_local_node(Node, Validator, Slot, Attr, Env, Path) ->
+    case node_info(Node) of
+        {ok, Type, Pos, Subtrees} ->
+            case role_allowed(Validator, Type, Node, Env) of
+                true ->
+                    validate_local_child_specs(Type, Pos, child_specs(Type, Subtrees, Attr), Env, Path);
+                false ->
+                    ExpectedRole = validator_role(Validator),
+                    {error, invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path)}
+            end;
+        {error, Exception} ->
+            {error, invalid_node_error(Validator, validator_role(Validator), Slot, Node, Exception, Path)}
+    end.
+
+validate_current_node(Node, Validator, Slot, _Attr, Env, Path) ->
+    case node_info(Node) of
+        {ok, Type, Pos, _Subtrees} ->
+            case role_allowed(Validator, Type, Node, Env) of
+                true -> ok;
+                false ->
+                    ExpectedRole = validator_role(Validator),
+                    {error, invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path)}
+            end;
+        {error, Exception} ->
+            {error, invalid_node_error(Validator, validator_role(Validator), Slot, Node, Exception, Path)}
     end.
 
 node_info(Node) ->
@@ -229,19 +296,42 @@ node_info_1(Node) ->
             {error, {Class, Reason}}
     end.
 
-validate_child_specs(ParentType, ParentPos, [Spec|Specs], Path) ->
-    #{slot := Slot, role := Role, nodes := Nodes, attr := Attr} = Spec,
-    case validate_nodes(Nodes, Role, Slot, Attr, Path) of
+validate_recursive_child_specs(ParentType, ParentPos, [Spec|Specs], Env, Path) ->
+    #{slot := Slot, validator := Validator, nodes := Nodes, attr := Attr} = Spec,
+    case validate_recursive(Nodes, Validator, Slot, Attr, Env, Path) of
         ok ->
-            validate_child_specs(ParentType, ParentPos, Specs, Path);
+            validate_recursive_child_specs(ParentType, ParentPos, Specs, Env, Path);
         {error, Error} ->
-            {error, Error#{parent_type => ParentType, parent_pos => ParentPos}}
+            {error, add_parent_error(ParentType, ParentPos, Error)}
     end;
-validate_child_specs(_ParentType, _ParentPos, [], _Path) ->
+validate_recursive_child_specs(_ParentType, _ParentPos, [], _Env, _Path) ->
     ok.
 
-invalid_role_error(ExpectedRole, Slot, Type, Pos, Node, Path) ->
+validate_local_child_specs(ParentType, ParentPos, [Spec|Specs], Env, Path) ->
+    #{slot := Slot, validator := Validator, nodes := Nodes, attr := Attr} = Spec,
+    case validate_local_child_nodes(Nodes, Validator, Slot, Attr, Env, Path) of
+        ok ->
+            validate_local_child_specs(ParentType, ParentPos, Specs, Env, Path);
+        {error, Error} ->
+            {error, add_parent_error(ParentType, ParentPos, Error)}
+    end;
+validate_local_child_specs(_ParentType, _ParentPos, [], _Env, _Path) ->
+    ok.
+
+validate_local_child_nodes(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
+    validate_node_list(fun validate_current_node/6, Nodes, Validator, Slot, Attr, Env, Path, 1);
+validate_local_child_nodes(Node, Validator, Slot, Attr, Env, Path) ->
+    validate_current_node(Node, Validator, Slot, Attr, Env, Path).
+
+add_parent_error(ParentType, ParentPos, Error) ->
+    case maps:is_key(parent_type, Error) of
+        true -> Error;
+        false -> Error#{parent_type => ParentType, parent_pos => ParentPos}
+    end.
+
+invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path) ->
     #{reason => invalid_role,
+      validator => Validator,
       expected_role => ExpectedRole,
       slot => Slot,
       actual_type => Type,
@@ -249,16 +339,18 @@ invalid_role_error(ExpectedRole, Slot, Type, Pos, Node, Path) ->
       node => Node,
       path => Path}.
 
-invalid_node_error(ExpectedRole, Slot, Node, Exception, Path) ->
+invalid_node_error(Validator, ExpectedRole, Slot, Node, Exception, Path) ->
     #{reason => invalid_node,
+      validator => Validator,
       expected_role => ExpectedRole,
       slot => Slot,
       node => Node,
       exception => Exception,
       path => Path}.
 
-path_item(Slot, Index, ExpectedRole, Node) ->
-    Item0 = #{slot => Slot, index => Index, expected_role => ExpectedRole},
+path_item(Slot, Index, Validator, Node) ->
+    Item0 = #{slot => Slot, index => Index, validator => Validator,
+              expected_role => validator_role(Validator)},
     case node_info(Node) of
         {ok, Type, Pos, _Subtrees} ->
             Item0#{type => Type, pos => Pos};
@@ -266,11 +358,36 @@ path_item(Slot, Index, ExpectedRole, Node) ->
             Item0#{type => invalid}
     end.
 
-role_allowed(Type, ExpectedRole) ->
+role_allowed(Validator, Type, Node, Env) ->
+    ExpectedRole = validator_role(Validator),
+    role_allowed_1(Type, ExpectedRole, Node, Env) andalso slot_type_allowed(Validator, Type).
+
+role_allowed_1(_Type, guard, Node, Env) ->
+    erl_lint:is_guard_test(revert(Node), maps:get(forms, Env, []));
+role_allowed_1(Type, map_field, _Node, _Env) ->
+    lists:member(Type, [map_field_assoc, map_field_exact]);
+role_allowed_1(Type, binary_field, _Node, _Env) ->
+    Type =:= binary_field;
+role_allowed_1(Type, ExpectedRole, _Node, _Env) ->
     (ExpectedRole =:= attribute_body) orelse lists:member(ExpectedRole, node_roles(Type)).
 
+slot_type_allowed({slot, map_expr, fields, map_field}, Type) ->
+    lists:member(Type, [map_field_assoc, map_field_exact]);
+slot_type_allowed({slot, binary, elements, binary_field}, Type) ->
+    Type =:= binary_field;
+slot_type_allowed({slot, _ParentType, _Slot, Role}, Type)
+  when Role =/= map_field, Role =/= binary_field ->
+    not lists:member(Type, [map_field_assoc, map_field_exact, binary_field]);
+slot_type_allowed(_Validator, _Type) ->
+    true.
+
+validator_role({role, Role}) ->
+    Role;
+validator_role({slot, _ParentType, _Slot, Role}) ->
+    Role.
+
 -define(EXPR_PAT_GUARD, [atom, char, float, integer, nil, string, variable,
-                          tuple, list, cons, binary, binary_field,
+                          tuple, list, cons, binary, binary_field, size_qualifier,
                           map_expr, map_field_exact, record_expr, record_field,
                           parentheses]).
 
@@ -285,7 +402,7 @@ role_allowed(Type, ExpectedRole) ->
                     map_generator, strict_map_generator,
                     implicit_fun, list_comp, binary_comp, map_comp,
                     zip_generator, maybe_expr,
-                    arity_qualifier, size_qualifier]).
+                    arity_qualifier]).
 
 -define(PAT_ONLY, [underscore, class_qualifier]).
 -define(CLAUSE_ONLY, [clause]).
@@ -327,85 +444,129 @@ add_if(Type, Set, Roles) ->
     case lists:member(Type, Set) of true -> Roles; false -> [] end.
 
 -spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [map()].
-child_specs(_Type, Subtrees, #{node := pattern} = Attr) ->
+child_specs(Type, Subtrees, Attr) ->
+    add_child_validators(Type, child_specs_1(Type, Subtrees, Attr)).
+
+child_specs_1(map_expr, [Fields], Attr) ->
+    [map_field_child_spec(fields, Fields, Attr, false)];
+child_specs_1(map_expr, [Argument, Fields], Attr) ->
+    [child_spec(argument, expression, Argument, Attr, false),
+     map_field_child_spec(fields, Fields, Attr, false)];
+child_specs_1(binary, [Elements], Attr) ->
+    [binary_field_child_spec(elements, [Elements], Attr, false)];
+child_specs_1(binary_field, Subtrees, #{binary_field_role := Role} = Attr) ->
+    [child_spec(elements, Role, Subtrees, Attr, false)];
+child_specs_1(binary_field, Subtrees, Attr) ->
+    [child_spec(elements, expression, Subtrees, Attr, false)];
+child_specs_1(Type, [Keys, Values], #{node := map_field, map_field_role := pattern} = Attr)
+  when Type =:= map_field_assoc; Type =:= map_field_exact ->
+    {KeySlot, ValueSlot} = map_field_slots(Type),
+    [child_spec(KeySlot, expression, Keys, Attr, true),
+     child_spec(ValueSlot, pattern, Values, Attr, true)];
+child_specs_1(Type, [Keys, Values], #{node := map_field, map_field_role := Role} = Attr)
+  when Type =:= map_field_assoc; Type =:= map_field_exact ->
+    {KeySlot, ValueSlot} = map_field_slots(Type),
+    [child_spec(KeySlot, map_field_child_role(Role), Keys, Attr, true),
+     child_spec(ValueSlot, Role, Values, Attr, true)];
+child_specs_1(Type, [Keys, Values], #{node := pattern} = Attr)
+  when Type =:= map_field_assoc; Type =:= map_field_exact ->
+    {KeySlot, ValueSlot} = map_field_slots(Type),
+    [child_spec(KeySlot, expression, Keys, Attr, true),
+     child_spec(ValueSlot, pattern, Values, Attr, true)];
+child_specs_1(Type, [Keys, Values], #{node := Role} = Attr)
+  when Type =:= map_field_assoc; Type =:= map_field_exact ->
+    {KeySlot, ValueSlot} = map_field_slots(Type),
+    [child_spec(KeySlot, map_field_child_role(Role), Keys, Attr, true),
+     child_spec(ValueSlot, Role, Values, Attr, true)];
+child_specs_1(_Type, Subtrees, #{node := pattern} = Attr) ->
     [child_spec(elements, pattern, Subtrees, Attr, false)];
-child_specs(named_fun_expr, [Names, Clauses], Attr) ->
+child_specs_1(named_fun_expr, [Names, Clauses], Attr) ->
     [child_spec(name, pattern, Names, Attr, true),
      child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(Type, [Patterns, Expressions], Attr) when Type =:= match_expr; Type =:= maybe_match_expr ->
+child_specs_1(Type, [Patterns, Expressions], Attr) when Type =:= match_expr; Type =:= maybe_match_expr ->
     [child_spec(left, pattern, Patterns, Attr, true),
      child_spec(right, expression, Expressions, Attr, true)];
-child_specs(clause, [Patterns, Expressions], Attr) ->
+child_specs_1(clause, [Patterns, Expressions], Attr) ->
     [child_spec(patterns, pattern, Patterns, Attr, true),
      child_spec(body, expression, Expressions, Attr, true)];
-child_specs(clause, [Patterns, Guards, Expressions], Attr) ->
+child_specs_1(clause, [Patterns, Guards, Expressions], Attr) ->
     [child_spec(patterns, pattern, Patterns, Attr, true),
      child_spec(guards, guard, Guards, Attr, true),
      child_spec(body, expression, Expressions, Attr, true)];
-child_specs(Type, [Patterns, Expressions], Attr) when Type =:= generator; Type =:= strict_generator;
+child_specs_1(Type, [Patterns, Expressions], Attr) when Type =:= generator; Type =:= strict_generator;
                                                       Type =:= binary_generator; Type =:= strict_binary_generator;
                                                       Type =:= map_generator; Type =:= strict_map_generator ->
     [child_spec(pattern, pattern, Patterns, Attr, true),
-     child_spec(expression, expression, Expressions, Attr, true)];
-child_specs(fun_expr, [Clauses], Attr) ->
+     child_spec(body, expression, Expressions, Attr, true)];
+child_specs_1(fun_expr, [Clauses], Attr) ->
     [child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(case_expr, [Argument, Clauses], Attr) ->
+child_specs_1(case_expr, [Argument, Clauses], Attr) ->
     [child_spec(argument, expression, Argument, Attr, false),
      child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(if_expr, [Clauses], Attr) ->
+child_specs_1(if_expr, [Clauses], Attr) ->
     [child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(receive_expr, [Clauses], Attr) ->
+child_specs_1(receive_expr, [Clauses], Attr) ->
     [child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(receive_expr, [Clauses, Timeout, Action], Attr) ->
+child_specs_1(receive_expr, [Clauses, Timeout, Action], Attr) ->
     [child_spec(clauses, clause, Clauses, Attr, false),
      child_spec(timeout, expression, Timeout, Attr, false),
      child_spec(action, expression, Action, Attr, false)];
-child_specs(try_expr, [Body, Clauses, Handlers, After], Attr) ->
+child_specs_1(try_expr, [Body, Clauses, Handlers, After], Attr) ->
     [child_spec(body, expression, Body, Attr, false),
      child_spec(clauses, clause, Clauses, Attr, false),
      child_spec(handlers, clause, Handlers, Attr, false),
      child_spec('after', expression, After, Attr, false)];
-child_specs(try_expr, [Body, Clauses, Handlers], Attr) ->
+child_specs_1(try_expr, [Body, Clauses, Handlers], Attr) ->
     [child_spec(body, expression, Body, Attr, false),
      child_spec(clauses, clause, Clauses, Attr, false),
      child_spec(handlers, clause, Handlers, Attr, false)];
-child_specs(function, [Name, Clauses], Attr) ->
+child_specs_1(function, [Name, Clauses], Attr) ->
     [child_spec(name, name, Name, Attr, false),
      child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(function, [Clauses], Attr) ->
+child_specs_1(function, [Clauses], Attr) ->
     [child_spec(clauses, clause, Clauses, Attr, false)];
-child_specs(form_list, Subtrees, Attr) ->
+child_specs_1(form_list, Subtrees, Attr) ->
     [child_spec(forms, form, Subtrees, Attr, false)];
-child_specs(attribute, [[NameTree], BodyTrees], Attr) ->
+child_specs_1(attribute, [[NameTree], BodyTrees], Attr) ->
     Attribute = erl_syntax:atom_value(NameTree),
     [child_spec(name, name, [NameTree], Attr, false),
      child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr#{attribute => Attribute}, false)];
-child_specs(list_comp, [Template, Body], Attr) ->
+child_specs_1(list_comp, [Template, Body], Attr) ->
     [child_spec(template, expression, Template, Attr, true),
      child_spec(body, expression, Body, Attr, false)];
-child_specs(map_comp, [Template, Body], Attr) ->
+child_specs_1(map_comp, [Template, Body], Attr) ->
     [child_spec(template, expression, Template, Attr, true),
      child_spec(body, expression, Body, Attr, false)];
-child_specs(binary_comp, [Template, Body], Attr) ->
+child_specs_1(binary_comp, [Template, Body], Attr) ->
     [child_spec(template, expression, Template, Attr, true),
      child_spec(body, expression, Body, Attr, false)];
-child_specs(maybe_expr, [Body], Attr) ->
+child_specs_1(maybe_expr, [Body], Attr) ->
     [child_spec(body, expression, Body, Attr, false)];
-child_specs(maybe_expr, [Body, Else], Attr) ->
+child_specs_1(maybe_expr, [Body, Else], Attr) ->
     [child_spec(body, expression, Body, Attr, false),
      child_spec(else_clause, clause, Else, Attr, false)];
-child_specs(implicit_fun, [Name], Attr) ->
+child_specs_1(implicit_fun, [Name], Attr) ->
     [child_spec(name, expression, Name, Attr, false)];
-child_specs(record_access, [Argument, Field, Type], Attr) ->
+child_specs_1(record_access, [Argument, Field, Type], Attr) ->
     [child_spec(argument, expression, Argument, Attr, false),
      child_spec(field, expression, Field, Attr, false),
      child_spec(type, expression, Type, Attr, false)];
-child_specs(zip_generator, [Body], Attr) ->
+child_specs_1(zip_generator, [Body], Attr) ->
     [child_spec(body, expression, Body, Attr, false)];
-child_specs(_Type, Subtrees, #{node := Role} = Attr) ->
+child_specs_1(_Type, Subtrees, #{node := Role} = Attr) ->
     [child_spec(elements, Role, Subtrees, Attr, false)];
-child_specs(_Type, Subtrees, Attr) ->
+child_specs_1(_Type, Subtrees, Attr) ->
     [child_spec(elements, expression, Subtrees, Attr, false)].
+
+add_child_validators(ParentType, Specs) ->
+    lists:map(fun(Spec) -> add_child_validator(ParentType, Spec) end, Specs).
+
+add_child_validator(ParentType, #{slot := Slot, role := Role, attr := Attr} = Spec) ->
+    Validator = {slot, ParentType, Slot, Role},
+    ChildAttr = Attr#{validator => Validator,
+                      parent_type => ParentType,
+                      parent_slot => Slot},
+    Spec#{validator => Validator, attr => ChildAttr}.
 
 child_spec(Slot, Role, Nodes, Attr, Annotate) ->
     #{slot => Slot,
@@ -414,6 +575,24 @@ child_spec(Slot, Role, Nodes, Attr, Annotate) ->
       subtrees => Nodes,
       annotate => Annotate,
       attr => Attr#{node => Role}}.
+
+map_field_child_spec(Slot, Nodes, Attr, Annotate) ->
+    Spec = child_spec(Slot, map_field, Nodes, Attr, Annotate),
+    FieldRole = maps:get(node, Attr, expression),
+    FieldAttr = maps:get(attr, Spec),
+    Spec#{attr := FieldAttr#{map_field_role => FieldRole}}.
+
+binary_field_child_spec(Slot, Nodes, Attr, Annotate) ->
+    Spec = child_spec(Slot, binary_field, Nodes, Attr, Annotate),
+    FieldRole = maps:get(node, Attr, expression),
+    FieldAttr = maps:get(attr, Spec),
+    Spec#{attr := FieldAttr#{binary_field_role => FieldRole}}.
+
+map_field_child_role(pattern) -> expression;
+map_field_child_role(Role) -> Role.
+
+map_field_slots(map_field_assoc) -> {map_field_assoc_key, map_field_assoc_value};
+map_field_slots(map_field_exact) -> {map_field_exact_key, map_field_exact_value}.
 
 child_nodes([]) ->
     [];
@@ -437,21 +616,17 @@ attribute_body_role(_) -> attribute_body.
 child_specs_subtrees(Specs) ->
     lists:append(lists:map(fun child_spec_subtreess/1, Specs)).
 
-child_spec_subtreess(#{slot := Slot, subtrees := Subtrees, annotate := false})
+child_spec_subtreess(#{slot := Slot, subtrees := Subtrees, annotate := false} = Spec)
   when Slot =:= elements; Slot =:= forms ->
-    Subtrees;
-child_spec_subtreess(#{subtrees := Subtrees, annotate := false}) ->
-    [Subtrees];
-child_spec_subtreess(#{role := Role, subtrees := Subtrees, annotate := true}) ->
-    [role_node(Role, Subtrees)].
+    validator_node(Spec, Subtrees);
+child_spec_subtreess(#{subtrees := Subtrees, annotate := false} = Spec) ->
+    [validator_node(Spec, Subtrees)];
+child_spec_subtreess(#{subtrees := Subtrees, annotate := true} = Spec) ->
+    [validator_node(Spec, Subtrees)].
 
-role_node(pattern, Nodes) -> pattern_node(Nodes);
-role_node(guard, Nodes) -> guard_node(Nodes);
-role_node(expression, Nodes) -> expression_node(Nodes);
-role_node(name, Nodes) -> name_node(Nodes);
-role_node(type, Nodes) -> type_node(Nodes);
-role_node(type_param, Nodes) -> type_param_node(Nodes);
-role_node(_Role, Nodes) -> Nodes.
+validator_node(#{attr := Attr}, Nodes) ->
+    astranaut_uniplate:up_attr(maps:with([node, validator, parent_type, parent_slot,
+                                          map_field_role, binary_field_role], Attr), Nodes).
 
 %%===================================================================
 %% update forms related functions

@@ -12,6 +12,7 @@
 -include_lib("eunit/include/eunit.hrl").
 %% API
 -export([get_baseline/2, realize_with_baseline/2, test_module_forms/2, compile_test_module/2, compile_test_forms/1, load_data_modules/2]).
+-export([assert_formatted_messages/1]).
 
 %%%===================================================================
 %%% API
@@ -96,6 +97,14 @@ load_data_modules(Config, TestModules) ->
                 end, Return)
       end, TestModules),
     Config.
+
+assert_formatted_messages(Messages) ->
+    lists:foreach(fun assert_formatted_message/1, Messages).
+
+assert_formatted_message({_Line, Formatter, Error}) ->
+    Message = Formatter:format_error(Error),
+    ?assert(io_lib:deep_char_list(Message)),
+    ?assertNotEqual([], lists:flatten(Message)).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
