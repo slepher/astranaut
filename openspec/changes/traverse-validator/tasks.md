@@ -6,6 +6,10 @@
 - [x] Document the distinction between `validate_local/2` and `validate_recursive/2`.
 - [x] Document `validate => boolean` traversal behavior and default-off semantics.
 - [x] Document macro error attribution for validation failures.
+- [x] Document validation environment separation from traversal attrs.
+- [x] Document guard validation with filtered record-definition forms.
+- [x] Document structural identity checks for map fields and binary fields.
+- [x] Document `subtrees(Child)` current-node shape validation.
 
 ## Implementation
 
@@ -21,6 +25,10 @@
 - [x] Trigger automatic validation only for direct walker-return changes.
 - [x] Avoid automatic validation of ancestor nodes rebuilt only because children changed.
 - [x] Update macro expansion to use propagated validators for macro return validation.
+- [x] Pass filtered record-definition forms through validation opts for guard checks.
+- [x] Keep record-definition forms out of traversal attrs.
+- [x] Use `erl_lint:is_guard_test/2` for guard validation.
+- [x] Validate current-node abstract-format shape with `subtrees/1`.
 - [x] Wrap macro-triggered validation failures as `{invalid_macro_return, Detail}`.
 
 ## Tests
@@ -36,4 +44,7 @@
 - [x] `pre`, `post`, `all`, `subtree`, and `none` validation behavior is covered.
 - [x] Macro invalid return from a wrong slot reports `{invalid_macro_return, Detail}`.
 - [x] Nested macro invalid return preserves origin/current macro detail.
+- [x] Guard validation sees record definitions through validation opts.
+- [x] Structural identity errors reject binary fields in ordinary element slots.
+- [x] Type/tag-correct but malformed structural nodes fail as `invalid_node`.
 - [x] Existing Common Test suites continue to pass.

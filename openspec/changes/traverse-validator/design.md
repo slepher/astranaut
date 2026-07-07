@@ -39,6 +39,10 @@ Each child spec should carry both broad traversal role information and a slot-sp
 
 `node => Role` remains useful for traversal behavior. `validator => Validator` is the structural contract for the current child position.
 
+Traversal attrs must stay local to the current AST position. They should carry node identity and slot metadata only, such as `node`, `validator`, `parent_type`, `parent_slot`, and structure-specific role hints like `map_field_role` or `binary_field_role`.
+
+Module-wide validation context must not be propagated as attrs. In particular, record definition forms used by guard validation belong to the validation environment, not to node attrs.
+
 ## Validator Shape
 
 Validators should be data, not anonymous functions, so errors are inspectable and testable.
@@ -71,13 +75,28 @@ The slot form allows parent-specific rules while carrying the broad role used fo
 
 The validator dispatcher may map a slot validator to a role plus direct child slot rules, but callers should not need to know that mapping.
 
+Some child positions require structural identity checks in addition to broad role checks. For example:
+
+```erlang
+{slot, map_expr, fields, map_field}
+{slot, binary, elements, binary_field}
+{slot, map_field_assoc, map_field_assoc_key, expression}
+{slot, map_field_assoc, map_field_assoc_value, expression}
+{slot, map_field_exact, map_field_exact_key, expression}
+{slot, map_field_exact, map_field_exact_value, Role}
+```
+
+This prevents structural nodes from being used in ordinary expression slots. For example, a `bin_element` is a valid binary field node but must not be accepted as an ordinary list or tuple element. Likewise, a `map_field_exact` node is valid as a map field but not as the value expression inside another map field.
+
 ## Validation APIs
 
 Use separate functions for separate validation scopes:
 
 ```erlang
 astranaut_syntax:validate_local(NodeOrNodes, Validator) -> ok | {error, map()}.
+astranaut_syntax:validate_local(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
 astranaut_syntax:validate_recursive(NodeOrNodes, Validator) -> ok | {error, map()}.
+astranaut_syntax:validate_recursive(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
 ```
 
 Existing compatibility entry points may remain:
@@ -88,6 +107,27 @@ astranaut_syntax:validate(NodeOrNodes, ExpectedRole, Opts).
 ```
 
 Those compatibility functions should behave like recursive validation with a role validator.
+
+`Opts` is the validation environment. It may include:
+
+```erlang
+#{attr => Attr,
+  forms => RecordForms}
+```
+
+`RecordForms` must already be filtered to only record definitions:
+
+```erlang
+[{attribute, Anno, record, {Name, Fields}}]
+```
+
+The syntax validator should pass those forms to `erl_lint:is_guard_test/2` for guard checks. This is valid because `erl_lint:is_guard_test/2` consumes its `Forms` argument by extracting record attributes only; it does not require a complete module form list.
+
+Attrs and validation environment have different responsibilities:
+
+- `Attr` is local traversal metadata used to derive child validators.
+- `forms` is external validation context used by guard validation.
+- `forms` must not be inserted into traversal attrs or propagated by `subtrees_pge/3`.
 
 ## Local Validation
 
@@ -104,6 +144,10 @@ It must:
 It must not validate grandchildren.
 
 This is useful for parent insertion checks and for callers that want to control recursion themselves.
+
+Every current-node check must also call `subtrees(Child)` through the node information path. This verifies that the child AST node itself has a legal abstract-format shape before role or slot checks succeed. The call is a shape check for the current child only; it is not a request to recursively validate all grandchildren.
+
+Malformed nodes with a valid-looking tag, such as an incomplete `map_field_exact` or `bin_element`, should fail as `invalid_node`.
 
 ## Recursive Validation
 
@@ -206,6 +250,16 @@ This applies to both:
 - the returned node not satisfying the parent slot validator
 
 Nested macro expansion should preserve the existing origin/current macro detail behavior.
+
+Macro validation must pass record definitions through the validation environment, not traversal attrs. The macro transformer should filter module forms to record definitions once, keep that list in macro depth options, and call:
+
+```erlang
+astranaut_syntax:validate_recursive(Return, Validator,
+                                    #{attr => Attr,
+                                      forms => RecordForms})
+```
+
+This allows guard macros involving record construction or `is_record/2` checks to be validated by `erl_lint:is_guard_test/2` with the same record knowledge as the containing module.
 
 ## Error Details
 
