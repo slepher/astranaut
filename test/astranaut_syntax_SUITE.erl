@@ -93,7 +93,8 @@ all() ->
      test_otp28_strict_generator,
      test_traverse_validate_changed_node,
      test_traverse_validate_preserves_slot_attr,
-     test_traverse_validate_does_not_recurse_grandchildren,
+     test_traverse_pre_validate_does_not_recurse_grandchildren,
+     test_traverse_post_validate_recurse_grandchildren,
      test_map_m_validate_raises,
      %% edge cases
      test_set_pos_warning_keeps_shape,
@@ -630,7 +631,7 @@ test_traverse_validate_preserves_slot_attr(_Config) ->
             ok
     end.
 
-test_traverse_validate_does_not_recurse_grandchildren(_Config) ->
+test_traverse_pre_validate_does_not_recurse_grandchildren(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
     Updated = {tuple, 1, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
     ?assertEqual(
@@ -641,6 +642,22 @@ test_traverse_validate_does_not_recurse_grandchildren(_Config) ->
             (Node) ->
                  Node
          end, Tree, #{traverse => pre, validate => true})).
+
+test_traverse_post_validate_recurse_grandchildren(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
+    Updated = {tuple, 1, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
+    try astranaut:smap(
+          fun({atom, 1, bad}) ->
+                  Updated;
+             (Node) ->
+                  Node
+          end, Tree, #{traverse => post, validate => true}) of
+        _ -> error(unexpected_ok)
+    catch
+        error:{invalid_transform_validation, #{reason := invalid_role,
+                                               actual_type := clause}} ->
+            ok
+    end.
 
 test_map_m_validate_raises(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},

@@ -152,8 +152,8 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
 map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
-map_m_2(F, Node, Uniplate, MOpts, #{traverse := none}) ->
-    validated_transform(F, Node, Uniplate, MOpts, invalid_transform);
+map_m_2(F, Node, Uniplate, MOpts, #{traverse := none} = Opts) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_transform, Opts);
 map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
@@ -179,8 +179,8 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
                 end, NodeOrNodes, MOpts)
       end).
 
-sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree}) ->
-    validated_transform(F, Node, Uniplate, MOpts, invalid_subtree_transform);
+sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree} = Opts) ->
+    validated_transform(F, Node, Uniplate, MOpts, invalid_subtree_transform, Opts);
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
@@ -294,9 +294,6 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
                 end)
       end).
 
-validated_transform(F, Node, Uniplate, MOpts, ExceptionType) ->
-    validated_transform(F, Node, Uniplate, MOpts, ExceptionType, #{}).
-
 validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts, ExceptionType, Opts) ->
     Bind(
       updated_node_apply(F, Node, MOpts, Opts),
@@ -307,43 +304,44 @@ validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts
 
 validate_updated_node(_Node, false, #{return := Return}, _Opts) ->
     Return(ok);
-validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, #{validate := true}) ->
+validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, #{validate := true} = Opts) ->
     Bind(
       Ask(),
       fun(Attr) ->
-              validate_updated_node_1(Node, Attr, MOpts)
+              validate_updated_node_1(Node, Attr, MOpts, Opts)
       end);
-validate_updated_node(Node, true, MOpts, #{validate := true}) ->
-    validate_updated_node_1(Node, #{}, MOpts);
+validate_updated_node(Node, true, MOpts, #{validate := true} = Opts) ->
+    validate_updated_node_1(Node, #{}, MOpts, Opts);
 validate_updated_node(_Node, true, #{return := Return}, _Opts) ->
     Return(ok).
 
-validate_updated_node_1(Node, Attr, #{return := Return}) ->
+validate_updated_node_1(Node, Attr, #{return := Return}, Opts) ->
     Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),
-    case astranaut_syntax:validate_local(Node, Validator, #{attr => Attr}) of
+    Validate = validate_updated_node_fun(Opts),
+    case Validate(Node, Validator, #{attr => Attr}) of
         ok ->
             Return(ok);
         {error, Detail} ->
             erlang:error({invalid_transform_validation, Detail})
     end.
 
+validate_updated_node_fun(#{traverse := pre}) ->
+    fun astranaut_syntax:validate_local/3;
+validate_updated_node_fun(_Opts) ->
+    fun astranaut_syntax:validate_recursive/3.
+
 validate_transformed_node(Uniplate, Node, Nodes, ExceptionType, Opts) when is_list(Nodes) ->
     lists:foreach(fun(Node1) -> validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts) end, Nodes);
 validate_transformed_node(Uniplate, Node, Node1, ExceptionType, Opts) ->
     validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts).
 
-validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts) ->
+validate_transformed_node_1(_Uniplate, Node, Node1, ExceptionType, _Opts) ->
     case Node1 of
         #uniplate_node_context{} ->
             ContextExceptionType = list_to_atom(atom_to_list(ExceptionType) ++ "_with_context"),
             erlang:error({ContextExceptionType, Node, Node1});
-        Node ->
-            ok;
-        Node1 ->
-            case maps:get(validate, Opts, false) of
-                true -> ok;
-                false -> uniplate(Uniplate, Node, Node1, #{}, ExceptionType)
-            end
+        _ ->
+            ok
     end.
 
 %%%===================================================================

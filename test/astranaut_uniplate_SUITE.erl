@@ -412,13 +412,13 @@ test_invalid_post_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_post_transform, {var, _, _}, invalid_node, _OriginalException},
+       {invalid_transform_validation, _},
        astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  invalid_node;
             (Node) ->
                  Node
-         end, Forms, #{traverse => post})),
+         end, Forms, #{traverse => post, validate => true})),
     ok.
 
 test_invalid_post_transform_context_exception(Config) ->
@@ -474,26 +474,26 @@ test_invalid_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_transform, {function, _Pos, _Name, _Arity, _Clauses}, invalid_node, _OriginalException},
+       {invalid_transform_validation, _},
        astranaut:smap(
          fun({function, _Pos, _Name, _Arity, _Clauses}) ->
                  invalid_node;
             (Node) ->
                  Node
-         end, Forms, #{traverse => none})),
+         end, Forms, #{traverse => none, validate => true})),
     ok.
 
 test_invalid_subtree_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_subtree_transform, {clause, _Pos, _Pattern, _Guard, _Expression}, invalid_clause, _OriginalException},
+       {invalid_transform_validation, _},
        astranaut:smap(
          fun({clause, _Pos, _Pattern, _Guard, _Expression}) ->
                  invalid_clause;
             (Node) ->
                  Node
-         end, Forms, #{traverse => subtree})),
+         end, Forms, #{traverse => subtree, validate => true})),
     ok.
 
 uniplate(Node) ->

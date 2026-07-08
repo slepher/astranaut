@@ -307,16 +307,23 @@ node_info(Node) ->
             node_info_1(Node)
     end.
 
+node_info_1(default) ->
+    {ok, default, none, []};
 node_info_1(Node) ->
-    try
-        Type = type(Node),
-        Pos = get_pos(Node),
-        Subtrees = subtrees(Node),
-        _Reverted = revert(Node),
-        {ok, Type, Pos, Subtrees}
-    catch
-        Class:Reason ->
-            {error, {Class, Reason}}
+    case is_tuple(Node) orelse erl_syntax:is_tree(Node) of
+        true ->
+            try
+                Type = type(Node),
+                Pos = get_pos(Node),
+                Subtrees = subtrees(Node),
+                _Reverted = revert(Node),
+                {ok, Type, Pos, Subtrees}
+            catch
+                Class:Reason ->
+                    {error, {Class, Reason}}
+            end;
+        false ->
+            {error, {bad_syntax_tree, Node}}
     end.
 
 validate_recursive_child_specs(ParentType, ParentPos, [Spec|Specs], Env, Path) ->
