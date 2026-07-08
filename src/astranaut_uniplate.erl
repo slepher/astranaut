@@ -301,40 +301,38 @@ validated_transform(F, Node, Uniplate, #{bind := Bind, return := Return} = MOpts
     Bind(
       updated_node_apply(F, Node, MOpts, Opts),
       fun(NodeOrNodes) ->
-              validate_transformed_node(Uniplate, Node, NodeOrNodes, ExceptionType),
+              validate_transformed_node(Uniplate, Node, NodeOrNodes, ExceptionType, Opts),
               Return(NodeOrNodes)
       end).
 
 validate_updated_node(_Node, false, #{return := Return}, _Opts) ->
     Return(ok);
-validate_updated_node(Node, true, #{bind := Bind, return := Return, ask := Ask}, #{validate := true}) ->
+validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, #{validate := true}) ->
     Bind(
       Ask(),
       fun(Attr) ->
-              validate_updated_node_1(Node, Attr),
-              Return(ok)
+              validate_updated_node_1(Node, Attr, MOpts)
       end);
-validate_updated_node(Node, true, #{return := Return}, #{validate := true}) ->
-    validate_updated_node_1(Node, #{}),
-    Return(ok);
+validate_updated_node(Node, true, MOpts, #{validate := true}) ->
+    validate_updated_node_1(Node, #{}, MOpts);
 validate_updated_node(_Node, true, #{return := Return}, _Opts) ->
     Return(ok).
 
-validate_updated_node_1(Node, Attr) ->
+validate_updated_node_1(Node, Attr, #{return := Return}) ->
     Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),
-    case astranaut_syntax:validate_recursive(Node, Validator) of
+    case astranaut_syntax:validate_local(Node, Validator, #{attr => Attr}) of
         ok ->
-            ok;
+            Return(ok);
         {error, Detail} ->
             erlang:error({invalid_transform_validation, Detail})
     end.
 
-validate_transformed_node(Uniplate, Node, Nodes, ExceptionType) when is_list(Nodes) ->
-    lists:foreach(fun(Node1) -> validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) end, Nodes);
-validate_transformed_node(Uniplate, Node, Node1, ExceptionType) ->
-    validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType).
+validate_transformed_node(Uniplate, Node, Nodes, ExceptionType, Opts) when is_list(Nodes) ->
+    lists:foreach(fun(Node1) -> validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts) end, Nodes);
+validate_transformed_node(Uniplate, Node, Node1, ExceptionType, Opts) ->
+    validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts).
 
-validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) ->
+validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType, Opts) ->
     case Node1 of
         #uniplate_node_context{} ->
             ContextExceptionType = list_to_atom(atom_to_list(ExceptionType) ++ "_with_context"),
@@ -342,7 +340,10 @@ validate_transformed_node_1(Uniplate, Node, Node1, ExceptionType) ->
         Node ->
             ok;
         Node1 ->
-            uniplate(Uniplate, Node, Node1, #{}, ExceptionType)
+            case maps:get(validate, Opts, false) of
+                true -> ok;
+                false -> uniplate(Uniplate, Node, Node1, #{}, ExceptionType)
+            end
     end.
 
 %%%===================================================================

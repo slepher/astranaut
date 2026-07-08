@@ -94,7 +94,7 @@ all() ->
      test_traverse_validate_changed_node,
      test_traverse_validate_preserves_slot_attr,
      test_traverse_validate_does_not_recurse_grandchildren,
-     test_map_m_validate_returns_failure,
+     test_map_m_validate_raises,
      %% edge cases
      test_set_pos_warning_keeps_shape,
      test_validate_nested_valid, test_validate_nested_invalid,
@@ -642,7 +642,7 @@ test_traverse_validate_does_not_recurse_grandchildren(_Config) ->
                  Node
          end, Tree, #{traverse => pre, validate => true})).
 
-test_map_m_validate_returns_failure(_Config) ->
+test_map_m_validate_raises(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
     Monad =
         astranaut:map_m(
@@ -651,14 +651,14 @@ test_map_m_validate_returns_failure(_Config) ->
              (Node) ->
                   astranaut_traverse:return(Node)
           end, Tree, #{traverse => pre, validate => true}),
-    Return = astranaut_traverse:eval(Monad, astranaut, #{}, ok),
-    ?assertEqual(nothing, astranaut_return:run(Return)),
-    Error = astranaut_return:run_error(Return),
-    ?assertMatch(#{errors := [{invalid_transform_validation,
-                               #{reason := invalid_role,
-                                 pos := 1,
-                                 actual_type := function}}]},
-                 astranaut_error:printable(Error)).
+    try astranaut_traverse:eval(Monad, astranaut, #{}, ok) of
+        _ -> error(unexpected_ok)
+    catch
+        error:{invalid_transform_validation, #{reason := invalid_role,
+                                               pos := 1,
+                                               actual_type := function}} ->
+            ok
+    end.
 
 %%--------------------------------------------------------------------
 %% edge cases
