@@ -96,7 +96,7 @@ smap(F, Node, Opts) ->
 -spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Node, Opts) ->
     F1 = fun(N, A) -> fun(S) -> {N, apply_fun(F, [N, S, A])} end end,
-    StateM = map_m_with_attr(F1, Node, state, Opts#{static => true}, is_function(F, 3)),
+    StateM = map_m_with_attr(F1, Node, state, Opts#{static => true, validate => false}, is_function(F, 3)),
     %% Node is never changed if static is true
     {_Node, Acc} = StateM(Init),
     Acc.
@@ -152,7 +152,7 @@ smapfold(F, Init, Node, Opts) ->
 -spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, straverse_opts()) -> boolean().
 search(F, Node, Opts) ->
     F1 = fun(N, A) -> case apply_fun(F, [N, A]) of true -> {left, match}; false -> {right, N} end end,
-    Either = map_m_with_attr(F1, Node, either, Opts#{static => true}, is_function(F, 2)),
+    Either = map_m_with_attr(F1, Node, either, Opts#{static => true, validate => false}, is_function(F, 2)),
     case Either of {left, match} -> true; {right, _Node} -> false end.
 
 map_m_with_attr(F, Node, Monad, Opts, WithAttr) ->
@@ -163,10 +163,19 @@ map_m_with_attr(F, Node, Monad, Opts, WithAttr) ->
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, false) ->
     %% N is Node and #{} is empty Attr
     F1 = fun(N) -> F(N, #{}) end,
-    astranaut_uniplate:map_m(F1, Node, Uniplate, Monad, Opts);
+    case validation_attr_needed(Node, Opts) of
+        true ->
+            InitAttr = root_traverse_attr(Node, Opts, maps:get(attr, Opts, #{})),
+            Opts1 = maps:remove(attr, Opts),
+            F2 = fun(N) -> fun(_A) -> F1(N) end end,
+            ReaderT = astranaut_uniplate:map_m(F2, Node, Uniplate, {reader, Monad}, Opts1),
+            ReaderT(InitAttr);
+        false ->
+            astranaut_uniplate:map_m(F1, Node, Uniplate, Monad, Opts)
+    end;
 map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
     %% to take benefit of attribute access, add a ReaderT monad transformer.
-    Attr = maps:get(attr, Opts, #{}),
+    Attr = root_traverse_attr(Node, Opts, maps:get(attr, Opts, #{})),
     Opts1 = maps:remove(attr, Opts),
     %% N is Node and A is Attr
     F1 = fun(N) -> fun(A) -> F(N, A) end end,
@@ -189,7 +198,7 @@ map(F, TopNode, Opts) ->
 reduce(F, Init, TopNode, Opts) ->
     WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
     F1 = fun(Node, State, Attr) -> apply_fun(F, [Node, State, Attr]) end,
-    Return = mapfold_1(F1, Init, TopNode, Opts#{static => true}, WithReturn),
+    Return = mapfold_1(F1, Init, TopNode, Opts#{static => true, validate => false}, WithReturn),
     astranaut_return:lift_m(fun({_TopNode1, State}) -> State end, Return).
 
 -spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(trees()).
@@ -214,8 +223,8 @@ mapfold(F, Init, TopNode, Opts) ->
 
 mapfold_1(F, Init, TopNode, #{} = Opts, WithReturn) ->
     Formatter = maps:get(formatter, Opts, ?MODULE),
-    InitAttr = maps:get(attr, Opts, #{}),
-    Opts1 = maps:without([formatter, attr], Opts),
+    InitAttr = root_traverse_attr(TopNode, Opts, maps:get(attr, Opts, #{})),
+    Opts1 = maps:without([formatter], Opts#{attr => InitAttr}),
     F1 = fun(Node) ->
                  astranaut_traverse:bind(
                    astranaut_traverse:get(),
@@ -380,10 +389,97 @@ map_form(F, Form, Opts) ->
 
 map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Opts1 = maps:remove(uniplate, Opts),
+    Opts2 = Opts1#{attr => root_traverse_attr(Node, Opts, maps:get(attr, Opts, #{}))},
     astranaut_uniplate:map_m(
       fun(Node1) ->
               traverse_map_form(F, Node1)
-      end, Node, Uniplate, traverse, Opts).
+      end, Node, Uniplate, traverse, Opts2).
+
+validation_attr_needed(_Node, #{validate := false}) ->
+    false;
+validation_attr_needed(_Node, #{role := _Role}) ->
+    true;
+validation_attr_needed(_Node, #{validator := _Validator}) ->
+    true;
+validation_attr_needed(_Node, #{attr := _Attr}) ->
+    true;
+validation_attr_needed(Node, #{validate := true}) ->
+    root_role(Node) =/= unknown;
+validation_attr_needed(_Node, _Opts) ->
+    false.
+
+root_traverse_attr(Node, Opts, Attr) ->
+    Attr1 = maps:merge(Attr, maps:get(attr, Opts, #{})),
+    case maps:is_key(node, Attr1) orelse maps:is_key(validator, Attr1) of
+        true ->
+            Attr1;
+        false ->
+            case explicit_root_validator(Opts) of
+                {ok, Role, Validator} ->
+                    Attr1#{node => Role, validator => Validator};
+                error ->
+                    case maps:get(validate, Opts, false) of
+                        true ->
+                            case root_role(Node) of
+                                unknown ->
+                                    Attr1;
+                                ambiguous ->
+                                    erlang:error({ambiguous_root_role, Node});
+                                Role ->
+                                    Attr1#{node => Role, validator => {role, Role}}
+                            end;
+                        false ->
+                            Attr1
+                    end
+            end
+    end.
+
+explicit_root_validator(#{validator := {role, Role} = Validator}) ->
+    {ok, Role, Validator};
+explicit_root_validator(#{validator := {slot, _ParentType, _Slot, Role} = Validator}) ->
+    {ok, Role, Validator};
+explicit_root_validator(#{role := Role}) ->
+    {ok, Role, {role, Role}};
+explicit_root_validator(_Opts) ->
+    error.
+
+root_role([Node|Nodes]) ->
+    case root_role(Node) of
+        unknown ->
+            unknown;
+        ambiguous ->
+            ambiguous;
+        Role ->
+            case lists:all(fun(Node1) -> root_role(Node1) =:= Role end, Nodes) of
+                true -> Role;
+                false -> ambiguous
+            end
+    end;
+root_role([]) ->
+    unknown;
+root_role(Node) ->
+    try astranaut_syntax:type(Node) of
+        Type ->
+            root_role_type(Type)
+    catch
+        _:_ ->
+            unknown
+    end.
+
+root_role_type(Type) when Type =:= function; Type =:= attribute;
+                          Type =:= eof_marker; Type =:= error_marker;
+                          Type =:= warning_marker; Type =:= form_list ->
+    form;
+root_role_type(clause) ->
+    clause;
+root_role_type(Type) ->
+    case astranaut_syntax:node_roles(Type) of
+        [type] -> type;
+        [Role] -> Role;
+        [] -> unknown;
+        _Roles -> ambiguous
+    end.
 
 traverse_map_form(F, Node) ->
     Type = erl_syntax:type(Node),

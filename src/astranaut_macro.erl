@@ -928,7 +928,7 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
                          end,
                 return(annotate_traversal_node(Node1, Attr))
             ])
-        end, Exprs, #{traverse => all}),
+        end, Exprs, #{traverse => all, validate => false}),
     astranaut_traverse:local(fun(_) -> InitAttr end, Monad).
 
 annotate_traversal_node(Nodes, Attr) when is_list(Nodes) ->
@@ -1225,9 +1225,10 @@ append_attrs(Arguments, #{attributes := Attrs, pos := Pos}) ->
 append_attrs(Arguments, #{}) ->
     Arguments.
 
-update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true}) ->
+update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true} = Opts) ->
     astranaut_traverse:state(
       fun(Counter) ->
+              Role = maps:get(expected_role, Opts, expression),
               MacroNameStr = macro_name_str(Macro),
               CounterStr = integer_to_list(Counter),
               Nodes1 =
@@ -1242,7 +1243,7 @@ update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true}) ->
                             end;
                        (Node) ->
                             Node
-                    end, Nodes, #{traverse => post}),
+                    end, Nodes, #{traverse => post, role => Role}),
               {Nodes1, Counter + 1}
       end);
 update_quoted_variable_name(Nodes, _Macro, #{}) ->

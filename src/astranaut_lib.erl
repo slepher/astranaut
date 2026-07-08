@@ -61,7 +61,7 @@ replace_pos_cond(Cond, Ast, Pos) ->
                             false ->
                                 Node
                         end
-                end, Ast, #{});
+                end, Ast, #{validate => false});
         false ->
             exit({invalid_pos, Pos})
     end.

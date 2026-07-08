@@ -153,7 +153,7 @@ test_simple_map(_Config) ->
         astranaut:map_m(
           fun(Node) ->
                   astranaut_traverse:return(Node)
-          end, Node0, #{traverse => pre}),
+          end, Node0, #{traverse => pre, role => expression}),
     astranaut_traverse:bind(
       astranaut_traverse:listen_updated(Monad),
       fun(Updated) ->
@@ -229,7 +229,7 @@ test_map_with_state_node(_Config) ->
                   {Node1, Acc + 1};
              (Node, Acc, #{}) ->
                   {Node, Acc}
-          end, 0, NodeA, #{}),
+          end, 0, NodeA, #{role => expression}),
     ?assertEqual({match, 10, {var, 10, 'B'}, {atom, 10, a}}, Return),
     ok.
 
@@ -467,7 +467,7 @@ test_continue_sequence_children(_Config) ->
                     astranaut_traverse:return(Var));
              (Node) ->
                   astranaut_traverse:return(Node)
-          end, TopNode, #{traverse => pre}),
+          end, TopNode, #{traverse => pre, role => expression}),
     Monad1 =
         astranaut:map_m(
           fun({atom, _Pos, AtomValue} = Atom) ->
@@ -487,7 +487,7 @@ test_continue_sequence_children(_Config) ->
 
              (Node) ->
                   astranaut_traverse:return(Node)
-          end, TopNode, #{traverse => pre}),
+          end, TopNode, #{traverse => pre, role => expression}),
     Return = astranaut_traverse:exec(Monad, astranaut, #{}, []),
     Return1 = astranaut_traverse:exec(Monad1, astranaut, #{}, []),
     ?assertEqual({just, [c, 'Var', b, a]}, astranaut_return:run(Return)),

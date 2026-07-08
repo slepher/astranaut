@@ -194,7 +194,7 @@ test_map(_Config) ->
                   {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
              (Node) ->
                   Node
-          end, Ast, #{traverse => pre}),
+          end, Ast, #{traverse => pre, role => expression}),
     Ast2 = merl:quote("A_1 + (B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -215,7 +215,7 @@ test_map_attr(_Config) ->
                       _Type ->
                           Node
                   end
-          end, Ast, #{traverse => pre}),
+          end, Ast, #{traverse => pre, role => expression}),
     Ast2 = merl:quote("E_1 = A + (D_1 = B + C)"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -290,7 +290,7 @@ test_mapfold(_Config) ->
                       _ ->
                           {Node, Acc}
                   end
-          end, [], Ast, #{traverse => post}),
+          end, [], Ast, #{traverse => post, role => expression}),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ?assertEqual(['D_1', 'E_1'], lists:reverse(Acc1)),
@@ -312,7 +312,7 @@ test_mapfold_attr(_Config) ->
                   end;
              (Node, Acc, #{})->
                   {Node, Acc}
-          end, [], Ast, #{traverse => all}),
+          end, [], Ast, #{traverse => all, role => expression}),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ?assertEqual([{pre, 'E'}, {pre, 'D'}, {post, 'D_1'}, {post, 'E_1'}], lists:reverse(Acc1)),
@@ -327,7 +327,7 @@ test_f_return_list(_Config) ->
                    {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
              (Node) ->
                   Node
-          end, Ast, #{traverse => post}),
+          end, Ast, #{traverse => post, role => expression}),
     Ast2 = merl:quote("hello(A_1, A_2, B_1, B_2, world(C_1, C_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -341,7 +341,7 @@ test_all_return_list(_Config) ->
                    {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
              (Node) ->
                   Node
-          end, Ast, #{traverse => all}),
+          end, Ast, #{traverse => all, role => expression}),
     Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.

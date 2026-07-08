@@ -92,9 +92,11 @@ all() ->
      test_otp26_map_comprehension,
      test_otp28_strict_generator,
      test_traverse_validate_changed_node,
+     test_traverse_validate_false_opt_out,
      test_traverse_validate_preserves_slot_attr,
      test_traverse_pre_validate_does_not_recurse_grandchildren,
      test_traverse_post_validate_recurse_grandchildren,
+     test_read_only_traversals_skip_validation,
      test_map_m_validate_raises,
      %% edge cases
      test_set_pos_warning_keeps_shape,
@@ -203,8 +205,8 @@ test_validate_pattern_accept(_Config) ->
 test_validate_pattern_reject(_Config) ->
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(
         {call, 1, {atom, 1, f}, [{atom, 1, x}]}, pattern),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
-        {match, 1, {atom, 1, a}, {atom, 1, b}}, pattern),
+    ?assertEqual(ok, astranaut_syntax:validate(
+        {match, 1, {atom, 1, a}, {atom, 1, b}}, pattern)),
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), pattern).
 
 %%--------------------------------------------------------------------
@@ -597,13 +599,22 @@ test_traverse_validate_changed_node(_Config) ->
     try astranaut:smap(
           fun({atom, 1, bad}) -> function_form();
              (Node) -> Node
-          end, Tree, #{traverse => pre, validate => true}) of
+          end, Tree, #{traverse => pre, role => expression, validate => true}) of
         _ -> error(unexpected_ok)
     catch
         error:{invalid_transform_validation, #{reason := invalid_role,
                                                actual_type := function}} ->
             ok
     end.
+
+test_traverse_validate_false_opt_out(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
+    ?assertEqual(
+       {call, 1, {atom, 1, f}, [function_form()]},
+       astranaut:smap(
+         fun({atom, 1, bad}) -> function_form();
+            (Node) -> Node
+         end, Tree, #{traverse => pre, validate => false})).
 
 test_traverse_validate_preserves_slot_attr(_Config) ->
     Tree = {'case', 1, {var, 1, 'M'},
@@ -622,7 +633,7 @@ test_traverse_validate_preserves_slot_attr(_Config) ->
                     fun(Subtrees) ->
                             astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
                     end, Node)
-          end, Tree, #{traverse => pre, validate => true}) of
+          end, Tree, #{traverse => pre, role => expression, validate => true}) of
         _ -> error(unexpected_ok)
     catch
         error:{invalid_transform_validation, #{reason := invalid_role,
@@ -641,7 +652,7 @@ test_traverse_pre_validate_does_not_recurse_grandchildren(_Config) ->
                  Updated;
             (Node) ->
                  Node
-         end, Tree, #{traverse => pre, validate => true})).
+         end, Tree, #{traverse => pre, role => expression, validate => true})).
 
 test_traverse_post_validate_recurse_grandchildren(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
@@ -651,13 +662,23 @@ test_traverse_post_validate_recurse_grandchildren(_Config) ->
                   Updated;
              (Node) ->
                   Node
-          end, Tree, #{traverse => post, validate => true}) of
+          end, Tree, #{traverse => post, role => expression, validate => true}) of
         _ -> error(unexpected_ok)
     catch
         error:{invalid_transform_validation, #{reason := invalid_role,
                                                actual_type := clause}} ->
             ok
     end.
+
+test_read_only_traversals_skip_validation(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{clause, 1, [], [], [{atom, 1, ok}]}]},
+    ?assertEqual(4,
+                 astranaut:sreduce(fun(_, Acc) -> Acc + 1 end, 0, Tree, #{traverse => pre})),
+    ?assertEqual(false,
+                 astranaut:search(fun({atom, 1, missing}) -> true; (_) -> false end,
+                                  Tree, #{traverse => pre})),
+    ?assertMatch(#{return := 4},
+                 astranaut:reduce(fun(_, Acc) -> Acc + 1 end, 0, Tree, #{traverse => pre})).
 
 test_map_m_validate_raises(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
@@ -667,7 +688,7 @@ test_map_m_validate_raises(_Config) ->
                   astranaut_traverse:return(function_form());
              (Node) ->
                   astranaut_traverse:return(Node)
-          end, Tree, #{traverse => pre, validate => true}),
+          end, Tree, #{traverse => pre, role => expression, validate => true}),
     try astranaut_traverse:eval(Monad, astranaut, #{}, ok) of
         _ -> error(unexpected_ok)
     catch

@@ -58,7 +58,7 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     map_m(F, Node, Uniplate, MonadOpts, Opts);
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
-    Opts1 = maps:merge(#{traverse => pre}, maps:with([traverse, validate], Opts)),
+    Opts1 = maps:merge(#{traverse => pre, validate => false}, maps:with([traverse, validate, attr], Opts)),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
@@ -205,16 +205,52 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, li
     case uniplate(Uniplate, Node, NodeContext, Opts, invalid_pre_transform) of
         {[], _MakeTree} ->
             Return(context_node(NodeContext));
-        {Subtreess, MakeTree} ->
+        {Subtreess0, MakeTree} ->
             Bind(
+              annotate_child_subtreess(context_node(NodeContext), Subtreess0, MOpts),
+              fun(Subtreess) ->
+                      Bind(
               ListenUpdated(map_m_subtreess(F, Subtreess, MOpts)),
               fun({Subtrees1, true}) ->
-                      Return(make_tree(MakeTree, Node, Subtreess, Subtrees1));
+                              Return(make_tree(MakeTree, Node, Subtreess0, Subtrees1));
                  ({_Subtrees1, false}) ->
                       %% context should be removed if node is not updated.
                       Return(context_node(NodeContext))
+                      end)
               end)
     end.
+
+annotate_child_subtreess(Node, Subtreess, #{bind := Bind, return := Return, ask := Ask}) ->
+    Bind(
+      Ask(),
+      fun(Attr) ->
+              Return(annotate_child_subtreess_1(Node, Subtreess, Attr))
+      end);
+annotate_child_subtreess(_Node, Subtreess, #{return := Return}) ->
+    Return(Subtreess).
+
+annotate_child_subtreess_1(Node, Subtreess, Attr) ->
+    case has_node_context(Subtreess) of
+        true ->
+            Subtreess;
+        false ->
+            try astranaut_syntax:type(Node) of
+                Type ->
+                    astranaut_syntax:subtrees_pge(Type, Subtreess, Attr)
+            catch
+                _:_ ->
+                    Subtreess
+            end
+    end.
+
+has_node_context(#uniplate_node_context{}) ->
+    true;
+has_node_context([H|T]) ->
+    has_node_context(H) orelse has_node_context(T);
+has_node_context([]) ->
+    false;
+has_node_context(_Node) ->
+    false.
 
 map_m_subtreess(F, Subtreess, #{bind := Bind, return := Return} = MOpts) ->
     fail_on_error(
@@ -298,16 +334,25 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
 
 validate_updated_node(_Node, false, #{return := Return}, _ValidateScope, _Opts) ->
     Return(ok);
-validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, #{validate := true}) ->
+validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, #{validate := true} = Opts) ->
     Bind(
       Ask(),
-      fun(Attr) ->
+      fun(Attr0) ->
+              Attr = validate_attr(Attr0, Opts),
               validate_updated_node_1(Node, Attr, MOpts, ValidateScope)
       end);
-validate_updated_node(Node, true, MOpts, ValidateScope, #{validate := true}) ->
-    validate_updated_node_1(Node, #{}, MOpts, ValidateScope);
+validate_updated_node(Node, true, MOpts, ValidateScope, #{validate := true} = Opts) ->
+    validate_updated_node_1(Node, validate_attr(#{}, Opts), MOpts, ValidateScope);
 validate_updated_node(_Node, true, #{return := Return}, _ValidateScope, _Opts) ->
     Return(ok).
+
+validate_attr(Attr, Opts) ->
+    case maps:is_key(node, Attr) orelse maps:is_key(validator, Attr) of
+        true ->
+            Attr;
+        false ->
+            maps:merge(maps:get(attr, Opts, #{}), Attr)
+    end.
 
 validate_updated_node_1(Node, Attr, #{return := Return}, ValidateScope) ->
     Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),

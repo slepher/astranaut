@@ -526,7 +526,8 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
                      operator, record_index_expr, map_field_assoc,
                      record_access, conjunction, disjunction]).
 
--define(EXPR_ONLY, [match_expr, maybe_match_expr, case_expr, if_expr,
+-define(EXPR_PAT, [match_expr]).
+-define(EXPR_ONLY, [maybe_match_expr, case_expr, if_expr,
                     receive_expr, fun_expr, named_fun_expr, try_expr,
                     catch_expr, block_expr, generator, strict_generator,
                     binary_generator, strict_binary_generator,
@@ -542,11 +543,11 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
                     nil, parentheses, tuple, list, cons, binary]).
 -define(TYPE_ONLY, [fun_type, type_application, type_union, type_fun, type_tuple,
                     type_record, typed_record_field, type_binary,
-                    type_integer_range, type_map, type_map_field,
+                    type_integer_range, type_map, map_type, type_map_field,
                     user_type_application, remote_type,
                     annotated_type, bitstring_type, constrained_function_type,
                     function_type, constraint, map_type_assoc, map_type_exact,
-                    record_type_field]).
+                    record_type, record_type_field]).
 -define(FORM_ONLY, [function, attribute, eof_marker, error_marker,
                     warning_marker, comment, text, form_list]).
 
@@ -554,6 +555,7 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
                      {?TYPE_ONLY, [type]},
                      {?CLAUSE_ONLY, [clause]},
                      {?PAT_ONLY, [pattern]},
+                     {?EXPR_PAT, [expression, pattern]},
                      {?EXPR_ONLY, [expression]},
                      {?EXPR_GUARD, [expression, guard]},
                      {?EXPR_PAT_GUARD, [expression, pattern, guard]}]).

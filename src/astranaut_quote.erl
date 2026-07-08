@@ -161,7 +161,7 @@ parse_transform(Forms, _Options) ->
                                 fun(Attr) ->
                                         walk(Node, Attr, WalkOpts)
                                 end)
-                      end, Forms, #{traverse => pre}),
+                      end, Forms, #{traverse => pre, validate => true}),
                     ?MODULE, #{}, undefined))
         end)).
 quote_validator() ->
@@ -255,7 +255,7 @@ ast_to_options(AstOptions) ->
                       false ->
                           astranaut_uniplate:skip(astranaut_lib:abstract_form(Node))
                   end
-          end, AstOptions, #{traverse => pre}),
+          end, AstOptions, #{traverse => pre, role => expression, validate => true}),
     erl_syntax:concrete(AstOptions1).
 
 validate_options(Pos, _QuotePos) when is_integer(Pos) ->
