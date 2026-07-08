@@ -8,16 +8,16 @@
 %%%-------------------------------------------------------------------
 -module(rebinding_test).
 
--ifdef(OTP_RELEASE).
--if(?OTP_RELEASE >= 25).
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_25).
 -define(OVER_OTP_25, true).
 -endif.
--if(?OTP_RELEASE >= 26).
+-ifdef(ASTRANAUT_OTP_AT_LEAST_26).
 -define(OVER_OTP_26, true).
 -endif.
--if(?OTP_RELEASE >= 28).
+-ifdef(ASTRANAUT_OTP_AT_LEAST_28).
 -define(OVER_OTP_28, true).
--endif.
 -endif.
 
 -ifdef(OVER_OTP_25).

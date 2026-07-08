@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_syntax).
 
+-include("otp_vsn.hrl").
+
 -type form() :: erl_parse:abstract_form().
 
 %% API
@@ -23,13 +25,8 @@
 type(Node) ->
     erl_syntax:type(Node).
 
--ifdef('OTP_RELEASE').
 otp_vsn() ->
-    ?OTP_RELEASE.
--else.
-otp_vsn() ->
-    'pre-21'.
--endif.
+    ?ASTRANAUT_OTP_VSN.
 
 get_pos(Node) ->
     erl_syntax:get_pos(Node).

@@ -1,6 +1,7 @@
 test_task:
   container:
     matrix:
+      - image: erlang:29
       - image: erlang:28
       - image: erlang:27
       - image: erlang:26

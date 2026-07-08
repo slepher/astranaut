@@ -102,7 +102,9 @@ add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     Node = try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar),
     {Node, NVariables}.
 
--ifdef('OTP_RELEASE').
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar) ->
     quote(
       try

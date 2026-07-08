@@ -11,18 +11,14 @@
 %% API
 -export([]).
 
+-include("otp_vsn.hrl").
 -include("rebinding.hrl").
 
 -rebinding_all([debug]).
 
--ifdef(OTP_RELEASE).
--if(?OTP_RELEASE >= 29).
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
 -define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
         is_binary(list_to_binary([Var, <<"4">>]))).
--else.
--define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
-        Var = list_to_binary([Var, <<"4">>])).
--endif.
 -else.
 -define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
         Var = list_to_binary([Var, <<"4">>])).

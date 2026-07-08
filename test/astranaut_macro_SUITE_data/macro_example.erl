@@ -107,7 +107,9 @@ macro_case(Body, TrueClause, FalseClause) ->
               false
       end).
 
--ifdef(OTP_RELEASE).
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 macro_try_catch() ->
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},

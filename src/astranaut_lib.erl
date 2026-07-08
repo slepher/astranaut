@@ -122,9 +122,10 @@ parse_file(File, Opts) ->
 	    {error, Es, []}
     end.
 
--ifdef(OTP_RELEASE).
+-include("otp_vsn.hrl").
+
 %% StartLocation Option is added after OTP-24, it's need to pass dialyzer before OTP-23.
--if(?OTP_RELEASE >= 24).
+-ifdef(ASTRANAUT_OTP_AT_LEAST_24).
 eppopts_add_location(Opts, EppOpts) ->
     WithColumns = proplists:get_value(error_location, Opts, column) =:= column,
     StartLocation = case WithColumns of
@@ -134,10 +135,6 @@ eppopts_add_location(Opts, EppOpts) ->
                             1
                     end,
     [{location, StartLocation}|EppOpts].
--else.
-eppopts_add_location(_Opts, EppOpts) ->
-    EppOpts.
--endif.
 -else.
 eppopts_add_location(_Opts, EppOpts) ->
     EppOpts.
@@ -319,7 +316,7 @@ relative_path(Path) ->
             Path
     end.
 
--ifdef(OTP_RELEASE).
+-ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 replace_path(Path, BasePath) ->
     string:replace(Path, BasePath, "").
 -else.

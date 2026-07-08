@@ -7,10 +7,10 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_syntax_SUITE).
 
--ifdef(OTP_RELEASE).
--if(?OTP_RELEASE >= 25).
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_25).
 -feature(maybe_expr, enable).
--endif.
 -endif.
 
 -compile(export_all).
