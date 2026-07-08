@@ -125,7 +125,9 @@ all() ->
      test_mapfold_attr, test_f_return_list, test_all_return_list,
      test_with_subtrees, test_af_with,
      test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
-     test_invalid_post_transform_context_exception, test_invalid_transform_maketree_exception,
+     test_invalid_post_transform_context_exception,
+     test_invalid_post_transform_context_before_validation,
+     test_invalid_transform_maketree_exception,
      test_invalid_node_exception, test_invalid_uniplate_subnode_exception,
      test_invalid_transform_exception, test_invalid_subtree_transform_exception
     ].
@@ -432,6 +434,20 @@ test_invalid_post_transform_context_exception(Config) ->
             (Node) ->
                  Node
          end, Forms, #{traverse => post})),
+    ok.
+
+test_invalid_post_transform_context_before_validation(Config) ->
+    Forms = proplists:get_value(forms, Config),
+    InvalidRoleNode = {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]},
+    ?assertException(
+       error,
+       {invalid_post_transform_with_context, {var, _, _}, #uniplate_node_context{node = InvalidRoleNode}},
+       astranaut:smap(
+         fun({var, _Pos, _Value}) ->
+                 #uniplate_node_context{node = InvalidRoleNode};
+            (Node) ->
+                 Node
+         end, Forms, #{traverse => post, validate => true})),
     ok.
 
 test_invalid_transform_maketree_exception(Config) ->
