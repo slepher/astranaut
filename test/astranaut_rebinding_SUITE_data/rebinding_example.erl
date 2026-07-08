@@ -15,6 +15,19 @@
 
 -rebinding_all([debug]).
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 29).
+-define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
+        is_binary(list_to_binary([Var, <<"4">>]))).
+-else.
+-define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
+        Var = list_to_binary([Var, <<"4">>])).
+-endif.
+-else.
+-define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
+        Var = list_to_binary([Var, <<"4">>])).
+-endif.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -37,7 +50,7 @@ test(ABC) ->
         end,
     D = << <<ABC>> || 
            <<ABC>> <= begin ABC = ABC + 1, <<"123">> end,
-           ABC = list_to_binary([ABC, <<"4">>])
+           ?REBINDING_EXAMPLE_BINARY_FILTER(ABC)
          >>,
     D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
     EFG = 

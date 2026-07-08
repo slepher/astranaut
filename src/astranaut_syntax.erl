@@ -11,7 +11,7 @@
 -type form() :: erl_parse:abstract_form().
 
 %% API
--export([type/1, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
+-export([type/1, otp_vsn/0, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
 -export([subtrees_pge/3, attribute_subtrees_type/3]).
 -export([validate/2, validate/3, validate_local/2, validate_local/3,
@@ -22,6 +22,14 @@
 
 type(Node) ->
     erl_syntax:type(Node).
+
+-ifdef('OTP_RELEASE').
+otp_vsn() ->
+    ?OTP_RELEASE.
+-else.
+otp_vsn() ->
+    'pre-21'.
+-endif.
 
 get_pos(Node) ->
     erl_syntax:get_pos(Node).
@@ -39,7 +47,7 @@ set_pos(Node, Pos) ->
 set_pos_1({error, {_, Formatter, Error}}, Pos) ->
     {error, {Pos, Formatter, Error}};
 set_pos_1({warning, {_, Formatter, Warning}}, Pos) ->
-    {warnings, {Pos, Formatter, Warning}};
+    {warning, {Pos, Formatter, Warning}};
 set_pos_1(Node, Pos) ->
     setelement(2, Node, Pos).
 
@@ -70,6 +78,8 @@ subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= call
     NameTree = name_arity_tree(Name, Pos),
     MFATree = mfa_tree(MFA, Pos),
     [[NameTree], [MFATree|Specs]];
+subtrees({'try', _Pos, Body, Clauses, Handlers, After}) ->
+    [Body, Clauses, Handlers, After];
 subtrees(Node) ->
     erl_syntax:subtrees(Node).
 
@@ -179,7 +189,7 @@ validate(NodeOrNodes, ExpectedRole) ->
 validate([], _ExpectedRole, _Opts) ->
     ok;
 validate(NodeOrNodes, ExpectedRole, Opts) ->
-    Attr = maps:get(attr, Opts, #{}),
+    Attr = validation_attr(Opts, ExpectedRole),
     Env = validation_env(Opts),
     validate_recursive(NodeOrNodes, {role, ExpectedRole}, root, Attr, Env, []).
 
@@ -191,7 +201,7 @@ validate_local(NodeOrNodes, Validator) ->
 -spec validate_local(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
           ok | {error, map()}.
 validate_local(NodeOrNodes, Validator, Opts) ->
-    Attr = maps:get(attr, Opts, #{}),
+    Attr = validation_attr(Opts, validator_role(Validator)),
     Env = validation_env(Opts),
     validate_local(NodeOrNodes, Validator, root, Attr, Env, []).
 
@@ -203,12 +213,25 @@ validate_recursive(NodeOrNodes, Validator) ->
 -spec validate_recursive(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
           ok | {error, map()}.
 validate_recursive(NodeOrNodes, Validator, Opts) ->
-    Attr = maps:get(attr, Opts, #{}),
+    Attr = validation_attr(Opts, validator_role(Validator)),
     Env = validation_env(Opts),
     validate_recursive(NodeOrNodes, Validator, root, Attr, Env, []).
 
+validation_attr(Opts, Role) ->
+    Attr = maps:get(attr, Opts, #{}),
+    case maps:is_key(node, Attr) orelse not semantic_role(Role) of
+        true ->
+            Attr;
+        false ->
+            Attr#{node => Role}
+    end.
+
+semantic_role(Role) ->
+    lists:member(Role, [expression, pattern, guard, form, type, type_param, clause, name, attribute_body]).
+
 validation_env(Opts) ->
-    #{forms => maps:get(forms, Opts, [])}.
+    #{forms => maps:get(forms, Opts, []),
+      otp_vsn => maps:get(otp_vsn, Opts, otp_vsn())}.
 
 validate_recursive([], _Validator, _Slot, _Attr, _Env, _Path) ->
     ok;
@@ -360,19 +383,120 @@ path_item(Slot, Index, Validator, Node) ->
 
 role_allowed(Validator, Type, Node, Env) ->
     ExpectedRole = validator_role(Validator),
-    role_allowed_1(Type, ExpectedRole, Node, Env) andalso slot_type_allowed(Validator, Type).
+    syntax_allowed(Validator, Type, Node, Env) andalso
+        role_allowed_1(Type, ExpectedRole, Node, Env) andalso
+        slot_type_allowed(Validator, Type).
 
+syntax_allowed(Validator, Type, Node, Env) ->
+    OtpVsn = maps:get(otp_vsn, Env, otp_vsn()),
+    syntax_node_allowed(Type, OtpVsn) andalso syntax_slot_allowed(Validator, Type, Node, OtpVsn).
+
+syntax_node_allowed(maybe_expr, OtpVsn) ->
+    otp_at_least(OtpVsn, 25);
+syntax_node_allowed(maybe_match_expr, OtpVsn) ->
+    otp_at_least(OtpVsn, 25);
+syntax_node_allowed(map_comp, OtpVsn) ->
+    otp_at_least(OtpVsn, 26);
+syntax_node_allowed(map_generator, OtpVsn) ->
+    otp_at_least(OtpVsn, 26);
+syntax_node_allowed(strict_generator, OtpVsn) ->
+    otp_at_least(OtpVsn, 28);
+syntax_node_allowed(strict_binary_generator, OtpVsn) ->
+    otp_at_least(OtpVsn, 28);
+syntax_node_allowed(strict_map_generator, OtpVsn) ->
+    otp_at_least(OtpVsn, 28);
+syntax_node_allowed(zip_generator, OtpVsn) ->
+    otp_at_least(OtpVsn, 28);
+syntax_node_allowed(_Type, _OtpVsn) ->
+    true.
+
+syntax_slot_allowed({slot, map_field_exact, map_field_exact_key, _Role}, Type, Node, OtpVsn) ->
+    otp_at_least(OtpVsn, 23) orelse legacy_map_pattern_key_allowed(Type, Node);
+syntax_slot_allowed({slot, try_expr, handlers, clause}, clause, Node, OtpVsn) ->
+    otp_at_least(OtpVsn, 21) orelse legacy_try_handler_allowed(Node);
+syntax_slot_allowed({slot, size_qualifier, elements, binary_size}, _Type, Node, OtpVsn) ->
+    otp_at_least(OtpVsn, 23) orelse legacy_binary_size_allowed(Node);
+syntax_slot_allowed(_Validator, _Type, _Node, _OtpVsn) ->
+    true.
+
+otp_at_least(OtpVsn, Min) when is_integer(OtpVsn) ->
+    OtpVsn >= Min;
+otp_at_least(_OtpVsn, _Min) ->
+    false.
+
+legacy_map_pattern_key_allowed(Type, Node) ->
+    (Type =:= variable) orelse literal_node(Node).
+
+legacy_try_handler_allowed(Node) ->
+    try legacy_try_handler_patterns_allowed(erl_syntax:clause_patterns(Node))
+    catch
+        error:_Reason ->
+            false
+    end.
+
+legacy_try_handler_patterns_allowed([Pattern]) ->
+    legacy_try_handler_pattern_allowed(erl_syntax:revert(Pattern));
+legacy_try_handler_patterns_allowed(Patterns) ->
+    length(Patterns) =< 2.
+
+legacy_try_handler_pattern_allowed({tuple, _Pos, [_Class, _Reason]}) ->
+    true;
+legacy_try_handler_pattern_allowed({tuple, _Pos, [_Class, _Reason, {var, _VarPos, '_'}]}) ->
+    true;
+legacy_try_handler_pattern_allowed({tree, class_qualifier, _Attr,
+                                    {class_qualifier, _Class, _Reason, {var, _VarPos, '_'}}}) ->
+    true;
+legacy_try_handler_pattern_allowed(_Pattern) ->
+    false.
+
+legacy_binary_size_allowed({integer, _Pos, _Value}) ->
+    true;
+legacy_binary_size_allowed({var, _Pos, _Name}) ->
+    true;
+legacy_binary_size_allowed(default) ->
+    true;
+legacy_binary_size_allowed(_Node) ->
+    false.
+
+literal_node({atom, _Pos, _Value}) -> true;
+literal_node({char, _Pos, _Value}) -> true;
+literal_node({float, _Pos, _Value}) -> true;
+literal_node({integer, _Pos, _Value}) -> true;
+literal_node({nil, _Pos}) -> true;
+literal_node({string, _Pos, _Value}) -> true;
+literal_node(_Node) -> false.
+
+role_allowed_1(Type, guard, _Node, _Env)
+  when Type =:= conjunction; Type =:= disjunction; Type =:= operator ->
+    true;
 role_allowed_1(_Type, guard, Node, Env) ->
-    erl_lint:is_guard_test(revert(Node), maps:get(forms, Env, []));
+    try erl_lint:is_guard_test(revert(Node), maps:get(forms, Env, [])) of
+        Result -> Result
+    catch
+        error:badarg -> false
+    end;
 role_allowed_1(Type, map_field, _Node, _Env) ->
     lists:member(Type, [map_field_assoc, map_field_exact]);
 role_allowed_1(Type, binary_field, _Node, _Env) ->
     Type =:= binary_field;
+role_allowed_1(_Type, binary_size, default, _Env) ->
+    true;
+role_allowed_1(Type, binary_size, _Node, _Env)
+  when Type =:= conjunction; Type =:= disjunction; Type =:= infix_expr;
+       Type =:= operator; Type =:= prefix_expr ->
+    true;
+role_allowed_1(Type, binary_size, Node, Env) ->
+    role_allowed_1(Type, guard, Node, Env);
+role_allowed_1(Type, type_param, _Node, _Env) ->
+    Type =:= variable;
 role_allowed_1(Type, ExpectedRole, _Node, _Env) ->
     (ExpectedRole =:= attribute_body) orelse lists:member(ExpectedRole, node_roles(Type)).
 
 slot_type_allowed({slot, map_expr, fields, map_field}, Type) ->
     lists:member(Type, [map_field_assoc, map_field_exact]);
+slot_type_allowed({slot, ParentType, pattern, pattern}, _Type)
+  when ParentType =:= map_generator; ParentType =:= strict_map_generator ->
+    true;
 slot_type_allowed({slot, binary, elements, binary_field}, Type) ->
     Type =:= binary_field;
 slot_type_allowed({slot, _ParentType, _Slot, Role}, Type)
@@ -407,7 +531,8 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
 -define(PAT_ONLY, [underscore, class_qualifier]).
 -define(CLAUSE_ONLY, [clause]).
 -define(NAME_ALSO, [atom]).
--define(TYPE_ALSO, [nil, parentheses, tuple, list, cons, binary]).
+-define(TYPE_ALSO, [atom, char, integer, string, variable,
+                    nil, parentheses, tuple, list, cons, binary]).
 -define(TYPE_ONLY, [fun_type, type_application, type_union, type_fun, type_tuple,
                     type_record, typed_record_field, type_binary,
                     type_integer_range, type_map, type_map_field,
@@ -454,16 +579,29 @@ child_specs_1(map_expr, [Argument, Fields], Attr) ->
      map_field_child_spec(fields, Fields, Attr, false)];
 child_specs_1(binary, [Elements], Attr) ->
     [binary_field_child_spec(elements, [Elements], Attr, false)];
-child_specs_1(binary_field, Subtrees, #{binary_field_role := Role} = Attr) ->
+child_specs_1(application, [Operator, Arguments], Attr) ->
+    [child_spec(operator, expression, Operator, Attr, false),
+     child_spec(arguments, expression, Arguments, Attr, false)];
+child_specs_1(binary_field, [Values, Sizes, Types], #{slot_kind := binary_field, node := Role} = Attr) ->
+    [child_spec(value, Role, Values, Attr, false),
+     child_spec(size, binary_size, Sizes, Attr, false),
+     child_spec(types, attribute_body, Types, Attr, false)];
+child_specs_1(binary_field, [Values, Sizes, Types], Attr) ->
+    [child_spec(value, expression, Values, Attr, false),
+     child_spec(size, binary_size, Sizes, Attr, false),
+     child_spec(types, attribute_body, Types, Attr, false)];
+child_specs_1(size_qualifier, Subtrees, Attr) ->
+    [child_spec(elements, binary_size, Subtrees, Attr, false)];
+child_specs_1(binary_field, Subtrees, #{slot_kind := binary_field, node := Role} = Attr) ->
     [child_spec(elements, Role, Subtrees, Attr, false)];
 child_specs_1(binary_field, Subtrees, Attr) ->
     [child_spec(elements, expression, Subtrees, Attr, false)];
-child_specs_1(Type, [Keys, Values], #{node := map_field, map_field_role := pattern} = Attr)
+child_specs_1(Type, [Keys, Values], #{slot_kind := map_field, node := pattern} = Attr)
   when Type =:= map_field_assoc; Type =:= map_field_exact ->
     {KeySlot, ValueSlot} = map_field_slots(Type),
     [child_spec(KeySlot, expression, Keys, Attr, true),
      child_spec(ValueSlot, pattern, Values, Attr, true)];
-child_specs_1(Type, [Keys, Values], #{node := map_field, map_field_role := Role} = Attr)
+child_specs_1(Type, [Keys, Values], #{slot_kind := map_field, node := Role} = Attr)
   when Type =:= map_field_assoc; Type =:= map_field_exact ->
     {KeySlot, ValueSlot} = map_field_slots(Type),
     [child_spec(KeySlot, map_field_child_role(Role), Keys, Attr, true),
@@ -529,13 +667,13 @@ child_specs_1(form_list, Subtrees, Attr) ->
     [child_spec(forms, form, Subtrees, Attr, false)];
 child_specs_1(attribute, [[NameTree], BodyTrees], Attr) ->
     Attribute = erl_syntax:atom_value(NameTree),
-    [child_spec(name, name, [NameTree], Attr, false),
-     child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr#{attribute => Attribute}, false)];
+    [child_spec(name, name, [NameTree], Attr, false)|
+     attribute_body_specs(Attribute, BodyTrees, Attr#{attribute => Attribute})];
 child_specs_1(list_comp, [Template, Body], Attr) ->
     [child_spec(template, expression, Template, Attr, true),
      child_spec(body, expression, Body, Attr, false)];
 child_specs_1(map_comp, [Template, Body], Attr) ->
-    [child_spec(template, expression, Template, Attr, true),
+    [map_field_child_spec(template, Template, Attr, true),
      child_spec(body, expression, Body, Attr, false)];
 child_specs_1(binary_comp, [Template, Body], Attr) ->
     [child_spec(template, expression, Template, Attr, true),
@@ -576,17 +714,37 @@ child_spec(Slot, Role, Nodes, Attr, Annotate) ->
       annotate => Annotate,
       attr => Attr#{node => Role}}.
 
+attribute_body_specs(Attribute, BodyTrees, Attr) when Attribute =:= type; Attribute =:= opaque ->
+    case BodyTrees of
+        [TypeNameTree, TypeTree|TypeParamTrees] ->
+            [child_spec(type_name, name, [TypeNameTree], Attr, false),
+             child_spec(type_body, type, [TypeTree], Attr, false),
+             child_spec(type_params, type_param, TypeParamTrees, Attr, false)];
+        _ ->
+            [child_spec(body, type, BodyTrees, Attr, false)]
+    end;
+attribute_body_specs(Attribute, BodyTrees, Attr) when Attribute =:= spec; Attribute =:= callback ->
+    case BodyTrees of
+        [MFATree|SpecTrees] ->
+            [child_spec(spec_mfa, attribute_body, [MFATree], Attr, false),
+             child_spec(specs, type, SpecTrees, Attr, false)];
+        _ ->
+            [child_spec(body, type, BodyTrees, Attr, false)]
+    end;
+attribute_body_specs(Attribute, BodyTrees, Attr) ->
+    [child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr, false)].
+
 map_field_child_spec(Slot, Nodes, Attr, Annotate) ->
     Spec = child_spec(Slot, map_field, Nodes, Attr, Annotate),
     FieldRole = maps:get(node, Attr, expression),
     FieldAttr = maps:get(attr, Spec),
-    Spec#{attr := FieldAttr#{map_field_role => FieldRole}}.
+    Spec#{attr := FieldAttr#{node => FieldRole, slot_kind => map_field}}.
 
 binary_field_child_spec(Slot, Nodes, Attr, Annotate) ->
     Spec = child_spec(Slot, binary_field, Nodes, Attr, Annotate),
     FieldRole = maps:get(node, Attr, expression),
     FieldAttr = maps:get(attr, Spec),
-    Spec#{attr := FieldAttr#{binary_field_role => FieldRole}}.
+    Spec#{attr := FieldAttr#{node => FieldRole, slot_kind => binary_field}}.
 
 map_field_child_role(pattern) -> expression;
 map_field_child_role(Role) -> Role.
@@ -613,8 +771,15 @@ attribute_body_role(spec) -> type;
 attribute_body_role(callback) -> type;
 attribute_body_role(_) -> attribute_body.
 
+child_specs_subtrees([#{validator := {slot, attribute, name, name}} = NameSpec|BodySpecs]) ->
+    [NameSubtrees] = child_spec_subtreess(NameSpec),
+    BodySubtrees = lists:append(lists:map(fun attribute_child_spec_subtrees/1, BodySpecs)),
+    [NameSubtrees, BodySubtrees];
 child_specs_subtrees(Specs) ->
     lists:append(lists:map(fun child_spec_subtreess/1, Specs)).
+
+attribute_child_spec_subtrees(Spec) ->
+    lists:append(child_spec_subtreess(Spec)).
 
 child_spec_subtreess(#{slot := Slot, subtrees := Subtrees, annotate := false} = Spec)
   when Slot =:= elements; Slot =:= forms ->
@@ -626,7 +791,7 @@ child_spec_subtreess(#{subtrees := Subtrees, annotate := true} = Spec) ->
 
 validator_node(#{attr := Attr}, Nodes) ->
     astranaut_uniplate:up_attr(maps:with([node, validator, parent_type, parent_slot,
-                                          map_field_role, binary_field_role], Attr), Nodes).
+                                          slot_kind], Attr), Nodes).
 
 %%===================================================================
 %% update forms related functions

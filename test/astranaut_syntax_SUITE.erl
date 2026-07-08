@@ -7,6 +7,12 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_syntax_SUITE).
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 25).
+-feature(maybe_expr, enable).
+-endif.
+-endif.
+
 -compile(export_all).
 -compile(nowarn_export_all).
 
@@ -52,9 +58,12 @@ all() ->
      test_validate_pattern_accept, test_validate_pattern_reject,
      %% guard role
      test_validate_guard_accept, test_validate_guard_reject,
+     test_validate_function_with_real_guard,
      test_validate_guard_uses_record_forms,
      %% type role
      test_validate_type_accept, test_validate_type_reject,
+     test_validate_type_singletons,
+     test_validate_type_and_spec_attributes,
      %% clause role
      test_validate_clause_accept, test_validate_clause_reject,
      %% name role
@@ -67,12 +76,32 @@ all() ->
      test_child_specs_include_slot_validators,
      test_all_child_specs_emit_expected_validators,
      test_all_child_spec_validators_accept_and_reject_ast,
+     test_slot_kind_preserves_outer_role,
      test_slot_validators_reject_wrong_structural_identity,
      test_slot_validators_reject_malformed_structural_nodes,
      test_validate_local_does_not_recurse_grandchildren,
      test_validate_recursive_recurse_grandchildren,
+     test_otp_vsn,
+     test_validate_otp21_stacktrace_catch,
+     test_current_parser_otp21_stacktrace_catch,
+     test_validate_maybe_match_by_otp_vsn,
+     test_validate_map_comp_by_otp_vsn,
+     test_validate_strict_generator_by_otp_vsn,
+     test_validate_otp23_map_pattern_key_expression,
+     test_validate_legacy_map_pattern_key,
+     test_validate_otp23_binary_size_expression,
+     test_validate_legacy_binary_size,
+     test_current_parser_otp23_map_pattern_key,
+     test_current_parser_otp23_binary_size,
+     test_current_parser_otp25_maybe_expr,
+     test_current_parser_otp26_map_comprehension,
+     test_current_parser_otp28_strict_generators,
      test_traverse_validate_changed_node,
+     test_traverse_validate_preserves_slot_attr,
+     test_traverse_validate_does_not_recurse_grandchildren,
+     test_map_m_validate_returns_failure,
      %% edge cases
+     test_set_pos_warning_keeps_shape,
      test_validate_nested_valid, test_validate_nested_invalid,
      test_validate_empty_list].
 
@@ -203,6 +232,10 @@ test_validate_guard_reject(_Config) ->
         {call, 1, {atom, 1, helper}, []}, guard),
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), guard).
 
+test_validate_function_with_real_guard(_Config) ->
+    Form = parse_form("f(X) when X > 0 -> ok."),
+    ?assertEqual(ok, astranaut_syntax:validate(Form, form)).
+
 test_validate_guard_uses_record_forms(_Config) ->
     GuardRecord = {record, 1, guard_rec, []},
     ValidRecordForms = [{attribute, 1, record,
@@ -232,9 +265,21 @@ test_validate_type_accept(_Config) ->
 
 test_validate_type_reject(_Config) ->
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), type),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({atom, 1, ok}, type),
     {error, #{reason := invalid_role}} = astranaut_syntax:validate(
         {call, 1, {atom, 1, f}, []}, type).
+
+test_validate_type_singletons(_Config) ->
+    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, ok}, type)),
+    ?assertEqual(ok, astranaut_syntax:validate({integer, 1, 42}, type)),
+    ?assertEqual(ok, astranaut_syntax:validate({char, 1, $a}, type)),
+    ?assertEqual(ok, astranaut_syntax:validate({string, 1, "abc"}, type)).
+
+test_validate_type_and_spec_attributes(_Config) ->
+    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-type t() :: ok | 42 | atom()."), form)),
+    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-type t(A) :: A."), form)),
+    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-opaque opaque_t() :: ok | 42."), form)),
+    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-spec foo() -> ok."), form)),
+    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-callback foo() -> ok."), form)).
 
 %%--------------------------------------------------------------------
 %% clause role
@@ -313,14 +358,12 @@ test_all_child_specs_emit_expected_validators(_Config) ->
     lists:foreach(
       fun({ParentType, Subtrees, Attr, ExpectedSlots}) ->
               Specs = astranaut_syntax:child_specs(ParentType, Subtrees, Attr),
-              ActualSlots = [{Slot, Role, Validator, maps:with([node, validator, parent_type, parent_slot], SpecAttr)}
+              ActualSlots = [{Slot, Role, Validator,
+                              maps:with([node, slot_kind, validator, parent_type, parent_slot], SpecAttr)}
                              || #{slot := Slot, role := Role, validator := Validator, attr := SpecAttr} <- Specs],
               Expected =
                   [{Slot, Role, {slot, ParentType, Slot, Role},
-                    #{node => Role,
-                      validator => {slot, ParentType, Slot, Role},
-                      parent_type => ParentType,
-                      parent_slot => Slot}}
+                    expected_child_attr(Role, Attr, {slot, ParentType, Slot, Role}, ParentType, Slot)}
                    || {Slot, Role} <- ExpectedSlots],
               ?assertEqual(Expected, ActualSlots)
       end, child_spec_cases()).
@@ -333,7 +376,7 @@ test_all_child_spec_validators_accept_and_reject_ast(_Config) ->
     lists:foreach(
       fun(Validator) ->
               Role = validator_role(Validator),
-              ?assertEqual(ok, astranaut_syntax:validate_local(valid_ast(Role), Validator)),
+              ?assertEqual(ok, astranaut_syntax:validate_local(valid_slot_ast(Validator), Validator)),
               case invalid_ast(Role) of
                   none ->
                       ok;
@@ -344,6 +387,29 @@ test_all_child_spec_validators_accept_and_reject_ast(_Config) ->
                           astranaut_syntax:validate_local(InvalidAst, Validator)
               end
       end, Validators).
+
+test_slot_kind_preserves_outer_role(_Config) ->
+    Pattern = valid_ast(pattern),
+    Expr = valid_ast(expression),
+    MapField = valid_ast(map_field),
+    BinElement = valid_ast(binary_field),
+    [MapSpec] = astranaut_syntax:child_specs(map_expr, [[MapField]], #{node => pattern}),
+    ?assertMatch(#{role := map_field,
+                   validator := {slot, map_expr, fields, map_field},
+                   attr := #{node := pattern, slot_kind := map_field}},
+                 MapSpec),
+    [BinSpec] = astranaut_syntax:child_specs(binary, [[BinElement]], #{node => pattern}),
+    ?assertMatch(#{role := binary_field,
+                   validator := {slot, binary, elements, binary_field},
+                   attr := #{node := pattern, slot_kind := binary_field}},
+                 BinSpec),
+    MapFieldSpecs = astranaut_syntax:child_specs(
+                      map_field_exact, [[Expr], [Pattern]],
+                      #{node => pattern, slot_kind => map_field}),
+    ?assertMatch([#{role := expression}, #{role := pattern}], MapFieldSpecs),
+    [BinElementSpec] = astranaut_syntax:child_specs(
+                         binary_field, [[Pattern]], #{node => pattern, slot_kind => binary_field}),
+    ?assertMatch(#{role := pattern}, BinElementSpec).
 
 test_slot_validators_reject_wrong_structural_identity(_Config) ->
     BinElement = valid_ast(binary_field),
@@ -390,6 +456,179 @@ test_validate_recursive_recurse_grandchildren(_Config) ->
                    parent_type := tuple},
                  Error).
 
+test_otp_vsn(_Config) ->
+    OtpVsn = astranaut_syntax:otp_vsn(),
+    ?assert(OtpVsn =:= 'pre-21' orelse is_integer(OtpVsn)).
+
+test_validate_otp21_stacktrace_catch(_Config) ->
+    HandlerWithStacktrace =
+        {clause, 1,
+         [{tuple, 1, [{atom, 1, error}, {var, 1, 'Reason'}, {var, 1, 'Stacktrace'}]}],
+         [],
+         [{var, 1, 'Reason'}]},
+    HandlerWithoutStacktrace =
+        {clause, 1,
+         [{tuple, 1, [{atom, 1, error}, {var, 1, 'Reason'}, {var, 1, '_'}]}],
+         [],
+         [{var, 1, 'Reason'}]},
+    TryWithStacktrace = {'try', 1, [{atom, 1, body}], [], [HandlerWithStacktrace], []},
+    TryWithoutStacktrace = {'try', 1, [{atom, 1, body}], [], [HandlerWithoutStacktrace], []},
+    ?assertEqual(ok, astranaut_syntax:validate(TryWithStacktrace, expression, #{otp_vsn => 21})),
+    {error, #{reason := invalid_role,
+              actual_type := clause,
+              parent_type := try_expr}} =
+        astranaut_syntax:validate(TryWithStacktrace, expression, #{otp_vsn => 'pre-21'}),
+    ?assertEqual(ok, astranaut_syntax:validate(TryWithoutStacktrace, expression,
+                                               #{otp_vsn => 'pre-21'})).
+
+test_current_parser_otp21_stacktrace_catch(_Config) ->
+    case current_otp_at_least(21) of
+        true ->
+            Form = parse_form("f() -> try body catch error:Reason:Stacktrace -> Reason end."),
+            ?assertEqual(ok, astranaut_syntax:validate(Form, form)),
+            {'try', _, _, _, [Handler], _} = function_body_expr(Form),
+            {clause, _, [{tuple, _, [_Class, _Reason, {var, _, 'Stacktrace'}]}], _, _} = Handler,
+            ok;
+        false ->
+            Form = parse_form("f() -> try body catch error:Reason -> Reason end."),
+            ?assertEqual(ok, astranaut_syntax:validate(Form, form)),
+            {'try', _, _, _, [Handler], _} = function_body_expr(Form),
+            {clause, _, [{tuple, _, [_Class, _Reason, {var, _, '_'}]}], _, _} = Handler,
+            ok
+    end.
+
+test_validate_maybe_match_by_otp_vsn(_Config) ->
+    MaybeMatch = {maybe_match, 1, {var, 1, 'X'}, {atom, 1, ok}},
+    case current_otp_at_least(25) of
+        true ->
+            ?assertEqual(ok, astranaut_syntax:validate(MaybeMatch, expression, #{otp_vsn => 25})),
+            {error, #{reason := invalid_role, actual_type := maybe_match_expr}} =
+                astranaut_syntax:validate(MaybeMatch, expression, #{otp_vsn => 24});
+        false ->
+            ?assertMatch({error, _}, astranaut_syntax:validate(MaybeMatch, expression))
+    end.
+
+test_validate_map_comp_by_otp_vsn(_Config) ->
+    MapComp = {mc, 1, {map_field_assoc, 1, {var, 1, 'K'}, {var, 1, 'V'}},
+               [{m_generate, 1,
+                 {map_field_exact, 1, {var, 1, 'K'}, {var, 1, 'V'}},
+                 {var, 1, 'Map'}}]},
+    case current_otp_at_least(26) of
+        true ->
+            ?assertEqual(ok, astranaut_syntax:validate(MapComp, expression, #{otp_vsn => 26})),
+            {error, #{reason := invalid_role, actual_type := map_comp}} =
+                astranaut_syntax:validate(MapComp, expression, #{otp_vsn => 25});
+        false ->
+            ?assertMatch({error, _}, astranaut_syntax:validate(MapComp, expression))
+    end.
+
+test_validate_strict_generator_by_otp_vsn(_Config) ->
+    StrictGenerate = {generate_strict, 1, {var, 1, 'X'}, {nil, 1}},
+    case current_otp_at_least(28) of
+        true ->
+            ?assertEqual(ok, astranaut_syntax:validate_local(StrictGenerate,
+                                                             {slot, list_comp, body, expression},
+                                                             #{otp_vsn => 28})),
+            {error, #{reason := invalid_role, actual_type := strict_generator}} =
+                astranaut_syntax:validate_local(StrictGenerate,
+                                                {slot, list_comp, body, expression},
+                                                #{otp_vsn => 27});
+        false ->
+            ?assertMatch({error, _},
+                         astranaut_syntax:validate_local(StrictGenerate,
+                                                         {slot, list_comp, body, expression}))
+    end.
+
+test_validate_otp23_map_pattern_key_expression(_Config) ->
+    GuardKey = {op, 1, '+', {var, 1, 'K'}, {integer, 1, 1}},
+    Field = {map_field_exact, 1, GuardKey, {var, 1, 'V'}},
+    ?assertEqual(ok, astranaut_syntax:validate(Field, pattern, #{otp_vsn => 23})),
+    {error, #{reason := invalid_role,
+              actual_type := infix_expr,
+              parent_type := map_field_exact}} =
+        astranaut_syntax:validate(Field, pattern, #{otp_vsn => 22}).
+
+test_validate_legacy_map_pattern_key(_Config) ->
+    ?assertEqual(ok, astranaut_syntax:validate(
+                       {map_field_exact, 1, {var, 1, 'K'}, {var, 1, 'V'}},
+                       pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, astranaut_syntax:validate(
+                       {map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}},
+                       pattern, #{otp_vsn => 'pre-21'})).
+
+test_validate_otp23_binary_size_expression(_Config) ->
+    GuardSize = {op, 1, '+', {var, 1, 'N'}, {integer, 1, 1}},
+    Bin = {bin, 1, [{bin_element, 1, {var, 1, 'X'}, GuardSize, default}]},
+    ?assertEqual(ok, astranaut_syntax:validate(Bin, pattern, #{otp_vsn => 23})),
+    {error, #{reason := invalid_role,
+              actual_type := infix_expr,
+              parent_type := size_qualifier}} =
+        astranaut_syntax:validate(Bin, pattern, #{otp_vsn => 22}).
+
+test_validate_legacy_binary_size(_Config) ->
+    ?assertEqual(ok, astranaut_syntax:validate(
+                       {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {var, 1, 'N'}, default}]},
+                       pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, astranaut_syntax:validate(
+                       {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {integer, 1, 8}, default}]},
+                       pattern, #{otp_vsn => 'pre-21'})).
+
+test_current_parser_otp23_map_pattern_key(_Config) ->
+    case current_otp_at_least(23) of
+        true ->
+            MapForm = parse_form("f(#{(K + 1) := V}) -> V."),
+            ?assertEqual(ok, astranaut_syntax:validate(MapForm, form)),
+            {map, _, [{map_field_exact, _, {op, _, '+', _, _}, _}]} = function_first_pattern(MapForm),
+            ok;
+        false ->
+            assert_parser_or_validator_rejects("f(#{(K + 1) := V}) -> V.")
+    end.
+
+test_current_parser_otp23_binary_size(_Config) ->
+    case current_otp_at_least(23) of
+        true ->
+            BinForm = parse_form("f(<<X:(N + 1)>>) -> X."),
+            ?assertEqual(ok, astranaut_syntax:validate(BinForm, form)),
+            {bin, _, [{bin_element, _, _, {op, _, '+', _, _}, _}]} = function_first_pattern(BinForm),
+            ok;
+        false ->
+            assert_parser_or_validator_rejects("f(<<X:(N + 1)>>) -> X.")
+    end.
+
+test_current_parser_otp25_maybe_expr(_Config) ->
+    case current_otp_at_least(25) of
+        true ->
+            Form = parse_form("f(A) -> maybe {ok, B} ?= A, B end."),
+            ?assertEqual(ok, astranaut_syntax:validate(Form, form)),
+            {'maybe', _, [{maybe_match, _, _, _}, _]} = function_body_expr(Form),
+            ok;
+        false ->
+            assert_parser_or_validator_rejects("f(A) -> maybe {ok, B} ?= A, B end.")
+    end.
+
+test_current_parser_otp26_map_comprehension(_Config) ->
+    case current_otp_at_least(26) of
+        true ->
+            Form = parse_form("f(Map) -> #{K => V || K := V <- Map}."),
+            ?assertEqual(ok, astranaut_syntax:validate(Form, form)),
+            {mc, _, {map_field_assoc, _, _, _}, [{m_generate, _, {map_field_exact, _, _, _}, _}]} =
+                function_body_expr(Form),
+            ok;
+        false ->
+            assert_parser_or_validator_rejects("f(Map) -> #{K => V || K := V <- Map}.")
+    end.
+
+test_current_parser_otp28_strict_generators(_Config) ->
+    case current_otp_at_least(28) of
+        true ->
+            Form = parse_form("f(A) -> [X || X <:- A]."),
+            ?assertEqual(ok, astranaut_syntax:validate(Form, form)),
+            {lc, _, _, [{generate_strict, _, _, _}]} = function_body_expr(Form),
+            ok;
+        false ->
+            assert_parser_or_validator_rejects("f(A) -> [X || X <:- A].")
+    end.
+
 test_traverse_validate_changed_node(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
     try astranaut:smap(
@@ -403,9 +642,69 @@ test_traverse_validate_changed_node(_Config) ->
             ok
     end.
 
+test_traverse_validate_preserves_slot_attr(_Config) ->
+    Tree = {'case', 1, {var, 1, 'M'},
+            [{clause, 1,
+              [{map, 1, [{map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}}]}],
+              [],
+              [{atom, 1, ok}]}]},
+    InvalidField = {map_field_exact, 1, {atom, 1, key},
+                    {call, 1, {atom, 1, f}, []}},
+    try astranaut:smap(
+          fun({map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}}, _Attr) ->
+                  InvalidField;
+             (Node, Attr) ->
+                  Type = astranaut_syntax:type(Node),
+                  astranaut_uniplate:with_subtrees(
+                    fun(Subtrees) ->
+                            astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
+                    end, Node)
+          end, Tree, #{traverse => pre, validate => true}) of
+        _ -> error(unexpected_ok)
+    catch
+        error:{invalid_transform_validation, #{reason := invalid_role,
+                                               actual_type := application,
+                                               parent_type := map_field_exact}} ->
+            ok
+    end.
+
+test_traverse_validate_does_not_recurse_grandchildren(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
+    Updated = {tuple, 1, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
+    ?assertEqual(
+       {call, 1, {atom, 1, f}, [Updated]},
+       astranaut:smap(
+         fun({atom, 1, bad}) ->
+                 Updated;
+            (Node) ->
+                 Node
+         end, Tree, #{traverse => pre, validate => true})).
+
+test_map_m_validate_returns_failure(_Config) ->
+    Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
+    Monad =
+        astranaut:map_m(
+          fun({atom, 1, bad}) ->
+                  astranaut_traverse:return(function_form());
+             (Node) ->
+                  astranaut_traverse:return(Node)
+          end, Tree, #{traverse => pre, validate => true}),
+    Return = astranaut_traverse:eval(Monad, astranaut, #{}, ok),
+    ?assertEqual(nothing, astranaut_return:run(Return)),
+    Error = astranaut_return:run_error(Return),
+    ?assertMatch(#{errors := [{invalid_transform_validation,
+                               #{reason := invalid_role,
+                                 pos := 1,
+                                 actual_type := function}}]},
+                 astranaut_error:printable(Error)).
+
 %%--------------------------------------------------------------------
 %% edge cases
 %%--------------------------------------------------------------------
+
+test_set_pos_warning_keeps_shape(_Config) ->
+    ?assertEqual({warning, {2, erl_lint, bad}},
+                 astranaut_syntax:set_pos({warning, {1, erl_lint, bad}}, 2)).
 
 test_validate_nested_valid(_Config) ->
     Tree = {call, 1,
@@ -419,7 +718,7 @@ test_validate_nested_invalid(_Config) ->
     ?assertMatch(#{reason := invalid_role,
                    expected_role := expression,
                    actual_type := clause,
-                   slot := elements,
+                   slot := arguments,
                    parent_type := application},
                  Error).
 
@@ -434,6 +733,43 @@ test_validate_empty_list(_Config) ->
 
 function_form() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
+
+parse_form(Code) ->
+    {ok, Tokens, _EndLine} = erl_scan:string(Code),
+    {ok, Form} = erl_parse:parse_form(Tokens),
+    Form.
+
+parse_form_result(Code) ->
+    case erl_scan:string(Code) of
+        {ok, Tokens, _EndLine} ->
+            erl_parse:parse_form(Tokens);
+        {error, ErrorInfo, _EndLine} ->
+            {error, ErrorInfo}
+    end.
+
+assert_parser_or_validator_rejects(Code) ->
+    case parse_form_result(Code) of
+        {ok, Form} ->
+            ?assertMatch({error, _}, astranaut_syntax:validate(Form, form));
+        {error, _ErrorInfo} ->
+            ok
+    end.
+
+current_otp_at_least(Min) ->
+    case astranaut_syntax:otp_vsn() of
+        OtpVsn when is_integer(OtpVsn) ->
+            OtpVsn >= Min;
+        'pre-21' ->
+            false
+    end.
+
+function_body_expr({function, _Pos, _Name, _Arity,
+                    [{clause, _ClausePos, _Patterns, _Guards, [Expr]}]}) ->
+    Expr.
+
+function_first_pattern({function, _Pos, _Name, _Arity,
+                        [{clause, _ClausePos, [Pattern|_Patterns], _Guards, _Body}]}) ->
+    Pattern.
 
 child_spec_cases() ->
     Pattern = valid_ast(pattern),
@@ -504,17 +840,17 @@ child_spec_cases() ->
      {attribute, [[{atom, 1, custom}], [AttributeBody]], #{node => form},
       [{name, name}, {body, attribute_body}]},
      {attribute, [[{atom, 1, type}], [Name, Type]], #{node => form},
-      [{name, name}, {body, type}]},
+      [{name, name}, {type_name, name}, {type_body, type}, {type_params, type_param}]},
      {attribute, [[{atom, 1, opaque}], [Name, Type]], #{node => form},
-      [{name, name}, {body, type}]},
+      [{name, name}, {type_name, name}, {type_body, type}, {type_params, type_param}]},
      {attribute, [[{atom, 1, spec}], [Name, Type]], #{node => form},
-      [{name, name}, {body, type}]},
+      [{name, name}, {spec_mfa, attribute_body}, {specs, type}]},
      {attribute, [[{atom, 1, callback}], [Name, Type]], #{node => form},
-      [{name, name}, {body, type}]},
+      [{name, name}, {spec_mfa, attribute_body}, {specs, type}]},
      {list_comp, [[Expr], [Expr]], #{node => expression},
       [{template, expression}, {body, expression}]},
      {map_comp, [[Expr], [Expr]], #{node => expression},
-      [{template, expression}, {body, expression}]},
+      [{template, map_field}, {body, expression}]},
      {binary_comp, [[Expr], [Expr]], #{node => expression},
       [{template, expression}, {body, expression}]},
      {maybe_expr, [[Expr]], #{node => expression},
@@ -539,6 +875,25 @@ validator_role({role, Role}) ->
 validator_role({slot, _ParentType, _Slot, Role}) ->
     Role.
 
+expected_child_attr(Role, Attr, Validator, ParentType, Slot) ->
+    Base = #{node => expected_child_node(Role, Attr),
+             validator => Validator,
+             parent_type => ParentType,
+             parent_slot => Slot},
+    case Role of
+        map_field ->
+            Base#{slot_kind => map_field};
+        binary_field ->
+            Base#{slot_kind => binary_field};
+        _ ->
+            Base
+    end.
+
+expected_child_node(Role, Attr) when Role =:= map_field; Role =:= binary_field ->
+    maps:get(node, Attr, expression);
+expected_child_node(Role, _Attr) ->
+    Role.
+
 valid_ast(expression) ->
     {atom, 1, ok};
 valid_ast(pattern) ->
@@ -557,8 +912,18 @@ valid_ast(name) ->
     {atom, 1, foo};
 valid_ast(type) ->
     {type, 1, integer, []};
+valid_ast(type_param) ->
+    {var, 1, 'A'};
 valid_ast(attribute_body) ->
     {atom, 1, ok}.
+
+valid_slot_ast({slot, try_expr, handlers, clause}) ->
+    {clause, 1,
+     [{tuple, 1, [{atom, 1, error}, {var, 1, 'Reason'}, {var, 1, '_'}]}],
+     [],
+     [{atom, 1, ok}]};
+valid_slot_ast(Validator) ->
+    valid_ast(validator_role(Validator)).
 
 invalid_ast(expression) ->
     function_form();
@@ -577,6 +942,8 @@ invalid_ast(form) ->
 invalid_ast(name) ->
     {var, 1, 'X'};
 invalid_ast(type) ->
+    {call, 1, {atom, 1, f}, []};
+invalid_ast(type_param) ->
     {atom, 1, ok};
 invalid_ast(attribute_body) ->
     none.

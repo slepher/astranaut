@@ -377,16 +377,16 @@ test_mc(A, Map) ->
     B = #{ A => A || 
             _K := A <- begin A = A + 2, Map end, 
             begin A = A + 3, A, true end,
-            is_ok(A + 3, begin A = A + 4, A end),
+            is_ok(A + 3, A + 4),
             true
         },
     B.
 
 test_mc_origin(A, Map) ->
-    B = #{A_3 => A_3
+    B = #{A_2 => A_2
           || _K := A_1 <- begin A_1 = A + 2, Map end,
              begin A_2 = A_1 + 3, A_2, true end,
-             (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
+             (is_ok(A_2 + 3, A_2 + 4)), true},
     B.
 -else.
 test_mc(A, _Map) -> A.
@@ -428,16 +428,16 @@ test_mc_strict(A, Map) ->
     B = #{ A => A || 
         _K := A <:- begin A = A + 2, Map end, 
         begin A = A + 3, A, true end,
-        is_ok(A + 3, begin A = A + 4, A end),
+        is_ok(A + 3, A + 4),
         true
         },
     B.
 
 test_mc_strict_origin(A, Map) ->
-    B = #{A_3 => A_3
+    B = #{A_2 => A_2
             || _K := A_1 <:- begin A_1 = A + 2, Map end,
                begin A_2 = A_1 + 3, A_2, true end,
-               (is_ok(A_2 + 3, begin A_3 = A_2 + 4, A_3 end)), true},
+               (is_ok(A_2 + 3, A_2 + 4)), true},
     B.
 
 test_lc_zip(A, B) ->
