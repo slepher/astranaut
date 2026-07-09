@@ -928,7 +928,7 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
                          end,
                 return(annotate_traversal_node(Node1, Attr))
             ])
-        end, Exprs, #{traverse => all, validate => false}),
+        end, Exprs, #{traverse => all, normalize => false}),
     astranaut_traverse:local(fun(_) -> InitAttr end, Monad).
 
 annotate_traversal_node(Nodes, Attr) when is_list(Nodes) ->
@@ -1038,8 +1038,8 @@ validate_macro_return(Return, Macro, Opts) ->
     Attr = maps:get(attr, Opts, #{}),
     Validator = maps:get(validator, Attr, {role, ExpectedRole}),
     case lint_macro_return(Return, Validator, Opts) of
-        ok ->
-            astranaut_traverse:return(Return);
+        {ok, Return1} ->
+            astranaut_traverse:return(Return1);
         {error, Detail} ->
             astranaut_traverse:fail(
               {invalid_macro_return, macro_return_detail(Macro, Opts, Detail)})
@@ -1048,10 +1048,7 @@ validate_macro_return(Return, Macro, Opts) ->
 lint_macro_return(Return, Validator, Opts) ->
     Attr = maps:get(attr, Opts, #{}),
     ValidateOpts = #{attr => Attr, forms => maps:get(forms, Opts, [])},
-    case astranaut_syntax:validate_recursive(Return, Validator, ValidateOpts) of
-        ok -> ok;
-        {error, Detail} -> {error, Detail}
-    end.
+    astranaut_syntax:normalize(Return, Validator, ValidateOpts).
 
 precheck_macro_return_tree(Return, Macro, Opts) ->
     case macro_return_tree(Return) of

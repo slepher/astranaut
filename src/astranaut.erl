@@ -96,7 +96,7 @@ smap(F, Node, Opts) ->
 -spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Node, Opts) ->
     F1 = fun(N, A) -> fun(S) -> {N, apply_fun(F, [N, S, A])} end end,
-    StateM = map_m_with_attr(F1, Node, state, Opts#{static => true, validate => false}, is_function(F, 3)),
+    StateM = map_m_with_attr(F1, Node, state, Opts#{static => true, normalize => false}, is_function(F, 3)),
     %% Node is never changed if static is true
     {_Node, Acc} = StateM(Init),
     Acc.
@@ -152,7 +152,7 @@ smapfold(F, Init, Node, Opts) ->
 -spec search(fun((N) -> boolean()) | fun((N, map()) -> boolean()), N, straverse_opts()) -> boolean().
 search(F, Node, Opts) ->
     F1 = fun(N, A) -> case apply_fun(F, [N, A]) of true -> {left, match}; false -> {right, N} end end,
-    Either = map_m_with_attr(F1, Node, either, Opts#{static => true, validate => false}, is_function(F, 2)),
+    Either = map_m_with_attr(F1, Node, either, Opts#{static => true, normalize => false}, is_function(F, 2)),
     case Either of {left, match} -> true; {right, _Node} -> false end.
 
 map_m_with_attr(F, Node, Monad, Opts, WithAttr) ->
@@ -198,7 +198,7 @@ map(F, TopNode, Opts) ->
 reduce(F, Init, TopNode, Opts) ->
     WithReturn = fun(Node, State) -> #{return => Node, state => State} end,
     F1 = fun(Node, State, Attr) -> apply_fun(F, [Node, State, Attr]) end,
-    Return = mapfold_1(F1, Init, TopNode, Opts#{static => true, validate => false}, WithReturn),
+    Return = mapfold_1(F1, Init, TopNode, Opts#{static => true, normalize => false}, WithReturn),
     astranaut_return:lift_m(fun({_TopNode1, State}) -> State end, Return).
 
 -spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(trees()).
@@ -396,7 +396,7 @@ map_m_1(F, Node, Opts) ->
               traverse_map_form(F, Node1)
       end, Node, Uniplate, traverse, Opts2).
 
-validation_attr_needed(_Node, #{validate := false}) ->
+validation_attr_needed(_Node, #{normalize := false}) ->
     false;
 validation_attr_needed(_Node, #{role := _Role}) ->
     true;
@@ -404,7 +404,7 @@ validation_attr_needed(_Node, #{validator := _Validator}) ->
     true;
 validation_attr_needed(_Node, #{attr := _Attr}) ->
     true;
-validation_attr_needed(Node, #{validate := true}) ->
+validation_attr_needed(Node, #{normalize := true}) ->
     root_role(Node) =/= unknown;
 validation_attr_needed(_Node, _Opts) ->
     false.
@@ -417,9 +417,9 @@ root_traverse_attr(Node, Opts, Attr) ->
         false ->
             case explicit_root_validator(Opts) of
                 {ok, Role, Validator} ->
-                    Attr1#{node => Role, validator => Validator};
+                    explicit_validator_attr(Role, Validator, Attr1);
                 error ->
-                    case maps:get(validate, Opts, false) of
+                    case maps:get(normalize, Opts, false) of
                         true ->
                             case root_role(Node) of
                                 unknown ->
@@ -443,6 +443,13 @@ explicit_root_validator(#{role := Role}) ->
     {ok, Role, {role, Role}};
 explicit_root_validator(_Opts) ->
     error.
+
+explicit_validator_attr(Role, Validator, Attr) ->
+    Attr1 = Attr#{validator => Validator},
+    case lists:member(Role, [expression, pattern, guard, form, type, clause]) of
+        true -> Attr1#{node => Role};
+        false -> Attr1
+    end.
 
 root_role([Node|Nodes]) ->
     case root_role(Node) of

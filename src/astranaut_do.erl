@@ -30,7 +30,7 @@ do(_Ast, #{}) ->
     {error, expected_list_comprehension}.
 
 parse_transform(Forms, _Opts) ->
-    TransformOpts = #{formatter => ?MODULE, traverse => post, validate => true},
+    TransformOpts = #{formatter => ?MODULE, traverse => post, normalize => true},
     astranaut_return:to_compiler(astranaut:map(fun walk_node/2, Forms, TransformOpts)).
 
 format_error(non_empty_do) ->
@@ -114,4 +114,4 @@ update_expression(Expression, Monad, #{monad := MonadModule, monad_fail := Monad
               quote(_A@MonadModule:return(unquote(Arg), unquote(Monad)), Pos);
          (Node) ->
               Node
-      end, Expression, #{traverse => pre, role => expression, validate => true}).
+      end, Expression, #{traverse => pre, role => expression, normalize => true}).

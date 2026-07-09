@@ -414,13 +414,13 @@ test_invalid_post_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_transform_validation, _},
+       {invalid_transform_normalization, _},
        astranaut:smap(
          fun({var, _Pos, _Value}) ->
                  invalid_node;
             (Node) ->
                  Node
-         end, Forms, #{traverse => post, validate => true})),
+         end, Forms, #{traverse => post, normalize => true})),
     ok.
 
 test_invalid_post_transform_context_exception(Config) ->
@@ -447,7 +447,7 @@ test_invalid_post_transform_context_before_validation(Config) ->
                  #uniplate_node_context{node = InvalidRoleNode};
             (Node) ->
                  Node
-         end, Forms, #{traverse => post, validate => true})),
+         end, Forms, #{traverse => post, normalize => true})),
     ok.
 
 test_invalid_transform_maketree_exception(Config) ->
@@ -490,26 +490,26 @@ test_invalid_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_transform_validation, _},
+       {invalid_transform_normalization, _},
        astranaut:smap(
          fun({function, _Pos, _Name, _Arity, _Clauses}) ->
                  invalid_node;
             (Node) ->
                  Node
-         end, Forms, #{traverse => none, validate => true})),
+         end, Forms, #{traverse => none, normalize => true})),
     ok.
 
 test_invalid_subtree_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
        error,
-       {invalid_transform_validation, _},
+       {invalid_transform_normalization, _},
        astranaut:smap(
          fun({clause, _Pos, _Pattern, _Guard, _Expression}) ->
                  invalid_clause;
             (Node) ->
                  Node
-         end, Forms, #{traverse => subtree, validate => true})),
+         end, Forms, #{traverse => subtree, normalize => true})),
     ok.
 
 uniplate(Node) ->

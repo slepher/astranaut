@@ -148,7 +148,7 @@ walk_function_clause(Clause, RebindingOptions) ->
                               Attr1 = maps:merge(Attr, maps:with(rebinding_keys(), RebindingOptions)),
                               astranaut_traverse:astranaut_traverse(walk_node(NodeType, Node, Context, Attr1))
                           ])
-             end, Clause, #{traverse => pre, role => clause, validate => true})
+             end, Clause, #{traverse => pre, role => clause, normalize => true})
          ])).
 
 %% the + pin operator will be replaced with ^ pin operator after this pull request merged.

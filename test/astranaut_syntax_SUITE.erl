@@ -76,12 +76,13 @@ all() ->
      test_child_specs_include_slot_validators,
      test_all_child_specs_emit_expected_validators,
      test_all_child_spec_validators_accept_and_reject_ast,
-     test_slot_kind_preserves_outer_role,
+     test_slot_roles_do_not_replace_node_role,
      test_slot_validators_reject_wrong_structural_identity,
      test_slot_validators_reject_malformed_structural_nodes,
      test_validate_local_does_not_recurse_grandchildren,
      test_validate_recursive_recurse_grandchildren,
      test_otp_vsn,
+     test_try_handler_local_validation_uses_slot_shape,
      test_legacy_catch_handler,
      test_otp21_stacktrace_catch,
      test_legacy_map_pattern_key,
@@ -109,13 +110,13 @@ all() ->
 
 test_validate_expression(_Config) ->
     Expr = {call, 1, {atom, 1, foo}, [{integer, 1, 1}]},
-    ?assertEqual(ok, astranaut_syntax:validate(Expr, expression)).
+    ?assertEqual(ok, validate(Expr, expression)).
 
 test_validate_form_list(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate([function_form()], form)).
+    ?assertEqual(ok, validate([function_form()], form)).
 
 test_validate_root_role_error(_Config) ->
-    {error, Error} = astranaut_syntax:validate(function_form(), expression),
+    {error, Error} = validate(function_form(), expression),
     ?assertMatch(#{reason := invalid_role,
                    expected_role := expression,
                    actual_type := function,
@@ -124,7 +125,7 @@ test_validate_root_role_error(_Config) ->
 
 test_validate_child_role_error(_Config) ->
     Expr = {match, 1, function_form(), {atom, 1, ok}},
-    {error, Error} = astranaut_syntax:validate(Expr, expression),
+    {error, Error} = validate(Expr, expression),
     ?assertMatch(#{reason := invalid_role,
                    expected_role := pattern,
                    actual_type := function,
@@ -135,7 +136,7 @@ test_validate_child_role_error(_Config) ->
     ?assertMatch([#{slot := left, index := 1, expected_role := pattern, type := function}], Path).
 
 test_validate_invalid_node(_Config) ->
-    {error, Error} = astranaut_syntax:validate({bad_ast}, expression),
+    {error, Error} = validate({bad_ast}, expression),
     ?assertMatch(#{reason := invalid_node,
                    expected_role := expression,
                    slot := root},
@@ -146,15 +147,15 @@ test_validate_invalid_node(_Config) ->
 %%--------------------------------------------------------------------
 
 test_validate_form_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate(function_form(), form)),
-    ?assertEqual(ok, astranaut_syntax:validate({attribute, 1, custom, [{atom, 1, val}]}, form)),
-    ?assertEqual(ok, astranaut_syntax:validate({eof, 1}, form)).
+    ?assertEqual(ok, validate(function_form(), form)),
+    ?assertEqual(ok, validate({attribute, 1, custom, [{atom, 1, val}]}, form)),
+    ?assertEqual(ok, validate({eof, 1}, form)).
 
 test_validate_form_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({atom, 1, ok}, form),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate({atom, 1, ok}, form),
+    {error, #{reason := invalid_role}} = validate(
         {call, 1, {atom, 1, f}, []}, form),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(
         {clause, 1, [], [], [{atom, 1, ok}]}, form).
 
 %%--------------------------------------------------------------------
@@ -162,28 +163,28 @@ test_validate_form_reject(_Config) ->
 %%--------------------------------------------------------------------
 
 test_validate_expression_accept_more(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, ok}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({atom, 1, ok}, expression)),
+    ?assertEqual(ok, validate(
         {call, 1, {atom, 1, f}, [{atom, 1, x}]}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {match, 1, {atom, 1, a}, {atom, 1, b}}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {'case', 1, {atom, 1, x}, [{clause, 1, [{atom, 1, x}], [], [{atom, 1, ok}]}]}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate({integer, 1, 42}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({integer, 1, 42}, expression)),
+    ?assertEqual(ok, validate(
         {'if', 1, [{clause, 1, [], [], [{atom, 1, true}]}]}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {'receive', 1, [{clause, 1, [{atom, 1, msg}], [], [{atom, 1, ok}]}]}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {'try', 1, [{atom, 1, body}], [], [], []}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {'catch', 1, {atom, 1, expr}}, expression)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {block, 1, [{atom, 1, a}, {atom, 1, b}]}, expression)).
 
 test_validate_expression_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), expression),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(function_form(), expression),
+    {error, #{reason := invalid_role}} = validate(
         {clause, 1, [], [], [{atom, 1, ok}]}, expression).
 
 %%--------------------------------------------------------------------
@@ -191,48 +192,48 @@ test_validate_expression_reject(_Config) ->
 %%--------------------------------------------------------------------
 
 test_validate_pattern_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, ok}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate({var, 1, 'X'}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate({var, 1, '_'}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({atom, 1, ok}, pattern)),
+    ?assertEqual(ok, validate({var, 1, 'X'}, pattern)),
+    ?assertEqual(ok, validate({var, 1, '_'}, pattern)),
+    ?assertEqual(ok, validate(
         {tuple, 1, [{atom, 1, a}, {var, 1, 'B'}]}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate({nil, 1}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({nil, 1}, pattern)),
+    ?assertEqual(ok, validate(
         {cons, 1, {var, 1, 'H'}, {var, 1, 'T'}}, pattern)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {integer, 1, 8}, default}]}, pattern)).
 
 test_validate_pattern_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(
         {call, 1, {atom, 1, f}, [{atom, 1, x}]}, pattern),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {match, 1, {atom, 1, a}, {atom, 1, b}}, pattern)),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), pattern).
+    {error, #{reason := invalid_role}} = validate(function_form(), pattern).
 
 %%--------------------------------------------------------------------
 %% guard role
 %%--------------------------------------------------------------------
 
 test_validate_guard_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, true}, guard)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({atom, 1, true}, guard)),
+    ?assertEqual(ok, validate(
         {call, 1, {atom, 1, is_integer}, [{var, 1, 'X'}]}, guard)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {op, 1, '>', {var, 1, 'X'}, {integer, 1, 0}}, guard)),
-    ?assertEqual(ok, astranaut_syntax:validate({integer, 1, 42}, guard)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({integer, 1, 42}, guard)),
+    ?assertEqual(ok, validate(
         {call, 1, {remote, 1, {atom, 1, erlang}, {atom, 1, '+'}}, [{var, 1, 'A'}, {var, 1, 'B'}]}, guard)).
 
 test_validate_guard_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(
         {match, 1, {atom, 1, a}, {atom, 1, b}}, guard),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(
         {call, 1, {atom, 1, helper}, []}, guard),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), guard).
+    {error, #{reason := invalid_role}} = validate(function_form(), guard).
 
 test_validate_function_with_real_guard(_Config) ->
     Form = parse_form("f(X) when X > 0 -> ok."),
-    ?assertEqual(ok, astranaut_syntax:validate(Form, form)).
+    ?assertEqual(ok, validate(Form, form)).
 
 test_validate_guard_uses_record_forms(_Config) ->
     GuardRecord = {record, 1, guard_rec, []},
@@ -241,9 +242,9 @@ test_validate_guard_uses_record_forms(_Config) ->
     InvalidRecordForms = [{attribute, 1, record,
                            {guard_rec, [{record_field, 1, {atom, 1, field},
                                          {call, 1, {atom, 1, helper}, []}}]}}],
-    ?assertEqual(ok, astranaut_syntax:validate(GuardRecord, guard,
+    ?assertEqual(ok, validate(GuardRecord, guard,
                                                #{forms => ValidRecordForms})),
-    {error, Error} = astranaut_syntax:validate(GuardRecord, guard,
+    {error, Error} = validate(GuardRecord, guard,
                                                #{forms => InvalidRecordForms}),
     ?assertMatch(#{reason := invalid_role,
                    expected_role := guard,
@@ -255,70 +256,70 @@ test_validate_guard_uses_record_forms(_Config) ->
 %%--------------------------------------------------------------------
 
 test_validate_type_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({nil, 1}, type)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({nil, 1}, type)),
+    ?assertEqual(ok, validate(
         {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}, type)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {type, 1, integer, []}, type)).
 
 test_validate_type_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), type),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate(function_form(), type),
+    {error, #{reason := invalid_role}} = validate(
         {call, 1, {atom, 1, f}, []}, type).
 
 test_validate_type_singletons(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, ok}, type)),
-    ?assertEqual(ok, astranaut_syntax:validate({integer, 1, 42}, type)),
-    ?assertEqual(ok, astranaut_syntax:validate({char, 1, $a}, type)),
-    ?assertEqual(ok, astranaut_syntax:validate({string, 1, "abc"}, type)).
+    ?assertEqual(ok, validate({atom, 1, ok}, type)),
+    ?assertEqual(ok, validate({integer, 1, 42}, type)),
+    ?assertEqual(ok, validate({char, 1, $a}, type)),
+    ?assertEqual(ok, validate({string, 1, "abc"}, type)).
 
 test_validate_type_and_spec_attributes(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-type t() :: ok | 42 | atom()."), form)),
-    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-type t(A) :: A."), form)),
-    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-opaque opaque_t() :: ok | 42."), form)),
-    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-spec foo() -> ok."), form)),
-    ?assertEqual(ok, astranaut_syntax:validate(parse_form("-callback foo() -> ok."), form)).
+    ?assertEqual(ok, validate(parse_form("-type t() :: ok | 42 | atom()."), form)),
+    ?assertEqual(ok, validate(parse_form("-type t(A) :: A."), form)),
+    ?assertEqual(ok, validate(parse_form("-opaque opaque_t() :: ok | 42."), form)),
+    ?assertEqual(ok, validate(parse_form("-spec foo() -> ok."), form)),
+    ?assertEqual(ok, validate(parse_form("-callback foo() -> ok."), form)).
 
 %%--------------------------------------------------------------------
 %% clause role
 %%--------------------------------------------------------------------
 
 test_validate_clause_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {clause, 1, [{atom, 1, a}], [], [{atom, 1, ok}]}, clause)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {clause, 1, [{var, 1, 'X'}], [], [{atom, 1, ok}]}, clause)).
 
 test_validate_clause_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({atom, 1, ok}, clause),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(
+    {error, #{reason := invalid_role}} = validate({atom, 1, ok}, clause),
+    {error, #{reason := invalid_role}} = validate(
         {call, 1, {atom, 1, f}, []}, clause),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), clause).
+    {error, #{reason := invalid_role}} = validate(function_form(), clause).
 
 %%--------------------------------------------------------------------
 %% name role — only atom is valid
 %%--------------------------------------------------------------------
 
 test_validate_name_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, foo}, name)).
+    ?assertEqual(ok, validate({atom, 1, foo}, name)).
 
 test_validate_name_reject(_Config) ->
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({var, 1, 'X'}, name),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate({integer, 1, 42}, name),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(function_form(), name).
+    {error, #{reason := invalid_role}} = validate({var, 1, 'X'}, name),
+    {error, #{reason := invalid_role}} = validate({integer, 1, 42}, name),
+    {error, #{reason := invalid_role}} = validate(function_form(), name).
 
 %%--------------------------------------------------------------------
 %% attribute_body role (always allowed regardless of node type)
 %%--------------------------------------------------------------------
 
 test_validate_attribute_body_accept(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate({atom, 1, ok}, attribute_body)),
-    ?assertEqual(ok, astranaut_syntax:validate(function_form(), attribute_body)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate({atom, 1, ok}, attribute_body)),
+    ?assertEqual(ok, validate(function_form(), attribute_body)),
+    ?assertEqual(ok, validate(
         {call, 1, {atom, 1, f}, []}, attribute_body)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {clause, 1, [], [], [{atom, 1, ok}]}, attribute_body)),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
         {type, 1, integer, []}, attribute_body)).
 
 %%--------------------------------------------------------------------
@@ -327,9 +328,9 @@ test_validate_attribute_body_accept(_Config) ->
 
 test_validate_list_comp(_Config) ->
     Lc = {lc, 1, {atom, 1, ok}, [{generate, 1, {var, 1, 'X'}, {nil, 1}}]},
-    ?assertEqual(ok, astranaut_syntax:validate(Lc, expression)),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(Lc, form),
-    {error, #{reason := invalid_role}} = astranaut_syntax:validate(Lc, pattern).
+    ?assertEqual(ok, validate(Lc, expression)),
+    {error, #{reason := invalid_role}} = validate(Lc, form),
+    {error, #{reason := invalid_role}} = validate(Lc, pattern).
 
 %%--------------------------------------------------------------------
 %% validator metadata and validation scopes
@@ -357,7 +358,7 @@ test_all_child_specs_emit_expected_validators(_Config) ->
       fun({ParentType, Subtrees, Attr, ExpectedSlots}) ->
               Specs = astranaut_syntax:child_specs(ParentType, Subtrees, Attr),
               ActualSlots = [{Slot, Role, Validator,
-                              maps:with([node, slot_kind, validator, parent_type, parent_slot], SpecAttr)}
+                              maps:with([node, validator, parent_type, parent_slot], SpecAttr)}
                              || #{slot := Slot, role := Role, validator := Validator, attr := SpecAttr} <- Specs],
               Expected =
                   [{Slot, Role, {slot, ParentType, Slot, Role},
@@ -374,7 +375,7 @@ test_all_child_spec_validators_accept_and_reject_ast(_Config) ->
     lists:foreach(
       fun(Validator) ->
               Role = validator_role(Validator),
-              ?assertEqual(ok, astranaut_syntax:validate_local(valid_slot_ast(Validator), Validator)),
+              ?assertEqual(ok, astranaut_syntax:validate_node(valid_slot_ast(Validator), Validator)),
               case invalid_ast(Role) of
                   none ->
                       ok;
@@ -382,11 +383,11 @@ test_all_child_spec_validators_accept_and_reject_ast(_Config) ->
                       {error, #{reason := invalid_role,
                                 validator := Validator,
                                 expected_role := Role}} =
-                          astranaut_syntax:validate_local(InvalidAst, Validator)
+                          astranaut_syntax:validate_node(InvalidAst, Validator)
               end
       end, Validators).
 
-test_slot_kind_preserves_outer_role(_Config) ->
+test_slot_roles_do_not_replace_node_role(_Config) ->
     Pattern = valid_ast(pattern),
     Expr = valid_ast(expression),
     MapField = valid_ast(map_field),
@@ -394,33 +395,36 @@ test_slot_kind_preserves_outer_role(_Config) ->
     [MapSpec] = astranaut_syntax:child_specs(map_expr, [[MapField]], #{node => pattern}),
     ?assertMatch(#{role := map_field,
                    validator := {slot, map_expr, fields, map_field},
-                   attr := #{node := pattern, slot_kind := map_field}},
+                   attr := #{node := pattern}},
                  MapSpec),
     [BinSpec] = astranaut_syntax:child_specs(binary, [[BinElement]], #{node => pattern}),
     ?assertMatch(#{role := binary_field,
                    validator := {slot, binary, elements, binary_field},
-                   attr := #{node := pattern, slot_kind := binary_field}},
+                   attr := #{node := pattern}},
                  BinSpec),
     MapFieldSpecs = astranaut_syntax:child_specs(
                       map_field_exact, [[Expr], [Pattern]],
-                      #{node => pattern, slot_kind => map_field}),
+                      #{node => pattern}),
     ?assertMatch([#{role := expression}, #{role := pattern}], MapFieldSpecs),
     [BinElementSpec] = astranaut_syntax:child_specs(
-                         binary_field, [[Pattern]], #{node => pattern, slot_kind => binary_field}),
-    ?assertMatch(#{role := pattern}, BinElementSpec).
+                         binary_field, [[Pattern]], #{node => pattern}),
+    ?assertMatch(#{role := pattern}, BinElementSpec),
+    [NameSpec|_] = astranaut_syntax:child_specs(function, [[valid_ast(name)], [valid_ast(clause)]],
+                                                #{node => form}),
+    ?assertNot(maps:is_key(node, maps:get(attr, NameSpec))).
 
 test_slot_validators_reject_wrong_structural_identity(_Config) ->
     BinElement = valid_ast(binary_field),
     MapField = {map_field_exact, 1, {atom, 1, key}, {atom, 1, value}},
-    ?assertEqual(ok, astranaut_syntax:validate_local(BinElement, {slot, binary, elements, binary_field})),
-    ?assertEqual(ok, astranaut_syntax:validate_local({atom, 1, value},
+    ?assertEqual(ok, astranaut_syntax:validate_node(BinElement, {slot, binary, elements, binary_field})),
+    ?assertEqual(ok, astranaut_syntax:validate_node({atom, 1, value},
                                                      {slot, map_field_exact, map_field_exact_value, expression})),
-    {error, BinError} = astranaut_syntax:validate_local(BinElement, {slot, tuple, elements, expression}),
+    {error, BinError} = astranaut_syntax:validate_node(BinElement, {slot, tuple, elements, expression}),
     ?assertMatch(#{reason := invalid_role,
                    validator := {slot, tuple, elements, expression},
                    actual_type := binary_field},
                  BinError),
-    {error, MapError} = astranaut_syntax:validate_local(MapField,
+    {error, MapError} = astranaut_syntax:validate_node(MapField,
                                                         {slot, map_field_exact,
                                                          map_field_exact_value, expression}),
     ?assertMatch(#{reason := invalid_role,
@@ -431,24 +435,26 @@ test_slot_validators_reject_wrong_structural_identity(_Config) ->
 test_slot_validators_reject_malformed_structural_nodes(_Config) ->
     MalformedMapField = {map_field_exact, 1, {atom, 1, key}},
     MalformedBinElement = {bin_element, 1, {atom, 1, value}},
-    {error, MapError} = astranaut_syntax:validate_local(MalformedMapField,
+    {error, MapError} = astranaut_syntax:validate_node(MalformedMapField,
                                                         {slot, map_expr, fields, map_field}),
     ?assertMatch(#{reason := invalid_node,
                    validator := {slot, map_expr, fields, map_field}},
                  MapError),
-    {error, BinError} = astranaut_syntax:validate_local(MalformedBinElement,
+    {error, BinError} = astranaut_syntax:validate_node(MalformedBinElement,
                                                         {slot, binary, elements, binary_field}),
     ?assertMatch(#{reason := invalid_node,
                    validator := {slot, binary, elements, binary_field}},
                  BinError).
 
 test_validate_local_does_not_recurse_grandchildren(_Config) ->
-    Tree = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
-    ?assertEqual(ok, astranaut_syntax:validate_local(Tree, {role, expression})).
+    DirectChildInvalid = {call, 1, {atom, 1, f}, [function_form()]},
+    GrandchildInvalid = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
+    ?assertEqual(ok, astranaut_syntax:validate_node(DirectChildInvalid, {role, expression})),
+    ?assertEqual(ok, astranaut_syntax:validate_node(GrandchildInvalid, {role, expression})).
 
 test_validate_recursive_recurse_grandchildren(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
-    {error, Error} = astranaut_syntax:validate_recursive(Tree, {role, expression}),
+    {error, Error} = astranaut_syntax:normalize(Tree, {role, expression}),
     ?assertMatch(#{reason := invalid_role,
                    actual_type := clause,
                    parent_type := tuple},
@@ -458,12 +464,40 @@ test_otp_vsn(_Config) ->
     OtpVsn = astranaut_syntax:otp_vsn(),
     ?assert(OtpVsn =:= 'pre-21' orelse is_integer(OtpVsn)).
 
+test_try_handler_local_validation_uses_slot_shape(_Config) ->
+    BareHandler = parse_try_handler("try a catch P -> P end"),
+    ThrowUnderscoreHandler = parse_try_handler("try a catch throw:P:_ -> P end"),
+    StacktraceHandler = parse_try_handler("try a catch throw:P:S -> P end"),
+    assert_same_ast(BareHandler, ThrowUnderscoreHandler),
+    ?assertEqual(astranaut_syntax:subtrees(BareHandler),
+                 astranaut_syntax:subtrees(ThrowUnderscoreHandler)),
+    ?assertNotEqual(astranaut_syntax:subtrees(BareHandler),
+                    astranaut_syntax:subtrees(StacktraceHandler)),
+    HandlerSlot = {slot, try_expr, handlers, clause},
+    ?assertEqual(ok, astranaut_syntax:validate_node(BareHandler, HandlerSlot,
+                                                     #{otp_vsn => 'pre-21'})),
+    ?assertEqual(ok, astranaut_syntax:validate_node(ThrowUnderscoreHandler, HandlerSlot,
+                                                     #{otp_vsn => 'pre-21'})),
+    {error, #{reason := invalid_role,
+              validator := HandlerSlot,
+              actual_type := clause}} =
+        astranaut_syntax:validate_node(StacktraceHandler, HandlerSlot,
+                                        #{otp_vsn => 'pre-21'}),
+    StacktraceHandlerWithInvalidBody =
+        {clause, 1,
+         [{tuple, 1, [{atom, 1, throw}, {var, 1, 'P'}, {var, 1, 'S'}]}],
+         [],
+         [function_form()]},
+    ?assertEqual(ok, astranaut_syntax:validate_node(StacktraceHandlerWithInvalidBody,
+                                                     HandlerSlot,
+                                                     #{otp_vsn => 21})).
+
 test_legacy_catch_handler(_Config) ->
     LegacyTry = legacy_catch_try_ast(),
     LegacyForm = parse_form("f() -> try body catch error:Reason -> Reason end."),
     assert_same_ast(LegacyTry, function_body_expr(LegacyForm)),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyTry, expression, #{otp_vsn => 'pre-21'})),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyTry, expression,
+    ?assertEqual(ok, validate(LegacyTry, expression, #{otp_vsn => 'pre-21'})),
+    ?assertEqual(ok, validate(LegacyTry, expression,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})).
 
 test_otp21_stacktrace_catch(_Config) ->
@@ -472,24 +506,24 @@ test_otp21_stacktrace_catch(_Config) ->
         true ->
             StacktraceForm = parse_form("f() -> try body catch error:Reason:Stacktrace -> Reason end."),
             assert_same_ast(StacktraceTry, function_body_expr(StacktraceForm)),
-            ?assertEqual(ok, astranaut_syntax:validate(StacktraceTry, expression,
+            ?assertEqual(ok, validate(StacktraceTry, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := clause,
                       parent_type := try_expr}} =
-                astranaut_syntax:validate(StacktraceTry, expression, #{otp_vsn => 'pre-21'});
+                validate(StacktraceTry, expression, #{otp_vsn => 'pre-21'});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(StacktraceTry, expression))
+            ?assertMatch({error, _}, validate(StacktraceTry, expression))
     end.
 
 test_legacy_map_pattern_key(_Config) ->
     LegacyField = {map_field_exact, 1, {var, 1, 'K'}, {var, 1, 'V'}},
     LegacyForm = parse_form("f(#{K := V}) -> V."),
     assert_same_ast({map, 1, [LegacyField]}, function_first_pattern(LegacyForm)),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyField, pattern, #{otp_vsn => 22})),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyField, pattern,
+    ?assertEqual(ok, validate(LegacyField, pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, validate(LegacyField, pattern,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
                        {map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}},
                        pattern, #{otp_vsn => 'pre-21'})).
 
@@ -502,24 +536,24 @@ test_otp23_map_pattern_key_expression(_Config) ->
         true ->
             NewForm = parse_form(NewCode),
             assert_same_ast({map, 1, [NewField]}, function_first_pattern(NewForm)),
-            ?assertEqual(ok, astranaut_syntax:validate(NewField, pattern,
+            ?assertEqual(ok, validate(NewField, pattern,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := infix_expr,
                       parent_type := map_field_exact}} =
-                astranaut_syntax:validate(NewField, pattern, #{otp_vsn => 22});
+                validate(NewField, pattern, #{otp_vsn => 22});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(NewField, pattern))
+            ?assertMatch({error, _}, validate(NewField, pattern))
     end.
 
 test_legacy_binary_size(_Config) ->
     LegacyBin = {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {var, 1, 'N'}, default}]},
     LegacyForm = parse_form("f(<<X:N>>) -> X."),
     assert_same_ast(LegacyBin, function_first_pattern(LegacyForm)),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyBin, pattern, #{otp_vsn => 22})),
-    ?assertEqual(ok, astranaut_syntax:validate(LegacyBin, pattern,
+    ?assertEqual(ok, validate(LegacyBin, pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, validate(LegacyBin, pattern,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})),
-    ?assertEqual(ok, astranaut_syntax:validate(
+    ?assertEqual(ok, validate(
                        {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {integer, 1, 8}, default}]},
                        pattern, #{otp_vsn => 'pre-21'})).
 
@@ -532,14 +566,14 @@ test_otp23_binary_size_expression(_Config) ->
         true ->
             NewForm = parse_form(NewCode),
             assert_same_ast(NewBin, function_first_pattern(NewForm)),
-            ?assertEqual(ok, astranaut_syntax:validate(NewBin, pattern,
+            ?assertEqual(ok, validate(NewBin, pattern,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := infix_expr,
                       parent_type := size_qualifier}} =
-                astranaut_syntax:validate(NewBin, pattern, #{otp_vsn => 22});
+                validate(NewBin, pattern, #{otp_vsn => 22});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(NewBin, pattern))
+            ?assertMatch({error, _}, validate(NewBin, pattern))
     end.
 
 test_otp25_maybe_expr(_Config) ->
@@ -553,12 +587,12 @@ test_otp25_maybe_expr(_Config) ->
         true ->
             Form = parse_form(Code),
             assert_same_ast(MaybeExpr, function_body_expr(Form)),
-            ?assertEqual(ok, astranaut_syntax:validate(MaybeExpr, expression,
+            ?assertEqual(ok, validate(MaybeExpr, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := maybe_expr}} =
-                astranaut_syntax:validate(MaybeExpr, expression, #{otp_vsn => 24});
+                validate(MaybeExpr, expression, #{otp_vsn => 24});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(MaybeExpr, expression))
+            ?assertMatch({error, _}, validate(MaybeExpr, expression))
     end.
 
 test_otp26_map_comprehension(_Config) ->
@@ -571,12 +605,12 @@ test_otp26_map_comprehension(_Config) ->
         true ->
             Form = parse_form(Code),
             assert_same_ast(MapComp, function_body_expr(Form)),
-            ?assertEqual(ok, astranaut_syntax:validate(MapComp, expression,
+            ?assertEqual(ok, validate(MapComp, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := map_comp}} =
-                astranaut_syntax:validate(MapComp, expression, #{otp_vsn => 25});
+                validate(MapComp, expression, #{otp_vsn => 25});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(MapComp, expression))
+            ?assertMatch({error, _}, validate(MapComp, expression))
     end.
 
 test_otp28_strict_generator(_Config) ->
@@ -586,12 +620,12 @@ test_otp28_strict_generator(_Config) ->
         true ->
             Form = parse_form(Code),
             assert_same_ast(StrictLc, function_body_expr(Form)),
-            ?assertEqual(ok, astranaut_syntax:validate(StrictLc, expression,
+            ?assertEqual(ok, validate(StrictLc, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := strict_generator}} =
-                astranaut_syntax:validate(StrictLc, expression, #{otp_vsn => 27});
+                validate(StrictLc, expression, #{otp_vsn => 27});
         false ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(StrictLc, expression))
+            ?assertMatch({error, _}, validate(StrictLc, expression))
     end.
 
 test_traverse_validate_changed_node(_Config) ->
@@ -599,10 +633,10 @@ test_traverse_validate_changed_node(_Config) ->
     try astranaut:smap(
           fun({atom, 1, bad}) -> function_form();
              (Node) -> Node
-          end, Tree, #{traverse => pre, role => expression, validate => true}) of
+          end, Tree, #{traverse => pre, role => expression, normalize => true}) of
         _ -> error(unexpected_ok)
     catch
-        error:{invalid_transform_validation, #{reason := invalid_role,
+        error:{invalid_transform_normalization, #{reason := invalid_role,
                                                actual_type := function}} ->
             ok
     end.
@@ -614,7 +648,7 @@ test_traverse_validate_false_opt_out(_Config) ->
        astranaut:smap(
          fun({atom, 1, bad}) -> function_form();
             (Node) -> Node
-         end, Tree, #{traverse => pre, validate => false})).
+         end, Tree, #{traverse => pre, normalize => false})).
 
 test_traverse_validate_preserves_slot_attr(_Config) ->
     Tree = {'case', 1, {var, 1, 'M'},
@@ -622,8 +656,7 @@ test_traverse_validate_preserves_slot_attr(_Config) ->
               [{map, 1, [{map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}}]}],
               [],
               [{atom, 1, ok}]}]},
-    InvalidField = {map_field_exact, 1, {atom, 1, key},
-                    {call, 1, {atom, 1, f}, []}},
+    InvalidField = {atom, 1, not_a_map_field},
     try astranaut:smap(
           fun({map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}}, _Attr) ->
                   InvalidField;
@@ -633,12 +666,12 @@ test_traverse_validate_preserves_slot_attr(_Config) ->
                     fun(Subtrees) ->
                             astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
                     end, Node)
-          end, Tree, #{traverse => pre, role => expression, validate => true}) of
+          end, Tree, #{traverse => pre, role => expression, normalize => true}) of
         _ -> error(unexpected_ok)
     catch
-        error:{invalid_transform_validation, #{reason := invalid_role,
-                                               actual_type := application,
-                                               parent_type := map_field_exact}} ->
+        error:{invalid_transform_normalization, #{reason := invalid_role,
+                                               validator := {slot, map_expr, fields, map_field},
+                                               actual_type := atom}} ->
             ok
     end.
 
@@ -652,7 +685,7 @@ test_traverse_pre_validate_does_not_recurse_grandchildren(_Config) ->
                  Updated;
             (Node) ->
                  Node
-         end, Tree, #{traverse => pre, role => expression, validate => true})).
+         end, Tree, #{traverse => pre, role => expression, normalize => true})).
 
 test_traverse_post_validate_recurse_grandchildren(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{atom, 1, bad}]},
@@ -662,10 +695,10 @@ test_traverse_post_validate_recurse_grandchildren(_Config) ->
                   Updated;
              (Node) ->
                   Node
-          end, Tree, #{traverse => post, role => expression, validate => true}) of
+          end, Tree, #{traverse => post, role => expression, normalize => true}) of
         _ -> error(unexpected_ok)
     catch
-        error:{invalid_transform_validation, #{reason := invalid_role,
+        error:{invalid_transform_normalization, #{reason := invalid_role,
                                                actual_type := clause}} ->
             ok
     end.
@@ -688,11 +721,11 @@ test_map_m_validate_raises(_Config) ->
                   astranaut_traverse:return(function_form());
              (Node) ->
                   astranaut_traverse:return(Node)
-          end, Tree, #{traverse => pre, role => expression, validate => true}),
+          end, Tree, #{traverse => pre, role => expression, normalize => true}),
     try astranaut_traverse:eval(Monad, astranaut, #{}, ok) of
         _ -> error(unexpected_ok)
     catch
-        error:{invalid_transform_validation, #{reason := invalid_role,
+        error:{invalid_transform_normalization, #{reason := invalid_role,
                                                pos := 1,
                                                actual_type := function}} ->
             ok
@@ -710,11 +743,11 @@ test_validate_nested_valid(_Config) ->
     Tree = {call, 1,
             {remote, 1, {atom, 1, m}, {atom, 1, f}},
             [{match, 1, {var, 1, 'X'}, {call, 1, {atom, 1, g}, [{integer, 1, 1}]}}]},
-    ?assertEqual(ok, astranaut_syntax:validate(Tree, expression)).
+    ?assertEqual(ok, validate(Tree, expression)).
 
 test_validate_nested_invalid(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{clause, 1, [], [], [{atom, 1, ok}]}]},
-    {error, Error} = astranaut_syntax:validate(Tree, expression),
+    {error, Error} = validate(Tree, expression),
     ?assertMatch(#{reason := invalid_role,
                    expected_role := expression,
                    actual_type := clause,
@@ -723,13 +756,22 @@ test_validate_nested_invalid(_Config) ->
                  Error).
 
 test_validate_empty_list(_Config) ->
-    ?assertEqual(ok, astranaut_syntax:validate([], expression)),
-    ?assertEqual(ok, astranaut_syntax:validate([], form)),
-    ?assertEqual(ok, astranaut_syntax:validate([], pattern)).
+    ?assertEqual(ok, validate([], expression)),
+    ?assertEqual(ok, validate([], form)),
+    ?assertEqual(ok, validate([], pattern)).
 
 %%--------------------------------------------------------------------
 %% helpers
 %%--------------------------------------------------------------------
+
+validate(NodeOrNodes, Role) ->
+    validate(NodeOrNodes, Role, #{}).
+
+validate(NodeOrNodes, Role, Opts) ->
+    case astranaut_syntax:normalize(NodeOrNodes, {role, Role}, Opts) of
+        {ok, _NodeOrNodes1} -> ok;
+        {error, _Error} = Error -> Error
+    end.
 
 function_form() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
@@ -750,9 +792,9 @@ parse_form_result(Code) ->
 assert_parser_or_constructed_ast_rejected(Code, ConstructedAst, Role) ->
     case parse_form_result(Code) of
         {ok, Form} ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(extract_feature_ast(Role, Form), Role));
+            ?assertMatch({error, _}, validate(extract_feature_ast(Role, Form), Role));
         {error, _ErrorInfo} ->
-            ?assertMatch({error, _}, astranaut_syntax:validate(ConstructedAst, Role))
+            ?assertMatch({error, _}, validate(ConstructedAst, Role))
     end.
 
 assert_same_ast(Expected, Actual) ->
@@ -770,6 +812,11 @@ current_otp_at_least(Min) ->
 function_body_expr({function, _Pos, _Name, _Arity,
                     [{clause, _ClausePos, _Patterns, _Guards, [Expr]}]}) ->
     Expr.
+
+parse_try_handler(TryCode) ->
+    {'try', _TryPos, _Body, _Clauses, [Handler], _After} =
+        function_body_expr(parse_form("f() -> " ++ TryCode ++ ".")),
+    Handler.
 
 function_first_pattern({function, _Pos, _Name, _Arity,
                         [{clause, _ClausePos, [Pattern|_Patterns], _Guards, _Body}]}) ->
@@ -901,23 +948,35 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
     Role.
 
 expected_child_attr(Role, Attr, Validator, ParentType, Slot) ->
-    Base = #{node => expected_child_node(Role, Attr),
-             validator => Validator,
+    Base = #{validator => Validator,
              parent_type => ParentType,
              parent_slot => Slot},
-    case Role of
-        map_field ->
-            Base#{slot_kind => map_field};
-        binary_field ->
-            Base#{slot_kind => binary_field};
-        _ ->
-            Base
+    case expected_child_node(Role, Attr) of
+        none -> Base;
+        Node -> Base#{node => Node}
     end.
 
-expected_child_node(Role, Attr) when Role =:= map_field; Role =:= binary_field ->
-    maps:get(node, Attr, expression);
-expected_child_node(Role, _Attr) ->
-    Role.
+expected_child_node(Role, Attr) ->
+    case Role of
+        map_field ->
+            maps:get(node, Attr, expression);
+        binary_field ->
+            maps:get(node, Attr, expression);
+        expression ->
+            expression;
+        pattern ->
+            pattern;
+        guard ->
+            guard;
+        form ->
+            form;
+        type ->
+            type;
+        clause ->
+            clause;
+        _ ->
+            none
+    end.
 
 valid_ast(expression) ->
     {atom, 1, ok};

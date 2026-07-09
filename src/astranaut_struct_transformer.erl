@@ -27,7 +27,7 @@ parse_transform(Forms, _Options) ->
                     astranaut:map(
                       fun(Node, Attrs) ->
                               walk(Node, StructInitMap, Attrs)
-                      end, Forms2, #{traverse => pre, formatter => ?MODULE, validate => true}),
+                      end, Forms2, #{traverse => pre, formatter => ?MODULE, normalize => true}),
                     fun(Forms3) ->
                             remove_used_struct_records(Forms, Forms3)
                     end)

@@ -58,7 +58,7 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     map_m(F, Node, Uniplate, MonadOpts, Opts);
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
-    Opts1 = maps:merge(#{traverse => pre, validate => false}, maps:with([traverse, validate, attr], Opts)),
+    Opts1 = maps:merge(#{traverse => pre, normalize => false}, maps:with([traverse, normalize, attr], Opts)),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
@@ -153,7 +153,7 @@ map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
 map_m_2(F, Node, _Uniplate, MOpts, #{traverse := none} = Opts) ->
-    updated_node_apply(F, Node, MOpts, recursive, invalid_transform, Opts);
+    updated_node_apply(F, Node, MOpts, validate_node, invalid_transform, Opts);
 map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
@@ -180,7 +180,7 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
       end).
 
 sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree} = Opts) ->
-    updated_node_apply(F, Node, MOpts, recursive, invalid_subtree_transform, Opts);
+    updated_node_apply(F, Node, MOpts, validate_node, invalid_subtree_transform, Opts);
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
@@ -308,9 +308,9 @@ map_m_if_list(AFB, Node, #{}) ->
     AFB(Node).
 
 apply_traverse_step(F, Node, pre, _Uniplate, MOpts, #{traverse := pre} = Opts) ->
-    updated_node_apply(F, Node, MOpts, local, none, Opts);
+    updated_node_apply(F, Node, MOpts, validate_node, none, Opts);
 apply_traverse_step(F, Node, post, _Uniplate, #{} = MOpts, #{traverse := post} = Opts) ->
-    updated_node_apply(F, Node, MOpts, recursive, invalid_post_transform, Opts);
+    updated_node_apply(F, Node, MOpts, normalize, invalid_post_transform, Opts);
 apply_traverse_step(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) ->
     NodeM = apply_traverse_step(F, Node, Step, Uniplate, MOpts, Opts#{traverse => Step}),
     %% add #{step => Step} to attr while traverse is all
@@ -326,27 +326,27 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
               {Node3, Updated} = updated_node(Node1, Node2),
               reject_node_context_return(Node1, Node3, ContextExceptionType),
               Bind(
-                validate_updated_node(Node3, Updated, MOpts, ValidateScope, Opts),
-                fun(ok) ->
-                        WriterUpdated({Node3, Updated})
+                normalize_updated_node(Node3, Updated, MOpts, ValidateScope, Opts),
+                fun(Node4) ->
+                        WriterUpdated({Node4, Updated})
                 end)
       end).
 
-validate_updated_node(_Node, false, #{return := Return}, _ValidateScope, _Opts) ->
-    Return(ok);
-validate_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, #{validate := true} = Opts) ->
+normalize_updated_node(Node, false, #{return := Return}, _ValidateScope, _Opts) ->
+    Return(Node);
+normalize_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, #{normalize := true} = Opts) ->
     Bind(
       Ask(),
       fun(Attr0) ->
-              Attr = validate_attr(Attr0, Opts),
-              validate_updated_node_1(Node, Attr, MOpts, ValidateScope)
+              Attr = normalize_attr(Attr0, Opts),
+              normalize_updated_node_1(Node, Attr, MOpts, ValidateScope)
       end);
-validate_updated_node(Node, true, MOpts, ValidateScope, #{validate := true} = Opts) ->
-    validate_updated_node_1(Node, validate_attr(#{}, Opts), MOpts, ValidateScope);
-validate_updated_node(_Node, true, #{return := Return}, _ValidateScope, _Opts) ->
-    Return(ok).
+normalize_updated_node(Node, true, MOpts, ValidateScope, #{normalize := true} = Opts) ->
+    normalize_updated_node_1(Node, normalize_attr(#{}, Opts), MOpts, ValidateScope);
+normalize_updated_node(Node, true, #{return := Return}, _ValidateScope, _Opts) ->
+    Return(Node).
 
-validate_attr(Attr, Opts) ->
+normalize_attr(Attr, Opts) ->
     case maps:is_key(node, Attr) orelse maps:is_key(validator, Attr) of
         true ->
             Attr;
@@ -354,20 +354,22 @@ validate_attr(Attr, Opts) ->
             maps:merge(maps:get(attr, Opts, #{}), Attr)
     end.
 
-validate_updated_node_1(Node, Attr, #{return := Return}, ValidateScope) ->
+normalize_updated_node_1(Node, Attr, #{return := Return}, ValidateScope) ->
     Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),
-    Validate = validate_updated_node_fun(ValidateScope),
-    case Validate(Node, Validator, #{attr => Attr}) of
+    Normalize = normalize_updated_node_fun(ValidateScope),
+    case Normalize(Node, Validator, #{attr => Attr}) of
         ok ->
-            Return(ok);
+            Return(Node);
+        {ok, Node1} ->
+            Return(Node1);
         {error, Detail} ->
-            erlang:error({invalid_transform_validation, Detail})
+            erlang:error({invalid_transform_normalization, Detail})
     end.
 
-validate_updated_node_fun(local) ->
-    fun astranaut_syntax:validate_local/3;
-validate_updated_node_fun(recursive) ->
-    fun astranaut_syntax:validate_recursive/3.
+normalize_updated_node_fun(validate_node) ->
+    fun astranaut_syntax:validate_node/3;
+normalize_updated_node_fun(normalize) ->
+    fun astranaut_syntax:normalize/3.
 
 reject_node_context_return(_Node, _NodeOrNodes, none) ->
     ok;
