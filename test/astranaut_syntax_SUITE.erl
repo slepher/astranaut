@@ -82,7 +82,7 @@ all() ->
      test_validate_local_does_not_recurse_grandchildren,
      test_validate_recursive_recurse_grandchildren,
      test_otp_vsn,
-     test_try_handler_local_validation_uses_slot_shape,
+     test_try_handler_validation_uses_abstract_format,
      test_legacy_catch_handler,
      test_otp21_stacktrace_catch,
      test_legacy_map_pattern_key,
@@ -343,14 +343,10 @@ test_child_specs_include_slot_validators(_Config) ->
     ?assertMatch(
        [#{slot := pattern,
           validator := {slot, binary_generator, pattern, pattern},
-          attr := #{validator := {slot, binary_generator, pattern, pattern},
-                    parent_type := binary_generator,
-                    parent_slot := pattern}},
+          attr := #{validator := {slot, binary_generator, pattern, pattern}}},
         #{slot := body,
           validator := {slot, binary_generator, body, expression},
-          attr := #{validator := {slot, binary_generator, body, expression},
-                    parent_type := binary_generator,
-                    parent_slot := body}}],
+          attr := #{validator := {slot, binary_generator, body, expression}}}],
        Specs).
 
 test_all_child_specs_emit_expected_validators(_Config) ->
@@ -358,7 +354,7 @@ test_all_child_specs_emit_expected_validators(_Config) ->
       fun({ParentType, Subtrees, Attr, ExpectedSlots}) ->
               Specs = astranaut_syntax:child_specs(ParentType, Subtrees, Attr),
               ActualSlots = [{Slot, Role, Validator,
-                              maps:with([node, validator, parent_type, parent_slot], SpecAttr)}
+                              maps:with([node, validator], SpecAttr)}
                              || #{slot := Slot, role := Role, validator := Validator, attr := SpecAttr} <- Specs],
               Expected =
                   [{Slot, Role, {slot, ParentType, Slot, Role},
@@ -464,20 +460,18 @@ test_otp_vsn(_Config) ->
     OtpVsn = astranaut_syntax:otp_vsn(),
     ?assert(OtpVsn =:= 'pre-21' orelse is_integer(OtpVsn)).
 
-test_try_handler_local_validation_uses_slot_shape(_Config) ->
-    BareHandler = parse_try_handler("try a catch P -> P end"),
-    ThrowUnderscoreHandler = parse_try_handler("try a catch throw:P:_ -> P end"),
-    StacktraceHandler = parse_try_handler("try a catch throw:P:S -> P end"),
-    assert_same_ast(BareHandler, ThrowUnderscoreHandler),
-    ?assertEqual(astranaut_syntax:subtrees(BareHandler),
-                 astranaut_syntax:subtrees(ThrowUnderscoreHandler)),
-    ?assertNotEqual(astranaut_syntax:subtrees(BareHandler),
+test_try_handler_validation_uses_abstract_format(_Config) ->
+    LegacyHandler = parse_try_handler("try a catch throw:P -> P end"),
+    assert_same_ast(legacy_throw_handler_ast(), LegacyHandler),
+    StacktraceHandler = stacktrace_throw_handler_ast(),
+    ?assertNotEqual(astranaut_syntax:subtrees(LegacyHandler),
                     astranaut_syntax:subtrees(StacktraceHandler)),
     HandlerSlot = {slot, try_expr, handlers, clause},
-    ?assertEqual(ok, astranaut_syntax:validate_node(BareHandler, HandlerSlot,
+    ?assertEqual(ok, astranaut_syntax:validate_node(LegacyHandler, HandlerSlot,
                                                      #{otp_vsn => 'pre-21'})),
-    ?assertEqual(ok, astranaut_syntax:validate_node(ThrowUnderscoreHandler, HandlerSlot,
-                                                     #{otp_vsn => 'pre-21'})),
+    {ok, LegacyHandler1} = astranaut_syntax:normalize(LegacyHandler, HandlerSlot,
+                                                       #{otp_vsn => 'pre-21'}),
+    assert_same_ast(LegacyHandler, LegacyHandler1),
     {error, #{reason := invalid_role,
               validator := HandlerSlot,
               actual_type := clause}} =
@@ -493,9 +487,9 @@ test_try_handler_local_validation_uses_slot_shape(_Config) ->
                                                      #{otp_vsn => 21})).
 
 test_legacy_catch_handler(_Config) ->
-    LegacyTry = legacy_catch_try_ast(),
     LegacyForm = parse_form("f() -> try body catch error:Reason -> Reason end."),
-    assert_same_ast(LegacyTry, function_body_expr(LegacyForm)),
+    LegacyTry = function_body_expr(LegacyForm),
+    assert_same_ast(legacy_catch_try_ast(), LegacyTry),
     ?assertEqual(ok, validate(LegacyTry, expression, #{otp_vsn => 'pre-21'})),
     ?assertEqual(ok, validate(LegacyTry, expression,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})).
@@ -505,13 +499,14 @@ test_otp21_stacktrace_catch(_Config) ->
     case current_otp_at_least(21) of
         true ->
             StacktraceForm = parse_form("f() -> try body catch error:Reason:Stacktrace -> Reason end."),
-            assert_same_ast(StacktraceTry, function_body_expr(StacktraceForm)),
-            ?assertEqual(ok, validate(StacktraceTry, expression,
+            ParsedStacktraceTry = function_body_expr(StacktraceForm),
+            assert_same_ast(StacktraceTry, ParsedStacktraceTry),
+            ?assertEqual(ok, validate(ParsedStacktraceTry, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := clause,
                       parent_type := try_expr}} =
-                validate(StacktraceTry, expression, #{otp_vsn => 'pre-21'});
+                validate(ParsedStacktraceTry, expression, #{otp_vsn => 'pre-21'});
         false ->
             ?assertMatch({error, _}, validate(StacktraceTry, expression))
     end.
@@ -519,12 +514,15 @@ test_otp21_stacktrace_catch(_Config) ->
 test_legacy_map_pattern_key(_Config) ->
     LegacyField = {map_field_exact, 1, {var, 1, 'K'}, {var, 1, 'V'}},
     LegacyForm = parse_form("f(#{K := V}) -> V."),
-    assert_same_ast({map, 1, [LegacyField]}, function_first_pattern(LegacyForm)),
-    ?assertEqual(ok, validate(LegacyField, pattern, #{otp_vsn => 22})),
-    ?assertEqual(ok, validate(LegacyField, pattern,
+    LegacyPattern = function_first_pattern(LegacyForm),
+    assert_same_ast({map, 1, [LegacyField]}, LegacyPattern),
+    LegacyField1 = map_pattern_field(LegacyPattern),
+    ?assertEqual(ok, validate(LegacyField1, pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, validate(LegacyField1, pattern,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})),
+    StaticKeyForm = parse_form("f(#{key := V}) -> V."),
     ?assertEqual(ok, validate(
-                       {map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}},
+                       map_pattern_field(function_first_pattern(StaticKeyForm)),
                        pattern, #{otp_vsn => 'pre-21'})).
 
 test_otp23_map_pattern_key_expression(_Config) ->
@@ -535,13 +533,15 @@ test_otp23_map_pattern_key_expression(_Config) ->
     case current_otp_at_least(23) of
         true ->
             NewForm = parse_form(NewCode),
-            assert_same_ast({map, 1, [NewField]}, function_first_pattern(NewForm)),
-            ?assertEqual(ok, validate(NewField, pattern,
+            NewPattern = function_first_pattern(NewForm),
+            assert_same_ast({map, 1, [NewField]}, NewPattern),
+            NewField1 = map_pattern_field(NewPattern),
+            ?assertEqual(ok, validate(NewField1, pattern,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := infix_expr,
                       parent_type := map_field_exact}} =
-                validate(NewField, pattern, #{otp_vsn => 22});
+                validate(NewField1, pattern, #{otp_vsn => 22});
         false ->
             ?assertMatch({error, _}, validate(NewField, pattern))
     end.
@@ -549,12 +549,14 @@ test_otp23_map_pattern_key_expression(_Config) ->
 test_legacy_binary_size(_Config) ->
     LegacyBin = {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {var, 1, 'N'}, default}]},
     LegacyForm = parse_form("f(<<X:N>>) -> X."),
-    assert_same_ast(LegacyBin, function_first_pattern(LegacyForm)),
-    ?assertEqual(ok, validate(LegacyBin, pattern, #{otp_vsn => 22})),
-    ?assertEqual(ok, validate(LegacyBin, pattern,
+    ParsedLegacyBin = function_first_pattern(LegacyForm),
+    assert_same_ast(LegacyBin, ParsedLegacyBin),
+    ?assertEqual(ok, validate(ParsedLegacyBin, pattern, #{otp_vsn => 22})),
+    ?assertEqual(ok, validate(ParsedLegacyBin, pattern,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})),
+    StaticSizeForm = parse_form("f(<<X:8>>) -> X."),
     ?assertEqual(ok, validate(
-                       {bin, 1, [{bin_element, 1, {var, 1, 'X'}, {integer, 1, 8}, default}]},
+                       function_first_pattern(StaticSizeForm),
                        pattern, #{otp_vsn => 'pre-21'})).
 
 test_otp23_binary_size_expression(_Config) ->
@@ -565,13 +567,14 @@ test_otp23_binary_size_expression(_Config) ->
     case current_otp_at_least(23) of
         true ->
             NewForm = parse_form(NewCode),
-            assert_same_ast(NewBin, function_first_pattern(NewForm)),
-            ?assertEqual(ok, validate(NewBin, pattern,
+            ParsedNewBin = function_first_pattern(NewForm),
+            assert_same_ast(NewBin, ParsedNewBin),
+            ?assertEqual(ok, validate(ParsedNewBin, pattern,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role,
                       actual_type := infix_expr,
                       parent_type := size_qualifier}} =
-                validate(NewBin, pattern, #{otp_vsn => 22});
+                validate(ParsedNewBin, pattern, #{otp_vsn => 22});
         false ->
             ?assertMatch({error, _}, validate(NewBin, pattern))
     end.
@@ -586,11 +589,12 @@ test_otp25_maybe_expr(_Config) ->
     case current_otp_at_least(25) of
         true ->
             Form = parse_form(Code),
-            assert_same_ast(MaybeExpr, function_body_expr(Form)),
-            ?assertEqual(ok, validate(MaybeExpr, expression,
+            ParsedMaybeExpr = function_body_expr(Form),
+            assert_same_ast(MaybeExpr, ParsedMaybeExpr),
+            ?assertEqual(ok, validate(ParsedMaybeExpr, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := maybe_expr}} =
-                validate(MaybeExpr, expression, #{otp_vsn => 24});
+                validate(ParsedMaybeExpr, expression, #{otp_vsn => 24});
         false ->
             ?assertMatch({error, _}, validate(MaybeExpr, expression))
     end.
@@ -604,11 +608,12 @@ test_otp26_map_comprehension(_Config) ->
     case current_otp_at_least(26) of
         true ->
             Form = parse_form(Code),
-            assert_same_ast(MapComp, function_body_expr(Form)),
-            ?assertEqual(ok, validate(MapComp, expression,
+            ParsedMapComp = function_body_expr(Form),
+            assert_same_ast(MapComp, ParsedMapComp),
+            ?assertEqual(ok, validate(ParsedMapComp, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := map_comp}} =
-                validate(MapComp, expression, #{otp_vsn => 25});
+                validate(ParsedMapComp, expression, #{otp_vsn => 25});
         false ->
             ?assertMatch({error, _}, validate(MapComp, expression))
     end.
@@ -619,11 +624,12 @@ test_otp28_strict_generator(_Config) ->
     case current_otp_at_least(28) of
         true ->
             Form = parse_form(Code),
-            assert_same_ast(StrictLc, function_body_expr(Form)),
-            ?assertEqual(ok, validate(StrictLc, expression,
+            ParsedStrictLc = function_body_expr(Form),
+            assert_same_ast(StrictLc, ParsedStrictLc),
+            ?assertEqual(ok, validate(ParsedStrictLc, expression,
                                                        #{otp_vsn => astranaut_syntax:otp_vsn()})),
             {error, #{reason := invalid_role, actual_type := strict_generator}} =
-                validate(StrictLc, expression, #{otp_vsn => 27});
+                validate(ParsedStrictLc, expression, #{otp_vsn => 27});
         false ->
             ?assertMatch({error, _}, validate(StrictLc, expression))
     end.
@@ -822,6 +828,9 @@ function_first_pattern({function, _Pos, _Name, _Arity,
                         [{clause, _ClausePos, [Pattern|_Patterns], _Guards, _Body}]}) ->
     Pattern.
 
+map_pattern_field({map, _Pos, [Field]}) ->
+    Field.
+
 extract_feature_ast(pattern, Form) ->
     function_first_pattern(Form);
 extract_feature_ast(expression, Form) ->
@@ -834,6 +843,18 @@ stacktrace_catch_try_ast() ->
          [],
          [{var, 1, 'Reason'}]},
     {'try', 1, [{atom, 1, body}], [], [Handler], []}.
+
+legacy_throw_handler_ast() ->
+    {clause, 1,
+     [{tuple, 1, [{atom, 1, throw}, {var, 1, 'P'}, {var, 1, '_'}]}],
+     [],
+     [{var, 1, 'P'}]}.
+
+stacktrace_throw_handler_ast() ->
+    {clause, 1,
+     [{tuple, 1, [{atom, 1, throw}, {var, 1, 'P'}, {var, 1, 'S'}]}],
+     [],
+     [{var, 1, 'P'}]}.
 
 legacy_catch_try_ast() ->
     Handler =
@@ -947,10 +968,8 @@ validator_role({role, Role}) ->
 validator_role({slot, _ParentType, _Slot, Role}) ->
     Role.
 
-expected_child_attr(Role, Attr, Validator, ParentType, Slot) ->
-    Base = #{validator => Validator,
-             parent_type => ParentType,
-             parent_slot => Slot},
+expected_child_attr(Role, Attr, Validator, _ParentType, _Slot) ->
+    Base = #{validator => Validator},
     case expected_child_node(Role, Attr) of
         none -> Base;
         Node -> Base#{node => Node}

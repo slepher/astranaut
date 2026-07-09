@@ -743,9 +743,7 @@ add_child_validators(ParentType, Specs) ->
 
 add_child_validator(ParentType, #{slot := Slot, role := Role, attr := Attr} = Spec) ->
     Validator = {slot, ParentType, Slot, Role},
-    ChildAttr = Attr#{validator => Validator,
-                      parent_type => ParentType,
-                      parent_slot => Slot},
+    ChildAttr = Attr#{validator => Validator},
     Spec#{validator => Validator, attr => ChildAttr}.
 
 child_spec(Slot, Role, Nodes, Attr, Annotate) ->
@@ -851,7 +849,7 @@ build_child_spec_subtreess(#{subtrees := Subtrees, annotate := true} = Spec, Wra
     [Wrap(Spec, Subtrees)].
 
 validator_node(#{attr := Attr}, Nodes) ->
-    astranaut_uniplate:up_attr(maps:with([node, validator, parent_type, parent_slot], Attr), Nodes).
+    astranaut_uniplate:up_attr(maps:with([node, validator], Attr), Nodes).
 
 %%===================================================================
 %% update forms related functions
