@@ -43,7 +43,10 @@
 *Attr*
 
 ```erlang
-  attr() :: #{step => Step :: step(), node :: NodeType :: node_type(), attribute :: Attribute}.
+  attr() :: #{step => Step :: step(),
+              node => Role :: node_role(),
+              validator => Validator :: term(),
+              attribute => Attribute :: atom()}.
 ```
 
 *Step*
@@ -54,17 +57,44 @@
   step()  :: pre | post | leaf. 
 ```
 
-*NodeType*
+*NodeRole*
 
-  &emsp;&emsp;ast node type.
+  &emsp;&emsp;traversal role of current node. It is not the Erlang AST type.
 
 ```erlang
-  node_type() :: form | attribute | pattern | expression | guard. 
+  node_role() :: form | expression | pattern | guard | type | clause. 
 ```
+
+&emsp;&emsp;Use `astranaut_syntax:type/1` when you need the concrete Erlang AST type.
+
+*Validator*
+
+&emsp;&emsp;`validator` is an opaque position token propagated by traversal.
+Normal users should not inspect or construct it. If a walker needs to validate a
+replacement node manually, pass `Attr.validator` unchanged to `astranaut_syntax`.
+
+```erlang
+case astranaut_syntax:validate_node(NewNode, Validator) of
+    ok -> NewNode;
+    {error, Detail} -> {error, Detail}
+end.
+```
+
+&emsp;&emsp;For recursive normalization, pass the attr as context:
+
+```erlang
+case astranaut_syntax:normalize(NewNode, Validator, #{attr => Attr}) of
+    {ok, NewNode1} -> NewNode1;
+    {error, Detail} -> {error, Detail}
+end.
+```
+
+&emsp;&emsp;Traversal may include extra diagnostic metadata in attrs. The stable
+way to validate a replacement is to pass the opaque `validator` token unchanged.
 
 *Attribute*
 
-&emsp;&emsp;if NodeType is attribute, Attribute is name of attribute, or Attribute does not exists.
+&emsp;&emsp;if `node` is related to an attribute body, `attribute` is the attribute name.
 
 *TraverseFunReturn*
 
@@ -109,9 +139,13 @@
 *Opts*
 
 ```erlang
-  opts()    :: {traverse => TraverseStyle :: traverse_style(), parse_transform => ParseTransform :: boolean(),
-                node => FormType :: form_type(), formatter => Formatter, 
-                children => Children, sequence_children => SequenceChildren}.
+  opts()    :: #{traverse => TraverseStyle :: traverse_style(),
+                 normalize => Normalize :: boolean(),
+                 role => Role :: node_role(),
+                 parse_transform => ParseTransform :: boolean(),
+                 formatter => Formatter :: module(),
+                 attr => Attr :: map(),
+                 uniplate => Uniplate :: fun()}.
 ```
 
 
@@ -124,19 +158,34 @@
 &emsp;&emsp;traverse_return(node()) will be transformed to parse_transform_return()  
 &emsp;&emsp;which could directed used as return in parse_transform/2, useful in map/3, map_with_state/3.
 
-*NodeType*
+*Role*
 
-&emsp;&emsp;node\_type(). if from() is incomplete erlang ast, this should be provided to help generate node_type() in attr().  
-&emsp;&emsp;if top node is function or attribute, default top node\_type() in attr() is form.  
-&emsp;&emsp;else, default top node\_type() in attr() is expression.
+&emsp;&emsp;`role => Role` explicitly sets the root traversal role. Use it when the
+root node is not a complete form or when the root role cannot be inferred safely.
+
+```erlang
+astranaut:smap(Fun, Expr, #{traverse => pre, role => expression}).
+```
+
+*Normalize*
+
+&emsp;&emsp;if `normalize => true`, traversal validates or normalizes the node
+directly returned by the walker before putting it back into the current position.
+This option only applies to the direct return value of the walker. A parent node
+rebuilt because a child changed is not treated as a direct replacement of that
+parent.
 
 *TraverseStyle*
 
-&emsp;&emsp;pre | post | all | leaf.
+&emsp;&emsp;pre | post | all | leaf | subtree | none.
 
-*Children*
+*Attr*
 
-&emsp;&emsp; true: Only traverse children of node, not traverse node its self.
+&emsp;&emsp;initial attrs merged into traversal context.
+
+*Uniplate*
+
+&emsp;&emsp;advanced traversal implementation hook. Most users do not need this option.
 
 *SequenceChildren*
 
@@ -218,6 +267,73 @@ SequenceChildren =
 ```erlang
   astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
 ```
+
+# astranaut_syntax
+
+### validation and normalization
+
+```erlang
+  astranaut_syntax:validate_node(NodeOrNodes, Validator) -> ok | {error, map()}.
+  astranaut_syntax:validate_node(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
+
+  astranaut_syntax:normalize(NodeOrNodes, Validator) ->
+    {ok, NodeOrNodes1} | {error, map()}.
+
+  astranaut_syntax:normalize(NodeOrNodes, Validator, Opts) ->
+    {ok, NodeOrNodes1} | {error, map()}.
+```
+
+*Validator*
+
+&emsp;&emsp;`Validator` is usually copied from `Attr.validator`. It is an internal
+position contract and should be treated as an opaque token.
+
+*validate_node*
+
+&emsp;&emsp;validates the current node against the provided validator. It does not
+recursively validate child nodes.
+
+*normalize*
+
+&emsp;&emsp;validates the current node, recursively normalizes its children, rebuilds
+the AST with `subtrees/1` and `update_tree/2`, and returns the normalized node.
+
+*Forms*
+
+&emsp;&emsp;guard validation may require record definitions. `Attr.validator` does
+not contain original forms, and traversal callbacks may not receive the original
+module forms. If guard validation depends on records, pass proper record forms
+explicitly:
+
+```erlang
+astranaut_syntax:validate_node(Node, Validator, #{forms => RecordForms}).
+astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
+```
+
+### helper api
+
+```erlang
+  astranaut_syntax:child_specs(Type, Subtrees, Attr) -> [child_spec()].
+  astranaut_syntax:node_roles(Type) -> [node_role()].
+  astranaut_syntax:otp_vsn() -> integer() | 'pre-21'.
+
+  astranaut_syntax:type(Node) -> Type.
+  astranaut_syntax:get_pos(Node) -> Pos.
+  astranaut_syntax:set_pos(Node, Pos) -> Node1.
+  astranaut_syntax:subtrees(Node) -> Subtrees.
+  astranaut_syntax:update_tree(Node, Subtrees) -> Node1.
+  astranaut_syntax:revert(Node) -> Node1.
+```
+
+&emsp;&emsp;`child_specs/3` is an advanced API used by traversal and normalization.
+It may contain internal validator data; user code should normally keep that data
+opaque.
+
+# astranaut_uniplate
+
+&emsp;&emsp;`astranaut_uniplate` is the internal uniplate/context implementation
+used by traversal. Most users should use `astranaut`, `astranaut_traverse`, and
+`astranaut_syntax` instead of depending on its internal context shape.
   
 # monad modules
 
@@ -451,13 +567,47 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 -include_lib("astranaut/include/macro.hrl").
 ```
 
-macro.hrl add three attribute: use\_macro, exec\_macro debug\_macro
+macro.hrl enables the astranaut macro parse transform.
+
+*export_macro*
+
+&emsp;&emsp;used in the module where macros are defined. Exported macros can be
+imported by other modules.
+
+```erlang
+-export_macro([MacroA/A, MacroB/B]).
+-export_macro({Macro/A, opts()}).
+-export_macro({[MacroA/A, MacroB/B], opts()}).
+```
+
+*local_macro*
+
+&emsp;&emsp;declare local functions as macros without exporting them.
+
+```erlang
+-local_macro([MacroA/A, MacroB/B]).
+-local_macro({Macro/A, opts()}).
+-local_macro({[MacroA/A, MacroB/B], opts()}).
+```
+
+*import_macro*
+
+&emsp;&emsp;declare a module that exports macros. Macro selection and call options
+should be configured with `-use_macro`.
+
+```erlang
+-import_macro(Module).
+```
 
 *use_macro*
 
+&emsp;&emsp;use an imported or local macro with extra call options.
+
 ```erlang
 -use_macro({Macro/A, opts()}).
+-use_macro({[MacroA/A, MacroB/B], opts()}).
 -use_macro({Module, Macro/A, opts()}).
+-use_macro({Module, [MacroA/A, MacroB/B], opts()}).
 ```
 
 *exec_macro*
@@ -469,30 +619,28 @@ macro.hrl add three attribute: use\_macro, exec\_macro debug\_macro
 -exec_macro({Module, Macro, Arguments}).
 ```
 
-*export_macro*
+*macro_options*
 
-&emsp;&emsp;used in where macro defined, options in export\_macro will be merged to options in use_macro.
-
-```erlang
--export_macro({[MacroA/A, MacroB/B], opts()}).
-```
-
-*debug_macro*
+&emsp;&emsp;declare module-level macro options.
 
 ```erlang
--debug_macro(true).
+-macro_options(opts()).
 ```
-
-&emsp;&emsp; module will be printed to console after astranaut\_macro transform.
 
 *opts()*
 
 ```erlang
-  #{debug => Debug, debug_ast => DebugAst, alias => Alias, 
-    formatter => Formatter, attrs => Attrs, order => Order,
-    as_attr => AsAttr, merge_function => MergeFunction, auto_export => AutoExport,
-    group_args => GroupArgs}
-  }
+  #{debug => Debug,
+    debug_ast => DebugAst,
+    debug_module => DebugModule,
+    debug_module_ast => DebugModuleAst,
+    alias => Alias,
+    order => Order,
+    inject_attrs => InjectAttrs,
+    as_attr => AsAttr,
+    group_args => GroupArgs,
+    force_override => ForceOverride,
+    max_depth => MaxDepth}
 ```
 &emsp;&emsp; opts() could also be proplists, same usage of map().
 
@@ -508,23 +656,17 @@ macro.hrl add three attribute: use\_macro, exec\_macro debug\_macro
 
 &emsp;&emsp; use Alias(Arguments) instead of Module:Macro(Arguments).
 
-*Formatter*
-
-&emsp;&emsp; module include format\_error/1 to format macro errors,  
-&emsp;&emsp; if formatter is true, formatter is the module where macro defined,  
-&emsp;&emsp; default is astranaut\_traverse.
-
-*Attrs*
+*InjectAttrs*
 
 &emsp;&emsp; module attributes as extra args while calling macro.
 
 ```
 -module(a).
 -behaviour(gen_server).
--use_macro({macro/2, [{attrs, [module, pos, behaviour]}]}).
+-local_macro({macro/2, [{inject_attrs, [module, behaviour]}]}).
 
 hello() ->
-  macro_a:macro(world).
+  macro(world).
 
 macro(Ast, #{module => Module, pos => Pos, behaviour => Behaviours} = Attributes) ->
     {warning, Ast, {attributes, Module, Pos, Behaviours}}.
@@ -532,20 +674,12 @@ macro(Ast, #{module => Module, pos => Pos, behaviour => Behaviours} = Attributes
 
 *Order*
 
-&emsp;&emsp; macro expand order for nested macro , value is pre | post. default is post.  
-&emsp;&emsp; pre is expand macro from outside to inside, post is expand macro from inside to outside.
+&emsp;&emsp; macro expand order for nested macros. `inner` is default and expands
+inside before outside. `outer` expands outside before inside.
 
 *AsAttr*
 
 &emsp;&emsp; user defined attribute name replace of -exec\_macro.
-
-*MergeFunction*
-
-&emsp;&emsp; -exec\_macro ast function merge to function with same name and arity if exists.
-
-*AutoExport*
-
-&emsp;&emsp; -exec\_macro ast function auto export, merge to current export if exists.
 
 *GroupArgs* 
 
@@ -560,6 +694,34 @@ test() ->
 a(Asts) ->
   quote({unquote_splicing(Asts)}).
 ```
+
+*ForceOverride*
+
+&emsp;&emsp; allow an intentional macro alias override. Without this option,
+conflicting macro names fail with `macro_override`.
+
+*MaxDepth*
+
+&emsp;&emsp; maximum nested macro expansion chain depth. The default module-level
+value is 100.
+
+*Option Scope*
+
+| Attribute | Options |
+| --- | --- |
+| `-macro_options` | `debug`, `debug_ast`, `debug_module`, `debug_module_ast`, `max_depth` |
+| `-export_macro`, `-local_macro` | `as_attr`, `order`, `inject_attrs`, `group_args`, `force_override`, `max_depth` |
+| `-use_macro` | `debug`, `debug_ast`, `alias`, `force_override` |
+
+*Errors*
+
+| Error | Meaning |
+| --- | --- |
+| `macro_override` | macro name or alias already exists and `force_override` was not set |
+| `max_macro_expansion_depth_exceeded` | nested macro expansion exceeded `max_depth` |
+| `invalid_macro_return` | macro returned AST that does not fit the current traversal position |
+| `invalid_import_macro_attr` | invalid `-import_macro` attribute |
+| `import_macro_failed` | imported macro module could not be loaded |
 
 &emsp;&emsp;define macro as normal erlang functions.  
 &emsp;&emsp;macro expand order is the order of -use\_macro in file.  
@@ -686,30 +848,6 @@ begin
   A@macro_example@_2 + B@macro_example@_2
 end,
 A1 + A2 + A3 + A4.
-```
-
-*parse_transform*
-
-
-&emsp;&emsp; for old parse_transform module which is used widely, two function is provided.
-
-```erlang
-*astranaut_macro:transform_macro(Module, Function, Arity, Opts, Forms).
-*astranaut_macro:transform_macros([Macro...], Forms).
-Macro = {Module, Function, Arity, Opts}.
-```
-
-&emsp;&emsp; example:
-
-```
--module(do).
-
--include_lib("astranaut/include/quote.hrl").
-
--export([parse_transform/2]).
-
-parse_transform(Forms, _Options) ->
-    astranaut_macro:transform_macro(do_macro, do, 1, [{alias, do}, formatter], Forms).
 ```
 
 # Rebinding 
