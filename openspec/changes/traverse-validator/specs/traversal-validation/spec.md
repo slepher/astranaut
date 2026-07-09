@@ -55,23 +55,25 @@ Traversal validation SHALL NOT run for an ancestor merely because a child change
 - **WHEN** the parent is rebuilt from changed child subtrees
 - **THEN** traversal does not automatically validate the rebuilt parent as a direct change
 
-### Requirement: Local Validation Checks One Descend Step
+### Requirement: Local Validation Checks Current Node
 
-`validate_local/2` SHALL validate the current node against the supplied validator and SHALL validate direct child slots against their derived child validators.
+`validate_local/2` SHALL validate the current node against the supplied validator.
 
-`validate_local/2` SHALL NOT recursively validate grandchildren.
+`validate_local/2` SHALL read current-node shape through `node_info/subtrees` and SHALL apply role and slot-specific structural constraints for the supplied validator.
 
-#### Scenario: Local validation checks direct child slots
+`validate_local/2` SHALL NOT recursively validate child nodes.
 
-- **GIVEN** a node with parent-specific child slots
+#### Scenario: Local validation checks slot-specific current-node constraints
+
+- **GIVEN** a try handler clause with OTP-version-specific catch syntax
 - **WHEN** `validate_local/2` is called
-- **THEN** direct children are checked against their slot validators
+- **THEN** the handler clause is checked against the supplied handler slot validator
 
-#### Scenario: Local validation does not recurse into grandchildren
+#### Scenario: Local validation does not recurse into children
 
-- **GIVEN** a direct child has its own children
+- **GIVEN** a current node has child nodes
 - **WHEN** `validate_local/2` is called on the parent
-- **THEN** grandchildren are not validated by that call
+- **THEN** child nodes are not validated by that call
 
 ### Requirement: Recursive Validation Repeats Local Validation
 

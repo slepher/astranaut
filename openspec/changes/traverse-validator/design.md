@@ -131,21 +131,22 @@ Attrs and validation environment have different responsibilities:
 
 ## Local Validation
 
-`validate_local/2` is a one-step descend validation.
+`validate_local/2` is current-node validation.
 
 It must:
 
 1. Check that the current node or node list satisfies the provided validator.
-2. Read the current node subtrees.
-3. Derive direct child specs for the current node.
-4. Check that each direct child satisfies its own child validator.
-5. Stop there.
+2. Read the current node subtrees through `node_info/1`.
+3. Apply role and slot-specific structural constraints for the supplied validator.
+4. Stop there.
 
-It must not validate grandchildren.
+It must not validate child nodes recursively.
 
 This is useful for parent insertion checks and for callers that want to control recursion themselves.
 
-Every current-node check must also call `subtrees(Child)` through the node information path. This verifies that the child AST node itself has a legal abstract-format shape before role or slot checks succeed. The call is a shape check for the current child only; it is not a request to recursively validate all grandchildren.
+Every current-node check must also call `subtrees(Node)` through the node information path. This verifies that the current AST node itself has a legal abstract-format shape before role or slot checks succeed. The call is a shape check for the current node only; it is not a request to recursively validate children.
+
+Some syntax nodes need slot-specific checks that cannot be derived from `subtrees/1` alone. For example, `erl_syntax:subtrees/1` normalizes try/catch handler clauses so `catch P -> ...` and `catch throw:P:_ -> ...` have the same subtree view. Handler legality across OTP versions must therefore be checked from the current handler clause's raw/reverted structure while validating the `{slot, try_expr, handlers, clause}` role.
 
 Malformed nodes with a valid-looking tag, such as an incomplete `map_field_exact` or `bin_element`, should fail as `invalid_node`.
 
@@ -155,7 +156,7 @@ Malformed nodes with a valid-looking tag, such as an incomplete `map_field_exact
 
 ```text
 validate_local(Node, Validator)
-for each direct child:
+for each child spec derived from Node:
   validate_recursive(Child, ChildValidator)
 ```
 
