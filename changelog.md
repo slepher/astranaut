@@ -13,3 +13,4 @@
 - **新增 `astranaut_compile_meta_transformer`**：编译期元编程变换器
 - 新增 `astranaut:map_with_state/4`、`astranaut:smap_with_state/4`
 - 兼容 Erlang/OTP 19 ~ 29
+- **CI 与脚本**：新增本地 CI 容器方案（`ci_scripts`）、覆盖率报告脚本（`cover_report.escript`）、抽象语法文档抓取脚本（`fetch_absforms`）
