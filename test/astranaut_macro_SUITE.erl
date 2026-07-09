@@ -33,6 +33,8 @@ init_per_suite(Config) ->
                    macro_uniform_a, macro_uniform_b, macro_uniform_test,
                    macro_uniform_override_test,
                    macro_uniform_import_force_override_test,
+                   macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
+                   macro_pass_no_backscan_test, macro_pass_local_chain_test,
                    macro_node_role_test,
                    macro_validator_slots,
                    macro_test],
@@ -122,6 +124,9 @@ all() ->
      test_uniform_outer_macro, test_uniform_generated_macro_chain,
      test_uniform_direct_macro_function_call, test_uniform_attribute_generates_local_macro,
      test_uniform_local_generates_external, test_uniform_macro_override_error,
+     test_macro_pass_generated_import,
+     test_macro_pass_no_backscan,
+     test_macro_pass_local_attribute_chain,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
      test_use_macro_errors,
@@ -131,6 +136,11 @@ all() ->
      test_uniform_local_macro_invalid_return,
      test_macro_validator_slot_errors,
      test_uniform_macro_max_depth,
+     test_macro_pass_generated_macro_options,
+     test_macro_pass_export_helper_unlocked,
+     test_macro_pass_internal_function_conflict,
+     test_macro_pass_local_environment_mutation_errors,
+     test_macro_pass_locked_snapshot_mutation_error,
      test_macro_node_roles].
 
 %%--------------------------------------------------------------------
@@ -308,6 +318,18 @@ test_uniform_attribute_generates_local_macro(_Config) ->
 
 test_uniform_local_generates_external(_Config) ->
     ?assertEqual({a, {from_a, ok}}, macro_uniform_test:local_generates_external()),
+    ok.
+
+test_macro_pass_generated_import(_Config) ->
+    ?assertEqual({pass_generated, ok}, macro_pass_test:pass_generated_value()),
+    ok.
+
+test_macro_pass_no_backscan(_Config) ->
+    ?assertEqual({pass_generated, ok}, macro_pass_no_backscan_test:pass_generated_value()),
+    ok.
+
+test_macro_pass_local_attribute_chain(_Config) ->
+    ?assertEqual({local_attribute_chain, ok}, macro_pass_local_chain_test:local_chain_value()),
     ok.
 
 test_uniform_macro_override_error(Config) ->
@@ -516,9 +538,69 @@ test_uniform_macro_max_depth(Config) ->
     assert_formatted_messages(Errors),
     ok.
 
+test_macro_pass_generated_macro_options(Config) ->
+    assert_macro_pass_error(
+      macro_pass_generated_options_error_test, Config,
+      fun({max_macro_expansion_depth_exceeded, {macro_pass_depth, chain_a}, []}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_export_helper_unlocked(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_pass_export_helper_unlocked_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assert(lists:any(fun({_Line, erl_lint, {redefine_spec, {helper, 1}}}) -> true;
+                         (_) -> false
+                      end, Errors)),
+    ?assertNot(lists:any(fun({_Line, astranaut_macro, {illegal_local_macro_definition_mutation, _}}) -> true;
+                            (_) -> false
+                         end, Errors)),
+    ok.
+
+test_macro_pass_internal_function_conflict(Config) ->
+    assert_macro_pass_error(
+      macro_pass_internal_conflict_error_test, Config,
+      fun({conflicting_internal_function_policy, {shared, 1}, _Policies}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_local_environment_mutation_errors(Config) ->
+    assert_macro_pass_error(
+      macro_pass_local_import_error_test, Config,
+      fun({illegal_macro_environment_mutation, {attribute, _, import_macro, macro_uniform_a}}) -> true;
+         (_) -> false
+      end),
+    assert_macro_pass_error(
+      macro_pass_local_macro_error_test, Config,
+      fun({illegal_macro_environment_mutation, {attribute, _, local_macro, [{generated_local, 0}]}}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_locked_snapshot_mutation_error(Config) ->
+    assert_macro_pass_error(
+      macro_pass_locked_helper_error_test, Config,
+      fun({illegal_local_macro_definition_mutation, {function, _, helper, 1, _}}) -> true;
+         (_) -> false
+      end),
+    ok.
+
 test_macro_node_roles(_Config) ->
     ?assertEqual(ok, macro_node_role_test:test_node_roles()),
     ok.
+
+assert_macro_pass_error(Module, Config, MatchError) ->
+    Forms = astranaut_test_lib:test_module_forms(Module, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assert(lists:any(fun({_Line, astranaut_macro, Error}) -> MatchError(Error);
+                         (_) -> false
+                      end, Errors)),
+    assert_formatted_messages(Errors).
 
 assert_macro_format_error(Error) ->
     Message = astranaut_macro:format_error(Error),
