@@ -59,15 +59,11 @@ parse_transform(Forms, Options) ->
              Module = astranaut_lib:analyze_forms_module(Forms),
              File = astranaut_lib:analyze_forms_file(Forms),
              GlobalMacroOpts0 <- astranaut_lib:validate(global_macro_validator(), []),
-             {Forms1, ExternalEnv} <- run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms, Options),
-             #{macro_map := ExternalMacroMap, global_macro_opts := GlobalMacroOpts1,
-               local_macro_state := ScanLocalState} = ExternalEnv,
-             {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts1, ExternalMacroMap, Forms1),
-             Forms3 <- transform_uniform_macros(Module, ExternalMacroMap, LocalMacros,
-                                                 ScanLocalState, Forms2, Options),
-             Forms4 = astranaut_syntax:sort_forms(Forms3),
-             format_forms(Forms4, GlobalMacroOpts1),
-             return(Forms4)
+             {AttributeForms, FunctionEnv} <-
+                 run_attribute_macro_pass(Module, File, GlobalMacroOpts0, Forms, Options),
+             FunctionForms <- run_function_macro_pass(AttributeForms, FunctionEnv),
+             format_forms(FunctionForms, maps:get(global_macro_opts, FunctionEnv)),
+             return(FunctionForms)
          ])).
 
 -spec format_error(term()) -> term().
@@ -129,10 +125,26 @@ format_macro_ref(Macro) ->
     Macro.
 
 %%%===================================================================
-%%% ===== Phase 1: external attribute macro pass =====
+%%% ===== Attribute pass
 %%%===================================================================
+run_attribute_macro_pass(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
+    do([ return ||
+           {ScannedForms, ExternalEnv} <-
+               run_unified_attribute_scan(Module, File, GlobalMacroOpts0, Forms, CompileOpts),
+           #{macro_map := ExternalMacroMap,
+             global_macro_opts := GlobalMacroOpts,
+             local_macro_state := ScanLocalState} = ExternalEnv,
+           {PreparedForms, LocalMacroMap} <-
+               prepare_local_macro_declarations(Module, File, GlobalMacroOpts,
+                                                ExternalMacroMap, ScannedForms),
+           finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMacroMap,
+                                         ScanLocalState, PreparedForms, CompileOpts)
+       ]).
 
-run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
+%%%===================================================================
+%%% ===== Attribute pass, substep 1: unified attribute scan and splice =====
+%%%===================================================================
+run_unified_attribute_scan(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
     InitState = #{global_macro_opts => GlobalMacroOpts0,
                   module_macro_maps => #{},
                   module => Module,
@@ -208,7 +220,7 @@ register_local_macro_declarations([Attr|Attrs], Pos, ClauseMap, SourceView, Exte
              Attrs, Pos, ClauseMap, SourceView, ExternalEnv, LocalState1)
        ]);
 register_local_macro_declarations(Attr, Pos, ClauseMap, SourceView, ExternalEnv, LocalState) ->
-    %% Phase 2 remains the source of declaration diagnostics while both
+    %% Declaration preparation remains the source of diagnostics while both
     %% passes coexist.  `run/1' intentionally keeps error_ok diagnostics out
     %% of this scan transaction, so one bad FA cannot roll back prior local
     %% registrations or duplicate its compiler error.
@@ -410,9 +422,9 @@ import_macro_form(_GlobalMacroOpts, {attribute, _Pos, import_macro, Attr}) ->
 
 
 %%%===================================================================
-%%% ===== Phase 2: local macro discovery and declaration loading =====
+%%% ===== Attribute pass, substep 2: local declaration preparation =====
 %%%===================================================================
-load_local_macro_attributes(Module, File, GlobalMacroOpts, ExternalMacroMap, Forms) ->
+prepare_local_macro_declarations(Module, File, GlobalMacroOpts, ExternalMacroMap, Forms) ->
     do([ return ||
            ClausesMap = function_clauses_map(Forms, maps:new()),
            {Forms1, ExportedMacros} <- exported_macros(Forms, ClausesMap),
@@ -839,14 +851,10 @@ macro_without_module_attr(_Other) ->
     invalid_attr.
 
 %%%===================================================================
-%%% ===== Phase 3: local macro closure and snapshot orchestration =====
+%%% ===== Attribute pass, substep 3: local macro closure and snapshots =====
 %%%===================================================================
-%% Step 1. expand external attribute macros only.
-%% Step 2. find local macros and their related functions.
-%% Step 3. expand local macro source snapshots with external macros only.
-%% Step 4. compile and load the local macro module.
-%% Step 5. expand all non-local-macro forms with the final external + local macro map.
-transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, ScanLocalState, Forms, CompileOpts) ->
+finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMacroMap,
+                              ScanLocalState, Forms, CompileOpts) ->
     do([ return ||
            ClauseMap = function_clauses_map(Forms, maps:new()),
            LocalMacroExtraFunctions <- local_macro_extra_functions(LocalMacroMap, ClauseMap),
@@ -862,7 +870,12 @@ transform_uniform_macros(Module, ExternalMacroMap, LocalMacroMap, ScanLocalState
            {_FinalLocalEnv, FinalSkipIds, _FinalLocalState} =
                astranaut_local_macro:finalize(retain_roots(Forms), LocalState1),
            FinalMacroMap <- merge_macro_maps(ExternalMacroMap, LocalMacroMap),
-           transform_uniform_macro_forms(Ctx, LocalMacroMap, FinalMacroMap, FinalSkipIds)
+           {UnsortedAttributeForms, FunctionEnv0} <-
+               finalize_attribute_forms(Ctx, LocalMacroMap, FinalMacroMap, FinalSkipIds),
+           %% The attribute-pass output is sorted before the function pass sees it.
+           AttributeForms = astranaut_syntax:sort_forms(UnsortedAttributeForms),
+           FunctionEnv = FunctionEnv0#{global_macro_opts => GlobalMacroOpts},
+           return({AttributeForms, FunctionEnv})
        ]).
 
 uniform_macro_context(Module, ExternalMacroMap, LocalMacroMap, Forms, CompileOpts,
@@ -967,7 +980,7 @@ maybe_add_local_formatter(LocalMacroFunctions, ClauseMap) ->
             LocalMacroFunctions
     end.
 
-transform_uniform_macro_forms(
+finalize_attribute_forms(
   #{module := Module,
     forms := Forms,
     macro_definition_related_functions := MacroDefinitionRelatedFunctions,
@@ -976,13 +989,39 @@ transform_uniform_macro_forms(
     do([ return ||
            LockedSnapshotIds = local_macro_snapshot_form_ids(LockedLocalMacroRelatedFunctions, Forms),
            Forms1 <- transform_local_attribute_macros(LocalMacroMap, LockedSnapshotIds, Forms),
-           FunctionMacroMap = inject_macro_attributes(FinalMacroMap, Forms1),
-           FinalMacroCallers = find_function_macro_callers(Forms1, FunctionMacroMap, MacroDefinitionRelatedFunctions),
+           %% Skipped local-macro source forms must not enter the function pass.
+           Forms2 = remove_final_skip_forms(Forms1, FinalSkipIds),
+           FunctionMacroMap = inject_macro_attributes(FinalMacroMap, Forms2),
+           FinalMacroCallers = find_function_macro_callers(Forms2, FunctionMacroMap, MacroDefinitionRelatedFunctions),
            FinalSkipFunctionIds = ordsets:from_list([{function, Name, Arity}
                                                       || {function, Name, Arity} <- FinalSkipIds]),
-           transform_functions(Module, FunctionMacroMap, Forms1,
-                               ordsets:subtract(FinalMacroCallers, FinalSkipFunctionIds))
+           FunctionEnv = #{module => Module,
+                           macro_map => FunctionMacroMap,
+                           callers => ordsets:subtract(FinalMacroCallers, FinalSkipFunctionIds)},
+           return({Forms2, FunctionEnv})
        ]).
+
+run_function_macro_pass(Forms, #{module := Module, macro_map := MacroMap, callers := Callers}) ->
+    transform_functions(Module, MacroMap, Forms, Callers).
+
+remove_final_skip_forms(Forms, FinalSkipIds) ->
+    Skip = ordsets:from_list(FinalSkipIds),
+    lists:flatmap(fun(Form) -> remove_final_skip_form(Form, Skip) end, Forms).
+
+remove_final_skip_form({attribute, Pos, compile, {nowarn_unused_function, FAs}}, Skip) ->
+    RemainingFAs = [FA || FA = {Name, Arity} <- FAs,
+                          not ordsets:is_element({function, Name, Arity}, Skip)],
+    case RemainingFAs of
+        [] ->
+            [];
+        _ ->
+            [{attribute, Pos, compile, {nowarn_unused_function, RemainingFAs}}]
+    end;
+remove_final_skip_form(Form, Skip) ->
+    case ordsets:is_element(local_macro_snapshot_form_id(Form), Skip) of
+        true -> [];
+        false -> [Form]
+    end.
 
 merge_macro_maps(First, Second) ->
     astranaut_return:foldl_m(
@@ -1166,7 +1205,7 @@ append_if(Boolean, Form, Forms) ->
     end.
 
 %%%===================================================================
-%%% ===== Phase 4: local attribute macro pass =====
+%%% ===== Attribute pass, substep 4: remaining local attribute expansion =====
 %%%===================================================================
 
 transform_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms) ->
@@ -1261,7 +1300,7 @@ handle_missing_attribute_macro(Form, warn_missing) ->
       astranaut_traverse:return(Form)).
 
 %%%===================================================================
-%%% ===== Phase 5: final function body macro expansion =====
+%%% ===== Function pass: function body macro expansion =====
 %%%===================================================================
 -spec transform_functions(module(), map(), [astranaut:form()], all | {except, list()} | list()) -> term().
 transform_functions(Module, MacroMap, Forms, TransformFunctions) ->

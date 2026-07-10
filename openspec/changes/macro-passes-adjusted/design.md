@@ -22,10 +22,12 @@ pass 的收尾子步骤；它必须在 forms 交给 function pass 前完成。
        - 未就绪本地属性宏按需请求累计编译后在原位置展开
    1.3 收尾 local-macro 工作流，取得 FinalLocalEnv 与 FinalSkipIds
    1.4 从 function-pass 输入中剔除 FinalSkipIds；retain forms 保留
+   1.5 对 attribute pass 的最终输出排序
 
 2. Function pass
    - 使用最终 ExternalEnv + FinalLocalEnv
    - 只遍历 attribute pass 输出的保留 forms
+   - 不再排序 forms
 ```
 
 ## 统一属性扫描
