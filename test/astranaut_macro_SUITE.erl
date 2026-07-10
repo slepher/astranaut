@@ -45,6 +45,7 @@ init_per_suite(Config) ->
                    macro_pass_extra_functions_test, macro_pass_extra_union_test,
                    macro_pass_internal_independent_test, macro_pass_internal_direct_test,
                    macro_pass_final_outside_snapshot_test,
+                   macro_pass_generated_function_delay_test,
                    macro_node_role_test,
                    macro_validator_slots,
                    macro_test],
@@ -151,6 +152,7 @@ all() ->
      test_macro_pass_local_body_environment_mutation_error,
      test_macro_pass_locked_spec_mutation_error,
      test_macro_pass_final_expands_outside_snapshot,
+     test_macro_pass_generated_function_delay,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
      test_use_macro_errors,
@@ -437,6 +439,10 @@ test_macro_pass_locked_spec_mutation_error(Config) ->
 test_macro_pass_final_expands_outside_snapshot(_Config) ->
     ?assertEqual({locked_snapshot, ok}, macro_pass_final_outside_snapshot_test:local_value()),
     ?assertEqual({a, {from_a, ok}}, macro_pass_final_outside_snapshot_test:final_external_value()),
+    ok.
+
+test_macro_pass_generated_function_delay(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_pass_generated_function_delay_test:delayed_value()),
     ok.
 
 test_uniform_macro_override_error(Config) ->

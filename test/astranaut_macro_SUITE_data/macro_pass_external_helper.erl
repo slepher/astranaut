@@ -16,7 +16,8 @@
                 generate_late_seen_attr/1,
                 generate_non_env_attr/1,
                 non_env_chained_attr/1,
-                generate_final_function/1], [{as_attr, true}]}).
+                generate_final_function/1,
+                generate_delayed_macro_call/1], [{as_attr, true}]}).
 
 generate_helper(_Ast) ->
     Body = quote(astranaut_lib:abstract_form({external_generated_helper, ok})),
@@ -57,3 +58,7 @@ non_env_chained_attr(_Ast) ->
 generate_final_function(_Ast) ->
     Body = quote(macro_uniform_a:to_a(ok)),
     astranaut_lib:gen_function(final_external_value, Body).
+
+generate_delayed_macro_call(_Ast) ->
+    Body = quote(macro_uniform_a:to_a(ok)),
+    astranaut_lib:gen_function(delayed_value, Body).
