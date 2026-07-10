@@ -32,7 +32,7 @@
 %% Generated forms are spliced back into the current scan position. Import,
 %% use, and macro option attributes update the external macro environment for
 %% subsequent forms only; already passed forms are not revisited. Attribute
-%% injection sees the forms that have passed this scan point.</li>
+%% macro injection sees the forms that have passed this scan point.</li>
 %% <li>Local macro discovery. `-export_macro' and `-local_macro' declarations
 %% are validated and transformed into local macro metadata.</li>
 %% <li>Local macro closure and snapshot compilation. Local macro closures are
@@ -43,7 +43,8 @@
 %% scan-and-splice model, but may not mutate the macro environment or rewrite
 %% locked snapshot forms.</li>
 %% <li>Final function body expansion. Non-snapshot functions are recursively
-%% expanded with the frozen external environment plus loaded local macros.</li>
+%% expanded with the frozen external environment plus loaded local macros;
+%% function macro injection sees the complete form list.</li>
 %% </ol>
 %%
 %% The final forms are sorted before returning to the compiler so generated
@@ -213,13 +214,12 @@ handle_external_env_form(Form, _State) ->
 
 handle_external_attribute(Form, State) ->
     #{macro_map := MacroMap} = State,
-    AttributeMacroMap = attribute_macro_map(MacroMap),
-    case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
+    ExecutionMacroMap = inject_macro_attributes(MacroMap, external_passed_forms(State)),
+    AttributeMacroMap = attribute_macro_map(ExecutionMacroMap),
+    case attribute_find_macro(Form, ExecutionMacroMap, AttributeMacroMap) of
         {ok, Macro} ->
             do([ traverse ||
-                   Expanded <- astranaut:traverse_return(
-                                 astranaut_traverse:eval(expand_macro(Macro, #{expected_role => form}),
-                                                         ?MODULE, #{}, ok)),
+                   Expanded <- expand_macro(Macro, #{expected_role => form}),
                    return({splice, to_list(Expanded)})
                ]);
         error ->
@@ -433,15 +433,20 @@ local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
                    function => Function,
                    arity => Arity}.
 
-update_module_macros(File, Module, Forms, ModuleMacros) ->
+update_module_macros(File, Module, _Forms, ModuleMacros) ->
     maps:fold(
       fun(_MFA, MacroOptions, Acc) ->
               MacroOptions1 = MacroOptions#{file => File, local_module => Module},
               MacroOptions2 = update_as_attr(MacroOptions1),
-              MacroOptions3 = inject_attrs(MacroOptions2, Forms),
-              #{macro := Macro, call_arity := CallArity} = MacroOptions4 = update_call_arity(MacroOptions3),
-              maps:put({Macro, CallArity}, MacroOptions4, Acc)
+              #{macro := Macro, call_arity := CallArity} = MacroOptions3 = update_call_arity(MacroOptions2),
+              maps:put({Macro, CallArity}, MacroOptions3, Acc)
       end, #{}, ModuleMacros).
+
+%% Injection belongs to the macro invocation, not macro import. Attribute
+%% macros use the forms already passed by their scan; function macros use the
+%% complete form list in the final expansion phase.
+inject_macro_attributes(MacroMap, Forms) ->
+    maps:map(fun(_MacroKey, Macro) -> inject_attrs(Macro, Forms) end, MacroMap).
 
 used_macros(File, Module, ImportedMacros, Forms, MacroForms) ->
     ImportedMacroMap = effective_module_macro_maps(File, Module, MacroForms, ImportedMacros),
@@ -837,8 +842,9 @@ transform_uniform_macro_forms(
     do([ return ||
            LockedSnapshotIds = local_macro_snapshot_form_ids(LockedLocalMacroRelatedFunctions, Forms),
            Forms1 <- transform_local_attribute_macros(LocalMacroMap, LockedSnapshotIds, Forms),
-           FinalMacroCallers = find_function_macro_callers(Forms1, FinalMacroMap, MacroDefinitionRelatedFunctions),
-           transform_functions(Module, FinalMacroMap, Forms1, FinalMacroCallers)
+           FunctionMacroMap = inject_macro_attributes(FinalMacroMap, Forms1),
+           FinalMacroCallers = find_function_macro_callers(Forms1, FunctionMacroMap, MacroDefinitionRelatedFunctions),
+           transform_functions(Module, FunctionMacroMap, Forms1, FinalMacroCallers)
        ]).
 
 merge_macro_maps(First, Second) ->
@@ -1004,7 +1010,8 @@ append_if(Boolean, Form, Forms) ->
 transform_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     InitState = #{macro_map => MacroMap,
-                  locked_snapshot_ids => LockedSnapshotIds},
+                  locked_snapshot_ids => LockedSnapshotIds,
+                  passed_forms => []},
     astranaut_traverse:eval(
       astranaut_traverse:then(
         astranaut_traverse:update_file(File),
@@ -1018,9 +1025,10 @@ local_form_handler(Form) ->
        ]).
 
 local_form_handler(Form, #{macro_map := MacroMap,
-                           locked_snapshot_ids := LockedSnapshotIds}) ->
-    AttributeMacroMap = attribute_macro_map(MacroMap),
-    case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
+                           locked_snapshot_ids := LockedSnapshotIds} = State) ->
+    ExecutionMacroMap = inject_macro_attributes(MacroMap, local_passed_forms(State)),
+    AttributeMacroMap = attribute_macro_map(ExecutionMacroMap),
+    case attribute_find_macro(Form, ExecutionMacroMap, AttributeMacroMap) of
         {ok, Macro} ->
             do([ traverse ||
                    Expanded <- expand_macro(Macro, #{expected_role => form}),
@@ -1032,11 +1040,24 @@ local_form_handler(Form, #{macro_map := MacroMap,
         error ->
             do([ traverse ||
                    Form1 <- handle_missing_attribute_macro(Form, warn_missing),
-                   return(Form1)
+                   local_keep_form(Form1)
                ]);
         not_macro ->
-            astranaut_traverse:return(Form)
+            local_keep_form(Form)
     end.
+
+local_keep_form(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           astranaut_traverse:put(local_note_passed_form(Form, State)),
+           return(Form)
+       ]).
+
+local_note_passed_form(Form, #{passed_forms := PassedForms} = State) ->
+    State#{passed_forms => [Form | PassedForms]}.
+
+local_passed_forms(#{passed_forms := PassedForms}) ->
+    lists:reverse(PassedForms).
 
 assert_no_macro_environment_mutation(Forms) ->
     Mutations = lists:filter(fun is_macro_environment_form/1, Forms),
