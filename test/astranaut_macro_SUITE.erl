@@ -37,6 +37,10 @@ init_per_suite(Config) ->
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
                    macro_pass_external_helper, macro_pass_inject_attrs,
                    macro_pass_external_local_helper_test,
+                   macro_pass_scan_local_attr_test,
+                   macro_pass_local_generated_import_test,
+                   macro_pass_generated_local_attribute_test,
+                   macro_pass_local_no_backscan_test,
                    macro_pass_external_remaining_test,
                    macro_pass_extra_functions_test, macro_pass_extra_union_test,
                    macro_pass_internal_independent_test, macro_pass_internal_direct_test,
@@ -134,6 +138,10 @@ all() ->
      test_macro_pass_no_backscan,
      test_macro_pass_local_attribute_chain,
      test_macro_pass_external_generated_local_helper,
+     test_macro_pass_scan_local_attribute,
+     test_macro_pass_local_generated_import,
+     test_macro_pass_generated_local_attribute,
+     test_macro_pass_local_no_backscan,
      test_macro_pass_external_remaining_cases,
      test_macro_pass_extra_functions,
      test_macro_pass_extra_functions_missing_error,
@@ -352,6 +360,22 @@ test_macro_pass_external_generated_local_helper(_Config) ->
     ?assertEqual({external_generated_helper, ok}, macro_pass_external_local_helper_test:value()),
     ok.
 
+test_macro_pass_scan_local_attribute(_Config) ->
+    ?assertEqual(ok, macro_pass_scan_local_attr_test:value()),
+    ok.
+
+test_macro_pass_local_generated_import(_Config) ->
+    ?assertEqual({pass_generated, ok}, macro_pass_local_generated_import_test:pass_generated_value()),
+    ok.
+
+test_macro_pass_generated_local_attribute(_Config) ->
+    ?assertEqual(ok, macro_pass_generated_local_attribute_test:value()),
+    ok.
+
+test_macro_pass_local_no_backscan(_Config) ->
+    ?assertEqual({pass_generated, ok}, macro_pass_local_no_backscan_test:pass_generated_value()),
+    ok.
+
 test_macro_pass_external_remaining_cases(_Config) ->
     ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:alias_value()),
     ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:alias_attr_value()),
@@ -404,7 +428,7 @@ test_macro_pass_local_body_environment_mutation_error(Config) ->
 test_macro_pass_locked_spec_mutation_error(Config) ->
     assert_macro_pass_error(
       macro_pass_locked_spec_error_test, Config,
-      fun({illegal_local_macro_definition_mutation,
+      fun({illegal_locked_form_mutation,
            {attribute, _, spec, {{helper, 1}, _}}}) -> true;
          (_) -> false
       end),
@@ -651,22 +675,21 @@ test_macro_pass_internal_function_conflict(Config) ->
     ok.
 
 test_macro_pass_local_environment_mutation_errors(Config) ->
-    assert_macro_pass_error(
-      macro_pass_local_import_error_test, Config,
-      fun({illegal_macro_environment_mutation, {attribute, _, import_macro, macro_uniform_a}}) -> true;
-         (_) -> false
-      end),
-    assert_macro_pass_error(
-      macro_pass_local_macro_error_test, Config,
-      fun({illegal_macro_environment_mutation, {attribute, _, local_macro, [{generated_local, 0}]}}) -> true;
-         (_) -> false
-      end),
+    Forms1 = astranaut_test_lib:test_module_forms(macro_pass_local_import_error_test, Config),
+    Forms2 = astranaut_test_lib:test_module_forms(macro_pass_local_macro_error_test, Config),
+    ?assertEqual({[], []}, astranaut_test_lib:realize_with_baseline(
+                            astranaut_test_lib:get_baseline(yep, Forms1),
+                            astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms1)))),
+    {[{_File, [{3, astranaut_macro, {undefined_macro, generated_local, 0}}]}], []} =
+        astranaut_test_lib:realize_with_baseline(
+          astranaut_test_lib:get_baseline(yep, Forms2),
+          astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms2))),
     ok.
 
 test_macro_pass_locked_snapshot_mutation_error(Config) ->
     assert_macro_pass_error(
       macro_pass_locked_helper_error_test, Config,
-      fun({illegal_local_macro_definition_mutation, {function, _, helper, 1, _}}) -> true;
+      fun({illegal_locked_form_mutation, {function, _, helper, 1, _}}) -> true;
          (_) -> false
       end),
     ok.
