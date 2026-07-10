@@ -117,16 +117,17 @@ parse_transform(Forms, Options) ->
       do([ return ||
              Module = astranaut_lib:analyze_forms_module(Forms),
              File = astranaut_lib:analyze_forms_file(Forms),
-             {Forms1, ExternalEnv} <- run_external_macro_pass(Module, File, Forms),
-             ExternalMacroMap = external_env_macro_map(ExternalEnv),
-             GlobalMacroOpts1 = external_env_global_macro_opts(ExternalEnv),
+             GlobalMacroOpts0 <- astranaut_lib:validate(global_macro_validator(), []),
+             {Forms1, ExternalEnv} <- run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms),
+             #{macro_map := ExternalMacroMap, global_macro_opts := GlobalMacroOpts1} = ExternalEnv,
              %% load macros from attributes and transform -export_macro to -exported_macro
              %% -exported_macro is validated -export_macro attribute.
              %% add nowarn_unused_function compile options to -local_macro if it's not exported
              {Forms2, LocalMacros} <- load_local_macro_attributes(Module, File, GlobalMacroOpts1, ExternalMacroMap, Forms1),
              Forms3 <- transform_uniform_macros(Module, ExternalMacroMap, LocalMacros, Forms2, Options),
-             format_forms(Forms3, GlobalMacroOpts1),
-             return(Forms3)
+             Forms4 = astranaut_syntax:sort_forms(Forms3),
+             format_forms(Forms4, GlobalMacroOpts1),
+             return(Forms4)
          ])).
 
 -spec format_error(term()) -> term().
@@ -213,15 +214,16 @@ exported_macros(Forms, ClausesMap) ->
                      {FAs, Options} <-
                          validate_macro_attribute(fun macro_without_module_attr/1, Validator, export_macro, Attr),
                      FAs1 <- remove_undefined_macros(FAs, ClausesMap),
+                     Options1 <- validate_extra_functions_defined(Options, ClausesMap),
                      case FAs1 of
                          [] ->
                              astranaut_return:return({[], Acc});
                          _ ->
                              %% export_macro options for local usage
-                             Options1 = Options#{macro_source => export_macro},
-                             Acc2 = lists:foldl(fun(FA, Acc1) -> maps:put(FA, Options1, Acc1) end, Acc, FAs1),
+                             Options2 = Options1#{macro_source => export_macro},
+                             Acc2 = lists:foldl(fun(FA, Acc1) -> maps:put(FA, Options2, Acc1) end, Acc, FAs1),
                              %% exported_macro options for external usage
-                             ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options}]),
+                             ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options1}]),
                              ExportAttribute = astranaut_lib:gen_attribute_node(export, Pos, FAs),
                              astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], Acc2})
                      end
@@ -270,8 +272,19 @@ validate_local_macro_attribute(#{clause_map := ClauseMap}, Attr) ->
            Validator = macro_definition_validator(),
            {FAs, Options} <- validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
            FAs1 <- remove_undefined_macros(FAs, ClauseMap),
-           return({FAs1, Options})
+           Options1 <- validate_extra_functions_defined(Options, ClauseMap),
+           return({FAs1, Options1})
        ]).
+
+validate_extra_functions_defined(Options, ClauseMap) ->
+    Missing = [FA || FA <- maps:get(extra_functions, Options, []),
+                     not maps:is_key(FA, ClauseMap)],
+    case Missing of
+        [] ->
+            astranaut_return:return(Options);
+        _ ->
+            astranaut_return:error_fail({invalid_extra_functions, Missing})
+    end.
 
 update_local_macros(_Ctx, _Pos, [], _Options, Acc) ->
     astranaut_return:return({[], Acc});
@@ -745,6 +758,29 @@ merge_macro_maps(First, Second) ->
               end
       end, First, maps:to_list(Second)).
 
+merge_macro_maps_pure(First, Second) ->
+    merge_macro_maps_pure_loop(maps:to_list(Second), First).
+
+merge_macro_maps_pure_loop([{MacroKey, Macro} | T], Acc) ->
+    case maps:find(MacroKey, Acc) of
+        {ok, ExistingMacro} ->
+            case ExistingMacro =:= Macro of
+                true ->
+                    merge_macro_maps_pure_loop(T, Acc);
+                false ->
+                    case maps:get(force_override, Macro, false) of
+                        true ->
+                            merge_macro_maps_pure_loop(T, maps:put(MacroKey, Macro, Acc));
+                        false ->
+                            {error, {macro_override, MacroKey, ExistingMacro, Macro}}
+                    end
+            end;
+        error ->
+            merge_macro_maps_pure_loop(T, maps:put(MacroKey, Macro, Acc))
+    end;
+merge_macro_maps_pure_loop([], Acc) ->
+    {ok, Acc}.
+
 macro_override_fail(MacroKey, ExistingMacro, OverridingMacro) ->
     astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, OverridingMacro}).
 
@@ -853,83 +889,113 @@ append_if(Boolean, Form, Forms) ->
             Forms
     end.
 
-run_external_macro_pass(Module, File, Forms) ->
-    do([ return ||
-           GlobalMacroOpts <- astranaut_lib:validate(global_macro_validator(), []),
-           Env = new_external_env(GlobalMacroOpts),
-           astranaut_return:with_error(
-             fun(ErrorState) -> astranaut_error:update_file(File, ErrorState) end,
-             scan_external_macro_pass(Module, File, Forms, Env, []))
+run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms) ->
+    InitState = #{global_macro_opts => GlobalMacroOpts0,
+                  module_macro_maps => #{},
+                  module => Module,
+                  file => File,
+                  passed_forms => [],
+                  macro_map => #{}},
+    astranaut_traverse:run(
+      astranaut:map_forms_splice(fun external_form_handler/1, Forms, #{traverse => none}),
+      ?MODULE, #{}, InitState).
+
+external_form_handler(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           case is_external_env_form(Form) of
+               true -> handle_external_env_form(Form, State);
+               false -> handle_external_attribute(Form, State)
+           end
        ]).
 
-new_external_env(GlobalMacroOpts) ->
-    #{global_macro_opts => GlobalMacroOpts,
-      module_macro_maps => #{},
-      macro_map => #{}}.
-
-external_env_global_macro_opts(#{global_macro_opts := GlobalMacroOpts}) ->
-    GlobalMacroOpts.
-
-external_env_macro_map(#{macro_map := MacroMap}) ->
-    MacroMap.
-
-external_env_module_macro_maps(#{module_macro_maps := ModuleMacroMaps}) ->
-    ModuleMacroMaps.
-
-external_env_put_module_macro_maps(ModuleMacroMaps, Env) ->
-    Env#{module_macro_maps => ModuleMacroMaps,
-         macro_map => uniform_imported_macro_map(ModuleMacroMaps)}.
-
-external_env_put_global_macro_opts(GlobalMacroOpts, Env) ->
-    Env#{global_macro_opts => GlobalMacroOpts}.
-
-scan_external_macro_pass(Module, File, [Form|Forms], Env, Acc) ->
-    case is_external_env_form(Form) of
-        true ->
-            CurrentForms = lists:reverse(Acc) ++ [Form|Forms],
-            astranaut_return:with_error(
-              fun(ErrorState) -> astranaut_error:update_pos(form_pos(Form), ?MODULE, ErrorState) end,
-              apply_external_env_form(Module, File, Form, CurrentForms, Env,
-                                      fun(Env1) ->
-                                              Acc1 = maybe_keep_external_env_form(Form, Acc),
-                                              scan_external_macro_pass(Module, File, Forms, Env1, Acc1)
-                                      end));
-        false ->
-            scan_external_macro_form(Module, File, Form, Forms, Env, Acc)
+handle_external_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
+    #{global_macro_opts := GlobalMacroOpts} = State,
+    case import_macro_form(GlobalMacroOpts, Form) of
+        {ok, ModuleMacroMap} ->
+            #{module := Module, file := File, macro_map := MacroMap} = State,
+            PassedForms = external_passed_forms(State),
+            Effective = effective_module_macro_maps(File, Module, PassedForms, ModuleMacroMap),
+            NewMap = uniform_imported_macro_map(Effective),
+            case merge_macro_maps_pure(MacroMap, NewMap) of
+                {ok, Merged} ->
+                    ModuleMacroMaps = maps:merge(maps:get(module_macro_maps, State, #{}), Effective),
+                    do([ traverse ||
+                           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps,
+                                                         macro_map => Merged}),
+                           return({splice, []})
+                       ]);
+                {error, Reason} ->
+                    astranaut_traverse:fail(Reason)
+            end;
+        {error, Error} ->
+            astranaut_traverse:fail(Error)
     end;
-scan_external_macro_pass(_Module, _File, [], Env, Acc) ->
-    astranaut_return:return({lists:reverse(Acc), Env}).
+handle_external_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
+    #{module := Module, file := File, macro_map := MacroMap} = State,
+    ImportedMacros = module_macro_maps_from_uniform(MacroMap),
+    PassedForms = external_passed_forms(State),
+    do([ traverse ||
+           UsedMacros <- astranaut:traverse_return(
+                           used_macros(File, Module, ImportedMacros, [Form], PassedForms)),
+           NewMap = uniform_imported_macro_map(UsedMacros),
+           Merged <- case merge_macro_maps_pure(MacroMap, NewMap) of
+                         {ok, MergedMap} ->
+                             astranaut_traverse:return(MergedMap);
+                         {error, Reason} ->
+                             astranaut_traverse:fail(Reason)
+                     end,
+           ModuleMacroMaps0 = maps:get(module_macro_maps, State, #{}),
+           ModuleMacroMaps1 = maps:fold(
+                                fun(M, Macros, Acc) ->
+                                        M1 = maps:get(M, Acc, #{}),
+                                        maps:put(M, maps:merge(M1, Macros), Acc)
+                                end, ModuleMacroMaps0, UsedMacros),
+           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps1,
+                                         macro_map => Merged}),
+           return({splice, []})
+       ]);
+handle_external_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
+    #{global_macro_opts := GlobalMacroOpts} = State,
+    do([ traverse ||
+           MacroOpts <- astranaut:traverse_return(
+                          astranaut_lib:validate(global_macro_update_validator(), Attr)),
+           astranaut_traverse:put(external_note_passed_form(
+                                    Form, State#{global_macro_opts => maps:merge(GlobalMacroOpts, MacroOpts)})),
+           return(Form)
+       ]);
+handle_external_env_form(Form, _State) ->
+    external_keep_form(Form).
 
-scan_external_macro_form(Module, File, Form, Forms, Env, Acc) ->
-    MacroMap = external_env_macro_map(Env),
+handle_external_attribute(Form, State) ->
+    #{macro_map := MacroMap} = State,
     AttributeMacroMap = attribute_macro_map(MacroMap),
     case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
         {ok, Macro} ->
-            do([ return ||
-                   Expanded <- expand_external_attribute_macro(Macro),
-                   ExpandedForms = to_list(Expanded),
-                   MergedForms = splice_generated_forms(ExpandedForms, Forms),
-                   scan_external_macro_pass(Module, File, MergedForms, Env, Acc)
+            do([ traverse ||
+                   Expanded <- astranaut:traverse_return(
+                                 astranaut_traverse:eval(expand_macro(Macro, #{expected_role => form}),
+                                                         ?MODULE, #{}, ok)),
+                   return({splice, to_list(Expanded)})
                ]);
         error ->
-            CurrentForms = lists:reverse(Acc) ++ [Form|Forms],
-            astranaut_return:with_error(
-              fun(ErrorState) -> astranaut_error:update_pos(form_pos(Form), ?MODULE, ErrorState) end,
-              apply_external_env_form(Module, File, Form, CurrentForms, Env,
-                                      fun(Env1) ->
-                                              Acc1 = maybe_keep_external_env_form(Form, Acc),
-                                              scan_external_macro_pass(Module, File, Forms, Env1, Acc1)
-                                      end));
+            handle_external_env_form(Form, State);
         not_macro ->
-            CurrentForms = lists:reverse(Acc) ++ [Form|Forms],
-            astranaut_return:with_error(
-              fun(ErrorState) -> astranaut_error:update_pos(form_pos(Form), ?MODULE, ErrorState) end,
-              apply_external_env_form(Module, File, Form, CurrentForms, Env,
-                                      fun(Env1) ->
-                                              Acc1 = maybe_keep_external_env_form(Form, Acc),
-                                              scan_external_macro_pass(Module, File, Forms, Env1, Acc1)
-                                      end))
+            external_keep_form(Form)
     end.
+
+external_keep_form(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           astranaut_traverse:put(external_note_passed_form(Form, State)),
+           return(Form)
+       ]).
+
+external_note_passed_form(Form, #{passed_forms := PassedForms} = State) ->
+    State#{passed_forms => [Form | PassedForms]}.
+
+external_passed_forms(#{passed_forms := PassedForms}) ->
+    lists:reverse(PassedForms).
 
 is_external_env_form({attribute, _Pos, import_macro, _Attr}) -> true;
 is_external_env_form({attribute, _Pos, use_macro, _Attr}) -> true;
@@ -941,50 +1007,12 @@ form_pos({attribute, Pos, _Name, _Value}) ->
 form_pos(_Form) ->
     0.
 
-expand_external_attribute_macro(Macro) ->
-    astranaut_traverse:eval(expand_macro(Macro, #{expected_role => form}), ?MODULE, #{}, ok).
-
-maybe_keep_external_env_form({attribute, _Pos, import_macro, _Attr}, Acc) ->
-    Acc;
-maybe_keep_external_env_form({attribute, _Pos, use_macro, _Attr}, Acc) ->
-    Acc;
-maybe_keep_external_env_form(Form, Acc) ->
-    [Form|Acc].
-
-apply_external_env_form(Module, File, {attribute, _Pos, import_macro, _Attr} = Form, CurrentForms, Env, Continue) ->
-    GlobalMacroOpts = external_env_global_macro_opts(Env),
-    case import_macro_form(GlobalMacroOpts, Form) of
-        {ok, ModuleMacroMap} ->
-            do([ return ||
-                   EffectiveModuleMacroMaps = effective_module_macro_maps(File, Module, CurrentForms, ModuleMacroMap),
-                   NewMacroMap = uniform_imported_macro_map(EffectiveModuleMacroMaps),
-                   ExistingMacroMap = external_env_macro_map(Env),
-                   MergedMacroMap <- merge_macro_maps(ExistingMacroMap, NewMacroMap),
-                   ModuleMacroMaps = maps:merge(external_env_module_macro_maps(Env), EffectiveModuleMacroMaps),
-                   Continue((external_env_put_module_macro_maps(ModuleMacroMaps, Env))#{macro_map => MergedMacroMap})
-               ]);
-        {error, Error} ->
-            astranaut_return:then(
-              astranaut_return:formatted_error(form_pos(Form), ?MODULE, Error),
-              Continue(Env))
-    end;
-apply_external_env_form(Module, File, {attribute, _Pos, use_macro, _Attr} = Form, CurrentForms, Env, Continue) ->
-    do([ return ||
-           ImportedMacros = external_env_module_macro_maps(Env),
-           UsedMacros <- used_macros(File, Module, ImportedMacros, [Form], CurrentForms),
-           NewMacroMap = uniform_imported_macro_map(UsedMacros),
-           ExistingMacroMap = external_env_macro_map(Env),
-           MergedMacroMap <- merge_macro_maps(ExistingMacroMap, NewMacroMap),
-           Continue((external_env_put_module_macro_maps(UsedMacros, Env))#{macro_map => MergedMacroMap})
-       ]);
-apply_external_env_form(_Module, _File, {attribute, _Pos, macro_options, Attr}, _CurrentForms, Env, Continue) ->
-    do([ return ||
-           GlobalMacroOpts = external_env_global_macro_opts(Env),
-           MacroOpts <- astranaut_lib:validate(global_macro_update_validator(), Attr),
-           Continue(external_env_put_global_macro_opts(maps:merge(GlobalMacroOpts, MacroOpts), Env))
-       ]);
-apply_external_env_form(_Module, _File, _Form, _CurrentForms, Env, Continue) ->
-    Continue(Env).
+module_macro_maps_from_uniform(MacroMap) ->
+    maps:fold(
+      fun(_Key, #{macro_module := MacroModule} = Macro, Acc) ->
+              ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
+              maps:put(MacroModule, maps:put(_Key, Macro, ModuleMacroMap), Acc)
+      end, #{}, MacroMap).
 
 import_macro_form(GlobalMacroOpts, {attribute, _Pos, import_macro, Module}) when is_atom(Module) ->
     case is_loaded(Module) of
@@ -1012,49 +1040,40 @@ import_macro_form(_GlobalMacroOpts, {attribute, _Pos, import_macro, Attr}) ->
 
 transform_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms) ->
     File = astranaut_lib:analyze_forms_file(Forms),
+    InitState = #{macro_map => MacroMap,
+                  locked_snapshot_ids => LockedSnapshotIds},
     astranaut_traverse:eval(
       astranaut_traverse:then(
         astranaut_traverse:update_file(File),
-        scan_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms, [])),
-      ?MODULE, #{}, ok).
+        astranaut:map_forms_splice(fun local_form_handler/1, Forms, #{traverse => none})),
+      ?MODULE, #{}, InitState).
 
-scan_local_attribute_macros(MacroMap, LockedSnapshotIds, [Form|Forms], Acc) ->
-    astranaut_traverse:update_pos(
-      form_pos(Form), ?MODULE,
-      scan_local_attribute_form(MacroMap, LockedSnapshotIds, Form, Forms, Acc));
-scan_local_attribute_macros(_MacroMap, _LockedSnapshotIds, [], Acc) ->
-    astranaut_traverse:return(lists:reverse(Acc)).
+local_form_handler(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           local_form_handler(Form, State)
+       ]).
 
-scan_local_attribute_form(MacroMap, LockedSnapshotIds, Form, Forms, Acc) ->
+local_form_handler(Form, #{macro_map := MacroMap,
+                           locked_snapshot_ids := LockedSnapshotIds}) ->
     AttributeMacroMap = attribute_macro_map(MacroMap),
     case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
         {ok, Macro} ->
-            astranaut_traverse:bind(
-              expand_macro(Macro, #{expected_role => form}),
-              fun(Expanded) ->
-                      ExpandedForms = to_list(Expanded),
-                      MergedForms = splice_generated_forms(ExpandedForms, Forms),
-                      astranaut_traverse:then(
-                        assert_no_macro_environment_mutation(ExpandedForms),
-                        astranaut_traverse:then(
-                          assert_no_locked_snapshot_mutation(LockedSnapshotIds, ExpandedForms),
-                          scan_local_attribute_macros(MacroMap, LockedSnapshotIds, MergedForms, Acc)))
-              end);
+            do([ traverse ||
+                   Expanded <- expand_macro(Macro, #{expected_role => form}),
+                   ExpandedForms = to_list(Expanded),
+                   assert_no_macro_environment_mutation(ExpandedForms),
+                   assert_no_locked_snapshot_mutation(LockedSnapshotIds, ExpandedForms),
+                   return({splice, ExpandedForms})
+               ]);
         error ->
             do([ traverse ||
                    Form1 <- handle_missing_attribute_macro(Form, warn_missing),
-                   scan_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms, [Form1|Acc])
+                   return(Form1)
                ]);
         not_macro ->
-            scan_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms, [Form|Acc])
+            astranaut_traverse:return(Form)
     end.
-
-splice_generated_forms(GeneratedForms, Forms) ->
-    {Attributes, OtherForms} = lists:partition(fun is_attribute_form/1, GeneratedForms),
-    Attributes ++ astranaut_syntax:insert_forms(OtherForms, Forms).
-
-is_attribute_form({attribute, _Pos, _Name, _Value}) -> true;
-is_attribute_form(_) -> false.
 
 assert_no_macro_environment_mutation(Forms) ->
     Mutations = lists:filter(fun is_macro_environment_form/1, Forms),

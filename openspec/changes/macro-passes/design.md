@@ -94,6 +94,7 @@ while Queue 非空:
 
 - 不应在扫描过程中调用会整体调整 form 次序的整理逻辑
 - 不应在扫描中途把已处理前缀重新并回队列后再继续扫描
+- 不应把原始 forms 与生成 forms 全局拆分后再一次性重插入
 
 如果后续实现仍然需要使用现有 forms 整理能力，例如：
 
@@ -102,20 +103,49 @@ while Queue 非空:
 
 那么这些整理步骤只能发生在外部属性阶段完成之后，而不能打断当前阶段的顺序扫描语义。
 
-`astranaut_syntax:insert_forms/2` 不属于这里排除的“阶段后整理”。它本身就是一种受规则约束的 forms 插入机制，允许作为当前阶段生成 forms 的插回手段使用。
+`astranaut_syntax:insert_forms/2` 的语义不能直接套到整个 scan-and-splice 输出上。它会按 Erlang form 规则重新安置 forms，并处理重复 function 的 `__original__` 重命名；如果把所有生成 forms 与原始 forms 拆成 `Generated` / `Base` 后统一调用 `insert_forms(Generated, Base)`，就会错误移动没有冲突的生成函数和 spec。
 
-因此，这里的限制应理解为：
+因此，`map_forms_splice/3` 的整理规则是：
 
-- 允许使用 `insert_forms/2` 将新生成 forms 按现有插入规则并回当前序列
-- 插回目标是当前位置之后的剩余队列，已处理前缀只保存在输出累积中
-- 不允许在扫描中途调用 `sort_forms/1`、`reorder_updated_forms/1` 或其他整体重排 forms 的逻辑
+- handler 返回 `{splice, NewForms}` 时，`NewForms` 插到队列前端并立即重扫
+- 原始 forms 不需要标记为 base/generated
+- 只有生成出的 `function` 与 `-spec` 需要带内部标记，因为它们可能参与函数插入、spec 归位或 `__original__` 重命名
+- 扫描结束时不能把 forms 全局拆分为 Generated/Base 两组
+- 没有重复函数冲突时，生成出的 `function` / `-spec` 必须维持原地展开后的相对位置
+- 只有生成函数与已有同名同 arity 函数冲突，并且生成函数内部调用 `__original__/Arity` 时，才对相关函数执行重命名与调用替换
+
+也就是说，本阶段允许使用现有插入规则中的“函数合并 / `__original__` 重命名”语义，但不能用它来全局重排 scan-and-splice 的结果。
 
 也就是说，本阶段的规则是：
 
 1. 先按当前 forms 顺序完成外部属性扫描与环境更新
-2. 阶段完成后，如有必要，再进入后续全局整理步骤
+2. 阶段完成后，只对被标记且确实需要处理的 `function` / `-spec` 执行最小化整理
+3. 其他 forms 保持扫描输出顺序
 
 这是一条补充性的实现约束，不改变既有的宏环境规则，只是明确“顺序扫描”优先于“forms 归位整理”。
+
+## Traverse 与 return monad 桥接
+
+外部属性阶段使用 traverse state 携带当前宏环境，因此 handler 内的 state 操作必须通过 traverse monad 串联：
+
+```erlang
+do([ traverse ||
+       State <- astranaut_traverse:get(),
+       ...,
+       astranaut_traverse:put(State1),
+       return({splice, []})
+   ])
+```
+
+不能用普通逗号表达式丢弃 `astranaut_traverse:put/1` 或 `modify/1` 的返回值，否则 state 更新不会生效。
+
+同时，`used_macros/5`、`astranaut_lib:validate/2`、`astranaut_traverse:eval/4` 等返回 `astranaut_return:struct()` 的路径不能简单 `run` 后只看 `{just, Value}` / `nothing`。这些结果可能携带 `error_ok` 或格式化错误状态；桥接到 traverse 时必须保留 error state，例如通过 `astranaut:traverse_return/1`。
+
+这一点保证：
+
+- `-use_macro(...)` 中的多个错误可以继续累积
+- 外部属性宏展开失败能保留原始 formatter / position 信息
+- `macro_options` 校验错误不会被泛化成无位置信息的占位错误
 
 ## 外部属性阶段对生成 forms 的处理
 

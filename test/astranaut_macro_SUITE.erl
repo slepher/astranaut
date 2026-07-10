@@ -35,6 +35,12 @@ init_per_suite(Config) ->
                    macro_uniform_import_force_override_test,
                    macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
+                   macro_pass_external_helper, macro_pass_inject_attrs,
+                   macro_pass_external_local_helper_test,
+                   macro_pass_external_remaining_test,
+                   macro_pass_extra_functions_test, macro_pass_extra_union_test,
+                   macro_pass_internal_independent_test, macro_pass_internal_direct_test,
+                   macro_pass_final_outside_snapshot_test,
                    macro_node_role_test,
                    macro_validator_slots,
                    macro_test],
@@ -127,6 +133,16 @@ all() ->
      test_macro_pass_generated_import,
      test_macro_pass_no_backscan,
      test_macro_pass_local_attribute_chain,
+     test_macro_pass_external_generated_local_helper,
+     test_macro_pass_external_remaining_cases,
+     test_macro_pass_extra_functions,
+     test_macro_pass_extra_functions_missing_error,
+     test_macro_pass_extra_functions_union,
+     test_macro_pass_internal_function_independent,
+     test_macro_pass_internal_function_direct,
+     test_macro_pass_local_body_environment_mutation_error,
+     test_macro_pass_locked_spec_mutation_error,
+     test_macro_pass_final_expands_outside_snapshot,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
      test_use_macro_errors,
@@ -330,6 +346,70 @@ test_macro_pass_no_backscan(_Config) ->
 
 test_macro_pass_local_attribute_chain(_Config) ->
     ?assertEqual({local_attribute_chain, ok}, macro_pass_local_chain_test:local_chain_value()),
+    ok.
+
+test_macro_pass_external_generated_local_helper(_Config) ->
+    ?assertEqual({external_generated_helper, ok}, macro_pass_external_local_helper_test:value()),
+    ok.
+
+test_macro_pass_external_remaining_cases(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:alias_value()),
+    ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:alias_attr_value()),
+    ?assertEqual({external_attr_chain, ok}, macro_pass_external_remaining_test:chained_attr_value()),
+    ?assertEqual({pass_generated, ok}, macro_pass_external_remaining_test:pass_generated_value()),
+    ?assertEqual({external_non_env_attr, ok}, macro_pass_external_remaining_test:non_env_attr_value()),
+    ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:final_external_value()),
+    ?assertEqual({injected_attrs, [early]}, macro_pass_external_remaining_test:injected_attrs_value()),
+    ok.
+
+test_macro_pass_extra_functions(_Config) ->
+    ?assertEqual({extra_helper, ok}, macro_pass_extra_functions_test:value()),
+    ok.
+
+test_macro_pass_extra_functions_missing_error(Config) ->
+    assert_macro_pass_error(
+      macro_pass_extra_missing_error_test, Config,
+      fun({invalid_extra_functions, Missing}) ->
+              lists:member({missing_helper, 1}, Missing);
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_extra_functions_union(_Config) ->
+    ?assertEqual({extra_union_a, ok}, macro_pass_extra_union_test:value_a()),
+    ?assertEqual({extra_union_b, ok}, macro_pass_extra_union_test:value_b()),
+    ok.
+
+test_macro_pass_internal_function_independent(_Config) ->
+    ?assertEqual({internal_independent_a, ok}, macro_pass_internal_independent_test:value_a()),
+    ?assertEqual({internal_independent_b, ok}, macro_pass_internal_independent_test:value_b()),
+    ok.
+
+test_macro_pass_internal_function_direct(_Config) ->
+    ?assertEqual({internal_direct, ok}, macro_pass_internal_direct_test:value()),
+    ok.
+
+test_macro_pass_local_body_environment_mutation_error(Config) ->
+    assert_macro_pass_error(
+      macro_pass_local_body_env_error_test, Config,
+      fun({invalid_macro_return, #{reason := invalid_role,
+                                   expected_role := expression}}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_locked_spec_mutation_error(Config) ->
+    assert_macro_pass_error(
+      macro_pass_locked_spec_error_test, Config,
+      fun({illegal_local_macro_definition_mutation,
+           {attribute, _, spec, {{helper, 1}, _}}}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_final_expands_outside_snapshot(_Config) ->
+    ?assertEqual({locked_snapshot, ok}, macro_pass_final_outside_snapshot_test:local_value()),
+    ?assertEqual({a, {from_a, ok}}, macro_pass_final_outside_snapshot_test:final_external_value()),
     ok.
 
 test_uniform_macro_override_error(Config) ->

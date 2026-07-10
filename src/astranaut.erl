@@ -15,6 +15,7 @@
 -export([smap/3, sreduce/4, smap_with_state/4, smapfold/4, search/3]).
 -export([map/3, reduce/4, map_with_state/4, mapfold/4]).
 -export([map_m/3]).
+-export([map_forms_splice/3]).
 -export([walk_return/1, traverse_return/1]).
 -export([uniplate/1]).
 -export([format_error/1]).
@@ -372,6 +373,121 @@ map_m(F, [Node|_T] = Nodes, Opts) ->
     end;
 map_m(F, Node, Opts) ->
     map_m_1(F, Node, Opts).
+
+-spec map_forms_splice(fun((tree()) -> astranaut_traverse:struct(tree())),
+                       [tree()], traverse_opts()) -> astranaut_traverse:struct([tree()]).
+map_forms_splice(F, Forms, Opts) ->
+    map_forms_splice_loop(F, [{form, Form} || Form <- Forms], [], Opts).
+
+map_forms_splice_loop(F, [{Tag, Form} | Forms], Acc, Opts) ->
+    astranaut_traverse:bind(
+      astranaut_traverse:catch_on_error(
+        traverse_map_form(F, Form),
+        fun() -> astranaut_traverse:return({splice, []}) end),
+      fun
+          ({splice, NewForms}) ->
+              GeneratedForms = [map_forms_splice_tag_generated(NewForm) || NewForm <- NewForms],
+              map_forms_splice_loop(F, GeneratedForms ++ Forms, Acc, Opts);
+          (Form1) ->
+              map_forms_splice_loop(F, Forms, [map_forms_splice_tag_result(Tag, Form1) | Acc], Opts)
+      end);
+map_forms_splice_loop(_F, [], Acc, _Opts) ->
+    astranaut_traverse:return(map_forms_splice_reorder(lists:reverse(Acc))).
+
+map_forms_splice_tag_generated({function, _Pos, _Name, _Arity, _Clauses} = Form) ->
+    {generated_insert, Form};
+map_forms_splice_tag_generated({attribute, _Pos, spec, _Spec} = Form) ->
+    {generated_insert, Form};
+map_forms_splice_tag_generated(Form) ->
+    {form, Form}.
+
+map_forms_splice_tag_result(generated_insert, {function, _Pos, _Name, _Arity, _Clauses} = Form) ->
+    {generated_insert, Form};
+map_forms_splice_tag_result(generated_insert, {attribute, _Pos, spec, _Spec} = Form) ->
+    {generated_insert, Form};
+map_forms_splice_tag_result(_Tag, Form) ->
+    {form, Form}.
+
+map_forms_splice_reorder(TaggedForms) ->
+    map_forms_splice_reorder(TaggedForms, []).
+
+map_forms_splice_reorder([{generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} | T], Acc) ->
+    case map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) of
+        true ->
+            Functions = map_forms_splice_forms_functions(lists:reverse(Acc) ++ [Form | map_forms_splice_untag(T)]),
+            NewName = map_forms_splice_new_function_name(Name, Arity, Functions),
+            Form1 = map_forms_splice_update_call_name('__original__', NewName, Arity, Form),
+            Acc1 = map_forms_splice_update_function_name(Name, Arity, NewName, Acc),
+            T1 = map_forms_splice_update_tagged_function_name(Name, Arity, NewName, T),
+            map_forms_splice_reorder(T1, [Form1 | Acc1]);
+        false ->
+            map_forms_splice_reorder(T, [Form | Acc])
+    end;
+map_forms_splice_reorder([{_Tag, Form} | T], Acc) ->
+    map_forms_splice_reorder(T, [Form | Acc]);
+map_forms_splice_reorder([], Acc) ->
+    lists:reverse(Acc).
+
+map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) ->
+    map_forms_splice_is_renamed(Arity, Form) andalso
+        ordsets:is_element({Name, Arity},
+                           map_forms_splice_forms_functions(
+                             lists:reverse(Acc) ++ map_forms_splice_untag(T))).
+
+map_forms_splice_untag(TaggedForms) ->
+    [Form || {_Tag, Form} <- TaggedForms].
+
+map_forms_splice_forms_functions(Forms) ->
+    lists:foldl(
+      fun({function, _Pos, Name, Arity, _Clauses}, Acc) ->
+              ordsets:add_element({Name, Arity}, Acc);
+         (_Form, Acc) ->
+              Acc
+      end, ordsets:new(), Forms).
+
+map_forms_splice_is_renamed(Arity, Form) ->
+    search(
+      fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
+              length(Arguments) =:= Arity;
+         (_Node) ->
+              false
+      end, Form, #{traverse => pre}).
+
+map_forms_splice_new_function_name(FName, Arity, Functions) ->
+    map_forms_splice_new_function_name(FName, Arity, Functions, 1).
+
+map_forms_splice_new_function_name(FName, Arity, Functions, Counter) ->
+    FName1 = list_to_atom(atom_to_list(FName) ++ "_" ++ integer_to_list(Counter)),
+    case ordsets:is_element({FName1, Arity}, Functions) of
+        true ->
+            map_forms_splice_new_function_name(FName, Arity, Functions, Counter + 1);
+        false ->
+            FName1
+    end.
+
+map_forms_splice_update_tagged_function_name(Name, Arity, NewName, TaggedForms) ->
+    [{Tag, map_forms_splice_update_function_name_1(Name, Arity, NewName, Form)}
+     || {Tag, Form} <- TaggedForms].
+
+map_forms_splice_update_function_name(Name, Arity, NewName, Forms) ->
+    [map_forms_splice_update_function_name_1(Name, Arity, NewName, Form) || Form <- Forms].
+
+map_forms_splice_update_function_name_1(Name, Arity, NewName,
+                                        {function, Pos, FName, FArity, Clauses})
+  when FName =:= Name, FArity =:= Arity ->
+    Clauses1 = map_forms_splice_update_call_name(Name, NewName, Arity, Clauses),
+    {function, Pos, NewName, Arity, Clauses1};
+map_forms_splice_update_function_name_1(_Name, _Arity, _NewName, Form) ->
+    Form.
+
+map_forms_splice_update_call_name(OriginalName, NewName, Arity, Function) ->
+    smap(
+      fun({call, Pos, {atom, Pos2, Name}, Arguments})
+            when Name =:= OriginalName, length(Arguments) =:= Arity ->
+              {call, Pos, {atom, Pos2, NewName}, Arguments};
+         (Node) ->
+              Node
+      end, Function, #{traverse => pre}).
 
 to_list(Form1) when is_list(Form1) ->
     Form1;
