@@ -110,7 +110,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [test_return, test_bind, test_error_0, test_state, 
-     test_pos, test_pos_2, test_file_pos, test_fail].
+     test_pos, test_pos_2, test_file_pos, test_fail,
+     test_scoped_state, test_scoped_state_fail, test_scoped_state_run].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -260,6 +261,64 @@ test_fail(_Config) ->
     #{error := Error} = astranaut_traverse:run(MB, ?MODULE, #{}, ok),
     ?assertEqual({Errors, Warnings}, {astranaut_error:formatted_errors(Error),
                                       astranaut_error:formatted_warnings(Error)}),
+    ok.
+
+test_scoped_state(_Config) ->
+    MA =
+        do([ traverse ||
+               astranaut_traverse:put(outer_value),
+               Value <- astranaut_traverse:scoped_state(
+                          inner_initial,
+                          do([ traverse ||
+                                 astranaut_traverse:put(inner_modified),
+                                 return(inner_result)
+                             ])),
+               OuterState <- astranaut_traverse:get(),
+               return({Value, OuterState})
+           ]),
+    #{return := Return, error := Error} =
+        astranaut_traverse:run(MA, undefined, #{}, ok),
+    ?assertEqual({{inner_result, outer_value}, outer_value}, Return),
+    ?assert(astranaut_error:is_empty_error(Error)),
+    ok.
+
+test_scoped_state_fail(_Config) ->
+    MA =
+        do([ traverse ||
+               astranaut_traverse:put(outer_value),
+               _Value <- astranaut_traverse:scoped_state(
+                          inner_initial,
+                          do([ traverse ||
+                                 astranaut_traverse:put(inner_modified),
+                                 astranaut_traverse:fail_on_error(
+                                   astranaut_traverse:update_pos(
+                                     10, astranaut_traverse:error(error_inner)))
+                             ])),
+               OuterState <- astranaut_traverse:get(),
+               return(OuterState)
+           ]),
+    #{error := Error} = astranaut_traverse:run(MA, ?MODULE, #{}, ok),
+    ?assertNot(astranaut_error:is_empty_error(Error)),
+    ok.
+
+test_scoped_state_run(_Config) ->
+    MA =
+        do([ traverse ||
+               astranaut_traverse:put(outer_value),
+               {Value, InnerState} <- astranaut_traverse:scoped_state_run(
+                                        0,
+                                        do([ traverse ||
+                                               astranaut_traverse:modify(
+                                                 fun(S) -> S + 1 end),
+                                               return(result)
+                                           ])),
+               OuterState <- astranaut_traverse:get(),
+               return({Value, InnerState, OuterState})
+           ]),
+    #{return := Return, error := Error} =
+        astranaut_traverse:run(MA, undefined, #{}, ok),
+    ?assertEqual({{result, 1, outer_value}, outer_value}, Return),
+    ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
 

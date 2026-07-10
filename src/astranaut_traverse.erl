@@ -51,6 +51,7 @@
 -export([with_error/2, catch_fail/2, set_fail/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
+-export([scoped_state/2, scoped_state_run/2]).
 -export([listen_error/1, writer_updated/1, listen_updated/1]).
 -export([warning/1, warnings/1, formatted_warnings/1, error/1, errors/1, formatted_errors/1]).
 -export([update_file/1, eof/0, update_pos/2, update_pos/3, with_formatter/2]).
@@ -256,6 +257,23 @@ state(F) ->
 -spec modify(fun((S) -> S)) -> struct(S, ok).
 modify(F) ->
     state(fun(State) -> State1 = F(State), {ok, State1} end).
+
+-spec scoped_state(S, struct(S, A)) -> struct(S, A).
+scoped_state(InnerState0, MA) ->
+    lift_m(fun({Value, _InnerState}) -> Value end, scoped_state_run(InnerState0, MA)).
+
+-spec scoped_state_run(S, struct(S, A)) -> struct(S, {A, S}).
+scoped_state_run(InnerState0, #{?STRUCT_KEY := ?TRAVERSE_M, inner := Inner}) ->
+    WrappedInner =
+        fun(Formatter, File, Attr, OuterState) ->
+            case Inner(Formatter, File, Attr, InnerState0) of
+                #{?STRUCT_KEY := ?STATE_OK, return := Value, state := InnerState1} = Result ->
+                    Result#{return => {Value, InnerState1}, state => OuterState};
+                #{?STRUCT_KEY := ?STATE_FAIL} = Result ->
+                    Result#{state => OuterState}
+            end
+        end,
+    new(WrappedInner).
 
 -spec get() -> struct(S, S).
 get() ->
