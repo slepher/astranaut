@@ -7,20 +7,25 @@
 3. local macro 的专属生命周期委托给 [local-macro 设计](../local-macro/design.md)。
 4. 最终函数体展开继续保留现有递归及 `outer` / `inner` 语义。
 
-## Pass 模型
+## 两步模型
+
+顶层只有两个 pass。local-macro 的收尾不是第三个 pass，而是 attribute
+pass 的收尾子步骤；它必须在 forms 交给 function pass 前完成。
 
 ```text
-1. 统一属性扫描
-   - ExternalEnv 前向更新
-   - LocalMacroState 由 local-macro 工作流管理
-   - 属性展开结果 splice 回当前位置并继续扫描
+1. Attribute pass
+   1.1 初始化 ExternalEnv、LocalMacroState、Queue 和 Output
+   1.2 逐 form 统一 scan-and-splice
+       - 外部与可调用本地属性宏按当前位置展开
+       - import/use/macro_options 前向更新 ExternalEnv
+       - local_macro declaration 按 declaration-time source view 注册
+       - 未就绪本地属性宏按需请求累计编译后在原位置展开
+   1.3 收尾 local-macro 工作流，取得 FinalLocalEnv 与 FinalSkipIds
+   1.4 从 function-pass 输入中剔除 FinalSkipIds；retain forms 保留
 
-2. local-macro 收尾
-   - 取得 FinalLocalEnv 与 FinalSkipIds
-
-3. 最终函数体展开
-   - 使用 ExternalEnv + FinalLocalEnv
-   - 跳过 FinalSkipIds
+2. Function pass
+   - 使用最终 ExternalEnv + FinalLocalEnv
+   - 只遍历 attribute pass 输出的保留 forms
 ```
 
 ## 统一属性扫描
@@ -92,10 +97,17 @@ while Queue 非空:
 
 它不影响该 local macro 的 declaration 环境或已经完成的累计编译；这些属于 local-macro 工作流的不可变快照。
 
-## 收尾与最终展开
+## Attribute pass 收尾与 function pass
 
 扫描完成后调用 local-macro 收尾流程。该流程返回最终可调用的本地宏环境及 `FinalSkipIds`；具体如何冻结、保留、比较和构建该集合见 [local-macro 设计](../local-macro/design.md)。
 
-最终函数体展开使用 `ExternalEnv + FinalLocalEnv`，并跳过 `FinalSkipIds`。不在跳过集合中的 forms 仍遵循当前递归展开、`outer` / `inner` 和 `max_depth` 规则。
+`FinalSkipIds` 是应从 function pass 输入中剔除的 forms，而不是 retain
+集合。其定义为 `local_macro_expanded_ids - retained_form_ids`：已经为
+local macro 编译且未 retain 的 form 不进入 function pass；被
+`local_macro_retain`、`export` 或 `export_macro` retain 的闭包 form 保留。
+
+function pass 使用 `ExternalEnv + FinalLocalEnv`，且只接收 attribute pass
+收尾后的保留 forms。保留 form 仍遵循当前递归展开、`outer` / `inner` 和
+`max_depth` 规则。
 
 扫描器在收尾前不删除 local macro 相关的原始 forms；它只传递完整 forms 流及不透明 LocalMacroState。这样 retain declaration 即使出现在闭包 form 之后，也能由 local-macro 工作流基于完整扫描结果正确处理。

@@ -44,6 +44,6 @@ handle_local_macro_declaration([{foo,0}, {bar,1}], ...)
 
 `macro-passes-adjusted` 实现时应当统一到一条路径：
 
-- 保留 Phase 1 的 batch 语义（符合 local-macro design 中"原子操作"的要求）
-- 移除 Phase 2 中对 `-local_macro` 的重复处理，或改为调用 `astranaut_local_macro` 接口
-- `forms_with_attribute` 的 `deep_attr` unwrap 行为对 `-local_macro` list 语法是冗余的，可在统一后移除对该属性的 `deep_attr` 依赖
+- 保留 Phase 2 的逐个 FA 处理语义，维持既有 `forms_with_attribute` 的 `deep_attr` 行为
+- 统一扫描中的 `handle_local_macro_declaration` 对裸 list 语法逐项调用 `astranaut_local_macro` 接口
+- `{FAs, Options}` 等 tuple 语法仍作为单个 declaration 处理；仅 `-local_macro([foo/0, bar/1])` 逐项解包

@@ -4,21 +4,21 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ## 规格
 
-- [ ] 记录外部与本地属性宏统一参与 scan-and-splice。
-- [ ] 记录环境变更的前向生效与不回扫规则。
-- [ ] 记录生成属性、环境 form 与普通 forms 的当前位置处理及延后函数体展开规则。
-- [ ] 记录 splice 的局部顺序与禁止全局 Generated/Base 重排规则。
-- [ ] 记录 `local_macro` declaration 和未就绪本地属性调用委托 local-macro 工作流。
-- [ ] 记录 scan 收尾使用 local-macro 提供的最终环境和跳过集合。
+- [x] 记录外部与本地属性宏统一参与 scan-and-splice。
+- [x] 记录环境变更的前向生效与不回扫规则。
+- [x] 记录生成属性、环境 form 与普通 forms 的当前位置处理及延后函数体展开规则。
+- [x] 记录 splice 的局部顺序与禁止全局 Generated/Base 重排规则。
+- [x] 记录 `local_macro` declaration 和未就绪本地属性调用委托 local-macro 工作流。
+- [x] 记录 scan 收尾使用 local-macro 提供的最终环境和跳过集合。
 
 ## 实现
 
-- [ ] 重构属性扫描 handler，使其携带 ExternalEnv 与 LocalMacroState。
+- [ ] 重构 attribute pass，使其携带 ExternalEnv 与 LocalMacroState。
 - [ ] 将 `local_macro` 注册和按需可调用性检查接入 local-macro 模块。
 - [ ] 保留 scan-and-splice 对生成属性的当前位置重扫语义。
 - [ ] 让生成的 import/use/macro_options 在处理下一 form 前更新 ExternalEnv。
-- [ ] 保持普通生成 forms 在扫描中原位保留，延后到最终函数体展开。
-- [ ] 将 local-macro 收尾结果接入最终函数体展开。
+- [ ] 在 attribute pass 收尾剔除 FinalSkipIds，再运行 function pass。
+- [ ] 将 FinalLocalEnv 接入 function pass。
 
 ## 测试
 
