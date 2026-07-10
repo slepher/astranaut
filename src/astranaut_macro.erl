@@ -5,100 +5,49 @@
 %%% Created : 18 Nov 2018 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
 
-%% @doc The macro transformer.
-%% 
-%% Usage: 
-%% ```-include_lib("syntax_tools/include/macro.hrl").'''
-%% 
-%% <dl>
-%% <dt>macro.hrl add these attributes:</dt>
-%% <dd>-export_macro: export functions as macro</dd>
-%% <dd>Usage:</dd>
-%% <dd><ul>
-%% <li>-export_macro([F1/A1, F2/A2...]).</li>
-%% <li>-export_macro({F/A, MacroOptions}).</li>
-%% <li>-export_macro({[F1/A1, F2/A2, ...], MacroOptions}).</li>
-%% </ul></dd>
-%% <dd>-local_macro:declar local functions as macro without export it.</dd>
-%% <dd>Usage:</dd>
-%% <dd><ul>
-%% <li>-local_macro([F1/A1, F2/A2...]).</li>
-%% <li>-local_macro({F/A, MacroOptions}).</li>
-%% <li>-local_macro({[F1/A1, F2/A2, ...], MacroOptions}).</li>
-%% </ul></dd>
-%% <dd>-import_macro declars which module exports macro</dd>
-%% <dd>without this attribute, transform should analyze forms and detect every external module used whether has -export_macro attribute or not, it's not efficienty, so it's required to use external macro module.</dd>
-%% <dd>Usage:</dd>
-%% <dd><ul>
-%% <li>-import_macro(Module).</li>
-%% <li>-import_macro({Module, F/A, MacroOptions}).</li>
-%% <li>-import_macro({Module, [F1/A1, F2/A2, ...], MacroOptions}).</li>
-%% </ul></dd>
-%% <dd>-use_macro add extra options for imported or local macros</dd>
-%% <dd>Usage:</dd>
-%% <dd><ul>
-%% <li>-use_macro({Module, F/A, MacroOptions}).</li>
-%% <li>-use_macro({Module, [F1/A1, F2/A2, ...], MacroOptions}).</li>
-%% <li>-use_macro({F/A, MacroOptions}).</li>
-%% <li>-use_macro({[F1/A1, F2/A2, ...], MacroOptions}).</li>
-%% </ul></dd>
-%% <dd>-exec_macro execute macro generates ast take place of -exec_macro attribute.</dd>
-%% <dd>Usage:</dd>
-%% <dd><ul>
-%% <li>-exec_macro({Module, Function, Arguments}).</li>
-%% <li>-exec_macro({Function, Arguments}).</li>
-%% </ul></dd>
-%% <dd>-macro_options declars global options used in this moudule.</dd>
-%% <dd>exported macro options is only from -export_macro.</dd>
-%% <dd>macro from external module options merge order is -export_macro -macro_options -use_macro.</dd>
-%% <dd>macro from local module options merge order is -macro_options (-export_macro or -local_macro) -use_macro</dd>
-%% <dd>format_error/1</dd>
-%% <dd><ul>
-%% <li>if there is userdefined error or warning returned from macro definition, format_error/1 should defined</li>
-%% <li>if macro which returns error or warning is exported_macro, format_error/1 should be exported</li>
-%% <li>if macro which returns error or warning is local_macro, format_error/1 is not need to exported</li>
-%% <li>if format_error from macro module is not defined or exported, astranaut_macro will be used as default formatter</li>
-%% <li>if format_error/1 is not implemented correctly, there will be no error msg details (because exception is caught by compiler).</li>
-%% </ul></dd>
-%% </dl>
-%% <dl>
-%% <dt>MacroOptions = astranaut_lib:options()</dt>
-%% <dd>if an options is a <b>definition option</b>, which means it's only avaliable in  -export_macro -local_macro</dd>
-%% <dd>{order, Order}, when macro is nested, which macro will executed first, definition option.</dd>
-%% <dd><ul>
-%% <li>Order = inner, which is default</li>
-%% <li>Order = outer</li>
-%% </ul></dd>
-%% <dd>{inject_attrs, InjectAttrs}, extra arguments will be passed to macro function, definition option.</dd>
-%% <dd><ul>
-%% <li>InjectAttrs = true, #{file => File, module => Module, pos => Pos} will be extra arguments.</li>
-%% <li>InjectAttrs = Attr, if -Attr(AttrValue) declared in module which executes macro, #{Attr => [AttrValue...]} with file, module, pos, will be extra arguments.</li>
-%% <li>InjectAttrs = [Attr1, Attr2...], #{Attr1 => [AttrValue1...], Attr2 => [AttrValue2...]} with file, module, pos, will be extra arguments.</li>
-%% </ul></dd>
-%% <dd>{group_args, GroupArgs}, treat macro arguments as list, definition option.</dd>
-%% <dd>{as_attr, As}, -As(Arguments) will replace -exec_macro({M, F, A}), should not be dulicated, definition option.</dd>
-%% <dd>{debug, Debug}</dd>
-%% <dd><ul>
-%% <li>Debug = false, which is default, do nothing</li>
-%% <li>Debug = true, print result to console when macro is executed</li>
-%% </ul></dd>
-%% <dd>{debug_ast, DebugAst}</dd>
-%% <dd><ul>
-%% <li>DebugAst = false, which is default, do nothing</li>
-%% <li>DebugAst = true, print ast to console when macro is executed</li>
-%% </ul></dd>
-%% <dd>{debug_module, DebugModule}, only avaliable in -macro_options</dd>
-%% <dd><ul>
-%% <li>DebugModule = false, which is default, do nothing</li>
-%% <li>DebugModule = true, print module after transformed to console</li>
-%% </ul></dd>
-%% <dd>{debug_module_ast, DebugModuleAst}, only avaliable in -macro_options</dd>
-%% <dd><ul>
-%% <li>DebugModuleAst = false, which is default, do nothing</li>
-%% <li>DebugModuleAst = true, print module ast after transformed to console</li>
-%% </ul></dd>
-%% <dd>{alias, Alias}, rename macro, only avaliable in -use_macro</dd>
-%% </dl>
+%% @doc Parse transform for Astranaut macros.
+%%
+%% Include `macro.hrl' in a module to enable this transformer.
+%%
+%% Supported module attributes:
+%% <ul>
+%% <li>`-import_macro(ModuleOrSpec).' imports macros exported by another module.</li>
+%% <li>`-use_macro(UseSpec).' selects imported or local macros and may add use-site options such as `alias' or `force_override'.</li>
+%% <li>`-macro_options(Options).' updates global macro options for later macro imports and expansion.</li>
+%% <li>`-export_macro(MacroSpec).' exports local functions as macros for other modules.</li>
+%% <li>`-local_macro(MacroSpec).' declares local functions as macros without exporting them.</li>
+%% <li>`-exec_macro(Call).' expands a macro call in attribute position.</li>
+%% </ul>
+%%
+%% `MacroSpec' accepts a function, a function list, or either form paired with
+%% definition options. Definition options include `order', `as_attr',
+%% `inject_attrs', `group_args', `extra_functions', and `internal_function'.
+%% `extra_functions' explicitly adds helper functions to a local macro closure.
+%% `internal_function' controls which functions in a macro definition closure are
+%% treated as direct internal calls instead of macro calls.
+%%
+%% Expansion is split into ordered passes:
+%% <ol>
+%% <li>External attribute macro pass. Forms are scanned from left to right.
+%% Generated forms are spliced back into the current scan position. Import,
+%% use, and macro option attributes update the external macro environment for
+%% subsequent forms only; already passed forms are not revisited. Attribute
+%% injection sees the forms that have passed this scan point.</li>
+%% <li>Local macro discovery. `-export_macro' and `-local_macro' declarations
+%% are validated and transformed into local macro metadata.</li>
+%% <li>Local macro closure and snapshot compilation. Local macro closures are
+%% computed from static local calls plus `extra_functions'. Snapshot functions
+%% and specs are pre-expanded with the frozen external environment, compiled,
+%% and locked.</li>
+%% <li>Local attribute macro pass. Local attribute macros use the same
+%% scan-and-splice model, but may not mutate the macro environment or rewrite
+%% locked snapshot forms.</li>
+%% <li>Final function body expansion. Non-snapshot functions are recursively
+%% expanded with the frozen external environment plus loaded local macros.</li>
+%% </ol>
+%%
+%% The final forms are sorted before returning to the compiler so generated
+%% attributes remain in Erlang-valid form order.
 %% @end
 
 -module(astranaut_macro).
@@ -179,6 +128,160 @@ format_macro_ref(#{macro_module := Module, function := Function, arity := Arity}
     {Module, Function, Arity};
 format_macro_ref(Macro) ->
     Macro.
+
+%%%===================================================================
+%%% ===== Phase 1: external attribute macro pass =====
+%%%===================================================================
+
+run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms) ->
+    InitState = #{global_macro_opts => GlobalMacroOpts0,
+                  module_macro_maps => #{},
+                  module => Module,
+                  file => File,
+                  passed_forms => [],
+                  macro_map => #{}},
+    astranaut_traverse:run(
+      astranaut:map_forms_splice(fun external_form_handler/1, Forms, #{traverse => none}),
+      ?MODULE, #{}, InitState).
+
+external_form_handler(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           case is_external_env_form(Form) of
+               true -> handle_external_env_form(Form, State);
+               false -> handle_external_attribute(Form, State)
+           end
+       ]).
+
+handle_external_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
+    #{global_macro_opts := GlobalMacroOpts} = State,
+    case import_macro_form(GlobalMacroOpts, Form) of
+        {ok, ModuleMacroMap} ->
+            #{module := Module, file := File, macro_map := MacroMap} = State,
+            PassedForms = external_passed_forms(State),
+            Effective = effective_module_macro_maps(File, Module, PassedForms, ModuleMacroMap),
+            NewMap = uniform_imported_macro_map(Effective),
+            case merge_macro_maps_pure(MacroMap, NewMap) of
+                {ok, Merged} ->
+                    ModuleMacroMaps = maps:merge(maps:get(module_macro_maps, State, #{}), Effective),
+                    do([ traverse ||
+                           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps,
+                                                         macro_map => Merged}),
+                           return({splice, []})
+                       ]);
+                {error, Reason} ->
+                    astranaut_traverse:fail(Reason)
+            end;
+        {error, Error} ->
+            astranaut_traverse:fail(Error)
+    end;
+handle_external_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
+    #{module := Module, file := File, macro_map := MacroMap} = State,
+    ImportedMacros = module_macro_maps_from_uniform(MacroMap),
+    PassedForms = external_passed_forms(State),
+    do([ traverse ||
+           UsedMacros <- astranaut:traverse_return(
+                           used_macros(File, Module, ImportedMacros, [Form], PassedForms)),
+           NewMap = uniform_imported_macro_map(UsedMacros),
+           Merged <- case merge_macro_maps_pure(MacroMap, NewMap) of
+                         {ok, MergedMap} ->
+                             astranaut_traverse:return(MergedMap);
+                         {error, Reason} ->
+                             astranaut_traverse:fail(Reason)
+                     end,
+           ModuleMacroMaps0 = maps:get(module_macro_maps, State, #{}),
+           ModuleMacroMaps1 = maps:fold(
+                                fun(M, Macros, Acc) ->
+                                        M1 = maps:get(M, Acc, #{}),
+                                        maps:put(M, maps:merge(M1, Macros), Acc)
+                                end, ModuleMacroMaps0, UsedMacros),
+           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps1,
+                                         macro_map => Merged}),
+           return({splice, []})
+       ]);
+handle_external_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
+    #{global_macro_opts := GlobalMacroOpts} = State,
+    do([ traverse ||
+           MacroOpts <- astranaut:traverse_return(
+                          astranaut_lib:validate(global_macro_update_validator(), Attr)),
+           astranaut_traverse:put(external_note_passed_form(
+                                    Form, State#{global_macro_opts => maps:merge(GlobalMacroOpts, MacroOpts)})),
+           return(Form)
+       ]);
+handle_external_env_form(Form, _State) ->
+    external_keep_form(Form).
+
+handle_external_attribute(Form, State) ->
+    #{macro_map := MacroMap} = State,
+    AttributeMacroMap = attribute_macro_map(MacroMap),
+    case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
+        {ok, Macro} ->
+            do([ traverse ||
+                   Expanded <- astranaut:traverse_return(
+                                 astranaut_traverse:eval(expand_macro(Macro, #{expected_role => form}),
+                                                         ?MODULE, #{}, ok)),
+                   return({splice, to_list(Expanded)})
+               ]);
+        error ->
+            handle_external_env_form(Form, State);
+        not_macro ->
+            external_keep_form(Form)
+    end.
+
+external_keep_form(Form) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           astranaut_traverse:put(external_note_passed_form(Form, State)),
+           return(Form)
+       ]).
+
+external_note_passed_form(Form, #{passed_forms := PassedForms} = State) ->
+    State#{passed_forms => [Form | PassedForms]}.
+
+external_passed_forms(#{passed_forms := PassedForms}) ->
+    lists:reverse(PassedForms).
+
+is_external_env_form({attribute, _Pos, import_macro, _Attr}) -> true;
+is_external_env_form({attribute, _Pos, use_macro, _Attr}) -> true;
+is_external_env_form({attribute, _Pos, macro_options, _Attr}) -> true;
+is_external_env_form(_Form) -> false.
+
+form_pos({attribute, Pos, _Name, _Value}) ->
+    Pos;
+form_pos(_Form) ->
+    0.
+
+module_macro_maps_from_uniform(MacroMap) ->
+    maps:fold(
+      fun(_Key, #{macro_module := MacroModule} = Macro, Acc) ->
+              ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
+              maps:put(MacroModule, maps:put(_Key, Macro, ModuleMacroMap), Acc)
+      end, #{}, MacroMap).
+
+import_macro_form(GlobalMacroOpts, {attribute, _Pos, import_macro, Module}) when is_atom(Module) ->
+    case is_loaded(Module) of
+        {file, _} ->
+            Macros = analyze_module_macros(Module),
+            Exports = Module:module_info(exports),
+            GlobalMacroOpts1 = formatter_opts(Module, Exports, GlobalMacroOpts),
+            Macros1 =
+                maps:fold(
+                  fun({Function, Arity}, MacroOptions, Acc) ->
+                          MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
+                          MacroOptions2 = MacroOptions1#{module => Module,
+                                                         macro_module => Module,
+                                                         macro => {Module, Function},
+                                                         function => Function,
+                                                         arity => Arity},
+                          maps:put({Function, Arity}, MacroOptions2, Acc)
+                  end, #{}, Macros),
+            {ok, #{Module => Macros1}};
+        false ->
+            {error, {import_macro_failed, Module}}
+    end;
+import_macro_form(_GlobalMacroOpts, {attribute, _Pos, import_macro, Attr}) ->
+    {error, {invalid_import_macro_attr, Attr}}.
+
 
 %%%===================================================================
 %%% ===== Phase 2: local macro discovery and declaration loading =====
@@ -603,7 +706,7 @@ macro_without_module_attr(_Other) ->
     invalid_attr.
 
 %%%===================================================================
-%%% ===== Pass orchestration and local macro closure analysis =====
+%%% ===== Phase 3: local macro closure and snapshot orchestration =====
 %%%===================================================================
 %% Step 1. expand external attribute macros only.
 %% Step 2. find local macros and their related functions.
@@ -801,7 +904,7 @@ attribute_macro_map(MacroMap) ->
       end, #{}, AttributeMap).
 
 %%%===================================================================
-%%% ===== Phase 3: local macro snapshot compilation =====
+%%% ===== Local macro snapshot compilation helpers =====
 %%%===================================================================
 
 load_local_macro_forms([], _LocalMacroRelatedFunctions, _ExternalMacroMap, _Forms, _CompileOpts) ->
@@ -893,159 +996,6 @@ append_if(Boolean, Form, Forms) ->
         false ->
             Forms
     end.
-
-%%%===================================================================
-%%% ===== Phase 1: external attribute macro pass =====
-%%%===================================================================
-
-run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms) ->
-    InitState = #{global_macro_opts => GlobalMacroOpts0,
-                  module_macro_maps => #{},
-                  module => Module,
-                  file => File,
-                  passed_forms => [],
-                  macro_map => #{}},
-    astranaut_traverse:run(
-      astranaut:map_forms_splice(fun external_form_handler/1, Forms, #{traverse => none}),
-      ?MODULE, #{}, InitState).
-
-external_form_handler(Form) ->
-    do([ traverse ||
-           State <- astranaut_traverse:get(),
-           case is_external_env_form(Form) of
-               true -> handle_external_env_form(Form, State);
-               false -> handle_external_attribute(Form, State)
-           end
-       ]).
-
-handle_external_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
-    #{global_macro_opts := GlobalMacroOpts} = State,
-    case import_macro_form(GlobalMacroOpts, Form) of
-        {ok, ModuleMacroMap} ->
-            #{module := Module, file := File, macro_map := MacroMap} = State,
-            PassedForms = external_passed_forms(State),
-            Effective = effective_module_macro_maps(File, Module, PassedForms, ModuleMacroMap),
-            NewMap = uniform_imported_macro_map(Effective),
-            case merge_macro_maps_pure(MacroMap, NewMap) of
-                {ok, Merged} ->
-                    ModuleMacroMaps = maps:merge(maps:get(module_macro_maps, State, #{}), Effective),
-                    do([ traverse ||
-                           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps,
-                                                         macro_map => Merged}),
-                           return({splice, []})
-                       ]);
-                {error, Reason} ->
-                    astranaut_traverse:fail(Reason)
-            end;
-        {error, Error} ->
-            astranaut_traverse:fail(Error)
-    end;
-handle_external_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
-    #{module := Module, file := File, macro_map := MacroMap} = State,
-    ImportedMacros = module_macro_maps_from_uniform(MacroMap),
-    PassedForms = external_passed_forms(State),
-    do([ traverse ||
-           UsedMacros <- astranaut:traverse_return(
-                           used_macros(File, Module, ImportedMacros, [Form], PassedForms)),
-           NewMap = uniform_imported_macro_map(UsedMacros),
-           Merged <- case merge_macro_maps_pure(MacroMap, NewMap) of
-                         {ok, MergedMap} ->
-                             astranaut_traverse:return(MergedMap);
-                         {error, Reason} ->
-                             astranaut_traverse:fail(Reason)
-                     end,
-           ModuleMacroMaps0 = maps:get(module_macro_maps, State, #{}),
-           ModuleMacroMaps1 = maps:fold(
-                                fun(M, Macros, Acc) ->
-                                        M1 = maps:get(M, Acc, #{}),
-                                        maps:put(M, maps:merge(M1, Macros), Acc)
-                                end, ModuleMacroMaps0, UsedMacros),
-           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps1,
-                                         macro_map => Merged}),
-           return({splice, []})
-       ]);
-handle_external_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
-    #{global_macro_opts := GlobalMacroOpts} = State,
-    do([ traverse ||
-           MacroOpts <- astranaut:traverse_return(
-                          astranaut_lib:validate(global_macro_update_validator(), Attr)),
-           astranaut_traverse:put(external_note_passed_form(
-                                    Form, State#{global_macro_opts => maps:merge(GlobalMacroOpts, MacroOpts)})),
-           return(Form)
-       ]);
-handle_external_env_form(Form, _State) ->
-    external_keep_form(Form).
-
-handle_external_attribute(Form, State) ->
-    #{macro_map := MacroMap} = State,
-    AttributeMacroMap = attribute_macro_map(MacroMap),
-    case attribute_find_macro(Form, MacroMap, AttributeMacroMap) of
-        {ok, Macro} ->
-            do([ traverse ||
-                   Expanded <- astranaut:traverse_return(
-                                 astranaut_traverse:eval(expand_macro(Macro, #{expected_role => form}),
-                                                         ?MODULE, #{}, ok)),
-                   return({splice, to_list(Expanded)})
-               ]);
-        error ->
-            handle_external_env_form(Form, State);
-        not_macro ->
-            external_keep_form(Form)
-    end.
-
-external_keep_form(Form) ->
-    do([ traverse ||
-           State <- astranaut_traverse:get(),
-           astranaut_traverse:put(external_note_passed_form(Form, State)),
-           return(Form)
-       ]).
-
-external_note_passed_form(Form, #{passed_forms := PassedForms} = State) ->
-    State#{passed_forms => [Form | PassedForms]}.
-
-external_passed_forms(#{passed_forms := PassedForms}) ->
-    lists:reverse(PassedForms).
-
-is_external_env_form({attribute, _Pos, import_macro, _Attr}) -> true;
-is_external_env_form({attribute, _Pos, use_macro, _Attr}) -> true;
-is_external_env_form({attribute, _Pos, macro_options, _Attr}) -> true;
-is_external_env_form(_Form) -> false.
-
-form_pos({attribute, Pos, _Name, _Value}) ->
-    Pos;
-form_pos(_Form) ->
-    0.
-
-module_macro_maps_from_uniform(MacroMap) ->
-    maps:fold(
-      fun(_Key, #{macro_module := MacroModule} = Macro, Acc) ->
-              ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
-              maps:put(MacroModule, maps:put(_Key, Macro, ModuleMacroMap), Acc)
-      end, #{}, MacroMap).
-
-import_macro_form(GlobalMacroOpts, {attribute, _Pos, import_macro, Module}) when is_atom(Module) ->
-    case is_loaded(Module) of
-        {file, _} ->
-            Macros = analyze_module_macros(Module),
-            Exports = Module:module_info(exports),
-            GlobalMacroOpts1 = formatter_opts(Module, Exports, GlobalMacroOpts),
-            Macros1 =
-                maps:fold(
-                  fun({Function, Arity}, MacroOptions, Acc) ->
-                          MacroOptions1 = maps:merge(GlobalMacroOpts1, MacroOptions),
-                          MacroOptions2 = MacroOptions1#{module => Module,
-                                                         macro_module => Module,
-                                                         macro => {Module, Function},
-                                                         function => Function,
-                                                         arity => Arity},
-                          maps:put({Function, Arity}, MacroOptions2, Acc)
-                  end, #{}, Macros),
-            {ok, #{Module => Macros1}};
-        false ->
-            {error, {import_macro_failed, Module}}
-    end;
-import_macro_form(_GlobalMacroOpts, {attribute, _Pos, import_macro, Attr}) ->
-    {error, {invalid_import_macro_attr, Attr}}.
 
 %%%===================================================================
 %%% ===== Phase 4: local attribute macro pass =====
