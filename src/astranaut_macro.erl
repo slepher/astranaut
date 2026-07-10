@@ -179,8 +179,9 @@ format_macro_ref(#{macro_module := Module, function := Function, arity := Arity}
     {Module, Function, Arity};
 format_macro_ref(Macro) ->
     Macro.
+
 %%%===================================================================
-%%% analyze -export_macro -use_macro attributes functions
+%%% ===== Phase 2: local macro discovery and declaration loading =====
 %%%===================================================================
 load_local_macro_attributes(Module, File, GlobalMacroOpts, ExternalMacroMap, Forms) ->
     do([ return ||
@@ -602,7 +603,7 @@ macro_without_module_attr(_Other) ->
     invalid_attr.
 
 %%%===================================================================
-%%% transform macros
+%%% ===== Pass orchestration and local macro closure analysis =====
 %%%===================================================================
 %% Step 1. expand external attribute macros only.
 %% Step 2. find local macros and their related functions.
@@ -799,6 +800,10 @@ attribute_macro_map(MacroMap) ->
               maps:put(Name, MacroNameMap1, Acc)
       end, #{}, AttributeMap).
 
+%%%===================================================================
+%%% ===== Phase 3: local macro snapshot compilation =====
+%%%===================================================================
+
 load_local_macro_forms([], _LocalMacroRelatedFunctions, _ExternalMacroMap, _Forms, _CompileOpts) ->
     astranaut_return:return(ok);
 load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts) ->
@@ -888,6 +893,10 @@ append_if(Boolean, Form, Forms) ->
         false ->
             Forms
     end.
+
+%%%===================================================================
+%%% ===== Phase 1: external attribute macro pass =====
+%%%===================================================================
 
 run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms) ->
     InitState = #{global_macro_opts => GlobalMacroOpts0,
@@ -1038,6 +1047,10 @@ import_macro_form(GlobalMacroOpts, {attribute, _Pos, import_macro, Module}) when
 import_macro_form(_GlobalMacroOpts, {attribute, _Pos, import_macro, Attr}) ->
     {error, {invalid_import_macro_attr, Attr}}.
 
+%%%===================================================================
+%%% ===== Phase 4: local attribute macro pass =====
+%%%===================================================================
+
 transform_local_attribute_macros(MacroMap, LockedSnapshotIds, Forms) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     InitState = #{macro_map => MacroMap,
@@ -1114,89 +1127,8 @@ handle_missing_attribute_macro(Form, warn_missing) ->
       astranaut_traverse:warning(invalid_macro_attribute),
       astranaut_traverse:return(Form)).
 
-function_clauses_map([{function, _Pos, Name, Arity, Clauses}|T], Acc) ->
-    NAcc = maps:put({Name, Arity}, Clauses, Acc),
-    function_clauses_map(T, NAcc);
-function_clauses_map([_H|T], Acc) ->
-    function_clauses_map(T, Acc);
-function_clauses_map([], Acc) ->
-    Acc.
-
-local_macro_related_functions(Functions, ClauseMap) ->
-    local_macro_related_functions(Functions, ClauseMap, Functions).
-
-local_macro_related_functions(Functions, ClauseMap, Deps) ->
-    lists:foldl(
-      fun(Function, Acc) ->
-              case maps:find(Function, ClauseMap) of
-                  {ok, Clauses} ->
-                      FDeps = ordsets:union(lists:map(fun local_macro_related_functions/1, Clauses)),
-                      NDeps = ordsets:union(FDeps, Acc),
-                      AddedFunctions = ordsets:subtract(FDeps, Deps),
-                      local_macro_related_functions(AddedFunctions, ClauseMap, NDeps);
-                  error ->
-                      ordsets:del_element(Function, Acc)
-              end
-      end, Deps, Functions).
-
-local_macro_related_functions({clause, _Pos1, _Patterns, _Guards, Exprs}) ->
-    with_local_function_call(
-      fun(Function, Arity, Acc) when is_atom(Function) ->
-              ordsets:add_element({Function, Arity}, Acc)
-      end, ordsets:new(), Exprs).
-
-with_local_function_call(Fun, Init, Exprs) ->
-    astranaut:sreduce(
-      fun({call, _Pos1, {atom, _Pos2, Function}, Arguments}, Acc) ->
-              Arity = length(Arguments),
-              Fun(Function, Arity, Acc);
-         (_, Acc) ->
-              Acc
-      end, Init, Exprs, #{traverse => pre}).
-
-find_function_macro_callers(Forms, MacroMap, ExcludedFunctions) ->
-    case maps:size(MacroMap) of
-        0 ->
-            ordsets:new();
-        _ ->
-            lists:foldl(
-              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
-                      case ordsets:is_element({Function, Arity}, ExcludedFunctions) of
-                          true ->
-                              Acc;
-                          false ->
-                              case has_macro_call(Clauses, MacroMap) of
-                                  true ->
-                                      ordsets:add_element({function, Function, Arity}, Acc);
-                                  false ->
-                                      Acc
-                              end
-                      end;
-                 (_Form, Acc) ->
-                      Acc
-              end, ordsets:new(), Forms)
-    end.
-
-has_macro_call(Nodes, MacroMap) ->
-    astranaut:sreduce(
-      fun(_Node, true) ->
-              true;
-         (Node, false) ->
-              case call_find_macro(uniform, Node, MacroMap) of
-                  {ok, _Macro} ->
-                      true;
-                  error ->
-                      false
-              end
-      end, false, Nodes, #{traverse => pre}).
-
-to_list(Arguments) when is_list(Arguments) ->
-    Arguments;
-to_list(Arguments) ->
-    [Arguments].
-
 %%%===================================================================
-%%% transform macro MacroModule:MacroFun(Arguments) and it's help functions.
+%%% ===== Phase 5: final function body macro expansion =====
 %%%===================================================================
 -spec transform_functions(module(), map(), [astranaut:form()], all | {except, list()} | list()) -> term().
 transform_functions(Module, MacroMap, Forms, TransformFunctions) ->
@@ -1276,7 +1208,7 @@ annotate_traversal_node(Node, Attr) ->
     end.
 
 %%%===================================================================
-%%% apply macro functions
+%%% ===== Macro call lookup and invocation =====
 %%%===================================================================
 expand_macro_recursive(_Module, _MacroMap, #{ max_depth := MaxDepth } = Macro,
     #{depth := Depth} = DepthOpts) when Depth >= MaxDepth ->
@@ -1550,6 +1482,92 @@ append_attrs(Arguments, #{attributes := Attrs, pos := Pos}) ->
 append_attrs(Arguments, #{}) ->
     Arguments.
 
+%%%===================================================================
+%%% ===== Common helpers =====
+%%%===================================================================
+
+function_clauses_map([{function, _Pos, Name, Arity, Clauses}|T], Acc) ->
+    NAcc = maps:put({Name, Arity}, Clauses, Acc),
+    function_clauses_map(T, NAcc);
+function_clauses_map([_H|T], Acc) ->
+    function_clauses_map(T, Acc);
+function_clauses_map([], Acc) ->
+    Acc.
+
+local_macro_related_functions(Functions, ClauseMap) ->
+    local_macro_related_functions(Functions, ClauseMap, Functions).
+
+local_macro_related_functions(Functions, ClauseMap, Deps) ->
+    lists:foldl(
+      fun(Function, Acc) ->
+              case maps:find(Function, ClauseMap) of
+                  {ok, Clauses} ->
+                      FDeps = ordsets:union(lists:map(fun local_macro_related_functions/1, Clauses)),
+                      NDeps = ordsets:union(FDeps, Acc),
+                      AddedFunctions = ordsets:subtract(FDeps, Deps),
+                      local_macro_related_functions(AddedFunctions, ClauseMap, NDeps);
+                  error ->
+                      ordsets:del_element(Function, Acc)
+              end
+      end, Deps, Functions).
+
+local_macro_related_functions({clause, _Pos1, _Patterns, _Guards, Exprs}) ->
+    with_local_function_call(
+      fun(Function, Arity, Acc) when is_atom(Function) ->
+              ordsets:add_element({Function, Arity}, Acc)
+      end, ordsets:new(), Exprs).
+
+with_local_function_call(Fun, Init, Exprs) ->
+    astranaut:sreduce(
+      fun({call, _Pos1, {atom, _Pos2, Function}, Arguments}, Acc) ->
+              Arity = length(Arguments),
+              Fun(Function, Arity, Acc);
+         (_, Acc) ->
+              Acc
+      end, Init, Exprs, #{traverse => pre}).
+
+find_function_macro_callers(Forms, MacroMap, ExcludedFunctions) ->
+    case maps:size(MacroMap) of
+        0 ->
+            ordsets:new();
+        _ ->
+            lists:foldl(
+              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
+                      case ordsets:is_element({Function, Arity}, ExcludedFunctions) of
+                          true ->
+                              Acc;
+                          false ->
+                              case has_macro_call(Clauses, MacroMap) of
+                                  true ->
+                                      ordsets:add_element({function, Function, Arity}, Acc);
+                                  false ->
+                                      Acc
+                              end
+                      end;
+                 (_Form, Acc) ->
+                      Acc
+              end, ordsets:new(), Forms)
+    end.
+
+has_macro_call(Nodes, MacroMap) ->
+    astranaut:sreduce(
+      fun(_Node, true) ->
+              true;
+         (Node, false) ->
+              case call_find_macro(uniform, Node, MacroMap) of
+                  {ok, _Macro} ->
+                      true;
+                  error ->
+                      false
+              end
+      end, false, Nodes, #{traverse => pre}).
+
+to_list(Arguments) when is_list(Arguments) ->
+    Arguments;
+to_list(Arguments) ->
+    [Arguments].
+
+
 update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true} = Opts) ->
     astranaut_traverse:state(
       fun(Counter) ->
@@ -1586,7 +1604,7 @@ split_varname(String) ->
     end.
 
 %%%===================================================================
-%%% format functions.
+%%% ===== Debug formatting helpers =====
 %%%===================================================================
 format_forms(Forms, Opts) ->
     case maps:get(debug_module, Opts, false) of
