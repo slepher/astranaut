@@ -116,8 +116,16 @@ format_error({invalid_macro_return, Detail}) ->
                   [format_mfa(invalid_macro_return_mfa(Detail)), Detail]);
 format_error({invalid_extra_functions, Functions}) ->
     io_lib:format("extra_functions contains undefined functions: ~p", [Functions]);
+format_error({duplicate_local_macro_declaration, Function}) ->
+    io_lib:format("duplicate local macro declaration for ~p", [Function]);
 format_error({conflicting_internal_function_policy, Function, Policies}) ->
     io_lib:format("conflicting internal_function policy for ~p: ~p", [Function, Policies]);
+format_error({conflicting_local_macro_closure_environment, FormId}) ->
+    io_lib:format("local macro closure has conflicting expansion environments for ~p", [FormId]);
+format_error({illegal_locked_form_mutation, Form}) ->
+    io_lib:format("local macro expansion modified frozen form: ~p", [Form]);
+format_error(local_macro_module_in_use) ->
+    io_lib:format("local macro module is in use and cannot be safely replaced", []);
 format_error({illegal_macro_environment_mutation, Form}) ->
     io_lib:format("local macro expansion generated illegal macro environment form: ~p", [Form]);
 format_error({illegal_local_macro_definition_mutation, Form}) ->
@@ -140,19 +148,45 @@ run_external_macro_pass(Module, File, GlobalMacroOpts0, Forms) ->
                   module => Module,
                   file => File,
                   passed_forms => [],
+                  local_macro_state => astranaut_local_macro:new(),
                   macro_map => #{}},
     astranaut_traverse:run(
-      astranaut:map_forms_splice(fun external_form_handler/1, Forms, #{traverse => none}),
+      astranaut:map_forms_splice(fun external_form_handler/1, Forms, #{traverse => none, queue_state => true}),
       ?MODULE, #{}, InitState).
 
 external_form_handler(Form) ->
     do([ traverse ||
            State <- astranaut_traverse:get(),
-           case is_external_env_form(Form) of
-               true -> handle_external_env_form(Form, State);
-               false -> handle_external_attribute(Form, State)
+           case Form of
+               {attribute, _Pos, local_macro, _Attr} -> handle_local_macro_declaration(Form, State);
+               _ ->
+                   case is_external_env_form(Form) of
+                       true -> handle_external_env_form(Form, State);
+                       false -> handle_external_attribute(Form, State)
+                   end
            end
        ]).
+
+handle_local_macro_declaration({attribute, Pos, local_macro, Attr} = Form,
+                               #{local_macro_state := LocalState,
+                                 remaining_forms := Queue} = State) ->
+    SourceView = astranaut_local_macro:source_view(external_passed_forms(State), Queue),
+    ClauseMap = function_clauses_map(SourceView, #{}),
+    do([ traverse ||
+           {FAs, Options} <- astranaut:traverse_return(
+                               validate_local_macro_attribute(#{clause_map => ClauseMap}, Attr)),
+           case astranaut_local_macro:register(FAs, Options, SourceView,
+                                                external_env_snapshot(State), LocalState) of
+               {ok, LocalState1} ->
+                   astranaut_traverse:put(external_note_passed_form(Form, State#{local_macro_state => LocalState1}));
+               {error, Error} ->
+                   astranaut_traverse:update_pos(Pos, ?MODULE, astranaut_traverse:fail(Error))
+           end,
+           return(Form)
+       ]).
+
+external_env_snapshot(#{macro_map := MacroMap, global_macro_opts := GlobalOpts}) ->
+    #{macro_map => MacroMap, global_macro_opts => GlobalOpts}.
 
 handle_external_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
     #{global_macro_opts := GlobalMacroOpts} = State,
@@ -707,6 +741,8 @@ macro_without_module_attr({Function, Arity}) when is_integer(Arity) ->
     {[{Function, Arity}], []};
 macro_without_module_attr({FA, Options}) ->
     {[FA], Options};
+macro_without_module_attr(FAs) when is_list(FAs) ->
+    {FAs, []};
 macro_without_module_attr(_Other) ->
     invalid_attr.
 
@@ -974,7 +1010,8 @@ local_macro_snapshot_form_id(_Form) ->
 
 compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts) ->
     Forms1 = astranaut_syntax:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
-    astranaut_lib:load_forms(Forms1, [without_warnings|CompileOpts]).
+    Module = astranaut_lib:analyze_forms_module(Forms),
+    astranaut_local_macro:safe_load(Module, Forms1, [without_warnings|CompileOpts]).
 
 local_macro_exports(LocalMacroFunctions) ->
     lists:foldl(
@@ -1466,36 +1503,7 @@ function_clauses_map([], Acc) ->
     Acc.
 
 local_macro_related_functions(Functions, ClauseMap) ->
-    local_macro_related_functions(Functions, ClauseMap, Functions).
-
-local_macro_related_functions(Functions, ClauseMap, Deps) ->
-    lists:foldl(
-      fun(Function, Acc) ->
-              case maps:find(Function, ClauseMap) of
-                  {ok, Clauses} ->
-                      FDeps = ordsets:union(lists:map(fun local_macro_related_functions/1, Clauses)),
-                      NDeps = ordsets:union(FDeps, Acc),
-                      AddedFunctions = ordsets:subtract(FDeps, Deps),
-                      local_macro_related_functions(AddedFunctions, ClauseMap, NDeps);
-                  error ->
-                      ordsets:del_element(Function, Acc)
-              end
-      end, Deps, Functions).
-
-local_macro_related_functions({clause, _Pos1, _Patterns, _Guards, Exprs}) ->
-    with_local_function_call(
-      fun(Function, Arity, Acc) when is_atom(Function) ->
-              ordsets:add_element({Function, Arity}, Acc)
-      end, ordsets:new(), Exprs).
-
-with_local_function_call(Fun, Init, Exprs) ->
-    astranaut:sreduce(
-      fun({call, _Pos1, {atom, _Pos2, Function}, Arguments}, Acc) ->
-              Arity = length(Arguments),
-              Fun(Function, Arity, Acc);
-         (_, Acc) ->
-              Acc
-      end, Init, Exprs, #{traverse => pre}).
+    astranaut_local_macro:related_functions(Functions, ClauseMap).
 
 find_function_macro_callers(Forms, MacroMap, ExcludedFunctions) ->
     case maps:size(MacroMap) of
