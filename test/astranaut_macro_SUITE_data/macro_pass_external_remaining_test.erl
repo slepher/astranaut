@@ -12,6 +12,7 @@
 -export([non_env_attr_value/0]).
 -export([final_external_value/0]).
 -export([injected_attrs_value/0]).
+-export([injected_attribute_attrs_value/0]).
 
 -import_macro(macro_uniform_a).
 -import_macro(macro_pass_external_helper).
@@ -22,6 +23,7 @@
 -generate_import_and_attr(ok).
 -generate_seen_attr(ok).
 -import_macro(macro_pass_inject_attrs).
+-injected_attrs_attribute(ok).
 -pass_seen_attr(source_late).
 -generate_late_seen_attr(ok).
 -generate_non_env_attr(ok).

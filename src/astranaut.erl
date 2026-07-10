@@ -381,18 +381,30 @@ map_forms_splice(F, Forms, Opts) ->
 
 map_forms_splice_loop(F, [{Tag, Form} | Forms], Acc, Opts) ->
     astranaut_traverse:bind(
-      astranaut_traverse:catch_on_error(
-        traverse_map_form(F, Form),
-        fun() -> astranaut_traverse:return({splice, []}) end),
-      fun
-          ({splice, NewForms}) ->
-              GeneratedForms = [map_forms_splice_tag_generated(NewForm) || NewForm <- NewForms],
-              map_forms_splice_loop(F, GeneratedForms ++ Forms, Acc, Opts);
-          (Form1) ->
-              map_forms_splice_loop(F, Forms, [map_forms_splice_tag_result(Tag, Form1) | Acc], Opts)
+      map_forms_splice_note_queue(Opts, [Form | map_forms_splice_untag(Forms)]),
+      fun(_) ->
+              astranaut_traverse:bind(
+                astranaut_traverse:catch_on_error(
+                  traverse_map_form(F, Form),
+                  fun() -> astranaut_traverse:return({splice, []}) end),
+                fun
+                    ({splice, NewForms}) ->
+                        GeneratedForms = [map_forms_splice_tag_generated(NewForm) || NewForm <- NewForms],
+                        map_forms_splice_loop(F, GeneratedForms ++ Forms, Acc, Opts);
+                    (Form1) ->
+                        map_forms_splice_loop(F, Forms, [map_forms_splice_tag_result(Tag, Form1) | Acc], Opts)
+                end)
       end);
 map_forms_splice_loop(_F, [], Acc, _Opts) ->
     astranaut_traverse:return(map_forms_splice_reorder(lists:reverse(Acc))).
+
+%% A scanner can opt in to a materialised source view without changing the
+%% behaviour of existing splice clients.  The value contains the current form
+%% followed by the exact remaining queue, including generated forms.
+map_forms_splice_note_queue(#{queue_state := true}, Queue) ->
+    astranaut_traverse:modify(fun(State) -> State#{remaining_forms => Queue} end);
+map_forms_splice_note_queue(_Opts, _Queue) ->
+    astranaut_traverse:return(ok).
 
 map_forms_splice_tag_generated({function, _Pos, _Name, _Arity, _Clauses} = Form) ->
     {generated_insert, Form};

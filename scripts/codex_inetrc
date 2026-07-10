@@ -1,0 +1,3 @@
+{lookup, [file]}.
+{host, {127,0,0,1}, ["localhost"]}.
+{host, {0,0,0,0,0,0,0,1}, ["localhost"]}.

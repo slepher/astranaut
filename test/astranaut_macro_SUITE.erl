@@ -359,7 +359,10 @@ test_macro_pass_external_remaining_cases(_Config) ->
     ?assertEqual({pass_generated, ok}, macro_pass_external_remaining_test:pass_generated_value()),
     ?assertEqual({external_non_env_attr, ok}, macro_pass_external_remaining_test:non_env_attr_value()),
     ?assertEqual({a, {from_a, ok}}, macro_pass_external_remaining_test:final_external_value()),
-    ?assertEqual({injected_attrs, [early]}, macro_pass_external_remaining_test:injected_attrs_value()),
+    ?assertEqual({injected_attribute_attrs, [early]},
+                 macro_pass_external_remaining_test:injected_attribute_attrs_value()),
+    ?assertEqual({injected_attrs, [early, source_late, generated_late]},
+                 macro_pass_external_remaining_test:injected_attrs_value()),
     ok.
 
 test_macro_pass_extra_functions(_Config) ->
