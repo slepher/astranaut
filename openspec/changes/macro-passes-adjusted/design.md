@@ -63,7 +63,7 @@ while Queue 非空:
 | 已注册但尚不可调用的本地属性宏 | 请求 local-macro 工作流完成必要编译，再展开该属性。|
 | 其他 form | 原样保留。|
 
-属性宏可生成新的 `import_macro`、`use_macro`、`macro_options` 或 `local_macro` form；这些 form 重新进入同一扫描流。`export_macro` 不属于宏环境变更项，其 retain 语义由 local-macro 工作流处理。
+属性宏可生成新的 `import_macro`、`use_macro`、`macro_options` 或 `local_macro` form；这些 form 重新进入同一扫描流。`export_macro` 不属于宏环境变更项，单独出现时不会使宏在定义模块内变为可调用的 local macro；其 retain 语义由 local-macro 工作流处理。`local_macro` 与 `export_macro` 可标记同一 FA：前者使用 declaration-time 本地宏环境，后者发布原模块的导出宏，二者保持独立。
 
 ### 宏环境 form 的处理
 

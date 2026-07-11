@@ -17,7 +17,10 @@
                 generate_non_env_attr/1,
                 non_env_chained_attr/1,
                 generate_final_function/1,
-                generate_delayed_macro_call/1], [{as_attr, true}]}).
+                generate_delayed_macro_call/1,
+                stateful_attribute/1], [{as_attr, true}]}).
+
+-export_macro([stateful_function/0]).
 
 generate_helper(_Ast) ->
     Body = quote(astranaut_lib:abstract_form({external_generated_helper, ok})),
@@ -62,3 +65,18 @@ generate_final_function(_Ast) ->
 generate_delayed_macro_call(_Ast) ->
     Body = quote(macro_uniform_a:to_a(ok)),
     astranaut_lib:gen_function(delayed_value, Body).
+
+%% Deliberately returns a traverse computation that mutates its private State.
+%% The caller's scan State must remain intact after this macro completes.
+stateful_attribute(_Ast) ->
+    Form = astranaut_lib:gen_function(stateful_value,
+                                      astranaut_lib:abstract_form(stateful)),
+    astranaut_traverse:then(
+      astranaut_traverse:put(overwritten),
+      astranaut_traverse:return(Form)).
+
+%% The function-pass counterpart of stateful_attribute/1.
+stateful_function() ->
+    astranaut_traverse:then(
+      astranaut_traverse:put(overwritten),
+      astranaut_traverse:return(astranaut_lib:abstract_form(function_stateful))).

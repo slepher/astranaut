@@ -572,7 +572,10 @@ macro.hrl enables the astranaut macro parse transform.
 *export_macro*
 
 &emsp;&emsp;used in the module where macros are defined. Exported macros can be
-imported by other modules.
+imported by other modules. This declaration alone does not make the function a
+local macro in its defining module: an unqualified call there remains an
+ordinary Erlang function call. Combine it with `-local_macro` on the same FA
+when both local and exported macro behaviour are required.
 
 ```erlang
 -export_macro([MacroA/A, MacroB/B]).

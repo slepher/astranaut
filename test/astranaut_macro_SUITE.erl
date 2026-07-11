@@ -46,6 +46,10 @@ init_per_suite(Config) ->
                    macro_pass_internal_independent_test, macro_pass_internal_direct_test,
                    macro_pass_final_outside_snapshot_test,
                    macro_pass_generated_function_delay_test,
+                   macro_pass_export_not_local_test,
+                   macro_pass_export_and_local_test,
+                   macro_pass_scoped_attribute_state_test,
+                   macro_pass_scoped_function_state_test,
                    macro_node_role_test,
                    macro_validator_slots,
                    macro_test],
@@ -153,6 +157,10 @@ all() ->
      test_macro_pass_locked_spec_mutation_error,
      test_macro_pass_final_expands_outside_snapshot,
      test_macro_pass_generated_function_delay,
+     test_macro_pass_export_not_local,
+     test_macro_pass_export_and_local,
+     test_macro_pass_scoped_attribute_state,
+     test_macro_pass_scoped_function_state,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
      test_use_macro_errors,
@@ -443,6 +451,25 @@ test_macro_pass_final_expands_outside_snapshot(_Config) ->
 
 test_macro_pass_generated_function_delay(_Config) ->
     ?assertEqual({a, {from_a, ok}}, macro_pass_generated_function_delay_test:delayed_value()),
+    ok.
+
+test_macro_pass_export_not_local(_Config) ->
+    ?assertMatch({atom, _, exported_only}, macro_pass_export_not_local_test:value()),
+    ok.
+
+test_macro_pass_export_and_local(_Config) ->
+    ?assertEqual(shared_macro, macro_pass_export_and_local_test:local_value()),
+    ?assertMatch({atom, _, shared_macro}, macro_pass_export_and_local_test:shared()),
+    ok.
+
+test_macro_pass_scoped_attribute_state(_Config) ->
+    ?assertEqual(stateful, macro_pass_scoped_attribute_state_test:stateful_value()),
+    ?assertMatch({tuple, _, [{atom, _, external_generated_helper}, {atom, _, ok}]},
+                 macro_pass_scoped_attribute_state_test:generated_helper()),
+    ok.
+
+test_macro_pass_scoped_function_state(_Config) ->
+    ?assertEqual(function_stateful, macro_pass_scoped_function_state_test:value()),
     ok.
 
 test_uniform_macro_override_error(Config) ->

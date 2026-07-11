@@ -72,6 +72,20 @@
 - **当** 后续 form 使用 FA 时
 - **那么** 有效 options 为 `[{xxx1, false}, {xxx2, true}]`
 
+### 场景：export_macro 不进入本模块的 local macro 环境
+
+- **给定** 模块声明 `-export_macro([foo/0])`
+- **并且** 未声明 `-local_macro([foo/0])`
+- **当** 本模块出现非限定调用 `foo()`
+- **那么** 该调用保持普通 Erlang 函数调用，不作为宏展开
+
+### 场景：local_macro 与 export_macro 可组合
+
+- **给定** 同一 `foo/0` 同时声明为 `-local_macro([foo/0])` 和 `-export_macro([foo/0])`
+- **当** 本模块出现非限定调用 `foo()`
+- **那么** 该调用使用 local_macro 的 declaration-time 本地宏环境展开
+- **并且** 原模块中的 `foo/0` 保持导出，供其他模块 import 为宏
+
 ## 需求：扫描顺序保留局部 splice 顺序
 
 ### 场景：生成 forms 位于当前位置
