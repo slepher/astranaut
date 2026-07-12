@@ -109,7 +109,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [test_return, test_bind, test_error_0, test_state, 
+    [test_return, test_bind, test_error_0, test_with_all_error, test_state,
      test_pos, test_pos_2, test_file_pos, test_fail,
      test_map_m_root_attr,
      test_scoped_state, test_scoped_state_fail, test_scoped_state_run].
@@ -119,7 +119,7 @@ all() ->
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-test_return() -> 
+test_return() ->
     [].
 
 %%--------------------------------------------------------------------
@@ -161,6 +161,25 @@ test_error_0(_Config) ->
     ErrorStateM0 = astranaut_return:run_error(astranaut_traverse:run(MA, formatter_0, #{}, ok)),
     ErrorStateM1 = astranaut_error:printable(ErrorStateM0),
     ?assertEqual(ErrorState2, ErrorStateM1),
+    ok.
+
+test_with_all_error(_Config) ->
+    MA =
+        astranaut_traverse:with_all_error(
+          fun(Error) -> {mapped, Error} end,
+          do([ traverse ||
+                 astranaut_traverse:error(raw_error),
+                 astranaut_traverse:formatted_errors(
+                   [{10, formatter_0, formatted_error}]),
+                 astranaut_traverse:warning(unchanged_warning),
+                 return(ok)
+             ])),
+    #{error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, state),
+    ?assertEqual([{mapped, raw_error}], astranaut_error:errors(Error)),
+    ?assertEqual(
+       [{10, formatter_0, {mapped, formatted_error}}],
+       astranaut_error:formatted_errors(Error)),
+    ?assertEqual([unchanged_warning], astranaut_error:warnings(Error)),
     ok.
 
 test_state(_Config) ->

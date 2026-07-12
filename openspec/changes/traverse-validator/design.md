@@ -295,7 +295,15 @@ astranaut:map_m(PassFun, Return,
                                      fail => collect}})
 ```
 
-The input validation shares recursion with structure-preserving framework operations such as quoted-variable renaming, syntax reversion, and zero-position replacement. Output validation is disabled for those operations. The macro layer rewrites collected generic validation errors to `{invalid_macro_return, Detail}` and returns the original macro-call AST when validation fails.
+The input validation shares recursion with structure-preserving framework operations such as quoted-variable renaming, syntax reversion, and zero-position replacement. Output validation is disabled for those operations. The macro layer rewrites collected generic validation errors to `{invalid_macro_return, Detail}`.
+
+Every monadic macro-call failure, including invocation exceptions, explicit error
+returns, invalid returns, and expansion-depth failures, is recovered locally with
+the original macro-call AST. This is a temporary traversal value rather than a
+promise to retain the failed node in final output: it keeps the parent tree
+well-shaped long enough to analyse sibling branches and collect their errors.
+The outer traversal remains free to delete the failed node after that analysis.
+Framework invariant exceptions are not converted into macro-call recovery.
 
 A traversal computation returned by user macro code runs under
 `astranaut_traverse:scoped_state(InnerState, MA)`. It receives private State but

@@ -31,6 +31,7 @@
 - [x] Add `validate_opts` with `record_defs` and `fail => raise | collect`.
 - [x] Route collected validation failures through monadic fail/catch without tagged node return values.
 - [x] Preserve macro-specific validation errors by rewriting collected traversal errors.
+- [x] Recover every monadic macro-call failure with its original AST until sibling analysis completes.
 - [x] Pass filtered record-definition forms through validation opts for guard checks.
 - [x] Keep record-definition forms out of traversal attrs.
 - [x] Use `erl_lint:is_guard_test/2` for guard validation.
@@ -50,6 +51,7 @@
 - [x] `pre`, `post`, `all`, `subtree`, and `none` validation behavior is covered.
 - [x] Macro invalid return from a wrong slot reports `{invalid_macro_return, Detail}`.
 - [x] Nested macro invalid return preserves origin/current macro detail.
+- [x] Generated macro siblings collect exception, explicit-error, and invalid-return diagnostics in one pass.
 - [x] Guard validation sees record definitions through validation opts.
 - [x] Structural identity errors reject binary fields in ordinary element slots.
 - [x] Type/tag-correct but malformed structural nodes fail as `invalid_node`.

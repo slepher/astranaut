@@ -1264,9 +1264,12 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
 expand_macro_recursive(_Module, _MacroMap, #{ max_depth := MaxDepth } = Macro,
     #{depth := Depth} = DepthOpts) when Depth >= MaxDepth ->
     CurrentMacro = maps:get(origin_macro, DepthOpts, Macro),
-    astranaut_traverse:fail({max_macro_expansion_depth_exceeded,
-                             maps:get(macro, CurrentMacro),
-                             maps:get(arguments, CurrentMacro, [])});
+    recover_macro_call(
+      Macro,
+      astranaut_traverse:fail(
+        {max_macro_expansion_depth_exceeded,
+         maps:get(macro, CurrentMacro),
+         maps:get(arguments, CurrentMacro, [])}));
 expand_macro_recursive(Module, MacroMap, Macro, #{step := post } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     expand_macro_with(
@@ -1317,23 +1320,28 @@ expand_macro(Macro, Opts) ->
     expand_macro_with(Macro, Opts, fun astranaut_traverse:return/1).
 
 expand_macro_with(#{pos := Pos, formatter := Formatter} = Macro, Opts, Success) ->
-    do([ traverse ||
-           %% A user macro may return a traverse computation.  Run only that
-           %% computation in private State; framework work below, including
-           %% quoted-variable numbering, remains in the caller's State.
-           Node <- astranaut_traverse:update_pos(Pos, Formatter, invoke_macro_function(Macro)),
-           astranaut_traverse:catch_on_error(
-             do([ traverse ||
-                    %% Validate the returned tree while traversing it once for
-                    %% structure-preserving variable and position updates.
-                    Node1 <- process_macro_return(Node, Macro, Opts),
-                    format_node(Node1, Macro),
-                    Success(Node1)
-                ]),
-             fun() ->
-                     astranaut_traverse:return(maps:get(call_ast, Macro))
-             end)
-       ]).
+    recover_macro_call(
+      Macro,
+      do([ traverse ||
+             %% A user macro may return a traverse computation.  Run only that
+             %% computation in private State; framework work below, including
+             %% quoted-variable numbering, remains in the caller's State.
+             Node <- astranaut_traverse:update_pos(
+                       Pos, Formatter, invoke_macro_function(Macro)),
+             %% Validate the returned tree while traversing it once for
+             %% structure-preserving variable and position updates.
+             Node1 <- process_macro_return(Node, Macro, Opts),
+             format_node(Node1, Macro),
+             Success(Node1)
+         ])).
+
+recover_macro_call(Macro, Monad) ->
+    %% The original call is a temporary recovery value.  It keeps the parent
+    %% tree traversable so sibling macro errors can still be collected; the
+    %% outer traversal may delete the failed node after analysis completes.
+    astranaut_traverse:catch_on_error(
+      Monad,
+      fun() -> astranaut_traverse:return(maps:get(call_ast, Macro)) end).
 
 invoke_macro_function(#{module := Module, function := Function, arguments := Arguments} = Macro) ->
     try erlang:apply(Module, Function, Arguments) of
@@ -1360,15 +1368,12 @@ process_macro_return(Return, Macro, Opts) ->
            Attr <- astranaut_traverse:ask(),
            RenameContext <- macro_return_rename_context(Macro, Opts),
            ProcessReturn =
-               astranaut_traverse:with_error(
-                 fun(ErrorStruct) ->
-                         astranaut_error:with_error(
-                           fun({invalid_transform_normalization, Detail}) ->
-                                   {invalid_macro_return,
-                                    macro_return_detail(Macro, Opts, Detail)};
-                              (Error) ->
-                                   Error
-                           end, ErrorStruct)
+               astranaut_traverse:with_all_error(
+                 fun({invalid_transform_normalization, Detail}) ->
+                         {invalid_macro_return,
+                          macro_return_detail(Macro, Opts, Detail)};
+                    (Error) ->
+                         Error
                  end,
                  astranaut:map_m(
                    fun(Node) ->

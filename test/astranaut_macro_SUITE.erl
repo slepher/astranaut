@@ -166,6 +166,7 @@ all() ->
      test_use_macro_errors,
      test_macro_format_error_predefined_errors,
      test_uniform_macro_error,
+     test_macro_sibling_errors,
      test_uniform_macro_invalid_return,
      test_uniform_local_macro_invalid_return,
      test_macro_validator_slot_errors,
@@ -571,6 +572,33 @@ test_uniform_macro_error(Config) ->
            [{atom, _, b},
             {tuple, _, [{atom, _, from_b}, {atom, _, ok}]}]}}}],
        Errors),
+    assert_formatted_messages(Errors),
+    ok.
+
+test_macro_sibling_errors(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(macro_sibling_errors_test, Config),
+    ErrorStruct = astranaut_return:run_error(astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} = astranaut_error:realize(ErrorStruct),
+    ?assertEqual(3, length(Errors)),
+    ?assert(
+       lists:any(
+         fun({_Pos, _Formatter,
+              {macro_exception, #{function := raise_macro}, [], _Exception}}) -> true;
+            (_) -> false
+         end, Errors)),
+    ?assert(
+       lists:any(
+         fun({_Pos, _Formatter, sibling_return_error}) -> true;
+            (_) -> false
+         end, Errors)),
+    ?assert(
+       lists:any(
+         fun({_Pos, astranaut_macro,
+              {invalid_macro_return,
+               #{current_macro :=
+                     #{mfa := #{function := invalid_return_macro}}}}}) -> true;
+            (_) -> false
+         end, Errors)),
     assert_formatted_messages(Errors),
     ok.
 

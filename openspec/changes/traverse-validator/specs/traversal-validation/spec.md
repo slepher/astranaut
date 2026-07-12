@@ -169,3 +169,18 @@ Macro-triggered validation failures SHALL include the macro call detail already 
 - **AND** the generated macro returns an invalid node
 - **WHEN** macro expansion validates the generated return
 - **THEN** the error detail identifies both the origin macro and the current macro
+
+### Requirement: Macro Failures Do Not Stop Sibling Analysis
+
+Every monadic macro-call failure SHALL temporarily recover the original macro
+call so traversal can continue analysing sibling nodes. The diagnostic SHALL be
+retained, and the outer traversal MAY delete the failed node after sibling
+analysis completes.
+
+#### Scenario: Generated sibling macros fail differently
+
+- **GIVEN** a macro expands into sibling macro calls
+- **AND** those siblings respectively throw, return an explicit error, and return an invalid AST
+- **WHEN** the generated return tree is traversed
+- **THEN** all three diagnostics are collected
+- **AND** no sibling failure prevents analysis of the remaining siblings

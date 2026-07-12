@@ -48,7 +48,7 @@
 -export([bind/2, then/2, return/1]).
 -export([fail/1, fail/2, fails/1]).
 -export([fail_on_error/1, catch_on_error/2]).
--export([with_error/2, catch_fail/2, set_fail/1]).
+-export([with_error/2, with_all_error/2, catch_fail/2, set_fail/1]).
 -export([ask/0, local/2]).
 -export([state/1, get/0, put/1, modify/1]).
 -export([scoped_state/2, scoped_state_run/2]).
@@ -315,6 +315,15 @@ with_error(F, MA) ->
               Error2 = F(Error1),
               update_m_state(MState, #{error => Error2})
         end, MA).
+
+-spec with_all_error(fun((term()) -> term()), struct(S, A)) -> struct(S, A).
+%% @doc Map every base error term carried by a traversal, including raw,
+%% formatted, and file-associated errors. Warnings are left unchanged.
+with_all_error(F, MA) ->
+    with_error(
+      fun(ErrorStruct) ->
+              astranaut_error:with_all_error(F, ErrorStruct)
+      end, MA).
 
 catch_fail(F, MA) ->
     map_m_state(
