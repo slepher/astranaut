@@ -35,6 +35,7 @@ init_per_suite(Config) ->
                    macro_uniform_import_force_override_test,
                    macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
+                   macro_pass_local_dependency_test,
                    macro_pass_external_helper, macro_pass_inject_attrs,
                    macro_pass_external_local_helper_test,
                    macro_pass_scan_local_attr_test,
@@ -44,6 +45,7 @@ init_per_suite(Config) ->
                    macro_pass_external_remaining_test,
                    macro_pass_extra_functions_test, macro_pass_extra_union_test,
                    macro_pass_internal_independent_test, macro_pass_internal_direct_test,
+                   macro_pass_retained_helper_test,
                    macro_pass_final_outside_snapshot_test,
                    macro_pass_generated_function_delay_test,
                    macro_pass_export_not_local_test,
@@ -142,6 +144,7 @@ all() ->
      test_macro_pass_generated_import,
      test_macro_pass_no_backscan,
      test_macro_pass_local_attribute_chain,
+     test_macro_pass_local_dependency,
      test_macro_pass_external_generated_local_helper,
      test_macro_pass_scan_local_attribute,
      test_macro_pass_local_generated_import,
@@ -153,6 +156,7 @@ all() ->
      test_macro_pass_extra_functions_union,
      test_macro_pass_internal_function_independent,
      test_macro_pass_internal_function_direct,
+     test_macro_pass_retained_helper,
      test_macro_pass_local_body_environment_mutation_error,
      test_macro_pass_locked_spec_mutation_error,
      test_macro_pass_final_expands_outside_snapshot,
@@ -368,6 +372,10 @@ test_macro_pass_local_attribute_chain(_Config) ->
     ?assertEqual({local_attribute_chain, ok}, macro_pass_local_chain_test:local_chain_value()),
     ok.
 
+test_macro_pass_local_dependency(_Config) ->
+    ?assertEqual({wrapped, ok}, macro_pass_local_dependency_test:value()),
+    ok.
+
 test_macro_pass_external_generated_local_helper(_Config) ->
     ?assertEqual({external_generated_helper, ok}, macro_pass_external_local_helper_test:value()),
     ok.
@@ -426,6 +434,10 @@ test_macro_pass_internal_function_independent(_Config) ->
 
 test_macro_pass_internal_function_direct(_Config) ->
     ?assertEqual({internal_direct, ok}, macro_pass_internal_direct_test:value()),
+    ok.
+
+test_macro_pass_retained_helper(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_pass_retained_helper_test:value()),
     ok.
 
 test_macro_pass_local_body_environment_mutation_error(Config) ->

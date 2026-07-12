@@ -7,6 +7,33 @@
 3. local macro 的专属生命周期委托给 [local-macro 设计](../local-macro/design.md)。
 4. 最终函数体展开继续保留现有递归及 `outer` / `inner` 语义。
 
+## 统一 function 展开能力
+
+`astranaut_macro` 只维护一套 function-body 宏匹配和递归展开实现：
+
+```text
+ExpandFunctions(MacroEnv, Forms, TargetFAs) -> ExpandedForms | Error
+```
+
+最终 function pass 和 local-macro 累计编译都调用该实现。它只根据传入的
+`MacroEnv` 工作，不判断目标是否为 local macro，也不读取
+`internal_function`、declaration order、generation、retain 或冻结状态。
+
+`astranaut_macro` 还提供与展开器相同调用匹配语义的引用解析操作：
+
+```text
+ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
+```
+
+该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、
+候选环境、`internal_function` direct-call 集合以及逐目标 FA 的环境裁剪由
+`astranaut_local_macro` 决定。特别地，展开 TargetFA 时传入的最终环境不包含
+TargetFA；这是调用方构造环境的规则，不是通用展开器中的递归特判。
+
+两个操作均返回 `astranaut_return` 结果。统一扫描只在调用 local-macro 的注册、
+按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释
+local-macro 编译计划。
+
 ## 两步模型
 
 顶层只有两个 pass。local-macro 的收尾不是第三个 pass，而是 attribute
@@ -79,7 +106,11 @@ while Queue 非空:
 
 每次处理 attribute 时，从 `ExternalEnv + 当前可调用 LocalEnv` 构造执行宏映射，并按既有 `as_attr`、`exec_macro` 规则匹配。若命中外部或已就绪本地属性宏，使用当前映射展开并返回 `splice(NewForms)`。
 
-若 attribute 对应已注册但尚不可调用的 local macro，扫描器先向 local-macro 工作流请求最小累计编译计划；计划成功提交后重新以更新后的 LocalEnv 展开该 attribute。该过程仍在同一队列位置完成，不能把 attribute 延后到独立本地 pass。
+若 attribute 对应已注册但尚不可调用的 local macro，扫描器调用 local-macro
+工作流的确保可调用接口。最小累计计划、逐目标环境、通用 function 展开调用、
+缓存、加载和提交都在该工作流内部完成；成功后扫描器重新以更新后的 LocalEnv
+展开该 attribute。该过程仍在同一队列位置完成，不能把 attribute 延后到独立
+本地 pass。
 
 未匹配的普通 attribute 与普通 forms 保持原样。属性宏生成的 function、spec 或其他普通 form 留在输出流中，不在属性扫描阶段提前执行函数体递归展开。
 

@@ -1,5 +1,21 @@
 # Review: macro-passes-adjusted 实现与测试质量
 
+## 2026-07-12 后续状态
+
+本文件下文保留首次 review 的历史结论。local-macro 后续重构已经解决其中的
+未完成项：
+
+- scan 只调用 `register`、`ensure_available` 和 `finalize`，不再自行执行或忽略
+  compile plan；最小累计 boundary 与最终强制全量 generation 由
+  `astranaut_local_macro` 驱动。
+- `FinalLocalEnv` 已过滤并接入最终 function pass。
+- retained frozen forms 以最终逐目标环境重新展开并调用 `verify_retained`；目标
+  FA 自身和 `internal_function` 由 local 模块从有效环境裁剪。
+- local macro function 与普通 function 共用 `astranaut_macro` 的统一引用匹配和
+  `expand_functions` 实现，通用展开器没有 local 专属递归分支。
+- 新增依赖边界、多环境冲突、缓存、retained helper 与同构环境测试；完整
+  Common Test 为 296/296 通过。
+
 ## 总体结论
 
 **基本完成。** `tasks.md` 中 6 项实现任务 4 项已完成，2 项部分完成；6 项测试任务中 5 项已覆盖，1 项缺失。整体 spec 覆盖率 12/12 场景。发现 5 个问题。

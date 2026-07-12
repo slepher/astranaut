@@ -6,6 +6,11 @@
 
 `-local_macro(...)` 的注册、闭包快照、按需累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更只定义统一扫描如何调用该流程。
 
+`astranaut_macro` 继续提供唯一的 function 宏引用匹配和展开实现。local-macro
+工作流向它传入已经应用 declaration snapshot、`internal_function` 及目标 FA
+自身移除规则的最终 `MacroEnv`；同一展开器不区分普通 function 与 local macro
+function。实际 local 引用的识别也复用该统一宏匹配语义。
+
 ## 范围
 
 - 外部与本地属性宏统一参与同一次 scan-and-splice。
@@ -13,6 +18,7 @@
 - 扫描遇到 `local_macro` declaration 时委托 local-macro 工作流注册。
 - 扫描需要调用尚不可用的本地属性宏时委托该工作流完成必要编译。
 - 扫描结束后使用该工作流提供的最终本地宏环境与最终跳过集合执行函数体展开。
+- 为 local-macro 工作流提供同构的引用解析与 function 展开操作。
 
 ## 不在范围内
 

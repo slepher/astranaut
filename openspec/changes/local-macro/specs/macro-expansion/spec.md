@@ -46,6 +46,13 @@
 - **那么** 该调用按普通 Erlang 函数调用处理
 - **并且** foo/1 不进入自己的 local macro 依赖集合
 
+### 场景：实际 local 引用使用统一宏匹配语义
+
+- **给定** A 已注册，且 B 的静态闭包包含对 A 同名 FA 的调用
+- **当** 解析 B 实际引用的 local macro
+- **那么** 使用与普通 function 展开相同的宏环境和调用匹配规则
+- **并且** 只有实际匹配为 local macro 的 A 才进入 B 的依赖集合
+
 ## 需求：冻结原始闭包 forms
 
 ### 场景：闭包在注册时冻结
@@ -125,6 +132,28 @@
 - **并且** 两个 declaration 对该 helper 的 internal direct-call 策略不同
 - **当** 校验策略时
 - **那么** 编译以 `conflicting_internal_function_policy` 失败
+
+### 场景：internal_function 在构造环境时应用
+
+- **给定** declaration 将 helper/1 标记为 internal_function
+- **当** 展开该 declaration 的闭包 function
+- **那么** helper/1 不出现在传给通用 function 展开器的 MacroEnv 中
+- **并且** 展开器无需解释 internal_function option
+
+### 场景：local macro 自身不进入自身宏环境
+
+- **给定** foo/1 是 local macro 且其 function form 递归调用 foo/1
+- **当** 工作流请求通用 function 展开器展开 foo/1
+- **那么** 传入的 MacroEnv 不包含 foo/1
+- **并且** 递归调用保持普通 Erlang 本地调用
+
+### 场景：B 环境包含 A 但 A form 环境不包含 A
+
+- **给定** B 实际引用先声明的 local macro A
+- **并且** A 的 form 也属于 B 的静态闭包
+- **当** 分别展开 B form 与共享的 A form
+- **那么** B form 的有效环境包含 A
+- **并且** A form 的有效环境移除 A
 
 ## 需求：retain 与最终跳过集合
 

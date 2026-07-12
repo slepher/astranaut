@@ -9,6 +9,7 @@
 all() -> [register_freezes_static_closure,
           duplicate_declaration_fails_atomically,
           cache_rejects_conflicting_environments,
+          execute_plan_rejects_conflicting_snapshots,
           cache_hits_same_fingerprint,
           retain_controls_final_skip_ids,
           source_view_only_contains_materialised_forms,
@@ -19,6 +20,7 @@ all() -> [register_freezes_static_closure,
           extra_functions_and_self_recursion,
           internal_function_conflict,
           minimal_cumulative_compile_boundaries,
+          shared_declaration_stays_in_one_boundary,
           independent_macros_share_one_boundary,
           final_retained_helper_comparison,
           safe_load_replaces_current_generation,
@@ -27,7 +29,7 @@ all() -> [register_freezes_static_closure,
 
 register_freezes_static_closure(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, State} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{imports => [a]},
+    {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{imports => [a]},
                                                   astranaut_local_macro:new()),
     #{ {foo, 0} := Entry } = astranaut_local_macro:local_macros(State),
     ?assertEqual([{function, foo, 0}, {function, helper, 0}, {spec, helper, 0}],
@@ -38,10 +40,10 @@ register_freezes_static_closure(_Config) ->
 
 duplicate_declaration_fails_atomically(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, State} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
+    {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
                                                   astranaut_local_macro:new()),
     ?assertEqual({error, {duplicate_local_macro_declaration, {foo, 0}}},
-                 astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, State)),
+                 register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, State)),
     ?assertEqual(1, map_size(astranaut_local_macro:local_macros(State))),
     ok.
 
@@ -59,9 +61,43 @@ cache_hits_same_fingerprint(_Config) ->
     {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, helper_form(a), State1),
     ok.
 
+execute_plan_rejects_conflicting_snapshots(_Config) ->
+    Source = [{attribute, 1, module, local_macro_conflict_plan_test},
+              first_form(), second_form(), helper_form(ok)],
+    {ok, S1} = register(
+                 [{first, 0}], #{}, Source, #{macro_map => #{snapshot => first}},
+                 astranaut_local_macro:new()),
+    {ok, S2} = register(
+                 [{second, 0}], #{}, Source, #{macro_map => #{snapshot => second}}, S1),
+    {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
+    Expand =
+        fun(MacroEnv, _InjectForms, Forms, {helper, 0}) ->
+                Value = case maps:is_key(snapshot, MacroEnv) of
+                            true -> maps:get(snapshot, MacroEnv);
+                            false -> none
+                        end,
+                astranaut_return:return(
+                  astranaut_local_macro:materialize_forms(
+                    Forms, #{{function, helper, 0} => helper_form(Value)}));
+           (_MacroEnv, _InjectForms, Forms, _TargetFA) ->
+                astranaut_return:return(Forms)
+        end,
+    MacroOps = #{expand_function => Expand,
+                 merge_macro_maps =>
+                     fun(First, Second) ->
+                             astranaut_return:return(maps:merge(First, Second))
+                     end},
+    Context = #{local_macro_map => #{}, source_view => Source, compile_opts => []},
+    Error = astranaut_return:run_error(
+              astranaut_local_macro:execute_plan(Plan, Context, MacroOps, S2)),
+    ?assert(lists:member(
+              {conflicting_local_macro_closure_environment, {function, helper, 0}},
+              astranaut_error:errors(Error))),
+    ok.
+
 retain_controls_final_skip_ids(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, State0} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
+    {ok, State0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
                                                    astranaut_local_macro:new()),
     Forms = #{{function, foo, 0} => Foo, {function, helper, 0} => Helper, {spec, helper, 0} => Spec},
     State1 = astranaut_local_macro:commit_compiled([{foo, 0}], Forms, State0),
@@ -83,7 +119,7 @@ fingerprint_includes_injected_forms(_Config) ->
 
 frozen_splice_is_rejected(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, State} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
+    {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
                                                   astranaut_local_macro:new()),
     ?assertEqual({error, {illegal_locked_form_mutation, Helper}},
                  astranaut_local_macro:reject_locked_mutation([Helper], State)),
@@ -92,8 +128,8 @@ frozen_splice_is_rejected(_Config) ->
 
 later_declaration_remains_helper_in_earlier_closure(_Config) ->
     Source = [a_calls_b(), b_form_independent()],
-    {ok, S1} = astranaut_local_macro:register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
-    {ok, S2} = astranaut_local_macro:register([{b, 0}], #{}, Source, #{}, S1),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
     #{ {a, 0} := A, {b, 0} := B } = astranaut_local_macro:local_macros(S2),
     ?assert(lists:member({function, b, 0}, maps:get(closure_ids, A))),
     ?assertEqual([], maps:get(referenced_local_macros, A)),
@@ -102,9 +138,9 @@ later_declaration_remains_helper_in_earlier_closure(_Config) ->
 
 declaration_snapshot_and_actual_local_references(_Config) ->
     Source = [a_form(), b_form_calls_a(), unused_form()],
-    {ok, S1} = astranaut_local_macro:register([{a, 0}], #{}, Source, #{imports => [early]}, astranaut_local_macro:new()),
-    {ok, S2} = astranaut_local_macro:register([{unused, 0}], #{}, Source, #{imports => [middle]}, S1),
-    {ok, S3} = astranaut_local_macro:register([{b, 0}], #{}, Source, #{imports => [late]}, S2),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{imports => [early]}, astranaut_local_macro:new()),
+    {ok, S2} = register([{unused, 0}], #{}, Source, #{imports => [middle]}, S1),
+    {ok, S3} = register([{b, 0}], #{}, Source, #{imports => [late]}, S2),
     #{ {a, 0} := A, {b, 0} := B } = astranaut_local_macro:local_macros(S3),
     ?assertEqual(#{imports => [early]}, maps:get(env_snapshot, A)),
     ?assertEqual(#{imports => [late]}, maps:get(env_snapshot, B)),
@@ -113,48 +149,61 @@ declaration_snapshot_and_actual_local_references(_Config) ->
 
 extra_functions_and_self_recursion(_Config) ->
     Source = [recursive_form(), helper_form(ok)],
-    {ok, State} = astranaut_local_macro:register([{recursive, 0}], #{extra_functions => [{helper, 0}]}, Source, #{},
+    {ok, State} = register([{recursive, 0}], #{extra_functions => [{helper, 0}]}, Source, #{},
                                                   astranaut_local_macro:new()),
     #{ {recursive, 0} := Entry } = astranaut_local_macro:local_macros(State),
     ?assertEqual([], maps:get(referenced_local_macros, Entry)),
     ?assert(lists:member({function, helper, 0}, maps:get(closure_ids, Entry))),
     ?assertEqual({error, {invalid_extra_functions, [{missing, 0}]}},
-                 astranaut_local_macro:register([{recursive, 0}], #{extra_functions => [{missing, 0}]}, Source, #{},
+                 register([{recursive, 0}], #{extra_functions => [{missing, 0}]}, Source, #{},
                                                   astranaut_local_macro:new())),
     ok.
 
 internal_function_conflict(_Config) ->
     Source = [first_form(), second_form(), helper_form(ok)],
-    {ok, State} = astranaut_local_macro:register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, #{},
+    {ok, State} = register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, #{},
                                                   astranaut_local_macro:new()),
     ?assertMatch({error, {conflicting_internal_function_policy, {helper, 0}, _}},
-                 astranaut_local_macro:register([{second, 0}], #{}, Source, #{}, State)),
+                 register([{second, 0}], #{}, Source, #{}, State)),
     ok.
 
 minimal_cumulative_compile_boundaries(_Config) ->
     Source = [a_form(), b_form_calls_a()],
-    {ok, S1} = astranaut_local_macro:register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
-    {ok, S2} = astranaut_local_macro:register([{b, 0}], #{}, Source, #{}, S1),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
     {ok, [P1, P2]} = astranaut_local_macro:compile_plan({b, 0}, S2),
     ?assertEqual([{a, 0}], maps:get(members, P1)),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, P2)),
     [RequestA] = maps:get(requests, P1),
     ?assert(maps:is_key({function, a, 0}, maps:get(forms, RequestA))),
-    {ok, [Final]} = astranaut_local_macro:finalize_plan(S2),
+    {ok, [FinalDependency, Final]} = astranaut_local_macro:finalize_plan(S2),
+    ?assertEqual([{a, 0}], maps:get(members, FinalDependency)),
+    ?assertEqual(false, maps:get(final, FinalDependency, false)),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Final)),
+    ?assertEqual(true, maps:get(final, Final)),
     ok.
 
 independent_macros_share_one_boundary(_Config) ->
     Source = [a_form(), b_form_independent()],
-    {ok, S1} = astranaut_local_macro:register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
-    {ok, S2} = astranaut_local_macro:register([{b, 0}], #{}, Source, #{}, S1),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
     {ok, [Plan]} = astranaut_local_macro:compile_plan({b, 0}, S2),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     ok.
 
+shared_declaration_stays_in_one_boundary(_Config) ->
+    Source = [a_form(), b_form_independent(), c_form_calls_a()],
+    {ok, S1} = register(
+                 [{a, 0}, {b, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S2} = register([{c, 0}], #{}, Source, #{}, S1),
+    {ok, [Dependency, Final]} = astranaut_local_macro:finalize_plan(S2),
+    ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Dependency)),
+    ?assertEqual([{a, 0}, {b, 0}, {c, 0}], maps:get(members, Final)),
+    ok.
+
 final_retained_helper_comparison(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, S0} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
+    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
     S1 = astranaut_local_macro:commit_compiled([{foo, 0}], #{{function, foo, 0} => Foo, {function, helper, 0} => Helper}, S0),
     {_Env, _Skip, S2} = astranaut_local_macro:finalize([{helper, 0}], S1),
     ?assertEqual(ok, astranaut_local_macro:verify_retained(#{{function, helper, 0} => Helper}, S2)),
@@ -186,11 +235,40 @@ safe_load_refuses_module_with_old_code_in_use(_Config) ->
 
 non_frozen_retain_root_has_no_effect(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, S0} = astranaut_local_macro:register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
+    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
     S1 = astranaut_local_macro:commit_compiled([{foo, 0}], #{{function, foo, 0} => Foo}, S0),
     {_Env, Skip, _S2} = astranaut_local_macro:finalize([{ordinary, 0}], S1),
     ?assertEqual([{function, foo, 0}], Skip),
     ok.
+
+register(FAs, Options, Source, ExternalEnv, State) ->
+    CandidateMap =
+        maps:from_list(
+          [{{Name, Arity}, #{macro_source => local_macro,
+                            function => Name, arity => Arity}}
+           || {Name, Arity} <- maps:keys(astranaut_local_macro:local_macros(State))]),
+    MacroOps = #{resolve_local_references => fun test_resolve_local_references/2},
+    astranaut_local_macro:register(
+      FAs, Options, Source, ExternalEnv, CandidateMap, MacroOps, State).
+
+test_resolve_local_references(TargetEnvs, Forms) ->
+    lists:foldl(
+      fun({{Name, Arity}, CandidateEnv}, Acc) ->
+              case [Clauses || {function, _, Name0, Arity0, Clauses} <- Forms,
+                               Name0 =:= Name, Arity0 =:= Arity] of
+                  [Clauses | _] ->
+                      astranaut:sreduce(
+                        fun({call, _, {atom, _, Called}, Args}, Refs) ->
+                                CalledFA = {Called, length(Args)},
+                                case maps:is_key(CalledFA, CandidateEnv) of
+                                    true -> ordsets:add_element(CalledFA, Refs);
+                                    false -> Refs
+                                end;
+                           (_, Refs) -> Refs
+                        end, Acc, Clauses, #{traverse => pre});
+                  [] -> Acc
+              end
+      end, ordsets:new(), TargetEnvs).
 
 forms() ->
     [foo_form(), helper_form(ok), {attribute, 1, spec, {{helper, 0}, []}}].
@@ -208,6 +286,7 @@ second_form() -> {function, 1, second, 0, [{clause, 1, [], [], [{call, 1, {atom,
 a_form() -> {function, 1, a, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
 b_form_calls_a() -> {function, 1, b, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, a}, []}]}]}.
 b_form_independent() -> {function, 1, b, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
+c_form_calls_a() -> {function, 1, c, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, a}, []}]}]}.
 a_calls_b() -> {function, 1, a, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, b}, []}]}]}.
 unused_form() -> {function, 1, unused, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
 

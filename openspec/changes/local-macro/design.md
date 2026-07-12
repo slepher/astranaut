@@ -8,19 +8,47 @@
 
 `astranaut_local_macro` 管理注册表、闭包、冻结、缓存、编译计划、retain 和最终跳过集合。统一扫描器仅调用其注册、确保可调用及收尾接口；扫描和 splice 细节见 [macro-passes-adjusted](../macro-passes-adjusted/design.md)。
 
+local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供两个通用
+能力：按既有宏匹配规则识别 function 闭包实际引用的 local macro，以及在给定
+最终 `MacroEnv` 时展开指定 functions。`astranaut_local_macro` 决定候选和有效
+环境，但不复制调用匹配、`outer` / `inner`、递归展开或错误上下文语义。
+
 ### 模块调用方向
 
 ```text
 astranaut_macro
   ├─ 统一 scan、环境更新、attribute splice
-  ├─ 通用宏展开与错误/monad 流
+  ├─ 通用宏引用匹配、function 展开与错误/monad 流
   └─ 调用 astranaut_local_macro
        ├─ 注册/规划/状态转换
-       ├─ 闭包、冻结、缓存、retain、FinalSkipIds
+       ├─ 闭包、internal policy、有效环境、冻结、缓存、retain、FinalSkipIds
        └─ 累计编译与 local macro 模块加载
 ```
 
-`astranaut_local_macro` 不拥有 scan 队列，也不直接实现 attribute handler。它通过返回注册结果、编译计划和收尾结果与 `astranaut_macro` 协作；通用展开的执行及错误上下文仍由调用方提供，避免把 traverse/return monad 细节耦合进该模块。
+`astranaut_local_macro` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
+注册、确保可调用和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
+工作流驱动，但实际引用解析和 function 展开通过调用方提供的 `MacroOps` 执行，
+从而复用统一错误上下文，并避免把 traverse monad 或扫描队列耦合进该模块。
+
+### 同构 function 展开接口
+
+local macro 工作流调用的展开操作与最终普通 function pass 使用同一实现：
+
+```text
+ExpandFunctions(MacroEnv, Forms, TargetFAs) -> ExpandedForms | Error
+```
+
+展开器只解释 `MacroEnv` 中存在的宏，不知道某个目标是否为 local macro，也不
+解释 `internal_function`、generation、retain 或 declaration order。
+
+实际 local 引用同样由 `astranaut_macro` 的统一调用匹配能力识别：
+
+```text
+ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
+```
+
+`astranaut_local_macro` 提供候选环境和闭包，保存返回的 `ReferencedFAs` 并据此
+规划累计边界；它不以“静态闭包中包含某 FA”替代真实的宏调用匹配。
 
 ## 状态
 
@@ -72,7 +100,7 @@ register(LocalMacroAttribute, SourceView, ExternalEnv, State):
   2. 对每个 FA 计算静态函数闭包
   3. 校验 extra_functions 与 internal_function 策略
   4. 将闭包原始 function/spec forms 写入 frozen_forms
-  5. 解析闭包实际引用的已注册 local macro
+  5. 以已注册 local macro 的候选环境调用统一引用解析，取得闭包实际引用的 FA
   6. 为每个 FA 写入不可变的 order、env_snapshot、closure_ids 和 options
   7. 将 status 设为 pending
 ```
@@ -100,6 +128,30 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 
 不同 declaration 可以有不同的 `internal_function` 列表。只有某个具体函数同时出现在多个闭包中，且一方将其标为 direct-call、另一方没有时，才报 `conflicting_internal_function_policy`。没有共享函数时，名单差异不是错误。
 
+`internal_function` 的解析、共享闭包冲突校验和有效环境裁剪全部属于
+`astranaut_local_macro`。通用展开器不会读取该 option。
+
+### 逐目标 function 的同构有效环境
+
+每个冻结 function form 都使用逐目标构造的环境：
+
+```text
+EffectiveEnv(Declaration, TargetFA)
+  = ExternalSnapshot
+  + ReferencedLocalMacros
+  - InternalFunctions(Declaration)
+  - TargetFA
+```
+
+最后的 `- TargetFA` 是环境不变量，不是展开器特判：local macro 自身从不作为
+展开其自身 function form 时的宏。因此 `foo/1` 定义中的 `foo/1` 调用自然保留
+为累计模块内的普通 Erlang 递归调用。若 B 实际引用先声明的 A，则展开 B 时
+A 仍在环境中；若 A 的 form 同时属于 B 的闭包，展开该 A form 时仍按目标 FA
+规则移除 A。
+
+spec form 不执行 function-body 展开，但与对应 function 使用同一个 declaration
+环境指纹参与冻结、缓存和冲突比较。
+
 ### 源码与环境视图
 
 注册时的源码视图是当前已 materialize 的 forms 流：已 pass 的输出前缀加上当前尚未 pass 的队列。此前 splice 生成但尚未处理的 form 已经在该队列中，不是额外的第三类输入；未来尚未执行的 attribute splice 输出不属于源码视图。该视图只用于寻找函数与闭包。
@@ -108,7 +160,9 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 
 `use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；`import_macro` 对同名导入采用后者覆盖。这个合并后的外部环境才是写入 `env_snapshot` 的内容。
 
-闭包实际引用的 local macro 可以是此前已注册但尚未编译的 FA。它们记录在 snapshot 中，并由后续最小累计编译计划保证在调用点可用；不应因为尚未加载就从引用集合省略。
+闭包实际引用的 local macro 可以是此前已注册但尚未编译的 FA。统一引用解析
+基于候选宏描述而不是当前已加载代码，因此它们仍记录在 snapshot 中，并由
+后续最小累计编译计划保证在调用点可用；不应因为尚未加载就从引用集合省略。
 
 ## 注册、源码视图与冻结
 
@@ -185,7 +239,10 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ### 计划与执行的分离
 
-编译计划是纯数据：它指出须先可调用的 FA、待展开的原始 form/environment 组合以及下一份累计模块的成员。`astranaut_macro` 在保留当前位置错误上下文的前提下执行通用宏展开；`astranaut_local_macro` 接收结果并验证、缓存、生成累计 forms。
+编译计划是纯数据：它指出须先可调用的 FA、待展开的原始 form/environment
+组合以及下一份累计模块的成员。`astranaut_local_macro` 驱动计划，逐目标构造
+`EffectiveEnv`，再调用 `astranaut_macro` 提供的同构 function 展开操作；随后
+由前者验证、缓存、生成累计 forms、加载并提交 generation。
 
 若计划或展开失败，当前已加载的 local macro 模块和 `compiled_forms` 必须保持不变。只有全部新增 form 展开、比较和 Erlang 编译成功后，才提交新的 generation。
 
@@ -247,13 +304,19 @@ local macro 宏头自身不参与第 5 步的最终环境比对，因为自身�
 ## 建议接口
 
 ```erlang
-register(FA, Options, SourceView, ExternalEnv, State).
-ensure_available(FA, State).
+register(FA, Options, SourceView, ExternalEnv, CandidateLocalEnv, MacroOps, State).
+ensure_available(FA, CompileContext, MacroOps, State).
 compile_plan(NeededFA, State).
-commit_compiled(Plan, ExpandedForms, State).
-finalize(State).
+finalize(RetainRoots, FinalContext, MacroOps, State).
 ```
 
-`register/5` 负责源码快照、闭包发现和冻结；`ensure_available/2` 返回首次 attribute 调用所需的最小计划；`finalize/1` 返回 `FinalLocalEnv` 与 `FinalSkipIds`。宏展开与 scan 的 monad/error 流由调用方执行；本模块返回所需计划、状态及明确错误。
+`register` 负责源码快照、闭包发现和冻结，并通过 `MacroOps` 的统一引用解析
+记录实际 local 依赖；`ensure_available` 在首次 attribute 调用时执行最小累计
+计划；`finalize` 返回 `FinalLocalEnv` 与 `FinalSkipIds`。`MacroOps` 至少提供
+`resolve_local_references` 和 `expand_functions`，两者都实现于
+`astranaut_macro`，并以 `astranaut_return` 结果保留统一错误上下文。
 
-调用方在执行 `compile_plan/2` 时应将每个 `{FormId, EnvFingerprint}` 的展开请求交回 `astranaut_local_macro` 进行缓存/比较，再将获准提交的 ExpandedForms 传给 `commit_compiled/3`。因此模块边界不要求 `astranaut_local_macro` 依赖统一扫描器或直接调用 traverse monad，同时仍让状态转换和冲突判断集中在一个可独立测试的模块中。
+`astranaut_local_macro` 自己执行 `compile_plan/2`，对每个
+`{FormId, EnvFingerprint}` 先查缓存，再以逐目标 `EffectiveEnv` 调用
+`MacroOps.expand_functions`。它不依赖统一扫描器或 traverse monad；扫描器只在
+注册、按需确保可调用和收尾三个边界桥接 `astranaut_return`。

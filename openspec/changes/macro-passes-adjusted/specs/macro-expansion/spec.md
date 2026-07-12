@@ -1,5 +1,30 @@
 # 宏展开规范增量
 
+## 需求：local 与普通 function 使用同构展开
+
+`astranaut_macro` 必须以同一 function 展开实现处理最终普通 function pass 与
+local-macro 工作流提交的目标 functions。
+
+### 场景：展开器不解释 local 专属策略
+
+- **给定** local-macro 工作流已经构造最终 MacroEnv
+- **当** 调用统一 function 展开操作
+- **那么** 展开器只按 MacroEnv 匹配和递归展开宏调用
+- **并且** 不读取 internal_function、generation、retain 或 declaration order
+
+### 场景：local 引用复用统一调用匹配
+
+- **给定** local-macro 工作流提供候选 local 宏环境和闭包 functions
+- **当** 解析闭包实际引用的 local macros
+- **那么** 使用与普通 function 展开相同的调用匹配语义
+
+### 场景：目标自身移除由 local 工作流完成
+
+- **给定** local-macro 工作流请求展开 TargetFA
+- **当** 统一展开器收到 MacroEnv
+- **那么** TargetFA 已由 local-macro 工作流从环境移除
+- **并且** 展开器不包含 local macro 自身递归特判
+
 ## 需求：属性宏统一参与 scan-and-splice
 
 外部属性宏与已可调用的本地属性宏必须在同一次 scan-and-splice 扫描中按源码顺序处理。
