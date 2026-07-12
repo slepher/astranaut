@@ -129,6 +129,12 @@ Attrs and validation environment have different responsibilities:
 - `forms` is external validation context used by guard validation.
 - `forms` must not be inserted into traversal attrs or propagated by `subtrees_pge/3`.
 
+`astranaut:map_m/3` applies its explicit `attr` option to the traversal Reader
+environment. At runtime it merges `maps:merge(OuterAttr, OptionAttr)`, so fields
+not mentioned by the nested traversal remain inherited while explicit root
+fields take precedence. Child `up_attr` propagation starts from this merged
+root Attr.
+
 ## Local Validation
 
 `validate_local/2` is current-node validation.
@@ -169,10 +175,12 @@ The scope is still the returned node subtree only. It does not extend to the con
 Traversal gets one option:
 
 ```erlang
-#{validate => true | false}
+#{validate => false | true | input | output | both}
 ```
 
 Default is `false`.
+
+`true` is normalized to `output` for compatibility.
 
 When disabled:
 
@@ -180,12 +188,31 @@ When disabled:
 - No automatic validation is performed.
 - Callers may perform validation manually.
 
-When enabled:
+When validation includes `input`:
+
+- Validate the current input node locally during the pre stage.
+- Perform input validation once per visited node, before the pre walker.
+- Do not repeat input validation during the post stage.
+- Use the traversal's normal child recursion to cover the input tree.
+
+When validation includes `output`:
 
 - Validation runs only for nodes directly changed by the walker return.
 - Validation uses the current step's propagated validator.
-- Automatic validation should use recursive validation for the returned changed node.
-- Parent insertion should use local validation against the propagated parent slot validator.
+- A pre-walker changed output uses local validation because traversal will subsequently descend into it.
+- A post-walker changed output uses recursive validation because the current traversal will not subsequently descend into it.
+- Parent insertion uses local validation against the propagated parent slot validator.
+
+`both` enables both input and output behavior.
+
+Traversal callers may provide a validation environment and failure policy:
+
+```erlang
+#{validate_opts => #{record_defs => RecordDefinitions,
+                     fail => raise | collect}}
+```
+
+`fail` defaults to `raise`, preserving `{invalid_transform_normalization, Detail}` as an exception. With `collect`, validation enters the traversal monad's failure channel with `{invalid_transform_normalization, Detail}`; a validation-local `catch_on_error` then returns the unchanged current node while retaining the collected error. Validation success/failure is therefore not encoded in the node return value. `record_defs` supplies record-definition forms to guard validation.
 
 ## Change Detection
 
@@ -213,18 +240,21 @@ The external writer `updated` boolean can remain unchanged for compatibility; in
 
 `pre`:
 
-- Validate only if the pre walker directly changes the current node.
+- If input validation is enabled, locally validate the input before the walker.
+- If output validation is enabled, locally validate a directly changed walker output.
 - The returned node may still be traversed afterward.
 
 `post`:
 
 - Children may already have changed and rebuilt the current node.
-- Validate only if the post walker directly changes that current node.
+- Do not repeat input validation.
+- If output validation is enabled, recursively validate only when the post walker directly changes that current node.
 
 `all`:
 
 - Treat `pre` and `post` as separate steps.
 - The existing `step` attr can identify the active step.
+- Input validation occurs only once in the pre step.
 
 `subtree`:
 
@@ -252,13 +282,26 @@ This applies to both:
 
 Nested macro expansion should preserve the existing origin/current macro detail behavior.
 
-Macro validation must pass record definitions through the validation environment, not traversal attrs. The macro transformer should filter module forms to record definitions once, keep that list in macro depth options, and call:
+Macro validation must pass record definitions through the validation environment, not traversal attrs. The macro transformer filters module forms to record definitions once and keeps that list in macro depth options.
+
+Macro return processing uses one post traversal with input validation:
 
 ```erlang
-astranaut_syntax:validate_recursive(Return, Validator,
-                                    #{attr => Attr,
-                                      forms => RecordForms})
+astranaut:map_m(PassFun, Return,
+                #{traverse => post,
+                  validate => input,
+                  attr => Attr,
+                  validate_opts => #{record_defs => RecordForms,
+                                     fail => collect}})
 ```
+
+The input validation shares recursion with structure-preserving framework operations such as quoted-variable renaming, syntax reversion, and zero-position replacement. Output validation is disabled for those operations. The macro layer rewrites collected generic validation errors to `{invalid_macro_return, Detail}` and returns the original macro-call AST when validation fails.
+
+A traversal computation returned by user macro code runs under
+`astranaut_traverse:scoped_state(InnerState, MA)`. It receives private State but
+inherits the current macro-call Attr, allowing user code to inspect `node`,
+`validator`, `step`, and other traversal context through `ask()`. Error, warning,
+formatter, and file context remain in the same traversal pipeline.
 
 This allows guard macros involving record construction or `is_record/2` checks to be validated by `erl_lint:is_guard_test/2` with the same record knowledge as the containing module.
 

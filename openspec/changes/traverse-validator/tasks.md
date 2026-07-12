@@ -4,7 +4,7 @@
 
 - [x] Define validator data forms for role validators and slot validators.
 - [x] Document the distinction between `validate_local/2` and `validate_recursive/2`.
-- [x] Document `validate => boolean` traversal behavior and default-off semantics.
+- [x] Document `validate => false | true | input | output | both` traversal behavior and default-off semantics.
 - [x] Document macro error attribution for validation failures.
 - [x] Document validation environment separation from traversal attrs.
 - [x] Document guard validation with filtered record-definition forms.
@@ -15,16 +15,22 @@
 
 - [x] Extend `child_spec` to include `validator`.
 - [x] Propagate `validator`, `parent_type`, and `parent_slot` through child attrs.
-- [x] Keep validator propagation active regardless of `validate => boolean`.
+- [x] Keep validator propagation active regardless of the selected `validate` mode.
 - [x] Add `astranaut_syntax:validate_local/2`.
 - [x] Add `astranaut_syntax:validate_recursive/2`.
 - [x] Keep `astranaut_syntax:validate/2,3` as compatibility recursive role-validation entry points.
 - [x] Implement slot validators for match, clause, function, generator, binary generator, comprehensions, attribute, type, record, map, and binary node families.
-- [x] Add `validate => boolean` to traversal options with default `false`.
+- [x] Add `validate => false | true | input | output | both` to traversal options with default `false`.
+- [x] Normalize `validate => true` to `validate => output`.
+- [x] Validate input locally during the pre stage only when input validation is enabled.
 - [x] Distinguish direct `node_changed` from `children_changed` inside traversal validation logic.
 - [x] Trigger automatic validation only for direct walker-return changes.
 - [x] Avoid automatic validation of ancestor nodes rebuilt only because children changed.
 - [x] Update macro expansion to use propagated validators for macro return validation.
+- [x] Fuse macro return input validation with quoted-variable and zero-position updates.
+- [x] Add `validate_opts` with `record_defs` and `fail => raise | collect`.
+- [x] Route collected validation failures through monadic fail/catch without tagged node return values.
+- [x] Preserve macro-specific validation errors by rewriting collected traversal errors.
 - [x] Pass filtered record-definition forms through validation opts for guard checks.
 - [x] Keep record-definition forms out of traversal attrs.
 - [x] Use `erl_lint:is_guard_test/2` for guard validation.

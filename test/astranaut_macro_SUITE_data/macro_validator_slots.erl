@@ -11,6 +11,13 @@
 -export_macro([pattern_outer/0, pattern_inner/0,
                guard_outer/0, guard_inner/0,
                expression_outer/0, expression_inner/0]).
+-export_macro({[pre_pattern_outer/0], [{order, outer}]}).
+
+pre_pattern_outer() ->
+    quote(
+      case ok of
+          macro_validator_slots:pattern_inner() -> ok
+      end).
 
 pattern_outer() ->
     quote(

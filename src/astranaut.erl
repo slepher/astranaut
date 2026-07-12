@@ -27,11 +27,15 @@
 -type traverse_opts() :: #{traverse => traverse_style(),
                            formatter => module(),
                            attr => traverse_attr(),
+                           validate => false | true | input | output | both,
+                           validate_opts => map(),
                            uniplate => astranaut_uniplate:uniplate(tree())
                           }.
 
 -type straverse_opts() :: #{traverse => traverse_style(),
                             attr => traverse_attr(),
+                            validate => false | true | input | output | both,
+                            validate_opts => map(),
                             uniplate => astranaut_uniplate:uniplate(tree())
                            }.
 
@@ -362,17 +366,24 @@ map_m(F, [Node|_T] = Nodes, Opts) ->
                              ({_Form1, false}) ->
                                   Form
                           end, astranaut_traverse:listen_updated(
-                                 astranaut_traverse:catch_on_error(
-                                   map_form(F, Form, Opts),
-                                   fun() ->
-                                           astranaut_traverse:return({[], true})
-                                   end)))
+                                 maybe_catch_map_form_error(
+                                   map_form(F, Form, Opts), Opts)))
                 end, Nodes));
         false ->
             map_m_1(F, Nodes, Opts)
     end;
 map_m(F, Node, Opts) ->
     map_m_1(F, Node, Opts).
+
+maybe_catch_map_form_error(FormM, Opts) ->
+    case maps:get(fail, maps:get(validate_opts, Opts, #{}), raise) of
+        collect ->
+            FormM;
+        raise ->
+            astranaut_traverse:catch_on_error(
+              FormM,
+              fun() -> astranaut_traverse:return({[], true}) end)
+    end.
 
 -spec map_forms_splice(fun((tree()) -> astranaut_traverse:struct(tree())),
                        [tree()], traverse_opts()) -> astranaut_traverse:struct([tree()]).
@@ -506,24 +517,38 @@ to_list(Form1) when is_list(Form1) ->
 to_list(Form1) ->
     [Form1].
 
-map_form(F, Form, #{traverse := none}) ->
-    astranaut_traverse:bind(
-      traverse_map_form(F, Form),
-      fun(Form1) ->
-              astranaut_traverse:writer_updated({Form1, Form =/= Form1})
-      end);
+map_form(F, Form, #{traverse := none} = Opts) ->
+    map_form_none(F, Form, Opts);
 map_form(F, Form, Opts) ->
     map_m_1(F, Form, Opts).
+
+map_form_none(F, Form, Opts) ->
+    with_root_traverse_attr(
+      Form, Opts,
+      astranaut_traverse:bind(
+        traverse_map_form(F, Form),
+        fun(Form1) ->
+                astranaut_traverse:writer_updated({Form1, Form =/= Form1})
+        end)).
 
 map_m_1(F, Node, Opts) ->
     Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
     Opts1 = maps:remove(uniplate, Opts),
-    Opts2 = Opts1#{attr => root_traverse_attr(Node, Opts, maps:get(attr, Opts, #{}))},
-    astranaut_uniplate:map_m(
-      fun(Node1) ->
-              traverse_map_form(F, Node1)
-      end, Node, Uniplate, traverse, Opts2).
+    with_root_traverse_attr(
+      Node, Opts,
+      astranaut_uniplate:map_m(
+        fun(Node1) ->
+                traverse_map_form(F, Node1)
+        end, Node, Uniplate, traverse, Opts1)).
 
+with_root_traverse_attr(Node, Opts, Monad) ->
+    astranaut_traverse:local(
+      fun(OuterAttr) -> root_traverse_attr(Node, Opts, OuterAttr) end,
+      Monad).
+
+validation_attr_needed(_Node, #{validate := Validate})
+  when Validate =:= true; Validate =:= input; Validate =:= output; Validate =:= both ->
+    true;
 validation_attr_needed(_Node, #{normalize := false}) ->
     false;
 validation_attr_needed(_Node, #{role := _Role}) ->
@@ -547,7 +572,7 @@ root_traverse_attr(Node, Opts, Attr) ->
                 {ok, Role, Validator} ->
                     explicit_validator_attr(Role, Validator, Attr1);
                 error ->
-                    case maps:get(normalize, Opts, false) of
+                    case validation_enabled(Opts) of
                         true ->
                             case root_role(Node) of
                                 unknown ->
@@ -561,6 +586,13 @@ root_traverse_attr(Node, Opts, Attr) ->
                             Attr1
                     end
             end
+    end.
+
+validation_enabled(Opts) ->
+    case maps:find(validate, Opts) of
+        {ok, false} -> false;
+        {ok, _Validate} -> true;
+        error -> maps:get(normalize, Opts, false)
     end.
 
 explicit_root_validator(#{validator := {role, Role} = Validator}) ->

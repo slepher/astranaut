@@ -36,6 +36,55 @@ Traversal SHALL NOT automatically validate transformed nodes unless `validate =>
 - **WHEN** a walker returns a changed node
 - **THEN** traversal validates that changed node according to the active validator
 
+#### Scenario: Boolean true means output validation
+
+- **GIVEN** traversal options include `validate => true`
+- **WHEN** traversal normalizes its options
+- **THEN** validation behaves as `validate => output`
+
+### Requirement: Input And Output Validation Are Selectable
+
+Traversal SHALL accept `validate => false | true | input | output | both`.
+
+When validation includes `input`, traversal SHALL locally validate each node during the pre stage before applying the pre walker, and SHALL NOT repeat input validation during the post stage.
+
+When validation includes `output`, traversal SHALL preserve changed-output validation: pre-walker output validation SHALL be local and post-walker output validation SHALL be recursive.
+
+#### Scenario: Input validation shares traversal recursion
+
+- **GIVEN** traversal runs with `validate => input`
+- **WHEN** traversal visits an input tree
+- **THEN** each visited node is locally validated during its pre stage
+- **AND** no separate recursive validation pass is performed
+
+#### Scenario: Both enables input and output validation
+
+- **GIVEN** traversal runs with `validate => both`
+- **WHEN** traversal visits and directly changes nodes
+- **THEN** input validation and the phase-appropriate output validation both run
+
+### Requirement: Validation Options Carry Environment And Failure Policy
+
+Traversal SHALL accept `validate_opts => #{record_defs => RecordDefinitions, fail => raise | collect}`.
+
+The `fail` policy SHALL default to `raise`.
+
+With `fail => collect`, a validation failure SHALL enter the traversal failure channel and be recovered by `catch_on_error`; the unchanged current node SHALL be returned, and traversal SHALL not descend into that invalid node. Validation state SHALL NOT be represented by a tagged node return value.
+
+#### Scenario: Collect preserves the input node
+
+- **GIVEN** traversal runs with input validation and `fail => collect`
+- **WHEN** an input node fails local validation
+- **THEN** traversal records `{invalid_transform_normalization, Detail}`
+- **AND** returns the unchanged input node
+- **AND** does not attempt to traverse its invalid subtree
+
+#### Scenario: Record definitions reach guard validation
+
+- **GIVEN** `validate_opts` contains `record_defs`
+- **WHEN** a guard node is validated
+- **THEN** those record definitions are available to guard validation
+
 ### Requirement: Validation Runs Only For Direct Node Changes
 
 Traversal validation SHALL run only for nodes directly changed by a walker return.

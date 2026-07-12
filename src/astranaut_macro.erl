@@ -164,7 +164,7 @@ scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
                   macro_map => #{}},
     astranaut_traverse:run(
       astranaut:map_forms_splice(fun scan_form/1, Forms, #{traverse => none, queue_state => true}),
-      ?MODULE, #{}, InitState).
+      ?MODULE, #{node => form, validator => {role, form}}, InitState).
 
 scan_form(Form) ->
     do([ traverse ||
@@ -1269,18 +1269,14 @@ expand_macro_recursive(_Module, _MacroMap, #{ max_depth := MaxDepth } = Macro,
                              maps:get(arguments, CurrentMacro, [])});
 expand_macro_recursive(Module, MacroMap, Macro, #{step := post } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
-    do([traverse ||
-            Node1 <- expand_macro(Macro, DepthOpts1),
-            Node2 <- transform_exprs(Module, MacroMap, Node1, DepthOpts1),
-            validate_macro_return(Node2, Macro, DepthOpts1)
-        ]);
-expand_macro_recursive(Module, MacroMap, Macro, #{step := pre } = DepthOpts) ->
+    expand_macro_with(
+      Macro, DepthOpts1,
+      fun(Node1) -> transform_exprs(Module, MacroMap, Node1, DepthOpts1) end);
+expand_macro_recursive(_Module, _MacroMap, Macro, #{step := pre } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
-    do([ traverse ||
-            Node1 <- expand_macro(Macro, DepthOpts1),
-            Node2 <- transform_exprs(Module, MacroMap, Node1, DepthOpts1),
-            validate_macro_return(Node2, Macro, DepthOpts1)
-        ]).
+    %% A pre return is checked locally here.  Its children remain in the
+    %% surrounding traversal and are expanded at their own pre/post steps.
+    expand_macro(Macro, DepthOpts1).
 
 match_macro_call(Module, Node, Macros, Step) ->
     case call_find_macro(Module, Node, Macros) of
@@ -1317,22 +1313,33 @@ update_macro_context(Macro, #{depth := 0} = Opts) ->
 update_macro_context(Macro, Opts) ->
     Opts#{current_macro => Macro}.
 
-expand_macro(#{pos := Pos, formatter := Formatter} = Macro, Opts) ->
+expand_macro(Macro, Opts) ->
+    expand_macro_with(Macro, Opts, fun astranaut_traverse:return/1).
+
+expand_macro_with(#{pos := Pos, formatter := Formatter} = Macro, Opts, Success) ->
     do([ traverse ||
            %% A user macro may return a traverse computation.  Run only that
            %% computation in private State; framework work below, including
            %% quoted-variable numbering, remains in the caller's State.
-           Return <- astranaut_traverse:update_pos(Pos, Formatter, invoke_macro_function(Macro)),
-           Node1 <- precheck_macro_return_tree(Return, Macro, Opts),
-           Node2 <- update_quoted_variable_name(Node1, Macro, Opts),
-           Node3 = astranaut_lib:replace_pos_zero(Node2, Pos),
-           format_node(Node3, Macro),
-           return(Node3)
+           Node <- astranaut_traverse:update_pos(Pos, Formatter, invoke_macro_function(Macro)),
+           astranaut_traverse:catch_on_error(
+             do([ traverse ||
+                    %% Validate the returned tree while traversing it once for
+                    %% structure-preserving variable and position updates.
+                    Node1 <- process_macro_return(Node, Macro, Opts),
+                    format_node(Node1, Macro),
+                    Success(Node1)
+                ]),
+             fun() ->
+                     astranaut_traverse:return(maps:get(call_ast, Macro))
+             end)
        ]).
 
 invoke_macro_function(#{module := Module, function := Function, arguments := Arguments} = Macro) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
+            %% Macro code owns a private State, but inherits the current
+            %% traversal Attr so it can inspect the macro-call context.
             astranaut_traverse:scoped_state(ok, astranaut:traverse_return(Return))
     catch
         Class:Exception?CAPTURE_STACKTRACE ->
@@ -1347,61 +1354,38 @@ invoke_macro_function(#{module := Module, function := Function, arguments := Arg
             astranaut_traverse:fail(Error)
     end.
 
-validate_macro_return(Return, Macro, Opts) ->
-    ExpectedRole = maps:get(expected_role, Opts, form),
-    Attr = maps:get(attr, Opts, #{}),
-    Validator = maps:get(validator, Attr, {role, ExpectedRole}),
-    case lint_macro_return(Return, Validator, Opts) of
-        {ok, Return1} ->
-            astranaut_traverse:return(Return1);
-        {error, Detail} ->
-            astranaut_traverse:fail(
-              {invalid_macro_return, macro_return_detail(Macro, Opts, Detail)})
-    end.
-
-lint_macro_return(Return, Validator, Opts) ->
-    Attr = maps:get(attr, Opts, #{}),
-    ValidateOpts = #{attr => Attr, forms => maps:get(forms, Opts, [])},
-    astranaut_syntax:normalize(Return, Validator, ValidateOpts).
-
-precheck_macro_return_tree(Return, Macro, Opts) ->
-    case macro_return_tree(Return) of
-        ok ->
-            astranaut_traverse:return(Return);
-        {error, Detail} ->
-            ExpectedRole = maps:get(expected_role, Opts, form),
-            Attr = maps:get(attr, Opts, #{}),
-            Validator = maps:get(validator, Attr, {role, ExpectedRole}),
-            Detail1 = Detail#{validator => Validator,
-                               expected_role => ExpectedRole},
-            astranaut_traverse:fail(
-              {invalid_macro_return, macro_return_detail(Macro, Opts, Detail1)})
-    end.
-
-macro_return_tree([]) ->
-    ok;
-macro_return_tree([Node|Nodes]) ->
-    case macro_return_tree(Node) of
-        ok -> macro_return_tree(Nodes);
-        {error, Detail} -> {error, Detail}
-    end;
-macro_return_tree({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}) ->
-    macro_return_tree(Node);
-macro_return_tree(Node) ->
-    try
-        _Type = astranaut_syntax:type(Node),
-        _IsLeaf = astranaut_syntax:is_leaf(Node),
-        _Subtrees = astranaut_syntax:subtrees(Node),
-        _Reverted = astranaut_syntax:revert(Node),
-        ok
-    catch
-        Class:Reason ->
-            {error, #{reason => invalid_node,
-                      slot => root,
-                      node => Node,
-                      exception => {Class, Reason},
-                      path => []}}
-    end.
+process_macro_return(Return, Macro, Opts) ->
+    ValidateOpts = #{record_defs => maps:get(forms, Opts, []), fail => collect},
+    do([ traverse ||
+           Attr <- astranaut_traverse:ask(),
+           RenameContext <- macro_return_rename_context(Macro, Opts),
+           ProcessReturn =
+               astranaut_traverse:with_error(
+                 fun(ErrorStruct) ->
+                         astranaut_error:with_error(
+                           fun({invalid_transform_normalization, Detail}) ->
+                                   {invalid_macro_return,
+                                    macro_return_detail(Macro, Opts, Detail)};
+                              (Error) ->
+                                   Error
+                           end, ErrorStruct)
+                 end,
+                 astranaut:map_m(
+                   fun(Node) ->
+                           astranaut_traverse:return(
+                             update_macro_return_node(
+                               Node, RenameContext, maps:get(pos, Macro)))
+                   end, Return,
+                   #{traverse => post,
+                     validate => input,
+                     %% Preserve the inherited macro-call Attr as the root
+                     %% environment of the return-tree traversal.
+                     attr => Attr,
+                     validate_opts => ValidateOpts})),
+           Return1 <- astranaut_traverse:fail_on_error(ProcessReturn),
+           commit_macro_return_counter(Opts),
+           return(Return1)
+       ]).
 
 macro_return_detail(Macro, Opts, Detail) ->
     Current = macro_call_ref(Macro),
@@ -1593,29 +1577,43 @@ to_list(Arguments) ->
     [Arguments].
 
 
-update_quoted_variable_name(Nodes, Macro, #{rename_quoted_variables := true} = Opts) ->
-    astranaut_traverse:state(
-      fun(Counter) ->
-              Role = maps:get(expected_role, Opts, expression),
-              MacroNameStr = macro_name_str(Macro),
-              CounterStr = integer_to_list(Counter),
-              Nodes1 =
-                  astranaut:smap(
-                    fun({var, Pos, VarName} = Var) ->
-                            case split_varname(atom_to_list(VarName)) of
-                                [Head, MacroNameStr1] when MacroNameStr =:= MacroNameStr1 ->
-                                    VarName1 = list_to_atom(Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
-                                    {var, Pos, VarName1};
-                                _ ->
-                                    Var
-                            end;
-                       (Node) ->
-                            Node
-                    end, Nodes, #{traverse => post, role => Role}),
-              {Nodes1, Counter + 1}
-      end);
-update_quoted_variable_name(Nodes, _Macro, #{}) ->
-    astranaut_traverse:return(Nodes).
+macro_return_rename_context(Macro, #{rename_quoted_variables := true}) ->
+    do([ traverse ||
+           Counter <- astranaut_traverse:get(),
+           return({macro_name_str(Macro), integer_to_list(Counter)})
+       ]);
+macro_return_rename_context(_Macro, #{}) ->
+    astranaut_traverse:return(undefined).
+
+commit_macro_return_counter(#{rename_quoted_variables := true}) ->
+    astranaut_traverse:modify(fun(Counter) -> Counter + 1 end);
+commit_macro_return_counter(#{}) ->
+    astranaut_traverse:return(ok).
+
+update_macro_return_node(Node, RenameContext, Pos) ->
+    Node1 = rename_quoted_variable_node(Node, RenameContext),
+    Node2 = replace_pos_zero_node(Node1, Pos),
+    astranaut_syntax:revert(Node2).
+
+rename_quoted_variable_node({var, Pos, VarName} = Var,
+                            {MacroNameStr, CounterStr}) ->
+    case split_varname(atom_to_list(VarName)) of
+        [Head, MacroNameStr1] when MacroNameStr =:= MacroNameStr1 ->
+            VarName1 = list_to_atom(Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
+            {var, Pos, VarName1};
+        _ ->
+            Var
+    end;
+rename_quoted_variable_node(Node, _RenameContext) ->
+    Node.
+
+replace_pos_zero_node(Node, 0) ->
+    Node;
+replace_pos_zero_node(Node, Pos) ->
+    case astranaut_syntax:get_pos(Node) of
+        0 -> astranaut_syntax:set_pos(Node, Pos);
+        _ -> Node
+    end.
 
 split_varname(String) ->
     case lists:splitwith(

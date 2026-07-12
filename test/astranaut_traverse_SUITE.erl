@@ -111,6 +111,7 @@ groups() ->
 all() -> 
     [test_return, test_bind, test_error_0, test_state, 
      test_pos, test_pos_2, test_file_pos, test_fail,
+     test_map_m_root_attr,
      test_scoped_state, test_scoped_state_fail, test_scoped_state_run].
 
 %%--------------------------------------------------------------------
@@ -264,21 +265,49 @@ test_fail(_Config) ->
     ok.
 
 test_scoped_state(_Config) ->
-    MA =
-        do([ traverse ||
-               astranaut_traverse:put(outer_value),
-               Value <- astranaut_traverse:scoped_state(
-                          inner_initial,
-                          do([ traverse ||
-                                 astranaut_traverse:put(inner_modified),
-                                 return(inner_result)
-                             ])),
-               OuterState <- astranaut_traverse:get(),
-               return({Value, OuterState})
-           ]),
+    MA = astranaut_traverse:local(
+           fun(_) -> #{macro_context => inherited} end,
+           do([ traverse ||
+                  astranaut_traverse:put(outer_value),
+                  Value <- astranaut_traverse:scoped_state(
+                             inner_initial,
+                             do([ traverse ||
+                                    Attr <- astranaut_traverse:ask(),
+                                    astranaut_traverse:put(inner_modified),
+                                    return({inner_result, Attr})
+                                ])),
+                  OuterState <- astranaut_traverse:get(),
+                  return({Value, OuterState})
+              ])),
     #{return := Return, error := Error} =
         astranaut_traverse:run(MA, undefined, #{}, ok),
-    ?assertEqual({{inner_result, outer_value}, outer_value}, Return),
+    ?assertEqual(
+       {{{inner_result, #{macro_context => inherited}}, outer_value}, outer_value},
+       Return),
+    ?assert(astranaut_error:is_empty_error(Error)),
+    ok.
+
+test_map_m_root_attr(_Config) ->
+    Node = {atom, 1, ok},
+    Monad =
+        astranaut:map_m(
+          fun(CurrentNode) ->
+                  astranaut_traverse:bind(
+                    astranaut_traverse:ask(),
+                    fun(Attr) ->
+                            astranaut_traverse:then(
+                              astranaut_traverse:put(Attr),
+                              astranaut_traverse:return(CurrentNode))
+                    end)
+          end, Node,
+          #{traverse => none,
+            attr => #{explicit => new_value}}),
+    #{return := Return, error := Error} =
+        astranaut_traverse:run(
+          Monad, undefined,
+          #{outer => inherited, explicit => old_value}, initial_state),
+    ExpectedAttr = #{outer => inherited, explicit => new_value},
+    ?assertEqual({Node, ExpectedAttr}, Return),
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 

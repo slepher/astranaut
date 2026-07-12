@@ -73,10 +73,19 @@ stateful_attribute(_Ast) ->
                                       astranaut_lib:abstract_form(stateful)),
     astranaut_traverse:then(
       astranaut_traverse:put(overwritten),
-      astranaut_traverse:return(Form)).
+      astranaut_traverse:bind(
+        astranaut_traverse:ask(),
+        fun(#{node := form, validator := {role, form}}) ->
+                astranaut_traverse:return(Form)
+        end)).
 
 %% The function-pass counterpart of stateful_attribute/1.
 stateful_function() ->
     astranaut_traverse:then(
       astranaut_traverse:put(overwritten),
-      astranaut_traverse:return(astranaut_lib:abstract_form(function_stateful))).
+      astranaut_traverse:bind(
+        astranaut_traverse:ask(),
+        fun(#{node := expression}) ->
+                astranaut_traverse:return(
+                  astranaut_lib:abstract_form(function_stateful))
+        end)).

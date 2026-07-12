@@ -35,6 +35,7 @@
                                }).
 
 -type traverse_style() :: pre | post | all | subtree | none.
+-type validate_style() :: false | input | output | both.
 -type node_context(A) :: #uniplate_node_context{node :: A} | A.
 -type with_nodes(Node) :: fun(([[Node]]) -> [[node_context(Node)]]).
 -type reduce_nodes(Node) :: fun(([[node_context(Node)]]) -> [[node_context(Node)]]).
@@ -51,14 +52,18 @@
 %%% API
 %%%===================================================================
 -spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
-            #{traverse => traverse_style(), static => boolean()}) -> monad(M, N).
+            #{traverse => traverse_style(), static => boolean(),
+              validate => boolean() | validate_style(),
+              validate_opts => map()}) -> monad(M, N).
 %% @doc traverse node with user defined monad.
 map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
     map_m(F, Node, Uniplate, MonadOpts, Opts);
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
-    Opts1 = maps:merge(#{traverse => pre, normalize => false}, maps:with([traverse, normalize, attr], Opts)),
+    Validate = validate_style(Opts),
+    Opts1 = maps:merge(#{traverse => pre, validate => Validate},
+                       maps:with([traverse, attr, validate_opts], Opts)),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
       fun(MonadOpts1) ->
@@ -112,11 +117,13 @@ monad_opts(Monad) ->
     Listen = astranaut_monad:monad_listen_updated(Monad),
     FailOnError = astranaut_monad:monad_fail_on_error(Monad),
     CatchOnError = astranaut_monad:monad_catch_on_error(Monad),
+    Fail = validation_fail_handler(Monad),
     MOpts = #{bind => Bind, return => Return,
               ask => Ask, local => Local,
               state => State,
               writer_updated => Writer, listen_updated => Listen,
-              fail_on_error => FailOnError, catch_on_error => CatchOnError
+              fail_on_error => FailOnError, catch_on_error => CatchOnError,
+              fail => Fail
              },
     maps:filter(
       fun(_Key, Value) ->
@@ -143,44 +150,67 @@ lifted_writer_updated_opts(#{bind := Bind, return := Return} = MOpts) ->
       end, MOpts#{listen_updated => Listen, writer_updated => Writer,
                   writer_updated_lift => Lift, bind => BindW, return => ReturnW}).
 
+validation_fail_handler(traverse) ->
+    fun astranaut_traverse:fail/1;
+validation_fail_handler(_Monad) ->
+    undefined.
+
 map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
     %% list maybe returned when traverse one node, map_m_flatten is required.
     astranaut_monad:map_m_flatten(
       fun(Node) ->
-              catch_on_error(map_m_2(F, Node, Uniplate, MOpts, Opts), fun() -> Return([]) end, MOpts)
+              maybe_catch_on_error(
+                map_m_2(F, Node, Uniplate, MOpts, Opts),
+                fun() -> Return([]) end, MOpts, Opts)
       end, Nodes, Bind, Return);
 map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
 map_m_2(F, Node, _Uniplate, MOpts, #{traverse := none} = Opts) ->
-    updated_node_apply(F, Node, MOpts, validate_node, invalid_transform, Opts);
+    validate_input_node(
+      Node,
+      fun(Node1) ->
+              updated_node_apply(F, Node1, MOpts, validate_node,
+                                 invalid_transform, Opts)
+      end, MOpts, Opts);
 map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
     %% Node1 is node without context
-    Bind(
-      apply_traverse_step(F, Node, pre, Uniplate, MOpts, Opts),
-      %% F(Node) -> [Node] | Node
-      %% returned value is node or list of node, use map_m_if_list to mapover nodes
-      fun(NodeOrNodes) ->
-              map_m_if_list(
-                %% after pre_apply, NodeContext1 is node with context
-                fun(NodeContext1) ->
-                        Bind(
-                          descend_m_1(
-                            fun(SubNode) ->
-                                    %% add parent to subtree incase of exception raised
-                                    sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
-                            end, Node, NodeContext1, Uniplate, MOpts, Opts),
-                          fun(Node1) ->
-                                  apply_traverse_step(F, Node1, post, Uniplate, MOpts, Opts)
-                          end)
-                end, NodeOrNodes, MOpts)
-      end).
+    validate_input_node(
+      Node,
+      fun(InputNode) ->
+              Bind(
+                apply_traverse_step(F, InputNode, pre, Uniplate, MOpts, Opts),
+                %% F(Node) -> [Node] | Node
+                %% returned value is node or list of node, use map_m_if_list to mapover nodes
+                fun(NodeOrNodes) ->
+                        map_m_if_list(
+                          %% after pre_apply, NodeContext1 is node with context
+                          fun(NodeContext1) ->
+                                  Bind(
+                                    descend_m_1(
+                                      fun(SubNode) ->
+                                              %% add parent to subtree incase of exception raised
+                                              sub_apply(F, SubNode, Uniplate, MOpts,
+                                                        Opts#{parent => InputNode})
+                                      end, InputNode, NodeContext1, Uniplate, MOpts, Opts),
+                                    fun(Node1) ->
+                                            apply_traverse_step(F, Node1, post,
+                                                                Uniplate, MOpts, Opts)
+                                    end)
+                          end, NodeOrNodes, MOpts)
+                end)
+      end, MOpts, Opts).
 
 sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree} = Opts) ->
-    updated_node_apply(F, Node, MOpts, validate_node, invalid_subtree_transform, Opts);
+    validate_input_node(
+      Node,
+      fun(Node1) ->
+              updated_node_apply(F, Node1, MOpts, validate_node,
+                                 invalid_subtree_transform, Opts)
+      end, MOpts, Opts);
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
@@ -210,7 +240,7 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, li
               annotate_child_subtreess(context_node(NodeContext), Subtreess0, MOpts),
               fun(Subtreess) ->
                       Bind(
-              ListenUpdated(map_m_subtreess(F, Subtreess, MOpts)),
+              ListenUpdated(map_m_subtreess(F, Subtreess, MOpts, Opts)),
               fun({Subtrees1, true}) ->
                               Return(make_tree(MakeTree, Node, Subtreess0, Subtrees1));
                  ({_Subtrees1, false}) ->
@@ -252,15 +282,26 @@ has_node_context([]) ->
 has_node_context(_Node) ->
     false.
 
-map_m_subtreess(F, Subtreess, #{bind := Bind, return := Return} = MOpts) ->
-    fail_on_error(
-      astranaut_monad:map_m(
-        fun(Subtrees) ->
-                astranaut_monad:map_m_flatten(
-                  fun(Subtree) ->
-                          catch_on_error(F(Subtree), fun() -> Return([]) end, MOpts)
-                  end, Subtrees, Bind, Return)
-        end, Subtreess, Bind, Return), MOpts).
+map_m_subtreess(F, Subtreess, #{bind := Bind, return := Return} = MOpts, Opts) ->
+    SubtreessM =
+        astranaut_monad:map_m(
+          fun(Subtrees) ->
+                  astranaut_monad:map_m_flatten(
+                    fun(Subtree) ->
+                            maybe_catch_on_error(
+                              F(Subtree), fun() -> Return([]) end, MOpts, Opts)
+                    end, Subtrees, Bind, Return)
+          end, Subtreess, Bind, Return),
+    case validation_fail(Opts) of
+        collect -> SubtreessM;
+        raise -> fail_on_error(SubtreessM, MOpts)
+    end.
+
+maybe_catch_on_error(MA, FMA, MOpts, Opts) ->
+    case validation_fail(Opts) of
+        collect -> MA;
+        raise -> catch_on_error(MA, FMA, MOpts)
+    end.
 
 fail_on_error(MA, #{fail_on_error := FailOnError}) ->
     FailOnError(MA);
@@ -326,50 +367,113 @@ updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := Wr
               {Node3, Updated} = updated_node(Node1, Node2),
               reject_node_context_return(Node1, Node3, ContextExceptionType),
               Bind(
-                normalize_updated_node(Node3, Updated, MOpts, ValidateScope, Opts),
+                validate_output_node(Node3, Updated, MOpts, ValidateScope, Opts),
                 fun(Node4) ->
                         WriterUpdated({Node4, Updated})
                 end)
       end).
 
-normalize_updated_node(Node, false, #{return := Return}, _ValidateScope, _Opts) ->
+validate_input_node(Node, Continue, #{bind := Bind, return := Return} = MOpts,
+                    #{validate := Validate} = Opts)
+  when Validate =:= input; Validate =:= both ->
+    %% Catch only the validation computation.  Returning the continuation
+    %% keeps validation failure in the monadic fail channel without using a
+    %% tagged node result to decide whether traversal should continue.
+    Bind(
+      catch_validation_error(
+        Bind(validate_node(Node, MOpts, validate_node, Opts),
+             fun(Node1) -> Return(fun() -> Continue(Node1) end) end),
+        fun() -> Return(fun() -> Return(Node) end) end,
+        MOpts, Opts),
+      fun(Next) -> Next() end);
+validate_input_node(Node, Continue, _MOpts, _Opts) ->
+    Continue(Node).
+
+validate_output_node(Node, false, #{return := Return}, _ValidateScope, _Opts) ->
     Return(Node);
-normalize_updated_node(Node, true, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, #{normalize := true} = Opts) ->
+validate_output_node(Node, true, MOpts, ValidateScope, #{validate := Validate} = Opts)
+  when Validate =:= output; Validate =:= both ->
+    Return = maps:get(return, MOpts),
+    Fallback =
+        fun() ->
+                case maps:get(traverse, Opts, none) of
+                    pre -> Return(skip(Node));
+                    _ -> Return(Node)
+                end
+        end,
+    catch_validation_error(
+      validate_node(Node, MOpts, ValidateScope, Opts),
+      Fallback, MOpts, Opts);
+validate_output_node(Node, true, #{return := Return}, _ValidateScope, _Opts) ->
+    Return(Node).
+
+validate_node(Node, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, Opts) ->
     Bind(
       Ask(),
       fun(Attr0) ->
-              Attr = normalize_attr(Attr0, Opts),
-              normalize_updated_node_1(Node, Attr, MOpts, ValidateScope)
+              validate_node_1(Node, Attr0, MOpts, ValidateScope, Opts)
       end);
-normalize_updated_node(Node, true, MOpts, ValidateScope, #{normalize := true} = Opts) ->
-    normalize_updated_node_1(Node, normalize_attr(#{}, Opts), MOpts, ValidateScope);
-normalize_updated_node(Node, true, #{return := Return}, _ValidateScope, _Opts) ->
-    Return(Node).
+validate_node(Node, MOpts, ValidateScope, Opts) ->
+    validate_node_1(Node, #{}, MOpts, ValidateScope, Opts).
 
-normalize_attr(Attr, Opts) ->
-    case maps:is_key(node, Attr) orelse maps:is_key(validator, Attr) of
-        true ->
-            Attr;
-        false ->
-            maps:merge(maps:get(attr, Opts, #{}), Attr)
-    end.
-
-normalize_updated_node_1(Node, Attr, #{return := Return}, ValidateScope) ->
+validate_node_1(Node, Attr, #{return := Return} = MOpts, ValidateScope, Opts) ->
     Validator = maps:get(validator, Attr, {role, maps:get(node, Attr, expression)}),
     Normalize = normalize_updated_node_fun(ValidateScope),
-    case Normalize(Node, Validator, #{attr => Attr}) of
+    ValidateOpts = maps:merge(maps:get(validate_opts, Opts, #{}), #{attr => Attr}),
+    case Normalize(Node, Validator, ValidateOpts) of
         ok ->
             Return(Node);
         {ok, Node1} ->
             Return(Node1);
         {error, Detail} ->
+            handle_validation_failure(Node, Detail, MOpts, Opts)
+    end.
+
+handle_validation_failure(_Node, Detail, #{fail := Fail}, Opts) ->
+    case validation_fail(Opts) of
+        collect ->
+            Fail({invalid_transform_normalization, Detail});
+        raise ->
             erlang:error({invalid_transform_normalization, Detail})
+    end;
+handle_validation_failure(_Node, Detail, _MOpts, Opts) ->
+    case validation_fail(Opts) of
+        collect -> erlang:error({validation_collect_unsupported, Detail});
+        raise -> erlang:error({invalid_transform_normalization, Detail})
+    end.
+
+catch_validation_error(MA, FMA, MOpts, Opts) ->
+    case validation_fail(Opts) of
+        collect -> catch_on_error(MA, FMA, MOpts);
+        raise -> MA
     end.
 
 normalize_updated_node_fun(validate_node) ->
     fun astranaut_syntax:validate_node/3;
 normalize_updated_node_fun(normalize) ->
     fun astranaut_syntax:normalize/3.
+
+validate_style(Opts) ->
+    Validate0 =
+        case maps:find(validate, Opts) of
+            {ok, Validate} -> Validate;
+            error -> maps:get(normalize, Opts, false)
+        end,
+    case Validate0 of
+        true -> output;
+        false -> false;
+        input -> input;
+        output -> output;
+        both -> both;
+        _ -> erlang:error({invalid_validate_option, Validate0})
+    end.
+
+validation_fail(Opts) ->
+    case maps:get(fail, maps:get(validate_opts, Opts, #{}), raise) of
+        raise -> raise;
+        collect -> collect;
+        Fail -> erlang:error({invalid_validate_fail_option, Fail})
+    end.
 
 reject_node_context_return(_Node, _NodeOrNodes, none) ->
     ok;

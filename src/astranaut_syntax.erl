@@ -215,7 +215,7 @@ slot_role(Role) ->
     lists:member(Role, [name, type_param, attribute_body, binary_size, map_field, binary_field]).
 
 validation_env(Opts) ->
-    #{forms => maps:get(forms, Opts, []),
+    #{forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
       otp_vsn => maps:get(otp_vsn, Opts, otp_vsn())}.
 
 validate_node([], _Validator, _Slot, _Attr, _Env, _Path) ->
@@ -223,8 +223,8 @@ validate_node([], _Validator, _Slot, _Attr, _Env, _Path) ->
 validate_node(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
     validate_node_list(fun validate_node/6, Nodes, Validator, Slot, Attr, Env, Path, 1);
 validate_node(Node, Validator, Slot, _Attr, Env, Path) ->
-    case node_type_info(Node) of
-        {ok, Type, Pos} ->
+    case node_info(Node) of
+        {ok, Type, Pos, _Subtrees} ->
             case role_allowed(Validator, Type, Node, Env) of
                 true -> ok;
                 false ->
@@ -849,7 +849,11 @@ build_child_spec_subtreess(#{subtrees := Subtrees, annotate := true} = Spec, Wra
     [Wrap(Spec, Subtrees)].
 
 validator_node(#{attr := Attr}, Nodes) ->
-    astranaut_uniplate:up_attr(maps:with([node, validator], Attr), Nodes).
+    ChildAttr = maps:with([node, validator], Attr),
+    astranaut_uniplate:up_attr(
+      fun(ParentAttr) ->
+              maps:merge(maps:without([node, validator], ParentAttr), ChildAttr)
+      end, Nodes).
 
 %%===================================================================
 %% update forms related functions

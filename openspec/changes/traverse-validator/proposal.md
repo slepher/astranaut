@@ -21,7 +21,8 @@ This change covers:
 - Propagating slot-specific validators through traversal attributes.
 - Keeping validator propagation active even when automatic validation is disabled.
 - Adding explicit local and recursive syntax validation APIs.
-- Adding `validate => boolean` as an opt-in traversal validation switch, defaulting to disabled.
+- Adding `validate => false | true | input | output | both` as an opt-in traversal validation switch,
+  defaulting to disabled, with `true` retained as an alias for `output`.
 - Validating only nodes directly changed by a walker return.
 - Preserving macro-specific error attribution for macro-triggered validation failures.
 
@@ -36,8 +37,10 @@ This change does not cover:
 
 When traversal descends into a node, the child receives attribute metadata describing the exact parent slot validator that applies to it.
 
-When `validate => false` or the option is omitted, traversal does not automatically validate changed nodes. Callers can still read the propagated validator and perform their own validation.
+When `validate => false` or the option is omitted, traversal does not automatically validate nodes. Callers can still read the propagated validator and perform their own validation.
 
-When `validate => true`, traversal validates only nodes directly changed by the walker return. If a child change causes a parent to be rebuilt, the rebuilt parent is not automatically treated as directly changed.
+When validation includes `input`, traversal locally validates each input node during the pre stage before applying the pre walker. This shares the traversal's existing recursion and does not add a separate recursive validation pass.
+
+When validation includes `output`, traversal preserves the existing changed-output strategy: a direct pre-walker output is validated locally, while a direct post-walker output is validated recursively. If a child change causes a parent to be rebuilt, the rebuilt parent is not automatically treated as directly changed. `validate => true` is equivalent to `validate => output`.
 
 Macro expansion uses the propagated validator to validate macro returns and wraps failures as `{invalid_macro_return, Detail}` with the current and origin macro context.
