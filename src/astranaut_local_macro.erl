@@ -13,7 +13,8 @@
          frozen_ids/1, frozen_forms/1, local_macros/1, compiled_forms/1, skip_ids/1,
          related_functions/2, source_view/2, env_fingerprint/4,
          reject_locked_mutation/2, safe_load/3, finalize_plan/1,
-         verify_retained/2]).
+         verify_retained/2, load_local_macro_forms/4, module_name/1,
+         form_id/1, forms_id_map/1]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
@@ -176,6 +177,54 @@ reject_locked_mutation(Forms, State) ->
         [Form | _] -> {error, {illegal_locked_form_mutation, Form}}
     end.
 
+%% Generic macro expansion is performed by astranaut_macro before this
+%% boundary.  This module owns selection and assembly of the cumulative local
+%% macro module, followed by its safe replacement.
+-spec load_local_macro_forms(ordsets:ordset(fa()), ordsets:ordset(fa()),
+                             [term()], [compile:option()]) -> astranaut_return:struct(term()).
+load_local_macro_forms([], _LocalMacroRelatedFunctions, _PreparedForms, _CompileOpts) ->
+    astranaut_return:return(ok);
+load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions,
+                       PreparedForms, CompileOpts) ->
+    Forms = select_local_macro_forms(LocalMacroRelatedFunctions, PreparedForms),
+    compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts).
+
+-spec module_name(module()) -> module().
+module_name(Module) ->
+    list_to_atom(atom_to_list(Module) ++ "__local_macro").
+
+select_local_macro_forms(LocalMacroRelatedFunctions, Forms) ->
+    lists:reverse(
+      lists:foldl(
+        fun({attribute, Pos, module, Module}, Acc) ->
+                [{attribute, Pos, module, module_name(Module)} | Acc];
+           ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
+                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+           ({attribute, _Pos, spec, {{Name, Arity}, _Body}} = Node, Acc) ->
+                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
+           ({attribute, _Pos, export, _Exports}, Acc) -> Acc;
+           ({attribute, _Pos, local_macro, _Attr}, Acc) -> Acc;
+           ({attribute, _Pos, import_macro, _Attr}, Acc) -> Acc;
+           ({attribute, _Pos, use_macro, _Attr}, Acc) -> Acc;
+           ({attribute, _Pos, macro_options, _Attr}, Acc) -> Acc;
+           ({attribute, _Pos, exec_macro, _Attr}, Acc) -> Acc;
+           (Node, Acc) -> [Node | Acc]
+        end, [], Forms)).
+
+compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts) ->
+    Forms1 = astranaut_syntax:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
+    Module = astranaut_lib:analyze_forms_module(Forms),
+    safe_load(Module, Forms1, [without_warnings | CompileOpts]).
+
+local_macro_exports(LocalMacroFunctions) ->
+    lists:foldl(
+      fun(Export, Acc) ->
+              [astranaut_lib:gen_exports([Export], 0) | Acc]
+      end, [], LocalMacroFunctions).
+
+append_if(true, Form, Forms) -> [Form | Forms];
+append_if(false, _Form, Forms) -> Forms.
+
 %% Compile then safely replace the single local-macro module generation.  This
 %% has no force-purge fallback: callers retain their previous generation when
 %% old code is in use.
@@ -253,6 +302,10 @@ source_form_map(Forms) ->
 form_id({function, _Pos, Name, Arity, _Clauses}) -> {function, Name, Arity};
 form_id({attribute, _Pos, spec, {{Name, Arity}, _Body}}) -> {spec, Name, Arity};
 form_id(_) -> undefined.
+
+-spec forms_id_map([term()]) -> #{form_id() => term()}.
+forms_id_map(Forms) ->
+    source_form_map(Forms).
 
 closures(FAs, Options, FormMap) ->
     Extra = maps:get(extra_functions, Options, []),

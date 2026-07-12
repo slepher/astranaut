@@ -384,11 +384,14 @@ compile_local_plan([Boundary | Rest], LocalMap, ExternalMap, SourceView, ClauseM
                    Extra <- astranaut:traverse_return(local_macro_extra_functions(LocalMap, ClauseMap)),
                    Related = local_macro_related_functions(
                                 ordsets:union(ordsets:from_list(Members), Extra), ClauseMap),
+                   PreparedForms <- astranaut:traverse_return(
+                                      prepare_local_macro_snapshot(Related, ExternalMap, SourceView)),
                    _ <- astranaut:traverse_return(
                           %% Every plan boundary is a complete cumulative module.
                           %% `Pending' controls state transitions only; compiling
                           %% only it would discard earlier callable macros.
-                          load_local_macro_forms(ordsets:from_list(Members), Related, ExternalMap, SourceView, CompileOpts)),
+                          astranaut_local_macro:load_local_macro_forms(
+                            ordsets:from_list(Members), Related, PreparedForms, CompileOpts)),
                    LocalState1 = astranaut_local_macro:commit_compiled(
                                      Pending, astranaut_local_macro:frozen_forms(LocalState), LocalState),
                    compile_local_plan(Rest, LocalMap, ExternalMap, SourceView, ClauseMap, CompileOpts, LocalState1)
@@ -404,7 +407,7 @@ assert_scan_frozen_forms(Forms, LocalState) ->
     end.
 
 scan_locked_form(Form, LocalState) ->
-    case local_macro_snapshot_form_id(Form) of
+    case astranaut_local_macro:form_id(Form) of
         undefined -> false;
         Id -> ordsets:is_element(Id, astranaut_local_macro:frozen_ids(LocalState))
     end.
@@ -560,14 +563,14 @@ macro_options_by_fa(FAs, Options) ->
 local_macro_global_opts(Module, ClauseMap, GlobalMacroOpts) ->
     case maps:is_key({format_error, 1}, ClauseMap) of
         true ->
-            GlobalMacroOpts#{formatter => local_macro_module(Module)};
+            GlobalMacroOpts#{formatter => astranaut_local_macro:module_name(Module)};
         false ->
             GlobalMacroOpts#{formatter => astranaut_macro}
     end.
 
 local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
     MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
-    MacroOptions1#{module => local_macro_module(Module),
+    MacroOptions1#{module => astranaut_local_macro:module_name(Module),
                    macro_module => Module,
                    macro => Function,
                    function => Function,
@@ -726,9 +729,6 @@ call_arity(#{arity := Arity} = Opts) ->
             Arity - 1
     end.
 
-local_macro_module(Module) ->
-    list_to_atom(atom_to_list(Module) ++ "__local_macro").
-
 analyze_module_macros(Module) ->
     ModuleMacroAttributes = astranaut_lib:analyze_module_attributes(exported_macro, Module),
     Insert =
@@ -864,14 +864,17 @@ finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMa
                                        ClauseMap, LocalMacroExtraFunctions),
            #{local_macro_functions := LocalMacroFunctions,
              macro_definition_related_functions := MacroDefinitionRelatedFunctions} = Ctx,
-           load_local_macro_forms(LocalMacroFunctions, MacroDefinitionRelatedFunctions,
-                                  ExternalMacroMap, Forms, CompileOpts),
+           PreparedForms <- prepare_local_macro_snapshot(
+                              MacroDefinitionRelatedFunctions, ExternalMacroMap, Forms),
+           astranaut_local_macro:load_local_macro_forms(
+             LocalMacroFunctions, MacroDefinitionRelatedFunctions, PreparedForms, CompileOpts),
            LocalState1 = astranaut_local_macro:commit_compiled(
                            maps:keys(astranaut_local_macro:local_macros(ScanLocalState)),
                            astranaut_local_macro:frozen_forms(ScanLocalState), ScanLocalState),
            {FinalLocalEnv, FinalSkipIds, FinalLocalState} =
                astranaut_local_macro:finalize(retain_roots(Forms), LocalState1),
-           _ <- case astranaut_local_macro:verify_retained(forms_id_map(Forms), FinalLocalState) of
+           _ <- case astranaut_local_macro:verify_retained(
+                       astranaut_local_macro:forms_id_map(Forms), FinalLocalState) of
                      ok -> astranaut_return:return(ok);
                      {error, Error} -> astranaut_return:error_fail(Error)
                  end,
@@ -884,17 +887,6 @@ finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMa
            FunctionEnv = FunctionEnv0#{global_macro_opts => GlobalMacroOpts},
            return({AttributeForms, FunctionEnv})
        ]).
-
-%% Retained helpers must match their frozen declaration form; a mismatch means
-%% a later splice mutated an environment that the closure was captured against.
-forms_id_map(Forms) ->
-    lists:foldl(
-      fun(Form, Acc) ->
-              case local_macro_snapshot_form_id(Form) of
-                  undefined -> Acc;
-                  Id -> maps:put(Id, Form, Acc)
-              end
-      end, #{}, Forms).
 
 %% The function pass must only see local macros that are actually compiled in
 %% the final generation; declarations that failed compilation or were not yet
@@ -1028,7 +1020,7 @@ remove_final_skip_form({attribute, Pos, compile, {nowarn_unused_function, FAs}},
             [{attribute, Pos, compile, {nowarn_unused_function, RemainingFAs}}]
     end;
 remove_final_skip_form(Form, Skip) ->
-    case ordsets:is_element(local_macro_snapshot_form_id(Form), Skip) of
+    case ordsets:is_element(astranaut_local_macro:form_id(Form), Skip) of
         true -> [];
         false -> [Form]
     end.
@@ -1099,15 +1091,6 @@ attribute_macro_map(MacroMap) ->
 %%% ===== Local macro snapshot compilation helpers =====
 %%%===================================================================
 
-load_local_macro_forms([], _LocalMacroRelatedFunctions, _ExternalMacroMap, _Forms, _CompileOpts) ->
-    astranaut_return:return(ok);
-load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions, ExternalMacroMap, Forms, CompileOpts) ->
-    do([ return ||
-           Forms1 <- prepare_local_macro_snapshot(LocalMacroRelatedFunctions, ExternalMacroMap, Forms),
-           Forms2 = select_local_macro_forms(LocalMacroRelatedFunctions, Forms1),
-           compile_local_macro_forms(LocalMacroFunctions, Forms2, CompileOpts)
-       ]).
-
 prepare_local_macro_snapshot(LocalMacroRelatedFunctions, ExternalMacroMap, Forms) ->
     LocalSnapshotMacroCallers = local_macro_snapshot_callers(LocalMacroRelatedFunctions, ExternalMacroMap, Forms),
     transform_functions_if_needed(uniform, ExternalMacroMap, Forms, LocalSnapshotMacroCallers).
@@ -1116,43 +1099,6 @@ local_macro_snapshot_callers(LocalMacroRelatedFunctions, ExternalMacroMap, Forms
     LocalExternalMacroCallers = find_function_macro_callers(Forms, ExternalMacroMap, ordsets:new()),
     LocalMacroRelatedFunctionIds = function_ids(LocalMacroRelatedFunctions),
     ordsets:intersection(LocalExternalMacroCallers, LocalMacroRelatedFunctionIds).
-
-select_local_macro_forms(LocalMacroRelatedFunctions, Forms) ->
-    lists:reverse(
-      lists:foldl(
-        fun({attribute, Pos, module, Module}, Acc) ->
-                [{attribute, Pos, module, local_macro_module(Module)}|Acc];
-           ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
-                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-           ({attribute,_Pos, spec, {{Name,Arity}, _Body}} = Node, Acc) ->
-                append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
-           ({attribute,_Pos, export, _Exports}, Acc) ->
-               Acc;
-           ({attribute,_Pos, local_macro, _Attr}, Acc) ->
-                Acc;
-           ({attribute,_Pos, import_macro, _Attr}, Acc) ->
-                Acc;
-           ({attribute,_Pos, use_macro, _Attr}, Acc) ->
-                Acc;
-           ({attribute,_Pos, macro_options, _Attr}, Acc) ->
-                Acc;
-           ({attribute,_Pos, exec_macro, _Attr}, Acc) ->
-                Acc;
-           (Node, Acc) ->
-                [Node|Acc]
-        end, [], Forms)).
-
-local_macro_snapshot_form_id({function, _Pos, Name, Arity, _Clauses}) ->
-    {function, Name, Arity};
-local_macro_snapshot_form_id({attribute, _Pos, spec, {{Name, Arity}, _Body}}) ->
-    {spec, Name, Arity};
-local_macro_snapshot_form_id(_Form) ->
-    undefined.
-
-compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts) ->
-    Forms1 = astranaut_syntax:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
-    Module = astranaut_lib:analyze_forms_module(Forms),
-    astranaut_local_macro:safe_load(Module, Forms1, [without_warnings|CompileOpts]).
 
 retain_roots(Forms) ->
     lists:foldl(
@@ -1168,12 +1114,6 @@ retain_fas(FAs, Acc) when is_list(FAs) ->
 retain_fas({Name, Arity} = FA, Acc) when is_atom(Name), is_integer(Arity) -> [FA | Acc];
 retain_fas(_Other, Acc) -> Acc.
 
-local_macro_exports(LocalMacroFunctions) ->
-    lists:foldl(
-      fun(Export, Acc) ->
-              [astranaut_lib:gen_exports([Export], 0)|Acc]
-      end, [], LocalMacroFunctions).
-
 function_ids(Functions) ->
     lists:foldl(
       fun({Function, Arity}, Acc) ->
@@ -1186,14 +1126,6 @@ transform_functions_if_needed(_Module, _MacroMap, Forms, []) ->
     astranaut_return:return(Forms);
 transform_functions_if_needed(Module, MacroMap, Forms, TransformFunctions) ->
     transform_functions(Module, MacroMap, Forms, TransformFunctions).
-
-append_if(Boolean, Form, Forms) ->
-    case Boolean of
-        true ->
-            [Form|Forms];
-        false ->
-            Forms
-    end.
 
 %%%===================================================================
 %%% ===== Function pass: function body macro expansion =====
