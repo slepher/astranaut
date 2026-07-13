@@ -33,6 +33,7 @@ init_per_suite(Config) ->
                    macro_uniform_a, macro_uniform_b, macro_uniform_test,
                    macro_uniform_override_test,
                    macro_uniform_import_force_override_test,
+                   macro_uniform_external_after_local_force_test,
                    macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
                    macro_pass_local_dependency_test,
@@ -52,6 +53,8 @@ init_per_suite(Config) ->
                    macro_pass_export_and_local_test,
                    macro_pass_scoped_attribute_state_test,
                    macro_pass_scoped_function_state_test,
+                   macro_pass_local_compile_context_test,
+                   macro_pass_local_runtime_context_test,
                    macro_node_role_test,
                    macro_validator_slots,
                    macro_test],
@@ -165,8 +168,14 @@ all() ->
      test_macro_pass_export_and_local,
      test_macro_pass_scoped_attribute_state,
      test_macro_pass_scoped_function_state,
+     test_macro_pass_local_compile_context,
+     test_macro_pass_local_runtime_context,
+     test_macro_local_declaration_single_diagnostic,
+     test_macro_local_declaration_preserves_prior_registration,
      test_uniform_import_override_error, test_uniform_local_force_override,
      test_uniform_import_force_override,
+     test_uniform_external_after_local_force,
+     test_uniform_external_after_local_error,
      test_use_macro_errors,
      test_macro_format_error_predefined_errors,
      test_uniform_macro_error,
@@ -486,6 +495,48 @@ test_macro_pass_scoped_function_state(_Config) ->
     ?assertEqual(function_stateful, macro_pass_scoped_function_state_test:value()),
     ok.
 
+test_macro_pass_local_compile_context(_Config) ->
+    ?assertEqual({injected_attrs, [early]},
+                 macro_pass_local_compile_context_test:value()),
+    ok.
+
+test_macro_pass_local_runtime_context(_Config) ->
+    ?assertEqual({runtime_attrs, [call_site]},
+                 macro_pass_local_runtime_context_test:value()),
+    ok.
+
+test_macro_local_declaration_single_diagnostic(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_declaration_invalid_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroErrors = [Error || {_Line, astranaut_macro, Error} <- Errors],
+    ?assertMatch([{invalid_function_with_arity, {bad, -1}}], MacroErrors),
+    ok.
+
+test_macro_local_declaration_preserves_prior_registration(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_declaration_duplicate_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], Warnings} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroErrors = [Error || {_Line, astranaut_macro, Error} <- Errors],
+    ?assertMatch([{duplicate_local_macro_declaration, {gen, 1}}], MacroErrors),
+    ?assertNot(
+       lists:any(
+         fun({_File1, FileWarnings}) ->
+                 lists:any(
+                   fun({_Line, astranaut_macro, invalid_macro_attribute}) -> true;
+                      (_) -> false
+                   end, FileWarnings)
+         end, Warnings)),
+    ok.
+
 test_uniform_macro_override_error(Config) ->
     Forms = astranaut_test_lib:test_module_forms(macro_uniform_override_error_test, Config),
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
@@ -522,6 +573,22 @@ test_uniform_local_force_override(_Config) ->
 
 test_uniform_import_force_override(_Config) ->
     ?assertEqual({b, {from_b, ok}}, macro_uniform_import_force_override_test:same_name_call()),
+    ok.
+
+test_uniform_external_after_local_force(_Config) ->
+    ?assertEqual({a, {from_a, ok}},
+                 macro_uniform_external_after_local_force_test:same_name_call()),
+    ok.
+
+test_uniform_external_after_local_error(Config) ->
+    assert_macro_pass_error(
+      macro_uniform_external_after_local_error_test, Config,
+      fun({macro_override, {same_name, 1},
+           #{macro_source := local_macro},
+           #{macro_module := macro_uniform_a, function := to_a, arity := 1}}) ->
+              true;
+         (_) -> false
+      end),
     ok.
 
 test_use_macro_errors(Config) ->

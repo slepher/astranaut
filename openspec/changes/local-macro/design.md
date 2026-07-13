@@ -6,7 +6,7 @@
 
 ## 职责边界
 
-`astranaut_local_macro` 管理注册表、闭包、冻结、缓存、编译计划、retain 和最终跳过集合。统一扫描器仅调用其注册、确保可调用及收尾接口；扫描和 splice 细节见 [macro-passes-adjusted](../macro-passes-adjusted/design.md)。
+`astranaut_local_macro` 管理注册表、闭包、冻结、缓存、编译计划、retain 和最终跳过集合。统一扫描器仅调用其注册、确保可调用及收尾接口；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
 local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供两个通用
 能力：按既有宏匹配规则识别 function 闭包实际引用的 local macro，以及在给定
@@ -56,7 +56,9 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 State = #{
   local_macros => #{FA => #{
     order => ScanSequence,
-    env_snapshot => EnvSnapshot,
+    env_snapshot => EnvFromPassedForms,
+    inject_forms_snapshot => PassedFormsAtDeclaration,
+    closure_source_view => MaterializedSourceAtDeclaration,
     closure_ids => [FormId],
     referenced_local_macros => [FA],
     options => Options,
@@ -86,7 +88,7 @@ State = #{
 
 ### 声明单位与 FA
 
-`-local_macro([foo/1, bar/2])` 在语法上是一个 declaration form，但注册表为 `foo/1` 和 `bar/2` 分别建立条目。二者共享 declaration 的扫描顺序、已 pass 环境快照和 options；每个 FA 仍拥有自己的宏头、闭包成员和编译状态。
+`-local_macro([foo/1, bar/2])` 在语法上是一个 declaration form，但注册表为 `foo/1` 和 `bar/2` 分别建立条目。二者共享 declaration 的扫描顺序、已 pass 环境快照、注入快照和 options；每个 FA 仍拥有自己的宏头、闭包成员和编译状态。
 
 处理 declaration 时必须先检查全部 FA 是否已经存在；任一重复均以 `duplicate_local_macro_declaration` 失败，不能部分注册。
 
@@ -95,13 +97,13 @@ State = #{
 ### 注册过程
 
 ```text
-register(LocalMacroAttribute, SourceView, ExternalEnv, State):
+register(LocalMacroAttribute, ClosureSourceView, LocalCompileContext, State):
   1. 校验 declaration options、FA 格式与全部 FA 的唯一性
   2. 对每个 FA 计算静态函数闭包
   3. 校验 extra_functions 与 internal_function 策略
   4. 将闭包原始 function/spec forms 写入 frozen_forms
   5. 以已注册 local macro 的候选环境调用统一引用解析，取得闭包实际引用的 FA
-  6. 为每个 FA 写入不可变的 order、env_snapshot、closure_ids 和 options
+  6. 为每个 FA 写入不可变的 order、env_snapshot、inject_forms_snapshot、closure_source_view、closure_ids 和 options
   7. 将 status 设为 pending
 ```
 
@@ -160,6 +162,22 @@ spec form 不执行 function-body 展开，但与对应 function 使用同一个
 
 `use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；`import_macro` 对同名导入采用后者覆盖。这个合并后的外部环境才是写入 `env_snapshot` 的内容。
 
+local macro 唯一特殊的宏上下文规则是：编译其 function forms 时，整个宏展开上下文仅取 `-local_macro` declaration 之前的 `passed_forms`。实现上可将该上下文分解保存为 `env_snapshot` 与 `inject_forms_snapshot`：前者是从这些 passed forms 已经生效的 `import_macro`、`use_macro`、`macro_options` 得到的宏名称、alias、调用参数和 `inject_attrs` 配置；后者是同一份 passed forms，用于取得实际注入的 attribute 值。二者共同表示一个 declaration-time `LocalCompileContext`，而不是两个宏上下文。
+
+它必须与只用于结构分析的源码视图区分：
+
+```text
+LocalCompileContext = {
+  macro_env    = macro environment derived before declaration,
+  inject_forms = PassedFormsBeforeDeclaration
+}
+ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
+```
+
+按需编译即使由更晚的 attribute 调用触发，也只能使用 request 中冻结的 `LocalCompileContext` 展开 local macro forms。触发点传入的 `CompileContext.source_view` 只用于累计模块物化、模块分析和加载，不能替换 declaration-time 编译上下文。
+
+编译完成后执行 attribute 宏不属于 local-macro 的特殊规则。所有 attribute 宏，无论来自 external macro 还是 local macro，都统一使用调用点已经生效的宏映射、调用参数以及调用点前 `passed_forms`；local macro 只是在运行前可能多出一次按需编译步骤。
+
 闭包实际引用的 local macro 可以是此前已注册但尚未编译的 FA。统一引用解析
 基于候选宏描述而不是当前已加载代码，因此它们仍记录在 snapshot 中，并由
 后续最小累计编译计划保证在调用点可用；不应因为尚未加载就从引用集合省略。
@@ -168,10 +186,11 @@ spec form 不执行 function-body 展开，但与对应 function 使用同一个
 
 扫描遇到 `-local_macro(...)` 时：
 
-1. 使用该时刻的完整源码视图计算闭包；源码视图为已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
+1. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
 2. 编译环境只快照已 pass 的 ExternalEnv，加上闭包实际引用的 local macro。
-3. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；冻结仅表示 local macro 编译使用该原始输入。
-4. 以 FA 注册元数据。先声明 A 调用后声明 B 时，B 是 A 闭包成员；即使 B 也是 local macro，也按 helper 的多环境规则处理。
+3. 单独保存 declaration 前 `passed_forms` 为 `inject_forms_snapshot`，供 frozen function 展开时执行 `inject_attrs`。
+4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；冻结仅表示 local macro 编译使用该原始输入。
+5. 以 FA 注册元数据。先声明 A 调用后声明 B 时，B 是 A 闭包成员；即使 B 也是 local macro，也按 helper 的多环境规则处理。
 
 后续属性 splice 不得改写 `frozen_forms` 中的 form ID，否则报 `illegal_locked_form_mutation`。
 
@@ -185,7 +204,7 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ## 多环境展开与缓存
 
-每次展开从 `frozen_forms` 中的原始 form 开始。缓存键为 `{FormId, EnvFingerprint}`；fingerprint 包含外部宏映射、实际引用的 local macro 版本、macro options，以及影响 `inject_attrs` 的 forms 上下文。
+每次展开从 `frozen_forms` 中的原始 form 开始。缓存键为 `{FormId, EnvFingerprint}`；fingerprint 包含外部宏映射、实际引用的 local macro 版本、macro options，以及 declaration-time `inject_forms_snapshot`。
 
 同一 form 可属于多个闭包：
 
@@ -194,7 +213,7 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ### 环境指纹
 
-`EnvFingerprint` 必须反映所有可观察的展开输入，不能只比较 ExternalEnv。除外部宏映射、local macro 版本和 options 外，还必须包含影响 `inject_attrs` 的 forms 上下文。这样，同一 form 在不同声明位点或不同累计模块 generation 下不会错误复用缓存。
+`EnvFingerprint` 必须反映 `LocalCompileContext` 的所有可观察输入，不能只比较 ExternalEnv。除外部宏映射、local macro 版本和 options 外，还必须包含 declaration-time `inject_forms_snapshot`。不得使用包含 remaining queue 的 `closure_source_view` 代替它，否则声明后的 attribute 会错误参与 local macro forms 的注入和缓存身份。这样，同一 form 在不同声明位点或不同累计模块 generation 下不会错误复用缓存。
 
 ### 冲突检测时机
 

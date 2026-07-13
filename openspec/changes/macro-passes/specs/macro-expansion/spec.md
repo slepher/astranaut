@@ -1,173 +1,244 @@
-# 宏展开规范增量
+# Macro Expansion Spec Delta
 
-## 修改后的需求
+## ADDED Requirements
 
-### 需求：外部属性宏按源码顺序展开
+### Requirement: local 与普通 function 使用同构展开
 
-外部属性宏必须按源码顺序展开，并在扫描到每个属性时使用该时刻的当前外部宏环境。
+`astranaut_macro` MUST 以同一 function 展开实现处理最终普通 function pass 与 local-macro 工作流提交的目标 functions。
 
-#### 场景：后续属性能看到新导入的外部宏
+#### Scenario: 展开器不解释 local 专属策略
 
-- **给定** 一个外部属性宏展开后生成 `-import_macro(macro_b).`
-- **并且** 后续某个属性宏调用依赖 `macro_b`
-- **当** 模块执行外部属性阶段时
-- **那么** 后续属性必须在更新后的外部宏环境中展开
+- **给定** local-macro 工作流已经构造最终 MacroEnv
+- **当** 调用统一 function 展开操作
+- **那么** 展开器只按 MacroEnv 匹配和递归展开宏调用
+- **并且** 不读取 internal_function、generation、retain 或 declaration order
 
-#### 场景：生成出的属性在同一阶段被展开
+#### Scenario: local 引用复用统一调用匹配
 
-- **给定** 一个外部属性宏展开后生成另一个外部属性宏调用
-- **当** 模块执行外部属性阶段时
-- **那么** 该生成属性必须在同一外部属性阶段内被扫描并展开
+- **给定** local-macro 工作流提供候选 local 宏环境和闭包 functions
+- **当** 解析闭包实际引用的 local macros
+- **那么** 使用与普通 function 展开相同的调用匹配语义
 
-#### 场景：生成出的非环境 attribute 被递归重扫
+#### Scenario: 目标自身移除由 local 工作流完成
 
-- **给定** 一个外部属性宏展开后生成一个非环境 attribute form
-- **并且** 该生成 attribute 在当前外部宏环境下可以解析为外部属性宏调用
-- **当** 模块执行外部属性阶段时
-- **那么** 该生成 attribute 必须在同一外部属性阶段内被递归重扫并展开
+- **给定** local-macro 工作流请求展开 TargetFA
+- **当** 统一展开器收到 MacroEnv
+- **那么** TargetFA 已由 local-macro 工作流从环境移除
+- **并且** 展开器不包含 local macro 自身递归特判
 
-#### 场景：更早的属性不会被回溯重展开
+### Requirement: 属性宏统一参与 scan-and-splice
 
-- **给定** 一个较早的外部属性宏调用在导入 `macro_b` 之前已经完成展开
-- **并且** 后续某个外部属性展开后生成 `-import_macro(macro_b).`
-- **当** 模块执行外部属性阶段时
-- **那么** 先前已经展开完成的属性结果不会被重新访问
+外部属性宏与已可调用的本地属性宏 MUST 在同一次 scan-and-splice 扫描中按源码顺序处理。
 
-### 需求：外部属性阶段中生成的普通 forms 不做最终展开
+#### Scenario: 本地属性宏在统一扫描中展开
 
-外部属性宏生成的普通 forms 必须被插入 forms 流，但不得在外部属性阶段中提前执行最终函数体宏展开。
+- **给定** `-local_macro([foo/1])` 已由 local-macro 工作流注册并可调用
+- **并且** 后续存在 `-foo(...)`
+- **当** 模块执行统一属性扫描时
+- **那么** 该属性在当前位置以当前宏环境展开
 
-#### 场景：生成出的函数保留到最终阶段展开
+#### Scenario: 外部属性宏生成后续外部属性调用
 
-- **给定** 一个外部属性宏展开后生成一个包含宏调用的函数 form
-- **当** 模块执行外部属性阶段时
-- **那么** 该函数 form 会被保留在结果 forms 中
-- **并且** 它的函数体宏调用只会在后续最终展开阶段中被展开
+- **给定** 外部属性宏 A 展开后生成属性宏调用 B
+- **当** A 在统一扫描中展开
+- **那么** B 插回当前位置并在同一扫描中展开
 
-### 需求：外部宏环境在本地宏编译前冻结
+#### Scenario: 普通生成 forms 延后到最终函数体展开
 
-外部宏环境必须在外部属性阶段结束后、本地宏快照编译前被冻结。
+- **给定** 属性宏展开后生成包含宏调用的 function form
+- **当** 属性扫描继续
+- **那么** function form 保留在 forms 流中
+- **并且** 不在属性扫描阶段递归展开其函数体
 
-#### 场景：本地宏快照看到最终外部环境
+#### Scenario: 尚不可调用的本地属性宏触发工作流
 
-- **给定** 外部属性展开过程中生成了额外的外部宏环境项
-- **当** 本地宏快照编译开始时
-- **那么** 本地宏快照预展开必须使用外部属性阶段结束后冻结下来的最终外部宏环境
+- **给定** `-local_macro([foo/1])` 已注册但尚不可调用
+- **并且** 扫描遇到 `-foo(...)`
+- **当** 处理该属性时
+- **那么** 扫描委托 local-macro 工作流完成必要编译
+- **并且** 随后在当前位置展开 `-foo(...)`
 
-### 需求：本地属性宏生成的属性在本地阶段继续展开
+#### Scenario: 无法执行的宏 attribute 只诊断一次
 
-本地属性宏必须采用与外部属性阶段一致的当前位置 scan-and-splice 语义。生成出的 forms 会插回当前位置之后的剩余队列；如果生成的是另一个本地属性宏调用，必须在同一本地属性阶段继续展开。
+- **给定** form 在语法上是 `exec_macro` 或已注册 attribute macro 调用
+- **并且** 当前环境不能提供可执行宏
+- **当** 统一扫描处理该 form
+- **那么** 在当前位置报告 `invalid_macro_attribute` 并保留原 form
+- **并且** attribute pass 收尾不重复报告该诊断
 
-#### 场景：本地属性宏生成另一个本地属性宏调用
+### Requirement: 宏环境前向生效
 
-- **给定** 一个本地属性宏展开后生成另一个本地属性宏调用
-- **当** 本地属性展开运行时
-- **那么** 该生成属性必须在同一本地属性阶段内被扫描并展开
+`import_macro`、`use_macro`、`macro_options` 以及属性宏生成的这些 form MUST 仅影响后续扫描到的 forms。
 
-## 新增需求
+#### Scenario: 属性宏生成 import
 
-### 需求：本地宏快照允许显式补充 extra_functions
+- **给定** 属性宏展开后生成 `-import_macro(macro_b)`
+- **并且** 后续 form 依赖 `macro_b`
+- **当** 扫描继续时
+- **那么** 后续 form 在包含 `macro_b` 的环境中处理
 
-本地宏 helper 闭包发现必须允许通过本地宏定义选项中的 `extra_functions` 显式补充函数。
+#### Scenario: 已处理属性不回扫
 
-#### 场景：显式 helper 进入本地快照
+- **给定** 一个属性在 `macro_b` 导入前已完成展开
+- **并且** 后续属性生成 `-import_macro(macro_b)`
+- **当** 扫描继续时
+- **那么** 先前属性的结果不重新处理
 
-- **给定** 一个本地宏定义包含 `{extra_functions, [helper/2]}`
-- **当** 计算本地宏快照闭包时
-- **那么** `helper/2` 必须进入锁定本地宏快照
+#### Scenario: 生成的 import 对同一 splice 后续属性可见
 
-#### 场景：未定义的显式 helper 报错
+- **给定** 属性宏返回 `[import_macro(macro_b), DependentAttribute]`
+- **并且** DependentAttribute 依赖 macro_b
+- **当** 扫描处理该 splice 结果时
+- **那么** import_macro 先更新环境
+- **并且** DependentAttribute 随后在包含 macro_b 的环境中展开
 
-- **给定** 一个本地宏定义包含 `{extra_functions, [missing_helper/1]}`
-- **当** 计算本地宏快照闭包时
-- **那么** 编译必须以 `invalid_extra_functions` 失败
+#### Scenario: 生成的 local_macro declaration 进入同一扫描
 
-#### 场景：重复声明的显式 helper 按并集合并
+- **给定** 属性宏展开后生成 `-local_macro([foo/1])`
+- **当** 该 declaration 被重新扫描时
+- **那么** 扫描委托 local-macro 工作流注册 foo/1
+- **并且** 后续 `-foo(...)` 可按 local-macro 规则请求可调用性
 
-- **给定** 多个本地宏定义条目提供了 `extra_functions`
-- **当** 计算本地宏快照闭包时
-- **那么** 最终显式 helper 集合必须是这些条目的并集
+#### Scenario: use_macro 的同名 option 由后者覆盖
 
-### 需求：导出宏闭包参与宏定义策略分析
+- **给定** 先处理 `-use_macro({FA, [{xxx1, true}, {xxx2, true}]}).`
+- **并且** 随后处理 `-use_macro({FA, [{xxx1, false}]}).`
+- **当** 后续 form 使用 FA 时
+- **那么** 有效 options 为 `[{xxx1, false}, {xxx2, true}]`
 
-`-export_macro(...)` 也必须参与 helper 闭包分析，以支持宏定义策略处理，即使这些闭包本身不属于锁定本地快照。
+#### Scenario: 宏 key 冲突需要显式覆盖
 
-#### 场景：导出宏 helper 闭包被分析但不锁定
+- **给定** 当前环境已有宏 key K
+- **并且** 后续 import、use alias 或其他宏映射为 K 提供不同定义
+- **当** 新定义未声明 `force_override`
+- **那么** 编译以 `macro_override` 失败
+- **并且** 只有声明 `force_override` 时新定义才覆盖旧定义
 
-- **给定** 一个导出宏定义使用了若干 helper 函数
-- **当** 宏定义闭包分析执行时
-- **那么** 这些 helper 函数必须参与宏定义策略分析
-- **并且** 不会仅因为该宏是导出宏就进入锁定快照
+#### Scenario: 环境 form 的输出语义
 
-### 需求：本地展开不得修改宏环境
+- **给定** 扫描依次遇到 `import_macro`、`use_macro` 与 `macro_options`
+- **当** 它们成功更新环境
+- **那么** import/use forms 被消费
+- **并且** macro_options form 被保留并成为后续 passed form
 
-在外部宏环境冻结之后，本地宏函数体与本地属性宏都不得继续引入新的宏环境项。
+#### Scenario: export_macro 不进入本模块的 local macro 环境
 
-#### 场景：本地属性生成 import_macro
+- **给定** 模块声明 `-export_macro([foo/0])`
+- **并且** 未声明 `-local_macro([foo/0])`
+- **当** 本模块出现非限定调用 `foo()`
+- **那么** 该调用保持普通 Erlang 函数调用，不作为宏展开
 
-- **给定** 一个本地属性宏展开后生成 `-import_macro(macro_b).`
-- **当** 本地属性展开运行时
-- **那么** 编译必须以 `illegal_macro_environment_mutation` 失败
+#### Scenario: local_macro 与 export_macro 可组合
 
-#### 场景：本地属性生成 local_macro 定义
+- **给定** 同一 `foo/0` 同时声明为 `-local_macro([foo/0])` 和 `-export_macro([foo/0])`
+- **当** 本模块出现非限定调用 `foo()`
+- **那么** 该调用使用 local_macro 的 declaration-time 本地宏环境展开
+- **并且** 原模块中的 `foo/0` 保持导出，供其他模块 import 为宏
 
-- **给定** 一个本地属性宏展开后生成 `-local_macro([foo/0]).`
-- **当** 本地属性展开运行时
-- **那么** 编译必须以 `illegal_macro_environment_mutation` 失败
+### Requirement: attribute injection 使用扫描位置视图
 
-### 需求：锁定本地快照不得被改写
+attribute 宏的运行期注入环境 MUST 只由调用位置之前已经通过统一扫描的 forms 构造；该规则 MUST 对 external 与 local attribute macro 使用同一实现，不得为 local macro 建立另一套调用点规则。
 
-属于锁定本地宏快照的 forms 在临时本地宏模块编译后不得再被修改。
+#### Scenario: 只注入已通过扫描的 attributes
 
-#### 场景：本地属性改写锁定 helper
+- **给定** attribute 宏声明 `inject_attrs`
+- **并且** 调用位置之前和之后都存在目标 attribute
+- **当** 在统一扫描中调用该宏
+- **那么** 只注入调用位置之前已通过扫描的 attribute
+- **并且** 尚在队列中的 attribute 不可见
 
-- **给定** 一个 helper 函数属于锁定本地宏快照
-- **并且** 后续某个本地属性宏试图改写该 helper 函数
-- **当** 本地属性展开运行时
-- **那么** 编译必须以 `illegal_local_macro_definition_mutation` 失败
+#### Scenario: splice form 处理后才进入 passed 视图
 
-#### 场景：本地属性改写锁定 spec
+- **给定** 属性宏 splice 出 G1、G2
+- **当** 扫描正在处理 G1
+- **那么** G2 尚不属于 passed forms
+- **并且** G1 成功保留后才对后续调用可见
 
-- **给定** 一个 `-spec` form 属于锁定本地宏快照中的某个函数
-- **并且** 后续某个本地属性宏试图改写该 spec
-- **当** 本地属性展开运行时
-- **那么** 编译必须以 `illegal_local_macro_definition_mutation` 失败
+#### Scenario: external 与 local attribute 使用相同运行期规则
 
-### 需求：最终展开跳过锁定本地快照
+- **给定** external attribute macro 与已编译 local attribute macro 位于各自调用点
+- **当** 统一扫描解析调用名称、组织调用参数并执行 `inject_attrs`
+- **那么** 二者都使用各自调用点前已生效的 MacroEnv 与 passed forms
+- **并且** local macro 不具有独立的运行期上下文规则
 
-最终递归展开必须跳过所有属于锁定本地快照的 forms。
+### Requirement: local macro 编译使用声明位点注入快照
 
-#### 场景：最终 Pass 忽略本地宏函数
+local macro 的唯一特殊上下文规则是：其 frozen function forms 的编译 MUST 使用 `-local_macro` declaration 前 passed forms 所确定的完整宏展开上下文，包括已生效的宏名称、调用参数、options 与可注入 attribute。完整 remaining source view MUST 只用于闭包发现，不能作为编译上下文或 `inject_attrs` 输入。更晚的 attribute 调用即使触发按需编译，也不得把调用点环境传入 local macro forms 展开。
 
-- **给定** 某个函数属于锁定本地宏快照
-- **当** 最终展开在外部宏与本地宏的统一环境中运行时
-- **那么** 该函数不会被最终递归展开修改
+#### Scenario: 按需编译不改变 declaration-time 编译上下文
 
-### 需求：internal_function 策略按共享闭包函数逐项检查
+- **给定** `-local_macro([foo/1])` 前存在 attribute `early`
+- **并且** declaration 后存在 `use_macro` 配置变化和 attribute `late`
+- **并且** 更晚的 `-foo(...)` 触发 foo 按需编译
+- **当** 编译 foo 的 frozen forms 并随后展开 `-foo(...)`
+- **那么** frozen forms 使用 declaration 时的宏名称、调用参数和 `inject_attrs` 配置
+- **并且** frozen forms 的注入值只来自 declaration 前 passed forms，因此可见 `early` 而不可见 `late`
+- **并且** `-foo(...)` 本身随后按所有 attribute 宏共用的运行期规则执行
 
-不同宏定义允许拥有不同的 `internal_function` 列表。只有当某个具体函数同时属于多个宏定义闭包，且这些宏定义对它的处理不一致时，才应报错。
+#### Scenario: remaining queue 只参与闭包发现
 
-#### 场景：名单不同但没有共享函数时成功
+- **给定** local declaration 后方的 helper function 与 attribute 尚在 remaining queue
+- **当** 注册并最终编译该 local macro
+- **那么** helper function 可以进入 closure source view
+- **并且** 尚未 pass 的 attribute 不能进入 local macro forms 的 `inject_attrs`
 
-- **给定** 两个宏定义声明了不同的 `internal_function` 列表
-- **并且** 没有任何函数同时属于两个宏定义闭包且处理不一致
-- **当** 执行宏定义闭包分析时
-- **那么** 编译成功
+### Requirement: 扫描顺序保留局部 splice 顺序
 
-#### 场景：共享函数处理冲突时报错
+统一扫描 MUST 保留 splice 结果的局部顺序，并只在 function 合并确有需要时执行最小整理。
 
-- **给定** 某个函数同时属于多个宏定义闭包
-- **并且** 一个宏定义将其视为 internal direct-call 函数
-- **并且** 另一个宏定义没有将其视为 internal direct-call 函数
-- **当** 执行宏定义闭包分析时
-- **那么** 编译必须以 `conflicting_internal_function_policy` 失败
+#### Scenario: 生成 forms 位于当前位置
 
-### 需求：internal_function 策略可将宏定义内调用强制视为直接调用
+- **给定** 属性宏在原始 form F 的位置展开为 `[G1, G2]`
+- **并且** 原队列在 F 后仍有 R
+- **当** 扫描继续时
+- **那么** G1、G2 先于 R 按该顺序处理
 
-当某个宏定义的 `internal_function` 策略将一个宏函数标记为 direct-call 时，该调用在宏定义内部必须按普通函数调用处理，而不是按宏调用展开。
+#### Scenario: 扫描不全局重排生成 function/spec
 
-#### 场景：internal_function 让宏函数调用保持直接调用
+- **给定** 属性宏生成无冲突的 function 或 spec
+- **当** 统一属性扫描结束时
+- **那么** 该 form 保持其 splice 后的局部相对位置
+- **并且** 不因全局 Generated/Base 拆分被移动
 
-- **给定** 某个宏定义将 `helper_macro/1` 标记为 internal direct-call 函数
-- **当** 在该宏定义内部分析调用时
-- **那么** 对 `helper_macro/1` 的调用会按普通函数直接调用处理，而不是宏展开
+#### Scenario: 仅在 __original__ 冲突时合并
+
+- **给定** 属性宏生成同名同 arity function
+- **当** 生成 function 调用 `__original__/Arity`
+- **那么** 原 function 被重命名且相关调用同步替换
+- **并且** 无关 forms 的相对顺序保持不变
+
+### Requirement: 宏执行隔离 traverse state
+
+用户宏返回的 traverse computation MUST 在私有 state 中运行，且不得覆盖调用方的扫描或遍历 state。
+
+#### Scenario: 属性宏的 state 不覆盖扫描 state
+
+- **给定** 属性宏返回会执行 `put` 的 traverse computation
+- **当** 统一扫描调用该宏
+- **那么** computation 在私有 state 中执行
+- **并且** 当前 ExternalEnv、passed forms 与扫描队列状态保持不变
+
+#### Scenario: function 宏的 state 不泄漏到兄弟调用
+
+- **给定** function 宏返回会修改 traverse state 的 computation
+- **当** 最终 function pass 展开多个宏调用
+- **那么** 每次宏执行的私有 state 不泄漏到调用方或兄弟调用
+- **并且** formatter、位置和错误仍沿外层遍历传播
+
+### Requirement: 最终展开使用 local-macro 收尾结果
+
+最终 function pass MUST 使用 local-macro 收尾返回的最终环境和跳过集合。
+
+#### Scenario: 最终展开跳过工作流指定的 forms
+
+- **给定** local-macro 收尾返回 `FinalLocalEnv` 和 `FinalSkipIds`
+- **当** 最终函数体展开执行时
+- **那么** 使用 `ExternalEnv + FinalLocalEnv`
+- **并且** 不展开 `FinalSkipIds` 中的 forms
+
+#### Scenario: 最终映射不包含未编译 local macro
+
+- **给定** local-macro 收尾返回的 FinalLocalEnv 只包含最终可调用 FA
+- **当** 构造 function pass 的宏映射
+- **那么** local macro 映射按 FinalLocalEnv 过滤
+- **并且** 未编译或不可用的 FA 不参与最终匹配

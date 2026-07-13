@@ -432,7 +432,38 @@ map_forms_splice_tag_result(_Tag, Form) ->
     {form, Form}.
 
 map_forms_splice_reorder(TaggedForms) ->
-    map_forms_splice_reorder(TaggedForms, []).
+    TaggedForms1 = map_forms_splice_merge_specs(TaggedForms),
+    map_forms_splice_reorder(TaggedForms1, []).
+
+%% A generated spec explicitly describes the public wrapper.  When an
+%% __original__ merge happens, it replaces the original public spec; without
+%% a generated spec, the original spec remains attached to the wrapper name.
+%% The renamed implementation function intentionally receives no copied spec.
+map_forms_splice_merge_specs(TaggedForms) ->
+    MergeFAs = map_forms_splice_merge_fas(TaggedForms),
+    GeneratedSpecFAs = ordsets:from_list(
+                         [FA || {generated_insert, Form} <- TaggedForms,
+                                FA <- [map_forms_splice_spec_fa(Form)],
+                                FA =/= undefined,
+                                ordsets:is_element(FA, MergeFAs)]),
+    [Tagged || Tagged = {Tag, Form} <- TaggedForms,
+               not (Tag =:= form andalso
+                    ordsets:is_element(map_forms_splice_spec_fa(Form),
+                                       GeneratedSpecFAs))].
+
+map_forms_splice_merge_fas(TaggedForms) ->
+    Forms = map_forms_splice_untag(TaggedForms),
+    FunctionFAs = [{Name, Arity} || {function, _Pos, Name, Arity, _Clauses} <- Forms],
+    ordsets:from_list(
+      [{Name, Arity}
+       || {generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} <- TaggedForms,
+          map_forms_splice_is_renamed(Arity, Form),
+          length([ok || FA <- FunctionFAs, FA =:= {Name, Arity}]) > 1]).
+
+map_forms_splice_spec_fa({attribute, _Pos, spec, {{Name, Arity}, _Specs}}) ->
+    {Name, Arity};
+map_forms_splice_spec_fa(_Form) ->
+    undefined.
 
 map_forms_splice_reorder([{generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} | T], Acc) ->
     case map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) of

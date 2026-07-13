@@ -10,7 +10,7 @@
 
 -include("do.hrl").
 
--export([new/0, register/7, ensure_available/2, ensure_available/4,
+-export([new/0, register/7, register/8, ensure_available/2, ensure_available/4,
          compile_plan/2,
          cache_expanded/4, commit_compiled/3, finalize/2,
          finalize/4,
@@ -38,6 +38,15 @@ new() ->
           {ok, state()} | {error, term()}.
 register(FAs, Options, SourceView, ExternalEnv, CandidateLocalMap, MacroOps, State)
   when is_list(FAs), is_map(Options), is_map(CandidateLocalMap), is_map(MacroOps) ->
+    register(FAs, Options, SourceView, SourceView, ExternalEnv,
+             CandidateLocalMap, MacroOps, State).
+
+-spec register([fa()], map(), [term()], [term()], map(), map(), map(), state()) ->
+          {ok, state()} | {error, term()}.
+register(FAs, Options, SourceView, InjectFormsSnapshot, ExternalEnv,
+         CandidateLocalMap, MacroOps, State)
+  when is_list(FAs), is_list(InjectFormsSnapshot), is_map(Options),
+       is_map(CandidateLocalMap), is_map(MacroOps) ->
     Resolve = maps:get(resolve_local_references, MacroOps),
     ResolveReferences =
         fun(_FA, Closure, _Macros) ->
@@ -48,9 +57,11 @@ register(FAs, Options, SourceView, ExternalEnv, CandidateLocalMap, MacroOps, Sta
                      || TargetFA <- Closure],
                 Resolve(TargetEnvs, SourceView)
         end,
-    do_register(FAs, Options, SourceView, ExternalEnv, ResolveReferences, State).
+    do_register(FAs, Options, SourceView, InjectFormsSnapshot,
+                ExternalEnv, ResolveReferences, State).
 
-do_register(FAs, Options, SourceView, ExternalEnv, ResolveReferences, State) ->
+do_register(FAs, Options, SourceView, InjectFormsSnapshot,
+            ExternalEnv, ResolveReferences, State) ->
     Macros = maps:get(local_macros, State),
     case duplicate_or_existing(FAs, Macros) of
         none ->
@@ -72,6 +83,7 @@ do_register(FAs, Options, SourceView, ExternalEnv, ResolveReferences, State) ->
                                                                  closure_fas => Closure,
                                                                  referenced_local_macros => Refs,
                                                                  source_view => SourceView,
+                                                                 inject_forms_snapshot => InjectFormsSnapshot,
                                                                  options => Options,
                                                                  status => pending}, Acc)
                                           end, Macros, FAs),
@@ -388,10 +400,10 @@ expand_request_form(FormId, Request, Context, MacroOps, State) ->
                             Referenced, ordsets:add_element(TargetFA, Direct)),
     LocalVersions = local_versions(EffectiveReferenced, State),
     ExternalEnv = maps:get(env_snapshot, Request),
-    SourceView = maps:get(source_view, Request),
+    InjectFormsSnapshot = maps:get(inject_forms_snapshot, Request),
     Fingerprint = env_fingerprint(
                     ExternalEnv, LocalVersions, maps:get(options, Request),
-                    {TargetFA, SourceView}),
+                    {TargetFA, InjectFormsSnapshot}),
     case expanded_form(FormId, Fingerprint, State) of
         {ok, Form} ->
             astranaut_return:return({Form, State});
@@ -403,7 +415,8 @@ expand_request_form(FormId, Request, Context, MacroOps, State) ->
 
 expand_and_cache_form(FormId, TargetFA, EffectiveReferenced, Fingerprint,
                       #{forms := FrozenForms, env_snapshot := ExternalEnv,
-                        source_view := SourceView} = _Request,
+                        source_view := SourceView,
+                        inject_forms_snapshot := InjectFormsSnapshot} = _Request,
                       Context, MacroOps, State) ->
     OriginalForm = maps:get(FormId, FrozenForms),
     case FormId of
@@ -420,7 +433,7 @@ expand_and_cache_form(FormId, TargetFA, EffectiveReferenced, Fingerprint,
             do([ return ||
                    EffectiveEnv <- Merge(ExternalMacroMap, LocalMacroMap),
                    ExpandedSource <- Expand(
-                                       EffectiveEnv, SourceView,
+                                       EffectiveEnv, InjectFormsSnapshot,
                                        SnapshotForms, TargetFA),
                    ExpandedMap = forms_id_map(ExpandedSource),
                    ExpandedForm = maps:get(FormId, ExpandedMap, OriginalForm),
@@ -683,6 +696,7 @@ plan_boundary(Members, Ordered, Compiled, Frozen) ->
                      referenced_local_macros => maps:get(referenced_local_macros, Entry),
                      env_snapshot => maps:get(env_snapshot, Entry),
                      source_view => maps:get(source_view, Entry),
+                     inject_forms_snapshot => maps:get(inject_forms_snapshot, Entry),
                      options => maps:get(options, Entry),
                      already_compiled => maps:get(status, Entry) =:= compiled,
                      forms => maps:with(maps:get(closure_ids, Entry), Frozen)}

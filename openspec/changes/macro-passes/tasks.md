@@ -1,89 +1,72 @@
 # Tasks
 
+local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)。
+
 ## 规格
 
-- [x] 记录外部属性宏按源码顺序展开的规则。
-- [x] 记录外部属性宏生成 forms 后的 scan-and-splice 行为。
-- [x] 记录外部属性阶段中外部宏环境前向增长的规则。
-- [x] 记录后续环境增长不会回溯重展开已扫描属性。
-- [x] 记录生成出的外部属性宏调用会在同一阶段立即重新扫描。
-- [x] 记录生成出的非环境 attribute 会在当前阶段递归重扫。
-- [x] 记录生成出的普通 forms 会被保留，但不会在外部属性阶段提前做最终宏展开。
-- [x] 记录 scan-and-splice 不能全局拆分 Generated/Base 后统一重插入。
-- [x] 记录只有生成的 function/spec 需要参与最小化插入整理。
-- [x] 记录无重复函数冲突时生成的 function/spec 必须保持原地相对位置。
-- [x] 记录 return monad 桥接到 traverse 时必须保留 error state。
-- [x] 记录本地属性宏生成的 attribute 会在同一本地属性阶段继续展开。
-- [x] 记录宏环境变更 attribute 的黑名单。
-- [x] 记录外部属性阶段结束后建立本地宏快照边界。
-- [x] 记录 `extra_functions` 作为本地宏定义选项的语义。
-- [x] 记录 `extra_functions` 采用并集语义。
-- [x] 记录 `local_macro` 与 `export_macro` 都参与宏定义闭包分析。
-- [x] 记录 `internal_function` 是宏定义策略，而不是声明身份策略。
-- [x] 记录共享闭包函数上的 `internal_function` 冲突按具体函数检测。
-- [x] 记录本地宏与本地属性宏不得继续修改宏环境。
-- [x] 记录本地属性宏可以改写普通 forms，但不能改写锁定快照。
-- [x] 记录锁定快照至少包含 function 和 spec forms。
-- [x] 记录最终展开基于 `FrozenExternalEnv + LoadedLocalMacroEnv`。
+- [x] 记录外部与本地属性宏统一参与 scan-and-splice。
+- [x] 记录环境变更的前向生效与不回扫规则。
+- [x] 记录生成属性、环境 form 与普通 forms 的当前位置处理及延后函数体展开规则。
+- [x] 记录 splice 的局部顺序与禁止全局 Generated/Base 重排规则。
+- [x] 记录 attribute injection 只读取当前位置之前的 passed forms。
+- [x] 记录 import/use 的消费语义、macro_options 的保留语义及宏 key 冲突规则。
+- [x] 记录 traverse/return 桥接和用户宏 traverse state 隔离。
+- [x] 记录 `local_macro` declaration 和未就绪本地属性调用委托 local-macro 工作流。
+- [x] 记录 scan 收尾使用 local-macro 提供的最终环境和跳过集合。
+- [x] 记录 local 与普通 function 使用同构展开，以及统一 local 引用匹配边界。
 
 ## 实现
 
-- [x] 重构外部属性展开路径，使其按源码顺序扫描 forms，并携带可变的外部宏环境状态。
-- [x] 为外部属性宏生成的 forms 实现 queue / splice 回插机制。
-- [x] 增加 `map_forms_splice/3`，统一支持 queue/splice 重扫与 per-form 错误累积。
-- [x] 修正 `map_forms_splice/3` 的整理逻辑，避免全量 Generated/Base 拆分。
-- [x] 仅对生成的 function/spec 保留内部标记，并在确有重复函数和 `__original__` 时执行重命名。
-- [x] 保留非冲突生成 function/spec 的原地相对位置。
-- [x] 在外部属性扫描过程中重新发现外部属性宏生成的宏环境项。
-- [x] 对生成出的外部属性宏调用在插入点立即重新扫描。
-- [x] 对生成出的非环境 attribute 立即重新扫描，并在当前环境可解析为外部属性宏时继续递归展开。
-- [x] 保证新的外部环境只影响后续 forms，不回扫已处理结果。
-- [x] 让生成出的普通 forms 留在结果 forms 流中，但不在外部属性阶段提前执行最终函数体展开。
-- [x] 在外部属性阶段结束后冻结外部宏环境。
-- [x] 将外部属性阶段的环境状态改为 traverse State 传递。
-- [x] 将 handler 内 state 更新改为 traverse `do` / bind 串联，避免 `put` 被普通表达式丢弃。
-- [x] 使用保留 error state 的 return-to-traverse 桥接处理 `used_macros`、`macro_options` 校验和外部属性宏展开。
-- [x] 在本地宏定义校验中加入 `extra_functions`。
-- [x] 将 `extra_functions` 合并进本地 helper 闭包分析。
-- [x] 将多个 `extra_functions` 声明按集合并集处理。
-- [x] 使用 clause map 校验 `extra_functions` 中的函数是否存在。
-- [x] 对 `export_macro` 也执行宏定义 helper 闭包扫描。
-- [x] 为宏定义元数据增加 `internal_function` 策略表示。
-- [x] 将 `internal_function` 策略作用到闭包成员，而非仅作用于宏头函数。
-- [x] 在共享闭包函数上检测 `internal_function` 冲突，并在快照锁定前报错。
-- [x] 标记或追踪锁定本地宏快照 forms，以便后续 Pass 拒绝非法改写。
-- [x] 将 function 与 spec forms 一并纳入锁定快照追踪。
-- [x] 拒绝本地属性输出中的宏环境变更 attribute。
-- [x] 拒绝本地属性输出对锁定本地快照 forms 的改写。
-- [x] 将本地属性宏展开改为当前位置 scan-and-splice 递归扫描。
-- [x] 保持最终递归展开仅作用于非本地快照区域。
-- [x] 保持当前 `outer` / `inner` 遍历语义不变。
-- [x] 对新的 Pass 边界失败使用新的显式错误名。
+- [x] 重构 attribute pass，使其携带 ExternalEnv 与 LocalMacroState。
+- [x] 将 `local_macro` 注册和按需可调用性检查接入 local-macro 模块。
+- [x] 保留 scan-and-splice 对生成属性的当前位置重扫语义。
+- [x] 让生成的 import/use/macro_options 在处理下一 form 前更新 ExternalEnv。
+- [x] 维护 passed forms 与 remaining queue 两种不同的扫描视图。
+- [x] 仅对需要 `__original__/Arity` 合并的生成 function/spec 做最小整理。
+- [x] 通过冲突检查合并宏映射，仅在 `force_override` 时覆盖不同定义。
+- [x] 以 scoped state 执行用户宏返回的 traverse computation。
+- [x] 在 attribute pass 收尾剔除 FinalSkipIds，再运行 function pass。
+- [x] 将 FinalLocalEnv 接入 function pass，并过滤未编译 local macro。
+- [x] 提供不含 local 专属策略的统一 function 展开和 local 引用解析操作。
+- [x] 扫描器只调用 local-macro 注册、确保可调用和收尾接口，不自行执行编译计划。
 
 ## 测试
 
-- [x] 增加测试：外部属性宏生成新的 `-import_macro(...)`，供后续属性使用。
-- [x] 增加测试：外部属性宏生成新的 `-macro_options(...)`，供后续 import 使用。
-- [x] 增加测试：外部属性宏生成新的 `-use_macro(...)` alias，供后续属性使用。
-- [x] 增加测试：外部属性宏生成另一个外部属性宏调用，并在同阶段立即展开。
-- [x] 增加测试：外部属性宏同时生成新导入和依赖该导入的后续属性。
-- [x] 增加测试：生成出的非环境 attribute 被重新扫描，并递归展开为外部属性宏调用。
-- [x] 增加测试：后续外部环境更新不会回溯重展开较早属性。
-- [x] 增加测试：外部属性生成的普通函数 forms 会被保留，但只在最终阶段才完成宏展开。
-- [x] 增加测试：非冲突生成函数在 scan-and-splice 后保持原地相对位置。
-- [x] 增加测试：本地宏发现能看见更早外部属性宏生成的 forms。
-- [x] 增加测试：`extra_functions` 能补充静态分析遗漏的 helper。
-- [x] 增加测试：`extra_functions` 引用未定义函数时编译失败。
-- [x] 增加测试：多个 `extra_functions` 声明按并集合并。
-- [x] 增加测试：`export_macro` 的 helper 闭包会参与 `internal_function` 分析，但不会因此进入锁定快照。
-- [x] 增加测试：两个宏的 `internal_function` 名单不同，但没有共享闭包函数时编译成功。
-- [x] 增加测试：共享闭包函数在不同宏下的 `internal_function` 处理冲突时，报 `conflicting_internal_function_policy`。
-- [x] 增加测试：`internal_function` 策略会让宏定义内部的某个宏函数调用按直接调用处理。
-- [x] 增加测试：本地宏函数体试图生成宏环境变更输出时编译失败。
-- [x] 增加测试：本地属性宏生成 `-import_macro(...)` 时编译失败。
-- [x] 增加测试：本地属性宏生成 `-local_macro(...)` 时编译失败。
-- [x] 增加测试：本地属性宏生成另一个本地属性宏调用时会继续展开。
-- [x] 增加测试：本地属性宏改写锁定 helper 时编译失败。
-- [x] 增加测试：本地属性宏改写锁定 spec 时编译失败。
-- [x] 增加测试：最终展开仍会展开锁定快照之外普通代码中生成的宏调用。
+- [x] 增加测试：外部与已就绪本地属性宏按同一源码顺序扫描。
+- [x] 增加测试：本地属性宏生成环境变更后，后续 form 可见且先前 form 不回扫。
+- [x] 增加测试：尚未就绪的本地属性宏调用会触发 local-macro 工作流。
+- [x] 增加测试：属性宏生成 import 与依赖该 import 的后续属性时按 splice 顺序展开。
+- [x] 增加测试：attribute injection 只包含已经通过扫描的 attributes。
+- [x] 增加测试：生成的 macro_options 对后续展开生效。
+- [x] 增加测试：宏 key 冲突失败及 `force_override` 成功。
+- [x] 增加测试：生成的普通 function 延后到最终函数体展开，且无冲突 function/spec 不被全局重排。
+- [x] 增加测试：attribute/function 宏的 traverse state 与框架 state 隔离。
 - [x] 重新运行现有 uniform macro 与 macro validation 测试套件。
+- [x] 增加测试：local macro function 与普通 function 复用同一展开语义。
+- [x] 增加测试：目标 FA 自身移除和 internal_function 不在通用展开器中实现。
+
+## Hierarchy_final 后续任务（新增，保留既有任务状态）
+
+### 规格
+
+- [x] 明确 `env_snapshot` 与 `inject_forms_snapshot` 共同组成一份 local function-form 编译上下文，`closure_source_view` 仅是闭包结构输入而非宏上下文。
+- [x] 明确 local macro 唯一特殊规则是 function-form 编译上下文仅限 declaration 前 passed forms；attribute 运行期规则对 external/local 宏通用。
+- [x] 将 `Hierarchy_final.md` 识别的 P0–P3 差距转化为实现和测试任务。
+
+### 实现
+
+- [ ] **P0：声明位点注入快照。** 注册 local declaration 时单独保存 declaration 前 `passed_forms`；展开 frozen local forms 时用它执行 `inject_attrs` 和构造环境 fingerprint，不再把包含 remaining queue 的 closure source view 作为 `InjectForms`。
+- [ ] **P0：隔离编译期与运行期。** attribute 触发 `ensure_available` 时，只允许 declaration 前 passed forms 进入 local function-form 编译上下文；编译完成后的 attribute 调用继续走 external/local 共用的运行期 MacroEnv/PassedForms 规则，不新增 local 专用运行路径。
+- [ ] **P1：统一跨来源有效宏环境。** 让 external/local 宏 entry 按源码位置走同一冲突与 `force_override` 更新规则，避免固定 `maps:merge(External, Local)` 决定 winner 或延迟冲突。
+- [ ] **P2：明确并实现 `__original__` 的 spec merge。** 按 `Hierarchy_final.md` 的 spec 归属规则处理原 spec、生成 spec 与重命名原函数。
+- [ ] **P3：封装 local declaration 单次语义校验。** 注册和 local macro map 构造共享同一份成功校验结果，同时保留失败不回滚先前注册且诊断不重复的行为。
+
+### 测试
+
+- [ ] local declaration 前后存在目标 attribute 时，frozen local forms 的 `inject_attrs` 只包含 declaration 前已 pass 的值。
+- [ ] declaration 后 `use_macro` 修改 alias、调用参数或 `inject_attrs` 配置时，frozen local forms 仍使用 declaration-time 配置。
+- [ ] 更晚 attribute 触发按需编译时，验证 local function forms 仍只使用 declaration 前 passed forms，并验证后续 attribute 与 external attribute 使用同一运行期规则。
+- [ ] remaining queue 中 helper 可进入 local closure，但尚未 pass 的 attributes 不进入 local forms 注入。
+- [ ] external → local 与 local → external 的冲突、双方 `force_override`、生成环境 form 交错均按源码顺序裁决。
+- [ ] `__original__` 合并覆盖原函数带 spec、wrapper 自带 spec、原/生成 spec 同时存在三类场景。
+- [ ] local declaration 无效、重复及部分失败场景只产生一次诊断且不破坏先前成功注册。

@@ -13,6 +13,7 @@ all() -> [register_freezes_static_closure,
           cache_hits_same_fingerprint,
           retain_controls_final_skip_ids,
           source_view_only_contains_materialised_forms,
+          declaration_inject_snapshot_is_preserved,
           fingerprint_includes_injected_forms,
           frozen_splice_is_rejected,
           later_declaration_remains_helper_in_earlier_closure,
@@ -109,6 +110,22 @@ retain_controls_final_skip_ids(_Config) ->
 
 source_view_only_contains_materialised_forms(_Config) ->
     ?assertEqual([passed, queued], astranaut_local_macro:source_view([passed], [queued])),
+    ok.
+
+declaration_inject_snapshot_is_preserved(_Config) ->
+    [Foo, Helper, Spec] = forms(),
+    Source = [early, Foo, Helper, Spec, late],
+    InjectForms = [early],
+    MacroOps = #{resolve_local_references => fun test_resolve_local_references/2},
+    {ok, State} = astranaut_local_macro:register(
+                    [{foo, 0}], #{}, Source, InjectForms, #{}, #{}, MacroOps,
+                    astranaut_local_macro:new()),
+    #{{foo, 0} := Entry} = astranaut_local_macro:local_macros(State),
+    ?assertEqual(Source, maps:get(source_view, Entry)),
+    ?assertEqual(InjectForms, maps:get(inject_forms_snapshot, Entry)),
+    {ok, [Boundary]} = astranaut_local_macro:compile_plan({foo, 0}, State),
+    [Request] = maps:get(requests, Boundary),
+    ?assertEqual(InjectForms, maps:get(inject_forms_snapshot, Request)),
     ok.
 
 fingerprint_includes_injected_forms(_Config) ->

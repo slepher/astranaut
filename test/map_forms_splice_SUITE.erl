@@ -7,10 +7,16 @@
 -export([all/0]).
 -export([basic/1, splice/1, splice_empty/1, expand/1, expand_with_state/1,
          preserve_generated_function_position/1, generated_function_original_merge/1,
+         generated_merge_preserves_original_spec/1,
+         generated_merge_prefers_generated_spec/1,
+         generated_merge_keeps_generated_spec_without_original/1,
          lift_m_bridge/1]).
 
 all() -> [basic, splice, splice_empty, expand, expand_with_state,
           preserve_generated_function_position, generated_function_original_merge,
+          generated_merge_preserves_original_spec,
+          generated_merge_prefers_generated_spec,
+          generated_merge_keeps_generated_spec_without_original,
           lift_m_bridge].
 
 lift_m_bridge(_Config) ->
@@ -145,6 +151,54 @@ generated_function_original_merge(_Config) ->
                 (_) -> false
              end, Result, #{traverse => pre}),
     ok.
+
+generated_merge_preserves_original_spec(_Config) ->
+    OriginalSpec = spec_form({2,1}, foo),
+    {Original, Generated} = original_and_wrapper(),
+    Result = run_original_merge([OriginalSpec, Original], [Generated]),
+    [OriginalSpec] = [Spec || Spec = {attribute, _, spec, _} <- Result],
+    ok.
+
+generated_merge_prefers_generated_spec(_Config) ->
+    OriginalSpec = spec_form({2,1}, foo),
+    GeneratedSpec = spec_form({10,1}, foo),
+    {Original, Generated} = original_and_wrapper(),
+    Result = run_original_merge([OriginalSpec, Original], [GeneratedSpec, Generated]),
+    [GeneratedSpec] = [Spec || Spec = {attribute, _, spec, _} <- Result],
+    ok.
+
+generated_merge_keeps_generated_spec_without_original(_Config) ->
+    GeneratedSpec = spec_form({10,1}, foo),
+    {Original, Generated} = original_and_wrapper(),
+    Result = run_original_merge([Original], [GeneratedSpec, Generated]),
+    [GeneratedSpec] = [Spec || Spec = {attribute, _, spec, _} <- Result],
+    ok.
+
+original_and_wrapper() ->
+    Original = {function, {2,1}, foo, 0,
+                [{clause, {2,1}, [], [], [{atom, {2,5}, original}]}]},
+    Generated = {function, {10,1}, foo, 0,
+                 [{clause, {10,1}, [], [],
+                   [{call, {10,5}, {atom, {10,5}, '__original__'}, []}]}]},
+    {Original, Generated}.
+
+run_original_merge(Prefix, GeneratedForms) ->
+    Forms = [{attribute, {1,1}, module, test}] ++ Prefix ++
+            [{attribute, {3,1}, my_macro, ok}],
+    Handler = fun
+        ({attribute, _Pos, my_macro, _}) ->
+            astranaut_traverse:return({splice, GeneratedForms});
+        (Form) ->
+            astranaut_traverse:return(Form)
+    end,
+    {just, {Result, _State}} = run_splice(Handler, Forms, #{}),
+    Result.
+
+spec_form(Pos, Name) ->
+    {attribute, Pos, spec,
+     {{Name, 0},
+      [{type, Pos, 'fun',
+        [{type, Pos, product, []}, {type, Pos, atom, []}]}]}}.
 
 run_splice(Handler, Forms, InitState) ->
     astranaut_return:run(

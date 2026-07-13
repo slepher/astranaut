@@ -132,6 +132,7 @@ run_attribute_pass(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
            {ScannedForms, ExternalEnv} <-
                scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts),
            #{macro_map := ExternalMacroMap,
+             effective_macro_map := ScanEffectiveMacroMap,
              global_macro_opts := GlobalMacroOpts,
              local_macro_state := ScanLocalState,
              scan_local_macro_map := ScanLocalMacroMap,
@@ -143,6 +144,7 @@ run_attribute_pass(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
            %% The current module's execution map is defined solely by
            %% local_macro declarations collected during the scan.
            finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, ScanLocalMacroMap,
+                                         ScanEffectiveMacroMap,
                                          ScanLocalState, PreparedForms, CompileOpts)
        ]).
 
@@ -159,7 +161,8 @@ scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
                   local_macro_state => astranaut_local_macro:new(),
                   scan_local_macro_map => #{},
                   scan_local_declarations => #{},
-                  macro_map => #{}},
+                  macro_map => #{},
+                  effective_macro_map => #{}},
     astranaut_traverse:run(
       astranaut:map_forms_splice(fun scan_form/1, Forms, #{traverse => none, queue_state => true}),
       ?MODULE, #{node => form, validator => {role, form}}, InitState).
@@ -183,17 +186,40 @@ scan_local_macro({attribute, Pos, local_macro, Attr} = Form,
                                  scan_local_declarations := ScanLocalDeclarations,
                                  remaining_forms := Queue} = State) ->
     SourceView = astranaut_local_macro:source_view(passed_forms(State), Queue),
+    InjectFormsSnapshot = passed_forms(State),
     ClauseMap = function_clauses_map(SourceView, #{}),
+    Validation = validate_local_macro_attribute(#{clause_map => ClauseMap}, Attr),
+    case astranaut_return:run(Validation) of
+        {just, {FAs, Options}} ->
+            do([ traverse ||
+                   %% Preserve warnings/error_ok carried by the single
+                   %% validation computation before committing registration.
+                   _ <- astranaut:traverse_return(Validation),
+                   scan_valid_local_macro(
+                     Form, Pos, FAs, Options, ClauseMap, SourceView,
+                     InjectFormsSnapshot, State, LocalState, ScanLocalMap,
+                     ScanLocalDeclarations)
+               ]);
+        nothing ->
+            %% Bridge the same validation result that was inspected above;
+            %% do not execute a second validator pass merely to emit errors.
+            astranaut:traverse_return(Validation)
+    end.
+
+scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
+                       InjectFormsSnapshot, State, LocalState, ScanLocalMap,
+                       ScanLocalDeclarations) ->
+    EffectiveCandidateLocalMap = effective_local_macro_entries(
+                                   maps:get(effective_macro_map, State)),
     do([ traverse ||
            LocalState1 <- register_local_declaration(
-                            Attr, Pos, ClauseMap, SourceView,
-                            scan_env_snapshot(State), ScanLocalMap,
+                            FAs, Options, Pos, SourceView, InjectFormsSnapshot,
+                            scan_env_snapshot(State), EffectiveCandidateLocalMap,
                             local_macro_ops(), LocalState),
-           {FAs, Options} <- astranaut:traverse_return(
-                               validate_local_macro_attribute(#{clause_map => ClauseMap}, Attr)),
-           ScanLocalMap1 <- astranaut:traverse_return(
-                              add_local_macro(State, SourceView, ClauseMap,
-                                                             FAs, Options, ScanLocalMap)),
+           {ScanLocalMap1, EffectiveMacroMap1} <- astranaut:traverse_return(
+                                                   add_local_macro(
+                                                     State, SourceView, ClauseMap,
+                                                     FAs, Options, ScanLocalMap)),
            %% Registration and map construction happen exactly here.  The
            %% later cleanup only removes this already-scanned declaration; it
            %% never validates or registers a local macro again.  Retained local
@@ -202,39 +228,40 @@ scan_local_macro({attribute, Pos, local_macro, Attr} = Form,
              note_passed_form(
                Form, State#{local_macro_state => LocalState1,
                             scan_local_macro_map => ScanLocalMap1,
+                            effective_macro_map => EffectiveMacroMap1,
                             scan_local_declarations => maps:put(Form, {Pos, FAs}, ScanLocalDeclarations)})),
            return(Form)
        ]).
 
+effective_local_macro_entries(MacroMap) ->
+    maps:filter(
+      fun(_Key, #{macro_source := local_macro}) -> true;
+         (_Key, _Macro) -> false
+      end, MacroMap).
+
 add_local_macro(#{module := Module, file := File, global_macro_opts := GlobalOpts,
-                                 macro_map := ExternalMap}, SourceView, ClauseMap,
+                                 macro_map := ExternalMap,
+                                 effective_macro_map := EffectiveMap}, SourceView, ClauseMap,
                                  FAs, Options, Existing) ->
     Ctx = #{module => Module, file => File, forms => SourceView,
             global_macro_opts => local_macro_global_opts(Module, ClauseMap, GlobalOpts),
             external_macro_map => ExternalMap, clause_map => ClauseMap},
     New = build_local_macro_map(Ctx, macro_options_by_fa(FAs, Options#{macro_source => local_macro})),
     do([ return ||
-           assert_macro_map_no_overrides(New, ExternalMap),
-           merge_macro_maps(Existing, New)
+           Existing1 <- merge_macro_maps(Existing, New),
+           Effective1 <- merge_macro_maps(EffectiveMap, New),
+           return({Existing1, Effective1})
        ]).
 
-register_local_declaration(Attr, Pos, ClauseMap, SourceView, ExternalEnv,
+register_local_declaration(FAs, Options, Pos, SourceView, InjectFormsSnapshot, ExternalEnv,
                            CandidateLocalMap, MacroOps, LocalState) ->
-    %% Declaration preparation remains the source of diagnostics while both
-    %% passes coexist.  `run/1' intentionally keeps error_ok diagnostics out
-    %% of this scan transaction, so one bad FA cannot roll back prior local
-    %% registrations or duplicate its compiler error.
-    case astranaut_return:run(
-           validate_local_macro_attribute(#{clause_map => ClauseMap}, Attr)) of
-        {just, {FAs, Options}} ->
-            case astranaut_local_macro:register(
-                   FAs, Options, SourceView, ExternalEnv,
-                   CandidateLocalMap, MacroOps, LocalState) of
-                {ok, LocalState1} -> astranaut_traverse:return(LocalState1);
-                {error, Error} -> astranaut_traverse:update_pos(Pos, ?MODULE, astranaut_traverse:fail(Error))
-            end;
-        nothing ->
-            astranaut_traverse:return(LocalState)
+    case astranaut_local_macro:register(
+           FAs, Options, SourceView, InjectFormsSnapshot, ExternalEnv,
+           CandidateLocalMap, MacroOps, LocalState) of
+        {ok, LocalState1} -> astranaut_traverse:return(LocalState1);
+        {error, Error} ->
+            astranaut_traverse:update_pos(
+              Pos, ?MODULE, astranaut_traverse:fail(Error))
     end.
 
 scan_env_snapshot(#{macro_map := MacroMap, global_macro_opts := GlobalOpts}) ->
@@ -244,26 +271,32 @@ scan_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
     #{global_macro_opts := GlobalMacroOpts} = State,
     case import_macro_form(GlobalMacroOpts, Form) of
         {ok, ModuleMacroMap} ->
-            #{module := Module, file := File, macro_map := MacroMap} = State,
+            #{module := Module, file := File, macro_map := MacroMap,
+              effective_macro_map := EffectiveMacroMap} = State,
             PassedForms = passed_forms(State),
             Effective = effective_module_macro_maps(File, Module, PassedForms, ModuleMacroMap),
             NewMap = uniform_imported_macro_map(Effective),
-            case merge_macro_maps_pure(MacroMap, NewMap) of
-                {ok, Merged} ->
+            case {merge_macro_maps_pure(MacroMap, NewMap),
+                  merge_macro_maps_pure(EffectiveMacroMap, NewMap)} of
+                {{ok, Merged}, {ok, EffectiveMerged}} ->
                     ModuleMacroMaps = maps:merge(maps:get(module_macro_maps, State, #{}), Effective),
                     do([ traverse ||
                            astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps,
-                                                         macro_map => Merged}),
+                                                         macro_map => Merged,
+                                                         effective_macro_map => EffectiveMerged}),
                            return({splice, []})
                        ]);
-                {error, Reason} ->
+                {{error, Reason}, _} ->
+                    astranaut_traverse:fail(Reason);
+                {_, {error, Reason}} ->
                     astranaut_traverse:fail(Reason)
             end;
         {error, Error} ->
             astranaut_traverse:fail(Error)
     end;
 scan_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
-    #{module := Module, file := File, macro_map := MacroMap} = State,
+    #{module := Module, file := File, macro_map := MacroMap,
+      effective_macro_map := EffectiveMacroMap} = State,
     ImportedMacros = module_macro_maps_from_uniform(MacroMap),
     PassedForms = passed_forms(State),
     do([ traverse ||
@@ -276,6 +309,12 @@ scan_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
                          {error, Reason} ->
                              astranaut_traverse:fail(Reason)
                      end,
+           EffectiveMerged <- case merge_macro_maps_pure(EffectiveMacroMap, NewMap) of
+                                  {ok, EffectiveMergedMap} ->
+                                      astranaut_traverse:return(EffectiveMergedMap);
+                                  {error, EffectiveReason} ->
+                                      astranaut_traverse:fail(EffectiveReason)
+                              end,
            ModuleMacroMaps0 = maps:get(module_macro_maps, State, #{}),
            ModuleMacroMaps1 = maps:fold(
                                 fun(M, Macros, Acc) ->
@@ -283,7 +322,8 @@ scan_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
                                         maps:put(M, maps:merge(M1, Macros), Acc)
                                 end, ModuleMacroMaps0, UsedMacros),
            astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps1,
-                                         macro_map => Merged}),
+                                         macro_map => Merged,
+                                         effective_macro_map => EffectiveMerged}),
            return({splice, []})
        ]);
 scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
@@ -299,8 +339,7 @@ scan_env_form(Form, _State) ->
     keep_scanned_form(Form).
 
 scan_attribute(Form, State) ->
-    #{macro_map := ExternalMacroMap, scan_local_macro_map := ScanLocalMap} = State,
-    MacroMap = maps:merge(ExternalMacroMap, ScanLocalMap),
+    #{effective_macro_map := MacroMap} = State,
     ExecutionMacroMap = inject_macro_attributes(MacroMap, passed_forms(State)),
     AttributeMacroMap = attribute_macro_map(ExecutionMacroMap),
     case attribute_find_macro(Form, ExecutionMacroMap, AttributeMacroMap) of
@@ -814,7 +853,7 @@ macro_without_module_attr(_Other) ->
 %%% ===== Attribute pass, substep 3: local macro closure and snapshots =====
 %%%===================================================================
 finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMacroMap,
-                              ScanLocalState, Forms, CompileOpts) ->
+                              ScanEffectiveMacroMap, ScanLocalState, Forms, CompileOpts) ->
     do([ return ||
            FinalContext = #{local_macro_map => LocalMacroMap,
                             external_macro_map => ExternalMacroMap,
@@ -829,8 +868,8 @@ finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMa
            Ctx = Ctx0#{prepared_function_ids => ordsets:from_list(
                                                 [Id || Id = {function, _, _} <-
                                                            maps:keys(RetainedForms)])},
-           FinalLocalMacroMap = compiled_local_macro_map(LocalMacroMap, FinalLocalEnv),
-           FinalMacroMap <- merge_macro_maps(ExternalMacroMap, FinalLocalMacroMap),
+           FinalMacroMap = compiled_effective_macro_map(
+                             ScanEffectiveMacroMap, FinalLocalEnv),
            {UnsortedAttributeForms, FunctionEnv0} <-
                finalize_attribute_forms(Ctx, FinalMacroMap, FinalSkipIds),
            %% The attribute-pass output is sorted before the function pass sees it.
@@ -839,15 +878,17 @@ finalize_attribute_macro_pass(Module, GlobalMacroOpts, ExternalMacroMap, LocalMa
            return({AttributeForms, FunctionEnv})
        ]).
 
-%% The function pass must only see local macros that are actually compiled in
-%% the final generation; declarations that failed compilation or were not yet
-%% available are dropped from the macro map.
-compiled_local_macro_map(LocalMacroMap, FinalLocalEnv) ->
+%% Preserve the source-ordered winner selected by the scan, while excluding
+%% local declarations that are not callable in the final generation.
+compiled_effective_macro_map(EffectiveMacroMap, FinalLocalEnv) ->
     CompiledFAs = ordsets:from_list(maps:keys(FinalLocalEnv)),
     maps:filter(
-      fun(_Key, #{function := Function, arity := Arity}) ->
-              ordsets:is_element({Function, Arity}, CompiledFAs)
-      end, LocalMacroMap).
+      fun(_Key, #{macro_source := local_macro,
+                  function := Function, arity := Arity}) ->
+              ordsets:is_element({Function, Arity}, CompiledFAs);
+         (_Key, _ExternalMacro) ->
+              true
+      end, EffectiveMacroMap).
 
 uniform_macro_context(Module, Forms) ->
     #{module => Module, forms => Forms}.

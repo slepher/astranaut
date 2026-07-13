@@ -2,58 +2,28 @@
 
 ## 摘要
 
-将宏展开过程重构为一组显式 Pass，并区分两套环境规则：
+将属性宏展开重构为单一的 scan-and-splice 流：外部属性宏与已经可调用的本地属性宏按源码顺序处理，宏环境变更只前向生效。
 
-- 外部属性宏按源码顺序展开，且允许为后续属性扩展外部宏环境
-- 本地宏从锁定快照编译生成，且不得引入新的宏环境变化
+`-local_macro(...)` 的注册、闭包快照、按需累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更只定义统一扫描如何调用该流程。
 
-该方案保留已经实现的函数级递归展开，同时把模块级宏环境行为收敛为可预测的顺序语义。
-
-## 动机
-
-当前 uniform-macro 流程已经修复了“已知宏环境内部”的导入顺序问题，但以下行为仍未被明确规定：
-
-- 属性宏展开到底是按源码顺序，还是固定点回扫
-- 属性宏是否可以新增外部宏导入或 alias
-- 这些新增环境项是否会影响已经处理过的属性
-- 本地宏快照与后续属性展开之间如何隔离
-- 当静态扫描无法识别完整 helper 闭包时，用户如何补充相关函数
-
-如果这些规则不明确，即使递归展开已经可用，整体宏行为仍然是不完整的。
+`astranaut_macro` 继续提供唯一的 function 宏引用匹配和展开实现。local-macro 工作流向它传入已经应用声明位点快照、`internal_function` 及目标 FA 自身移除规则的最终 `MacroEnv`；同一展开器不区分普通 function 与 local macro function。实际 local 引用的识别也复用该统一宏匹配语义。
 
 ## 范围
 
-本变更覆盖：
+- 外部与本地属性宏统一参与同一次 scan-and-splice。
+- `import_macro`、`use_macro`、`macro_options` 的环境更新在扫描中前向生效。
+- 生成 forms 在当前位置插回队列，普通 function body 延后到最终 function pass 展开。
+- attribute injection 以当前位置之前已经通过扫描的 forms 为可见视图。
+- scan-and-splice 保留局部顺序，只对需要 `__original__/Arity` 合并的生成 function/spec 做最小整理。
+- 扫描遇到 `local_macro` declaration 时委托 local-macro 工作流注册。
+- local macro 唯一特殊上下文规则是：编译其 function forms 时只使用 declaration 前 passed forms；完整闭包源码视图仅用于结构分析。编译完成后的 attribute 运行规则对 external/local 宏统一。
+- 扫描需要调用尚不可用的本地属性宏时委托该工作流完成必要编译。
+- 扫描结束后使用该工作流提供的最终本地宏环境与最终跳过集合执行函数体展开。
+- 为 local-macro 工作流提供同构的引用解析与 function 展开操作。
+- 保留宏冲突诊断、traverse/return 错误信息及宏执行 state 隔离。
 
-- 外部属性宏按源码顺序展开
-- 外部属性宏生成 forms 后的立即插回并继续扫描
-- 外部属性阶段中外部宏环境的前向增长
-- 本地宏快照编译与锁定
-- 本地宏环境禁止继续增长
-- 通过 `extra_functions` 补充本地宏 helper 闭包
-- 本地宏与导出宏统一参与宏定义闭包分析
-- `internal_function` 直接调用策略及其冲突检查
-- 本地宏模块加载后的最终展开规则
+## 不在范围内
 
-本变更不覆盖：
-
-- 修改现有 `outer` / `inner` 遍历顺序语义
-- 为整个模块引入全局 fixed-point 重新发现机制
-- 支持本地属性宏定义新的宏，或生成宏相关属性
-- 支持同模块本地宏之间默认互相展开
-
-## 期望行为
-
-给定：
-
-```erlang
--import_macro(macro_boot).
--boot_macros(ok).
--my_external_attr_macro(ok).
-```
-
-如果 `-boot_macros(ok).` 展开后生成新的外部宏导入或 `-use_macro(...)`，那么新的外部宏环境必须影响后续出现的 `-my_external_attr_macro(ok).`。
-
-如果 `-boot_macros(ok).` 展开后又生成新的外部属性宏调用，这些生成出来的属性宏必须在同一个外部属性阶段里立即继续扫描与展开。
-
-如果某个本地属性宏后续生成了 `-import_macro(...)` 或 `-local_macro(...)`，则编译必须失败，而不是在本地宏快照边界之后继续修改宏环境。
+- local macro 的闭包定义、冻结、缓存、累计编译和安全加载细节。
+- retain 根及 retain 闭包计算。
+- 修改 `outer` / `inner` 的遍历语义，或引入模块级 fixed-point。

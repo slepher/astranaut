@@ -46,3 +46,21 @@
 - [x] local 引用识别与普通 function 展开使用相同调用匹配语义。
 - [x] internal_function 在 local 模块裁剪环境；通用展开器不解释该 option。
 - [x] B 可展开 A，而展开共享 A form 时 A 不进入自身宏环境。
+
+## 声明位点注入快照后续任务（新增，保留既有任务状态）
+
+### 规格
+
+- [x] 明确 closure source view 只用于闭包发现，local frozen forms 的 `inject_attrs` 使用 declaration 前 passed forms 快照。
+
+### 实现
+
+- [ ] 在 local macro 注册条目和 compile request 中保存 `inject_forms_snapshot`，并与 `closure_source_view` 分离。
+- [ ] 使用 declaration-time `inject_forms_snapshot` 调用共享 function 展开器，并将该快照纳入 `EnvFingerprint`。
+- [ ] 保证 `CompileContext.source_view` 只服务累计模块物化、分析和加载，不覆盖 request 的 declaration-time MacroEnv/InjectForms。
+
+### 测试
+
+- [ ] 验证 declaration 后 attributes 不进入 local frozen forms 的 `inject_attrs`。
+- [ ] 验证声明后 use/options 变化不改变 frozen forms 的宏名称、调用参数与注入配置。
+- [ ] 验证同一 frozen form 在不同 declaration 注入快照下按 fingerprint 分离缓存，并在展开结果不一致时维持既有冲突诊断。

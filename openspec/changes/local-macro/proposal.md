@@ -2,7 +2,7 @@
 
 ## 摘要
 
-为 `-local_macro(...)` 建立独立工作流：按 FA 注册、基于声明位点环境冻结和展开闭包、按需生成最小累计编译计划、缓存展开结果，并最终提供本地宏环境及函数体展开跳过集合。
+为 `-local_macro(...)` 建立独立工作流：按 FA 注册、基于声明位点环境冻结和展开闭包、按需生成最小累计编译计划、缓存展开结果，并最终提供本地宏环境及函数体展开跳过集合。声明位点环境同时冻结宏名称/调用参数等 MacroEnv 配置和 declaration 前 passed forms 注入快照；完整 remaining source view 只用于闭包发现，不用于 `inject_attrs`。
 
 该工作流实现为独立的 `astranaut_local_macro` 模块，而不是继续扩展 `astranaut_macro`。前者拥有 local macro 的状态与生命周期；后者继续拥有统一属性扫描、通用宏展开和 forms 队列。
 
@@ -20,4 +20,4 @@ function 构造最终宏环境，`astranaut_macro` 只按该环境执行与普�
 - `local_macro_retain`、`export`、`export_macro` 的统一 retain 规则。
 - 最终本地宏环境和跳过集合。
 
-统一属性扫描如何调度该工作流见 [macro-passes-adjusted](../macro-passes-adjusted/proposal.md)。
+统一属性扫描如何调度该工作流见 [macro-passes](../macro-passes/proposal.md)。

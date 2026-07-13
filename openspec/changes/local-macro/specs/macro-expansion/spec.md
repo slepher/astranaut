@@ -16,7 +16,7 @@
 
 ## 需求：声明位点环境
 
-每个 local macro 的闭包必须使用 declaration 前已 pass 的外部环境，以及闭包实际引用的 local macro 组成的环境快照。
+每个 local macro 的 function forms 必须使用 declaration 前 passed forms 所确定的编译上下文：其中包含已 pass 的外部环境、闭包实际引用的 local macro、`use_macro` 等确定的宏名称和调用参数，以及这些 passed forms 可提供的 `inject_attrs` 值。包含 remaining queue 的源码视图只用于发现闭包，不属于宏编译上下文。
 
 ### 场景：声明前 import 对闭包可见
 
@@ -31,6 +31,30 @@
 - **并且** 后续属性生成 `-import_macro(macro_b)`
 - **当** 编译 foo 时
 - **那么** foo 的 declaration 环境不包含 macro_b
+
+### 场景：声明后 use_macro 不改变 local forms 的调用语义
+
+- **给定** `-local_macro([foo/1])` 已保存声明位点环境
+- **并且** 后续 `-use_macro(...)` 修改同一宏的 alias、调用参数或 `inject_attrs` 配置
+- **当** 更晚的 attribute 触发 foo 的按需编译
+- **那么** foo 的 frozen forms 仍使用 declaration 时保存的宏名称、调用参数和 `inject_attrs` 配置
+- **并且** 后续 use_macro 只影响其声明位置之后的普通 attribute/function 展开
+
+### 场景：local forms 的 inject_attrs 只看声明前 passed forms
+
+- **给定** 目标 attribute `early` 已在 `-local_macro([foo/1])` 前 pass
+- **并且** 目标 attribute `late` 位于该 declaration 之后
+- **并且** foo 的 frozen function 调用声明了 `inject_attrs` 的宏
+- **当** foo 在更晚位置被按需编译或在 scan 收尾编译
+- **那么** 注入值只包含 `early`
+- **并且** declaration 自身、`late` 与 remaining queue 中其他尚未 pass 的 forms 均不可见
+
+### 场景：闭包源码视图不等于注入视图
+
+- **给定** declaration 后方的 helper function 已存在于当时的 remaining queue
+- **当** 注册 local macro 并展开其 frozen forms
+- **那么** helper 可以通过完整 closure source view 被纳入静态闭包
+- **但是** helper 前后的尚未 pass attributes 不得通过该 source view 进入 `inject_attrs`
 
 ### 场景：仅实际引用的 local macro 进入环境
 
