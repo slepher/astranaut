@@ -46,7 +46,7 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 
 ## 2026-07-13 声明位点注入快照复核与实现结果
 
-实现已同时冻结 declaration-time `env_snapshot` 与 `inject_forms_snapshot`。因此声明后的 `use_macro` 不会改变 local macro forms 中宏的名称、alias、调用参数和 `inject_attrs` 配置，声明后的 attributes 也不会进入 frozen forms 的注入视图。完整 `closure_source_view` 仍可用于查找 remaining queue 中的 helper，但不再作为宏上下文。
+实现只冻结一份唯一形状的 declaration-time `runtime_context_snapshot`，其中同时包含 `macro_map`、`macro_options` 与 `inject_forms`。因此声明后的 `use_macro` 不会改变 local macro forms 中宏的名称、alias、调用参数和 `inject_attrs` 配置，声明后的 attributes 也不会进入 frozen forms 的注入视图。完整 `closure_source_view` 仍可用于查找 remaining queue 中的 helper，但不再作为宏上下文。
 
 attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_forms`。重构后的控制流先解析目标，只有选中且未就绪的 local 目标才执行 availability prerequisite；随后 external/local 都回到同一个 invocation 构造、注入和执行路径。这个运行期规则对所有宏通用，不是 local-macro 特例。
 

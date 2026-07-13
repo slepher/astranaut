@@ -40,7 +40,7 @@ GenerationCompiler
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
 | 统一 attribute runtime | `resolve_attribute_macro_target/2`、`need_callable/4`、`build_attribute_macro_invocation/2` | 已实现；local 只增加通用可调用性前置条件。 |
-| declaration group 共享一个环境 | `register/8` 的 `declaration_groups`、`group_members` | 已实现；同 declaration 成员整体排除，成员间调用保持普通 Erlang 调用。 |
+| declaration group 共享一个环境 | `register/7` 的 `declaration_groups`、`group_members` | 已实现；同 declaration 成员整体排除，成员间调用保持普通 Erlang 调用。 |
 | declaration 时尽可能预展开 | `prepare_declaration/4` | 已实现；无真实 local 依赖时只预展开、不编译。 |
 | 环境只控制展开与一致性 | `prepare_requests/4`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
 | 编译仅消费 canonical forms | `compile_boundary/4`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |

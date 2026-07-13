@@ -59,7 +59,7 @@ ScanContext = {
 
 `passed_forms` 与 `queue` 必须严格分离：前者是 attribute injection 的历史视图，后者只用于扫描调度和 remaining-source 观察。尚未真正处理的 splice 结果不能进入 injection 视图。
 
-注册 local declaration 时还必须把 `passed_forms` 单独冻结为 `inject_forms_snapshot`。完整的 `passed_forms ++ queue` 只用于闭包发现；它不能替代注入快照。注册后立即尝试以 declaration-time `MacroRuntimeContext` 预展开，编译只在某次展开或调用真正产生 `NeedCallable` 时发生。
+注册 local declaration 时必须构造唯一形状的 declaration-time `MacroRuntimeContext`，其中 `inject_forms = passed_forms`。完整的 `passed_forms ++ queue` 只用于闭包发现；它不能替代 context 中的注入视图。注册后立即尝试以该 context 预展开，编译只在某次展开或调用真正产生 `NeedCallable` 时发生。
 
 ### 2.3 Local-Macro Gateway
 

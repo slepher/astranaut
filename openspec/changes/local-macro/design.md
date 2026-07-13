@@ -52,6 +52,44 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 `astranaut_local_macro` 提供候选环境和闭包，保存返回的 `ReferencedFAs` 并据此
 规划累计边界；它不以“静态闭包中包含某 FA”替代真实的宏调用匹配。
 
+## 显式数据接口
+
+跨模块数据只允许下列命名形状：
+
+```text
+MacroRuntimeContext = #{
+  macro_map := MacroMap,
+  macro_options := Options,
+  inject_forms := Forms
+}
+
+LocalMacroWorkflowContext = #{
+  local_macro_map := MacroMap,
+  source_view := Forms,
+  compile_opts := CompileOptions
+}
+
+ExpansionRequest = #{
+  group_members,
+  closure_ids,
+  closure_fas,
+  referenced_local_macros,
+  runtime_context_snapshot,
+  source_view,
+  options,
+  forms
+}
+```
+
+`MacroRuntimeContext` 只描述某个源码时点的宏运行期环境；
+`LocalMacroWorkflowContext` 只描述 local-macro scheduler/compiler 所需的模块构造输入。
+两者不可用同一个模糊 `Context` 形状替代。扫描器必须通过统一构造器生成 workflow
+context；注册时必须保存完整的 `runtime_context_snapshot`，不得同时保存
+`env_snapshot`、独立 inject snapshot 或接受裸 MacroMap 的兼容形状。
+
+`ExpansionRequest` 是 ExpansionValidator 与 planner 之间的显式接口。未被准备、依赖
+分析或 compiler 消费的字段不得进入 request。
+
 ## 状态
 
 ```text
@@ -343,11 +381,11 @@ FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 ## 建议接口
 
 ```erlang
-register_and_preexpand(Declaration, SourceView, DeclarationContext, MacroOps, State).
+register_and_preexpand(Declaration, SourceView, RuntimeContext, MacroOps, State).
 expand_and_validate(FormIds, RuntimeContext, MacroOps, State).
-need_callable(FA, MacroOps, State).
+need_callable(FA, WorkflowContext, MacroOps, State).
 compile_boundary(BoundaryKey, State).
-finalize(RetainRoots, FinalContext, MacroOps, State).
+finalize(RetainRoots, WorkflowContext, MacroOps, State).
 ```
 
 `register_and_preexpand` 负责 group 快照、闭包发现、冻结、依赖记录及就绪 forms

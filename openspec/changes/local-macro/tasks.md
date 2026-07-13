@@ -55,9 +55,9 @@
 
 ### 实现
 
-- [x] 在 local macro 注册条目和 compile request 中保存 `inject_forms_snapshot`，并与 `closure_source_view` 分离。
-- [x] 使用 declaration-time `inject_forms_snapshot` 调用共享 function 展开器，并将该快照纳入 `EnvFingerprint`。
-- [x] 保证 `CompileContext.source_view` 只服务累计模块物化、分析和加载，不覆盖 request 的 declaration-time MacroEnv/InjectForms。
+- [x] 在 local macro 注册条目和 expansion request 中保存唯一的 `runtime_context_snapshot`，其 `inject_forms` 与 `closure_source_view` 分离。
+- [x] 使用 declaration-time `runtime_context_snapshot.inject_forms` 调用共享 function 展开器，并将该值纳入 `EnvFingerprint`。
+- [x] 保证 `LocalMacroWorkflowContext.source_view` 只服务累计模块物化、分析和加载，不覆盖 request 的 declaration-time MacroRuntimeContext。
 
 ### 测试
 
@@ -88,3 +88,9 @@
 - [x] compiler 对 canonical forms 的输入不触发任何 request-specific 展开。
 - [x] 独立的连续 declaration 不在预展开时编译，最终只产生一个累计 members generation。
 - [x] retain 宏头、retain helper 和 Step 2 ordinary function 使用同一 final comparison 行为。
+
+### 上下文接口收敛
+
+- [x] Entry、DeclarationGroup 和 ExpansionRequest 只保存一份完整的 `runtime_context_snapshot`。
+- [x] 删除 ExpansionRequest 中未消费的 `fa`、`group_id`、`already_compiled` 及重复 snapshot 字段，仅保留 8 个必需字段。
+- [x] 用命名 map type 约束 workflow context、MacroRuntimeContext、MacroOps、ExpansionRequest 和 CompilationBoundary。

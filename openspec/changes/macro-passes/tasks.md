@@ -49,7 +49,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ### 规格
 
-- [x] 明确 `env_snapshot` 与 `inject_forms_snapshot` 共同组成一份 local function-form 编译上下文，`closure_source_view` 仅是闭包结构输入而非宏上下文。
+- [x] 明确唯一的 `runtime_context_snapshot` 同时携带 macro map/options/inject forms，`closure_source_view` 仅是闭包结构输入而非宏上下文。
 - [x] 明确 local macro 唯一特殊规则是 function-form 编译上下文仅限 declaration 前 passed forms；attribute 运行期规则对 external/local 宏通用。
 - [x] 将 `Hierarchy_final.md` 识别的 P0–P3 差距转化为实现和测试任务。
 
@@ -103,3 +103,10 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 同一累计 members boundary 由预展开、attribute 或 finalize 触发时只编译一次；独立连续 declaration 在预展开后 generation 仍为 0。
 - [x] retained helper、retained local macro 宏头和普通 Step 2 function 均与最后一次 local result 做 final-context 比对。
 - [x] final fingerprint 相同时直接复用，fingerprint 不同时从 original form 重新展开，禁止在 expanded AST 上继续展开。
+
+### 上下文接口收敛
+
+- [x] 通过 `local_macro_workflow_context/3` 统一构造 scheduler/compiler context，并删除未消费的 `external_macro_map`。
+- [x] 强制 declaration snapshot 使用唯一的 `MacroRuntimeContext` 形状，删除裸 MacroMap、`env_snapshot` 和独立 inject snapshot 兼容路径。
+- [x] 为 MacroRuntimeContext、workflow context、MacroOps、ExpansionRequest 和 CompilationBoundary 增加命名 map 类型。
+- [x] 将 `expand_final_functions/5` 参数调整为业务输入在前、`RuntimeContext, MacroOps, State` 固定收尾。
