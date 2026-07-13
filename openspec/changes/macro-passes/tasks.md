@@ -56,7 +56,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 实现
 
 - [x] **P0：声明位点注入快照。** 注册 local declaration 时单独保存 declaration 前 `passed_forms`；展开 frozen local forms 时用它执行 `inject_attrs` 和构造环境 fingerprint，不再把包含 remaining queue 的 closure source view 作为 `InjectForms`。
-- [x] **P0：隔离编译期与运行期。** attribute 触发 `ensure_available` 时，只允许 declaration 前 passed forms 进入 local function-form 编译上下文；编译完成后的 attribute 调用继续走 external/local 共用的运行期 MacroEnv/PassedForms 规则，不新增 local 专用运行路径。
+- [x] **P0：隔离编译期与运行期。** attribute 触发 `need_callable` 时，只允许 declaration 前 passed forms 进入 local function-form 编译上下文；编译完成后的 attribute 调用继续走 external/local 共用的运行期 MacroEnv/PassedForms 规则，不新增 local 专用运行路径。
 - [x] **P1：统一跨来源有效宏环境。** 让 external/local 宏 entry 按源码位置走同一冲突与 `force_override` 更新规则，避免固定 `maps:merge(External, Local)` 决定 winner 或延迟冲突。
 - [x] **P2：明确并实现 `__original__` 的 spec merge。** 按 `Hierarchy_final.md` 的 spec 归属规则处理原 spec、生成 spec 与重命名原函数。
 - [x] **P3：封装 local declaration 单次语义校验。** 注册和 local macro map 构造共享同一份成功校验结果，同时保留失败不回滚先前注册且诊断不重复的行为。
@@ -84,22 +84,22 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ### 实现
 
-- [ ] **P0：统一 MacroRuntimeContext builder。** 让 attribute 调用点、local declaration 快照和 final function context 使用同一个数据模型与宏映射/options/injection 规则。
-- [ ] **P0：DeclarationGroup。** 同一 declaration 的成员引用同一个 context fingerprint，并整体从 group MacroEnv 排除；删除按单个 TargetFA 生成 group 环境的行为。
-- [ ] **P1：ExpansionValidator。** 从编译计划中移出 function expansion，维护 last environment/result、canonical result 与可选 per-environment cache。
-- [ ] **P1：Canonical GenerationCompiler。** 编译 boundary 只读取 canonical expanded forms，不接收 declaration environment 或 expansion requests。
-- [ ] **P2：声明点预展开。** local declaration 注册、冻结和依赖建图后立即预展开就绪 forms；需要未就绪 local dependency 时产生通用 `NeedCallable`。
-- [ ] **P2：通用 DependencyScheduler。** declaration 预展开、attribute、retain、Step 2 和 finalize 共用 `NeedCallable`，并按规范化 boundary 去重编译。
-- [ ] **P3：统一最终 function 路径。** retain 与普通目标 function 使用 `FinalMacroRuntimeContext` 和 ExpansionValidator；删除 retain 宏头跳过比对的例外。
-- [ ] 将 `PreparedFunctionIds` 降级为调度优化，确保即使重复调度也通过相同 final fingerprint 命中缓存而不会二次展开 AST。
+- [x] **P0：统一 MacroRuntimeContext builder。** 让 attribute 调用点、local declaration 快照和 final function context 使用同一个数据模型与宏映射/options/injection 规则。
+- [x] **P0：DeclarationGroup。** 同一 declaration 的成员引用同一个 context fingerprint，并整体从 group MacroEnv 排除；删除按单个 TargetFA 生成 group 环境的行为。
+- [x] **P1：ExpansionValidator。** 将 function expansion 从 `compile_boundary` 分离为显式准备阶段，维护 last environment/result、canonical result 与可选 per-environment cache。
+- [x] **P1：Canonical GenerationCompiler。** 编译 boundary 只读取 canonical expanded forms，不接收 declaration environment 或 expansion requests。
+- [x] **P2：声明点预展开。** local declaration 注册、冻结和依赖建图后立即预展开就绪 forms；需要未就绪 local dependency 时产生通用 `NeedCallable`。
+- [x] **P2：通用 DependencyScheduler。** declaration 预展开、attribute、retain、Step 2 和 finalize 共用 `NeedCallable`，并按累计 members boundary 去重编译；未引入新 local macro 时不重新编译。
+- [x] **P3：统一最终 function 路径。** retain 与普通目标 function 使用 `FinalMacroRuntimeContext` 和 ExpansionValidator；删除 retain 宏头跳过比对的例外。
+- [x] 将 `PreparedFunctionIds` 降级为调度优化，确保即使重复调度也通过相同 final fingerprint 命中缓存而不会二次展开 AST。
 
 ### 测试
 
-- [ ] `-local_macro([foo/1, bar/1])` 的 foo/bar 共享 fingerprint，且双方调用保持普通 Erlang 调用。
-- [ ] declaration 注册后在无未就绪 local 依赖时完成预展开，但不因此编译当前 group。
-- [ ] declaration 预展开需要先声明 local macro 时，通过 `NeedCallable` 编译最小依赖 boundary 后恢复展开。
-- [ ] 同一 FormId 在相同环境复用 last result；不同环境结果相同则更新 record，结果不同则诊断冲突。
-- [ ] GenerationCompiler 在已有 canonical forms 时不调用 function expander。
-- [ ] 同一规范化 boundary 由预展开、attribute 或 finalize 触发时只编译一次。
-- [ ] retained helper、retained local macro 宏头和普通 Step 2 function 均与最后一次 local result 做 final-context 比对。
-- [ ] final fingerprint 相同时直接复用，fingerprint 不同时从 original form 重新展开，禁止在 expanded AST 上继续展开。
+- [x] `-local_macro([foo/1, bar/1])` 的 foo/bar 共享 fingerprint，且双方调用保持普通 Erlang 调用。
+- [x] declaration 注册后在无未就绪 local 依赖时完成预展开，但不因此编译当前 group。
+- [x] declaration 预展开需要先声明 local macro 时，通过 `NeedCallable` 编译最小依赖 boundary 后恢复展开。
+- [x] 同一 FormId 在相同环境复用 last result；不同环境结果相同则更新 record，结果不同则诊断冲突。
+- [x] GenerationCompiler 在已有 canonical forms 时不调用 function expander。
+- [x] 同一累计 members boundary 由预展开、attribute 或 finalize 触发时只编译一次；独立连续 declaration 在预展开后 generation 仍为 0。
+- [x] retained helper、retained local macro 宏头和普通 Step 2 function 均与最后一次 local result 做 final-context 比对。
+- [x] final fingerprint 相同时直接复用，fingerprint 不同时从 original form 重新展开，禁止在 expanded AST 上继续展开。

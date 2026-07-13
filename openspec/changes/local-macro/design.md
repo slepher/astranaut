@@ -254,6 +254,12 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 因此，A 在 B 前但 B 不引用 A 时，A 与 B 可以一起编译；若 B 预展开调用 A，则必须先加载 A，再预展开并加载 A+B。闭包成员关系、普通 Erlang 直接调用和 `internal_function` direct-call 均不单独产生该累计边界。
 
+boundary identity 只取按 declaration 顺序排列的累计 local macro members。没有新增
+local macro 就没有新 identity，任何阶段再次请求同一累计 members 都直接复用，不能因
+MacroRuntimeContext、展开触发位置、注入 forms 或 compile options 再编译。特别地，连续
+声明独立的 A、B 时，B 的注册和预展开不产生 `{A}` generation；首次需要可调用或收尾时
+直接编译 `{A,B}`。
+
 ### 编译输入与输出
 
 每一代模块的 forms 由下列部分组成：
@@ -263,7 +269,14 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 - local macro 所需的 export forms；
 - 编译所需的非函数模块 forms，但不复制原模块的普通 export 声明。
 
-编译前对 canonical forms 执行现有排序和合法性处理。编译成功、加载成功后，才把本代输入写入 `compiled_forms`，记录规范化 boundary key，更新相关 FA 的 `status = compiled` 和 generation。编译失败不能覆盖上一代可调用模块。
+canonical 输入只包含累计闭包相关的 function/spec FormIds；非函数支持 forms 从该
+boundary 最后一个 declaration 冻结的 source view 选择，因此 attribute/finalize 的触发点
+不会改变编译源码。普通无关函数和 macro 控制 attributes 不进入 local module。
+
+编译前对 canonical forms 执行现有排序和合法性处理。compile options 在一次 parse
+transform 内保持稳定，只作为 compiler 参数传入，不参与 boundary identity。编译成功、
+加载成功后，才把本代输入写入 `compiled_forms`，记录累计 members boundary key，更新相关
+FA 的 `status = compiled` 和 generation。编译失败不能覆盖上一代可调用模块。
 
 ### 计划与执行的分离
 

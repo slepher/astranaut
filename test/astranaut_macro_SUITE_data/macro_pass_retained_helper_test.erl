@@ -3,7 +3,7 @@
 -include("quote.hrl").
 -include("macro.hrl").
 
--export([value/0, helper/1]).
+-export([value/0, entry/1, helper/1]).
 
 -import_macro(macro_uniform_a).
 -local_macro([entry/1]).

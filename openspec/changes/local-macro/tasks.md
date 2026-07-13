@@ -71,19 +71,20 @@
 
 ### 实现
 
-- [ ] 新增 declaration group 状态，使 members 共享 order、`MacroRuntimeContext`、options 与 environment fingerprint。
-- [ ] 构造 group MacroEnv 时整体排除 declaration members，成员间调用不记录为 local macro dependency。
-- [ ] 注册完成后调用统一预展开操作，仅在真实依赖需要 callable local macro 时进入 dependency scheduler。
-- [ ] 用 `ExpansionRecord` 取代编译计划内的 `{FormId, EnvFingerprint}` request 展开：记录 last env/result、canonical result 与 per-env cache。
-- [ ] 将 `execute_plan` 拆成 expansion preparation、dependency scheduling 和 canonical generation compilation。
-- [ ] 让 compiler 只消费 `canonical_expanded_forms`，成功后才更新 `compiled_forms`、boundary cache、status 和 generation。
-- [ ] retain 只计算生命周期集合；实际 retain function 与普通 Step 2 function 一起使用 final context 展开验证。
-- [ ] 删除 local macro 宏头跳过最终环境比对的特殊规则。
+- [x] 新增 declaration group 状态，使 members 共享 order、`MacroRuntimeContext`、options 与 environment fingerprint。
+- [x] 构造 group MacroEnv 时整体排除 declaration members，成员间调用不记录为 local macro dependency。
+- [x] 注册完成后调用统一预展开操作，仅在真实依赖需要 callable local macro 时进入 dependency scheduler。
+- [x] 用 `ExpansionRecord` 取代编译计划内的 `{FormId, EnvFingerprint}` request 展开：记录 last env/result、canonical result 与 per-env cache。
+- [x] 让 `execute_plan` 显式协调 expansion preparation、dependency scheduling 和 canonical generation compilation，并保持 `compile_boundary` 不执行展开。
+- [x] 让 compiler 只消费 `canonical_expanded_forms`，成功后才更新 `compiled_forms`、boundary cache、status 和 generation；boundary key 仅为累计 members。
+- [x] retain 只计算生命周期集合；实际 retain function 与普通 Step 2 function 一起使用 final context 展开验证。
+- [x] 删除 local macro 宏头跳过最终环境比对的特殊规则。
 
 ### 测试
 
-- [ ] 同 declaration 多 FA 共享 context，互相不作为宏，但仍可形成普通闭包调用。
-- [ ] 预展开无依赖、预展开触发依赖编译、预展开失败的 record 原子性。
-- [ ] 环境 E1 → E2 → E1 时命中 per-env cache，且 canonical result 保持唯一。
-- [ ] compiler 对 canonical forms 的输入不触发任何 request-specific 展开。
-- [ ] retain 宏头、retain helper 和 Step 2 ordinary function 使用同一 final comparison 行为。
+- [x] 同 declaration 多 FA 共享 context，互相不作为宏，但仍可形成普通闭包调用。
+- [x] 预展开无依赖、预展开触发依赖编译、预展开失败的 record 原子性。
+- [x] 环境 E1 → E2 → E1 时命中 per-env cache，且 canonical result 保持唯一。
+- [x] compiler 对 canonical forms 的输入不触发任何 request-specific 展开。
+- [x] 独立的连续 declaration 不在预展开时编译，最终只产生一个累计 members generation。
+- [x] retain 宏头、retain helper 和 Step 2 ordinary function 使用同一 final comparison 行为。

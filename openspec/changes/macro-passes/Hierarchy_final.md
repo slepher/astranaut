@@ -35,19 +35,19 @@ GenerationCompiler
 
 ## 2. 与当前实现对照
 
-当前实现已经具备统一 attribute scan-and-splice、源码顺序 `effective_macro_map`、declaration-time `env_snapshot + inject_forms_snapshot`、展开缓存、累计 generation、安全加载和共享 function 展开器。以下最终逻辑仍需要结构性调整：
+当前实现已经完成最终层级重构：
 
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
-| 统一 attribute runtime | `resolve_attribute_macro_target/2`、`ensure_attribute_target_callable/2`、`build_attribute_macro_invocation/2` | 主路径一致；`ensure` 应改成通用 `NeedCallable`，而非 attribute 专属编译入口。 |
-| declaration group 共享一个环境 | `register/8` 为每个 FA 分别建立 entry | 快照数据相同，但展开仍按单个 target 构造环境；需整体排除同 declaration 的所有成员。 |
-| declaration 时尽可能预展开 | 注册当前只冻结 request | 未实现；应在注册和依赖建图后调用统一 ExpansionValidator。 |
-| 环境只控制展开与一致性 | `execute_plan/4` 在每个编译 boundary 中按 request 环境展开 | 不一致；展开验证必须与 generation 编译分离。 |
-| 编译仅消费 canonical forms | `compiled_forms` 在成功编译后提交 | 数据边界接近，但 compiler 入口仍接收 expansion requests；需改为 canonical forms。 |
-| 编译由 `NeedCallable` 驱动 | attribute ensure 与 finalize 触发计划 | 部分一致；预展开依赖也必须能够触发相同 scheduler，attribute 不拥有特殊编译时机。 |
-| retain 与 Step 2 共用最终上下文和验证器 | retain 在 local finalize 内展开，普通 function 走最终 pass | 不一致；两者应统一使用 `FinalMacroRuntimeContext` 和同一结果比对操作。 |
-| retain 宏头也比较最后一次 local 展开结果 | 当前 retain 宏头跳过最终环境比对 | 不一致；该例外必须删除。 |
-| 相同最终环境直接复用 | `expanded_forms` 按 fingerprint 缓存 | 基础能力已有；应扩展成显式 last/canonical expansion record。 |
+| 统一 attribute runtime | `resolve_attribute_macro_target/2`、`need_callable/4`、`build_attribute_macro_invocation/2` | 已实现；local 只增加通用可调用性前置条件。 |
+| declaration group 共享一个环境 | `register/8` 的 `declaration_groups`、`group_members` | 已实现；同 declaration 成员整体排除，成员间调用保持普通 Erlang 调用。 |
+| declaration 时尽可能预展开 | `prepare_declaration/4` | 已实现；无真实 local 依赖时只预展开、不编译。 |
+| 环境只控制展开与一致性 | `prepare_requests/4`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
+| 编译仅消费 canonical forms | `compile_boundary/4`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |
+| 编译由 `NeedCallable` 驱动 | `need_callable/4` | 已实现；仅真实 local 依赖可产生中间 boundary。 |
+| retain 与 Step 2 共用最终上下文和验证器 | `expand_final_functions/5` | 已实现；两类目标走同一 final-context 路径。 |
+| retain 宏头也比较最后一次 local 展开结果 | `verify_retained/2`、`expand_final_functions/5` | 已实现；宏头没有跳过例外。 |
+| 相同最终环境直接复用 | `expansion_records.results_by_env` | 已实现；E1 → E2 → E1 可直接复用 E1。 |
 | `__original__` spec 局部 merge | `map_forms_splice_merge_specs/1` | 已实现并保留。 |
 
 ## 3. 最终 Hierarchy
@@ -236,6 +236,21 @@ NeedCallable(FA)
   -> boundary 未提交：确保所需 canonical forms 已就绪，编译并提交
 ```
 
+编译 boundary 的身份只有按声明顺序排列的累计 local macro members。没有引入新的
+`local_macro`，就没有新的 boundary，也不得重新编译。MacroRuntimeContext、展开触发点、
+`inject_attrs` 输入和宏环境变化只触发展开缓存命中或结果一致性比较，不进入编译身份。
+
+例如：
+
+```erlang
+-local_macro([foo/1]).
+-local_macro([bar/1]).
+```
+
+若 `bar/1` 的 function form 不实际依赖 `foo/1` 作为宏，则声明和预展开 `bar/1`
+不会先编译 `{foo}`；首次真正需要可调用或 scan 收尾时直接编译累计 `{foo, bar}`。
+只有 `bar/1` 的预展开真实需要调用尚不可用的 `foo/1` 时，才先产生 `{foo}` 中间代次。
+
 `NeedCallable` 可以来自：
 
 - declaration 预展开需要调用先声明 local macro；
@@ -253,12 +268,17 @@ GenerationCompiler 的输入是：
 GenerationInput = {
   boundary_members,
   canonical_expanded_forms,
-  module_compile_forms,
-  compile_options
+  stable_module_support_forms
 }
 ```
 
 它不得接收或解释每个 declaration 的 MacroRuntimeContext，不得遍历 expansion requests，也不得为了编译而按环境重放 function expansion。若 canonical form 尚未就绪，应先返回 ExpansionValidator/DependencyScheduler 完成准备，再进入 compiler。
+
+其中 canonical 部分只包含该累计闭包所需的 function/spec FormIds；compiler 还从
+boundary 最后一个 declaration 的冻结 source view 选择稳定的 module/record/type 等
+编译支持 forms。普通无关函数、macro 控制 attributes 和触发点之后临时增加的 forms
+不进入 local module。parse transform 的 compile options 是稳定的 compiler 参数，
+既不是宏环境，也不属于 boundary identity。
 
 成功 compile + safe load 后才更新 generation、callable status 和已提交 boundary。失败不得覆盖上一代模块或 canonical expansion records。
 
@@ -354,8 +374,9 @@ Compile/load failure
 10. retained local macro 宏头同样参与最终环境结果比对。
 11. 编译、加载和 generation 提交原子化；失败保留上一代。
 12. source-ordered override、scan-and-splice、state 隔离及局部 `__original__` merge 规则保持不变。
+13. generation boundary identity 只由累计 local macro members 决定；未引入新 local macro 时不得重新编译。
 
-## 13. 后续实现任务优先级
+## 13. 实现结果
 
 ### P0：DeclarationGroup 与统一上下文
 
@@ -363,11 +384,15 @@ Compile/load failure
 - group members 整体从 declaration MacroEnv 排除。
 - 提供 attribute/local/retain/function 共用的 `MacroRuntimeContext` builder。
 
+状态：已实现。
+
 ### P1：拆分展开验证与编译
 
-- 从 `execute_plan` 中移出 request-specific expansion。
+- 将 request-specific expansion 与 `compile_boundary` 分离，由 `execute_plan` 仅按“准备后编译”顺序协调。
 - 实现显式 `ExpansionRecord` 和 `expand_and_validate`。
 - GenerationCompiler 只消费 canonical expanded forms。
+
+状态：已实现。
 
 ### P2：声明点预展开与通用 NeedCallable
 
@@ -375,8 +400,12 @@ Compile/load failure
 - 预展开、attribute、retain、Step 2 和 finalize 共用 dependency scheduler。
 - 用规范化 boundary cache 保证触发时点不制造额外编译。
 
+状态：已实现；boundary key 是累计 members，独立连续声明只在需要时合并编译一次。
+
 ### P3：统一最终 function 路径
 
 - retain 与普通 function 都使用 `FinalMacroRuntimeContext`。
 - 删除 retain 宏头跳过比对的例外。
 - 将 `PreparedFunctionIds` 降级为调度优化，并用缓存命中保证语义正确。
+
+状态：已实现。

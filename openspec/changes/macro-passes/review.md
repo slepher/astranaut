@@ -22,7 +22,10 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
 | attribute runtime 先解析、确保可调用，再统一构造与执行 | `resolve_attribute_macro_target/2`, `ensure_attribute_target_callable/2`, `build_attribute_macro_invocation/2` | 已实现 |
 | attribute injection 使用调用点 passed forms | `attribute_runtime_context/1`, `build_attribute_macro_invocation/2` | 已实现 |
-| local macro forms 使用 declaration-time inject forms | `inject_forms_snapshot`, `expand_request_form/4` | 已实现 |
+| local macro forms 使用 declaration-time context | `runtime_context_snapshot`, `prepare_declaration/4`, `prepare_requests/4` | 已实现 |
+| declaration 预展开不强制编译 | `prepare_declaration/4`, `need_callable/4` | 已实现；仅真实 local 依赖产生中间代次 |
+| generation 按累计 members 去重 | `generation_boundary_key/1`, `committed_boundaries` | 已实现；未新增 local macro 不重新编译 |
+| compiler 只消费 canonical forms | `compile_boundary/4`, `canonical_expanded_forms` | 已实现 |
 | 跨来源宏映射按源码顺序冲突/覆盖 | `effective_macro_map`, `merge_macro_maps_pure/2` | 已实现 |
 | 生成 function/spec 仅最小整理 | `map_forms_splice_reorder/1`, `map_forms_splice_merge_specs/1` | 已实现 |
 | 用户宏 traverse state 隔离 | `invoke_macro_function/1` + `scoped_state/2` | 已实现 |
@@ -56,11 +59,11 @@ attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_fo
 - `openspec validate macro-passes --strict`：通过。
 - `openspec validate local-macro --strict`：通过；本轮已将旧规格标题转换为标准 delta 结构。
 - `git diff --check`：通过。
-- `powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct`：307/307 通过。
+- `powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct`：314/314 通过。
 
-## 2026-07-13 最终 MacroRuntimeContext 层级调整
+## 2026-07-13 最终 MacroRuntimeContext 层级实现
 
-后续讨论进一步改变了目标层级，当前源码尚未实现以下新增契约：
+后续讨论确定的最终契约现已实现：
 
 1. local declaration 注册后应尽可能预展开，而不是等编译 boundary 执行 request 时才展开。
 2. 同一个 `-local_macro([...])` declaration 的 members 共享一个 context，并整体从 group MacroEnv 排除；不按单个 TargetFA 构造不同 group 环境。
@@ -68,4 +71,9 @@ attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_fo
 4. 编译由所有阶段共用的 `NeedCallable` 驱动，不绑定 attribute 调用点。
 5. retain 与 Step 2 ordinary function 都使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较；retain 宏头不再跳过。
 
-因此上方“当前实现核对”及 307/307 测试结果只证明上一层级实现稳定，不代表本节新增任务已经完成。最终目标和新增任务分别见 [`Hierarchy_final.md`](Hierarchy_final.md) 与 [`tasks.md`](tasks.md)。
+此外，编译 boundary identity 已收紧为按声明顺序排列的累计 local macro members。
+`-local_macro([foo/1]). -local_macro([bar/1]).` 中，若 bar 的 function form 不实际依赖
+foo 作为宏，bar 的注册和预展开不会产生中间编译；首次需要可调用或收尾时直接编译
+`{foo,bar}`。MacroRuntimeContext、注入 forms、触发阶段和 compile options 均不制造新代次。
+
+最终目标与完成任务分别见 [`Hierarchy_final.md`](Hierarchy_final.md) 与 [`tasks.md`](tasks.md)。

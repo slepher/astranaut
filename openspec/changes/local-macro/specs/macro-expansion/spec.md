@@ -156,6 +156,22 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 - **当** 首次需要调用 B 时
 - **那么** 直接编译 `{A,B}`
 
+#### Scenario: 独立声明本身不产生中间编译
+
+- **给定** `-local_macro([foo/1])` 后出现 `-local_macro([bar/1])`
+- **并且** bar/1 的 function form 不实际依赖 foo/1 作为宏
+- **当** bar/1 完成注册和 declaration-time 预展开
+- **那么** 不编译 `{foo}` 或 `{foo,bar}`
+- **并且** 首次真正需要可调用或 scan 收尾时直接编译 `{foo,bar}`
+
+#### Scenario: 相同累计成员不重新编译
+
+- **给定** 累计 local macro members 已成功编译并提交
+- **并且** 此后没有引入新的 local_macro declaration
+- **当** 不同展开环境或触发阶段再次请求该累计 boundary
+- **那么** 复用已提交 generation
+- **并且** MacroRuntimeContext、注入 forms 和 compile options 不产生新 boundary identity
+
 #### Scenario: scan 收尾编译全部 local macro
 
 - **给定** 某些 local macro 已在 earlier attribute 调用时编译，另一些从未被调用
