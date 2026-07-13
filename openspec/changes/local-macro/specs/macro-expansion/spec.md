@@ -4,7 +4,7 @@
 
 ### Requirement: 按 FA 注册 local macro
 
-系统 MUST 以 declaration group 原子注册全部 FA，并以逐 FA 索引维护闭包根和 callable 状态；任一成员重复时不得部分注册。
+系统 MUST 对一次 declaration 的全部 FA 先完成唯一性检查，再写入共享 order/context 的逐 FA 条目并维护各自闭包根和 callable 状态；任一成员重复时不得部分注册。系统不得为共享字段另建独立 group 状态。
 
 #### Scenario: 重复 declaration 失败
 
@@ -20,7 +20,7 @@
 
 ### Requirement: 声明位点环境
 
-每个 declaration group 的 function forms MUST 使用 declaration 前 passed forms 所确定的预展开 `MacroRuntimeContext`：其中包含已 pass 的有效宏环境、options，以及这些 passed forms 可提供的 `inject_attrs` 值。包含 remaining queue 的源码视图只用于发现闭包，不属于宏运行时上下文。GenerationCompiler MUST NOT 读取该 context。
+每个 declaration 的 function forms MUST 使用 declaration 前 passed forms 所确定的预展开 `MacroRuntimeContext`：其中包含已 pass 的有效宏环境、options，以及这些 passed forms 可提供的 `inject_attrs` 值。包含 remaining queue 的源码视图只用于发现闭包，不属于宏运行时上下文。GenerationCompiler MUST NOT 读取该 context。
 
 #### Scenario: 声明前 import 对闭包可见
 
@@ -64,8 +64,9 @@
 
 - **给定** 多个 local macro 已注册或已编译
 - **并且** foo 的闭包仅实际使用其中 a/1
-- **当** 构造 foo 的展开环境时
+- **当** 构造 foo 的 declaration 或 final 展开环境时
 - **那么** LocalEnv 部分仅包含 a/1
+- **并且** 后声明或未被 form 扫描识别的 local macros 不参与匹配
 
 #### Scenario: 自身递归调用不是宏依赖
 
@@ -79,7 +80,7 @@
 - **给定** `-local_macro([foo/1, bar/1])`
 - **当** 预展开 foo/1 与 bar/1 的 frozen forms
 - **那么** 二者使用同一个 declaration MacroRuntimeContext fingerprint
-- **并且** foo/1 与 bar/1 均从该 group MacroEnv 排除
+- **并且** declaration 前候选环境自然不包含 foo/1 与 bar/1，因此二者不进入扫描得到的 local-macro 白名单
 - **并且** bar/1 对 foo/1 的调用保持普通 Erlang 本地调用，反向同理
 
 #### Scenario: 实际 local 引用使用统一宏匹配语义
@@ -181,7 +182,7 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 
 ### Requirement: extra_functions 与 internal_function
 
-系统 MUST 将 `extra_functions` 纳入静态闭包，并在构造 declaration group MacroEnv 时应用 `internal_function` direct-call 策略而不把该策略交给通用展开器。
+系统 MUST 将 `extra_functions` 纳入静态闭包，并在 declaration MacroEnv 上应用 `internal_function` direct-call 策略而不把该策略交给通用展开器。
 
 #### Scenario: extra_functions 补充闭包
 
@@ -218,7 +219,22 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 
 ### Requirement: retain 与最终跳过集合
 
-系统 MUST 从 retain roots 计算完整闭包和 `FinalSkipIds`，并让所有 retained functions 与普通 Step 2 functions 使用同一个 `FinalMacroRuntimeContext` 和 ExpansionValidator。
+系统 MUST 从 retain roots 计算完整闭包和 `FinalSkipIds`，并让所有 retained functions 与普通 Step 2 functions 使用同一个 `FinalMacroRuntimeContext` 和 ExpansionValidator。属于 local macro 闭包的 function MUST 以注册时 form 扫描得到的 `referenced_local_macros` 过滤 FinalLocalEnv；不属于任何 local 闭包的普通 function MUST 使用完整 FinalLocalEnv。
+
+#### Scenario: final local 环境复用声明扫描白名单
+
+- **给定** B 的 declaration form 扫描只识别到先声明 local macro A
+- **并且** local macro C 在 B 之后声明
+- **当** retained B 或其闭包 helper 在 final context 展开
+- **那么** LocalEnv 包含 A，但不包含 B、C 或其他白名单外 local macros
+- **并且** 不再执行按 order、自身或同声明成员计算的 final 排除
+- **并且** 即使后声明 C 的闭包引用 B，B 宏头仍只使用 B 自身 declaration 的白名单
+
+#### Scenario: 普通 final function 使用完整 local 环境
+
+- **给定** ordinary function 不属于任何 local macro 闭包
+- **当** ordinary function 在 final context 展开
+- **那么** 它可以匹配 FinalLocalEnv 中全部可调用 local macros
 
 #### Scenario: retain 根保留完整闭包
 

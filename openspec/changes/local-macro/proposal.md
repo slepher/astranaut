@@ -2,7 +2,7 @@
 
 ## 摘要
 
-为 `-local_macro(...)` 建立独立工作流：以 declaration group 注册，基于声明位点 `MacroRuntimeContext` 冻结并预展开闭包，通过 last/canonical expansion record 验证多环境一致性，以通用 `NeedCallable` 调度最小累计编译，并最终提供本地宏环境及函数体生命周期集合。GenerationCompiler 只消费 canonical expanded forms；完整 remaining source view 只用于闭包发现，不用于 `inject_attrs`。
+为 `-local_macro(...)` 建立独立工作流：以逐 FA 条目记录共享的 declaration order/context，基于声明位点 `MacroRuntimeContext` 冻结并预展开闭包，通过 last/canonical expansion record 验证多环境一致性，以通用 `NeedCallable` 调度最小累计编译，并最终提供本地宏环境及函数体生命周期集合。GenerationCompiler 只消费 canonical expanded forms；完整 remaining source view 只用于闭包发现，不用于 `inject_attrs`。
 
 该工作流实现为独立的 `astranaut_local_macro` 模块，而不是继续扩展 `astranaut_macro`。前者拥有 local macro 的状态与生命周期；后者继续拥有统一属性扫描、通用宏展开和 forms 队列。
 

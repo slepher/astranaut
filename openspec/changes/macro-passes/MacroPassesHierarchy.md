@@ -102,7 +102,7 @@ resolve_local_references(CandidateLocalEnv, Forms, ClosureFAs)
   -> ReferencedFAs | Error
 ```
 
-两者必须复用相同的调用匹配规则。共享核心从 original/frozen form 展开；相同环境复用，环境不同则与上一次已接受结果比较。一个 declaration 的全部 members 在构造 context 时整体排除，不能按单个 TargetFA 生成不同 group 环境。
+两者必须复用相同的调用匹配规则。共享核心从 original/frozen form 展开；相同环境复用，环境不同则与上一次已接受结果比较。declaration-time form 扫描以注册前候选环境产生 `referenced_local_macros` 白名单；declaration 与 final 展开都用它过滤 local-macro 部分，不再维护 final 排除规则。
 
 ## 3. Attribute Phase 详细流程
 
@@ -258,8 +258,8 @@ Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs
 | 扫描顺序 | 外部/本地属性宏交错；生成属性立即重扫；旧结果不回扫 |
 | 环境演进 | 生成 import/use/options；同 splice 后项可见；冲突与 force_override |
 | injection | 只见 passed；不可见 remaining queue 与同 splice 后项 |
-| local gateway | group 注册/预展开、通用 NeedCallable、finalize、FinalSkipIds、未编译项过滤 |
+| local gateway | 逐 FA 注册/预展开、通用 NeedCallable、finalize、FinalSkipIds、未编译项过滤 |
 | form 顺序 | 无冲突生成 function/spec 原地；`__original__` 仅局部整理 |
 | 阶段边界 | 生成 function 的宏调用只在最终 function phase 展开 |
 | 状态/错误 | 私有 traverse state；return/traverse 桥接；兄弟诊断累计；单次 invalid attribute |
-| 共享语义 | attribute/local/retain/function 同一 context 逻辑；同 declaration group 整体排除；编译只消费 canonical forms |
+| 共享语义 | attribute/local/retain/function 同一 context 逻辑；同 declaration 成员保持普通调用；编译只消费 canonical forms |

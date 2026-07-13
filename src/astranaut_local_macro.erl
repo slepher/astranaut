@@ -10,7 +10,7 @@
 
 -include("do.hrl").
 
--export([new/0, register/7, prepare_declaration/4,
+-export([new/0, register/6, prepare_declaration/4,
          need_callable/4,
          compile_plan/2,
          cache_expanded/4, commit_compiled/3, finalize/2,
@@ -19,7 +19,7 @@
          retained_form_ids/1, expand_final_functions/5,
          source_view/2, env_fingerprint/4,
          reject_locked_mutation/2, safe_load/3, finalize_plan/1,
-         verify_retained/2, module_name/1,
+         module_name/1,
          form_id/1, materialize_forms/2, execute_plan/4]).
 
 -type fa() :: {atom(), non_neg_integer()}.
@@ -27,38 +27,30 @@
 -type macro_runtime_context() :: #{macro_map := map(),
                                    macro_options := map(),
                                    inject_forms := [term()]}.
--type workflow_context() :: #{local_macro_map := map(),
-                              source_view := [term()],
+-type workflow_context() :: #{source_view := [term()],
                               compile_opts := [compile:option()]}.
 -type macro_ops() ::
         #{resolve_local_references :=
               fun(([{fa(), map()}], [term()]) -> ordsets:ordset(fa())),
           expand_function :=
               fun((map(), [term()], [term()], fa()) ->
-                      astranaut_return:struct([term()])),
-          merge_macro_maps :=
-              fun((map(), map()) -> astranaut_return:struct(map()))}.
+                      astranaut_return:struct([term()]))}.
 -type expansion_request() ::
-        #{group_members := ordsets:ordset(fa()),
-          closure_ids := ordsets:ordset(form_id()),
+        #{closure_ids := ordsets:ordset(form_id()),
           closure_fas := ordsets:ordset(fa()),
           referenced_local_macros := ordsets:ordset(fa()),
           runtime_context_snapshot := macro_runtime_context(),
           source_view := [term()],
-          options := map(),
           forms := #{form_id() => term()}}.
 -type compilation_boundary() ::
         #{members := [fa()],
-          requests := [expansion_request()],
-          final => boolean()}.
+          requests := [expansion_request()]}.
 -type state() :: map().
 
 -spec new() -> state().
 new() ->
-    #{declaration_groups => #{},
-      local_macros => #{},
+    #{local_macros => #{},
       frozen_forms => #{},
-      expanded_forms => #{},
       expansion_records => #{},
       canonical_expanded_forms => #{},
       compiled_forms => #{},
@@ -67,21 +59,22 @@ new() ->
       retain_roots => ordsets:new(),
       generation => 0}.
 
--spec register([fa()], map(), [term()], macro_runtime_context(), map(),
-               macro_ops(), state()) ->
+-spec register([fa()], map(), [term()], macro_runtime_context(), macro_ops(),
+               state()) ->
           {ok, state()} | {error, term()}.
 register(FAs, Options, SourceView,
-         #{macro_map := _, macro_options := _, inject_forms := _} = RuntimeContext,
-         CandidateLocalMap, MacroOps, State)
-  when is_list(FAs), is_map(Options), is_map(CandidateLocalMap), is_map(MacroOps) ->
+         #{macro_map := MacroMap,
+           macro_options := _, inject_forms := _} = RuntimeContext,
+         MacroOps, State)
+  when is_list(FAs), is_map(Options), is_map(MacroOps) ->
     Resolve = maps:get(resolve_local_references, MacroOps),
+    CandidateLocalMap = local_macro_entries(MacroMap),
     ResolveReferences =
-        fun(_FA, Closure, _Macros) ->
+        fun(Closure) ->
                 Direct = internal_direct(Options, Closure),
-                Excluded = ordsets:union(ordsets:from_list(FAs), Direct),
-                GroupEnv = effective_local_env(CandidateLocalMap, Excluded),
+                DeclarationEnv = remove_local_fas(CandidateLocalMap, Direct),
                 TargetEnvs =
-                    [{TargetFA, GroupEnv}
+                    [{TargetFA, DeclarationEnv}
                      || TargetFA <- Closure],
                 Resolve(TargetEnvs, SourceView)
         end,
@@ -89,7 +82,7 @@ register(FAs, Options, SourceView,
                 ResolveReferences, State).
 
 -spec do_register([fa()], map(), [term()], macro_runtime_context(),
-                  fun((fa(), [fa()], map()) -> [fa()]), state()) ->
+                  fun(([fa()]) -> [fa()]), state()) ->
           {ok, state()} | {error, term()}.
 do_register(FAs, Options, SourceView, RuntimeContext,
             ResolveReferences, State) ->
@@ -102,17 +95,13 @@ do_register(FAs, Options, SourceView, RuntimeContext,
                     case validate_internal_policies(Closures, Options, Macros) of
                         ok ->
                             Order = next_order(Macros),
-                            GroupId = Order,
-                            GroupMembers = ordsets:from_list(FAs),
                             Frozen = maps:merge(maps:get(frozen_forms, State),
                                                 freeze_closures(Closures, FormMap)),
                             NewMacros = lists:foldl(
                                           fun(FA, Acc) ->
                                                   Closure = maps:get(FA, Closures),
-                                                  Refs = ResolveReferences(FA, Closure, Macros),
+                                                  Refs = ResolveReferences(Closure),
                                                   maps:put(FA, #{order => Order,
-                                                                 group_id => GroupId,
-                                                                 group_members => GroupMembers,
                                                                  runtime_context_snapshot =>
                                                                      RuntimeContext,
                                                                  closure_ids => closure_ids(Closure, FormMap),
@@ -122,18 +111,7 @@ do_register(FAs, Options, SourceView, RuntimeContext,
                                                                  options => Options,
                                                                  status => pending}, Acc)
                                           end, Macros, FAs),
-                            Group = #{id => GroupId,
-                                      order => Order,
-                                      members => GroupMembers,
-                                      runtime_context_snapshot =>
-                                          RuntimeContext,
-                                      source_view => SourceView,
-                                      options => Options},
-                            Groups = maps:put(
-                                       GroupId, Group,
-                                       maps:get(declaration_groups, State, #{})),
-                            {ok, State#{declaration_groups => Groups,
-                                       local_macros => NewMacros,
+                            {ok, State#{local_macros => NewMacros,
                                        frozen_forms => Frozen}};
                         {error, _} = Error -> Error
                     end;
@@ -143,14 +121,43 @@ do_register(FAs, Options, SourceView, RuntimeContext,
             {error, {duplicate_local_macro_declaration, FA}}
     end.
 
--spec effective_local_env(map(), ordsets:ordset(fa())) -> map().
-effective_local_env(CandidateLocalMap, Excluded) ->
+-spec local_macro_entries(map()) -> map().
+local_macro_entries(MacroMap) ->
     maps:filter(
-      fun(_Key, #{function := Function, arity := Arity}) ->
-              not ordsets:is_element({Function, Arity}, Excluded)
-      end, CandidateLocalMap).
+      fun(_Key, #{macro_source := local_macro}) -> true;
+         (_Key, _Macro) -> false
+      end, MacroMap).
 
-%% Registration freezes a declaration group.  Preparation eagerly validates
+-spec local_macro_fas(map()) -> ordsets:ordset(fa()).
+local_macro_fas(MacroMap) ->
+    ordsets:from_list(
+      [{Function, Arity}
+       || {_Key, #{macro_source := local_macro,
+                   function := Function, arity := Arity}} <-
+              maps:to_list(MacroMap)]).
+
+-spec remove_local_fas(map(), ordsets:ordset(fa())) -> map().
+remove_local_fas(MacroMap, Excluded) ->
+    maps:filter(
+      fun(_Key, #{macro_source := local_macro,
+                  function := Function, arity := Arity}) ->
+              not ordsets:is_element({Function, Arity}, Excluded);
+         (_Key, _Macro) ->
+              true
+      end, MacroMap).
+
+-spec keep_allowed_local_fas(map(), ordsets:ordset(fa())) -> map().
+keep_allowed_local_fas(MacroMap, Allowed) ->
+    maps:filter(
+      fun(_Key, #{macro_source := local_macro,
+                  function := Function, arity := Arity}) ->
+              ordsets:is_element({Function, Arity}, Allowed);
+         (_Key, _Macro) ->
+              true
+      end, MacroMap).
+
+%% Registration freezes each declaration member with the same order and
+%% runtime snapshot. Preparation eagerly validates
 %% every form that is currently expandable, compiling only earlier local
 %% dependencies that are genuinely needed to perform that expansion.
 -spec prepare_declaration([fa()], workflow_context(), macro_ops(), state()) ->
@@ -170,8 +177,7 @@ prepare_declaration(FAs, WorkflowContext, MacroOps, State) ->
                                  Dependency, WorkflowContext, MacroOps, StateAcc)
                        end, State, Dependencies),
            Requests = requests_for_fas(FAs, State1),
-           {_Forms, State2} <- prepare_requests(
-                                 Requests, WorkflowContext, MacroOps, State1),
+           State2 <- prepare_requests(Requests, MacroOps, State1),
            return(State2)
        ]).
 
@@ -204,7 +210,6 @@ finalize_plan(State) -> compile_plan(all, State).
 
 -spec cache_expanded(form_id(), term(), term(), state()) -> {ok, state()} | {error, term()}.
 cache_expanded(FormId, Fingerprint, ExpandedForm, State) ->
-    Expanded = maps:get(expanded_forms, State),
     Records = maps:get(expansion_records, State, #{}),
     Canonical = maps:get(canonical_expanded_forms, State, #{}),
     case maps:find(FormId, Records) of
@@ -221,9 +226,7 @@ cache_expanded(FormId, Fingerprint, ExpandedForm, State) ->
                                last_result => ExpandedForm,
                                canonical_result => maps:get(FormId, Canonical, ExpandedForm),
                                results_by_env => maps:put(Fingerprint, ExpandedForm, Results0)},
-                    {ok, State#{expanded_forms =>
-                                   maps:put({FormId, Fingerprint}, ExpandedForm, Expanded),
-                               expansion_records => maps:put(FormId, Record, Records),
+                    {ok, State#{expansion_records => maps:put(FormId, Record, Records),
                                canonical_expanded_forms =>
                                    maps:put(FormId, ExpandedForm, Canonical)}}
             end
@@ -231,7 +234,12 @@ cache_expanded(FormId, Fingerprint, ExpandedForm, State) ->
 
 -spec expanded_form(form_id(), term(), state()) -> {ok, term()} | error.
 expanded_form(FormId, Fingerprint, State) ->
-    maps:find({FormId, Fingerprint}, maps:get(expanded_forms, State)).
+    case maps:find(FormId, maps:get(expansion_records, State, #{})) of
+        {ok, Record} ->
+            maps:find(Fingerprint, maps:get(results_by_env, Record, #{}));
+        error ->
+            error
+    end.
 
 -spec local_versions([fa()], state()) -> #{fa() => non_neg_integer()}.
 local_versions(FAs, State) ->
@@ -275,7 +283,7 @@ finalize(RetainRoots, #{local_macros := Macros} = State) ->
     {LocalEnv, Skip, State#{retain_roots => ordsets:from_list(RetainRoots), retained_form_ids => Retained}}.
 
 -spec finalize([fa()], workflow_context(), macro_ops(), state()) ->
-          astranaut_return:struct({map(), ordsets:ordset(form_id()), map(), state()}).
+          astranaut_return:struct({map(), ordsets:ordset(form_id()), state()}).
 finalize(RetainRoots, WorkflowContext, MacroOps, State) ->
     case finalize_plan(State) of
         {error, Error} ->
@@ -287,33 +295,8 @@ finalize(RetainRoots, WorkflowContext, MacroOps, State) ->
                    %% Retain is now only a lifecycle/selection policy.  Retain
                    %% and ordinary functions are expanded together later with
                    %% the single FinalMacroRuntimeContext.
-                   return({FinalLocalEnv, FinalSkipIds, #{}, State2})
+                   return({FinalLocalEnv, FinalSkipIds, State2})
                ])
-    end.
-
--spec direct_functions_for(fa(), state()) -> ordsets:ordset(fa()).
-direct_functions_for(TargetFA, State) ->
-    case [Entry || Entry <- maps:values(maps:get(local_macros, State)),
-                   ordsets:is_element(TargetFA, maps:get(closure_fas, Entry))] of
-        [Entry | _] ->
-            internal_direct(maps:get(options, Entry), maps:get(closure_fas, Entry));
-        [] ->
-            ordsets:new()
-    end.
-
-%% Compatibility helper used by focused state-machine tests. Every retained
-%% form, including a local macro head, is compared with the canonical result.
--spec verify_retained(#{form_id() => term()}, state()) -> ok | {error, term()}.
-verify_retained(FinalForms, State) ->
-    Retained = maps:get(retained_form_ids, State, ordsets:new()),
-    Canonical = maps:merge(
-                  maps:get(compiled_forms, State),
-                  maps:get(canonical_expanded_forms, State, #{})),
-    case [Id || Id <- Retained,
-                maps:is_key(Id, FinalForms), maps:is_key(Id, Canonical),
-                maps:get(Id, FinalForms) =/= maps:get(Id, Canonical)] of
-        [] -> ok;
-        [Id | _] -> {error, {conflicting_local_macro_closure_environment, Id}}
     end.
 
 -spec frozen_ids(state()) -> ordsets:ordset(form_id()).
@@ -360,16 +343,9 @@ expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
                       #{macro_map := MacroMap} = RuntimeContext,
                       MacroOps, State) ->
     RuntimeInjectForms = maps:get(inject_forms, RuntimeContext),
-    Excluded = final_excluded_fas(TargetFA, State),
-    EffectiveMacroMap = maps:filter(
-                          fun(_Key, #{macro_source := local_macro,
-                                     function := Function, arity := Arity}) ->
-                                  not ordsets:is_element(
-                                        {Function, Arity}, Excluded);
-                             (_Key, _Macro) ->
-                                  true
-                          end, MacroMap),
-    LocalVersions = local_versions(maps:keys(maps:get(local_macros, State)), State),
+    EffectiveMacroMap = apply_local_macro_whitelist(
+                          TargetFA, MacroMap, State),
+    LocalVersions = local_versions(local_macro_fas(EffectiveMacroMap), State),
     Fingerprint = env_fingerprint(
                     EffectiveMacroMap, LocalVersions,
                     maps:get(macro_options, RuntimeContext),
@@ -392,18 +368,30 @@ expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
                ])
     end.
 
--spec final_excluded_fas(fa(), state()) -> ordsets:ordset(fa()).
-final_excluded_fas(TargetFA, State) ->
+-spec apply_local_macro_whitelist(fa(), map(), state()) -> map().
+apply_local_macro_whitelist(TargetFA, MacroMap, State) ->
     Macros = maps:get(local_macros, State),
-    GroupMembers = case maps:find(TargetFA, Macros) of
-                       {ok, Entry} -> maps:get(
-                                        group_members, Entry,
-                                        ordsets:from_list([TargetFA]));
-                       error -> ordsets:new()
-                   end,
-    ordsets:union(
-      ordsets:add_element(TargetFA, GroupMembers),
-      direct_functions_for(TargetFA, State)).
+    ClosureEntries = case maps:find(TargetFA, Macros) of
+                         {ok, TargetEntry} ->
+                             [TargetEntry];
+                         error ->
+                             [Entry || Entry <- maps:values(Macros),
+                                       ordsets:is_element(
+                                         TargetFA,
+                                         maps:get(closure_fas, Entry))]
+                     end,
+    case ClosureEntries of
+        [] ->
+            MacroMap;
+        _ ->
+            Allowed = lists:foldl(
+                        fun(Entry, Acc) ->
+                                ordsets:union(
+                                  maps:get(referenced_local_macros, Entry),
+                                  Acc)
+                        end, ordsets:new(), ClosureEntries),
+            keep_allowed_local_fas(MacroMap, Allowed)
+    end.
 
 %% The declaration source view is deliberately a two-part concatenation.  A
 %% generated form becomes visible only after it has entered Queue; no future
@@ -459,36 +447,30 @@ execute_plan([Boundary | Rest], WorkflowContext, MacroOps, State) ->
             execute_plan(Rest, WorkflowContext, MacroOps, State);
         _ ->
             do([ return ||
-                   {_PreparedForms, PreparedState} <-
-                       prepare_requests(
-                         maps:get(requests, Boundary), WorkflowContext,
-                         MacroOps, State),
-                   BoundaryKey = generation_boundary_key(Boundary),
-                   State1 <- case maps:is_key(
-                                    BoundaryKey,
-                                    maps:get(committed_boundaries,
-                                             PreparedState, #{})) of
-                                 true ->
-                                     astranaut_return:return(PreparedState);
-                                 false ->
-                                     compile_boundary(
-                                       Boundary, BoundaryKey, WorkflowContext,
-                                       PreparedState)
-                             end,
+                   PreparedState <- prepare_requests(
+                                      maps:get(requests, Boundary),
+                                      MacroOps, State),
+                   State1 <- compile_boundary(
+                               Boundary, WorkflowContext, PreparedState),
                    execute_plan(Rest, WorkflowContext, MacroOps, State1)
                ])
     end.
 
--spec compile_boundary(compilation_boundary(), [fa()], workflow_context(),
-                       state()) ->
+-spec compile_boundary(compilation_boundary(), workflow_context(), state()) ->
           astranaut_return:struct(state()).
-compile_boundary(#{members := Members, requests := Requests}, BoundaryKey,
+compile_boundary(#{members := Members, requests := Requests} = Boundary,
                  WorkflowContext, State) ->
-    SourceView = boundary_source_view(Requests, WorkflowContext),
-    Module = astranaut_lib:analyze_forms_module(SourceView),
-    with_generation_lock(
-      Module,
-      fun() ->
+    BoundaryKey = generation_boundary_key(Boundary),
+    case maps:is_key(
+           BoundaryKey, maps:get(committed_boundaries, State, #{})) of
+        true ->
+            astranaut_return:return(State);
+        false ->
+            SourceView = boundary_source_view(Requests, WorkflowContext),
+            Module = astranaut_lib:analyze_forms_module(SourceView),
+            with_generation_lock(
+              Module,
+              fun() ->
               RequiredIds = lists:foldl(
                               fun(Request, Acc) ->
                                       ordsets:union(
@@ -527,7 +509,8 @@ compile_boundary(#{members := Members, requests := Requests}, BoundaryKey,
                       astranaut_return:error_fail(
                         {missing_canonical_local_macro_form, Missing})
               end
-      end).
+              end)
+    end.
 
 -spec generation_boundary_key(compilation_boundary()) -> [fa()].
 generation_boundary_key(#{members := Members}) ->
@@ -539,74 +522,52 @@ boundary_source_view([], WorkflowContext) ->
 boundary_source_view(Requests, _WorkflowContext) ->
     maps:get(source_view, lists:last(Requests)).
 
--spec prepare_requests([expansion_request()], workflow_context(), macro_ops(),
-                       state()) ->
-          astranaut_return:struct({map(), state()}).
-prepare_requests(Requests, WorkflowContext, MacroOps, State) ->
+-spec prepare_requests([expansion_request()], macro_ops(), state()) ->
+          astranaut_return:struct(state()).
+prepare_requests(Requests, MacroOps, State) ->
     astranaut_return:foldl_m(
-      fun(Request, {FormsAcc, StateAcc}) ->
-              do([ return ||
-                     {RequestForms, State1} <-
-                         prepare_request(
-                           Request, WorkflowContext, MacroOps, StateAcc),
-                     return({maps:merge(FormsAcc, RequestForms), State1})
-                 ])
-      end, {#{}, State}, Requests).
+      fun(Request, StateAcc) ->
+              prepare_request(Request, MacroOps, StateAcc)
+      end, State, Requests).
 
--spec prepare_request(expansion_request(), workflow_context(), macro_ops(),
-                      state()) ->
-          astranaut_return:struct({map(), state()}).
-prepare_request(#{forms := FrozenForms} = Request, WorkflowContext,
-                MacroOps, State) ->
+-spec prepare_request(expansion_request(), macro_ops(), state()) ->
+          astranaut_return:struct(state()).
+prepare_request(#{forms := FrozenForms} = Request, MacroOps, State) ->
     astranaut_return:foldl_m(
-      fun(FormId, {FormsAcc, StateAcc}) ->
+      fun(FormId, StateAcc) ->
               do([ return ||
-                     {ExpandedForm, State1} <-
+                     {_ExpandedForm, State1} <-
                          prepare_request_form(
-                           FormId, Request, WorkflowContext,
-                           MacroOps, StateAcc),
-                     return({maps:put(FormId, ExpandedForm, FormsAcc), State1})
+                           FormId, Request, MacroOps, StateAcc),
+                     return(State1)
                  ])
-      end, {#{}, State}, maps:keys(FrozenForms)).
+      end, State, maps:keys(FrozenForms)).
 
--spec prepare_request_form(form_id(), expansion_request(), workflow_context(),
-                           macro_ops(), state()) ->
+-spec prepare_request_form(form_id(), expansion_request(), macro_ops(), state()) ->
           astranaut_return:struct({term(), state()}).
 prepare_request_form(
   FormId,
-  #{options := Options,
-    closure_fas := ClosureFAs,
-    group_members := GroupMembers,
-    referenced_local_macros := Referenced,
+  #{referenced_local_macros := Referenced,
     runtime_context_snapshot :=
-        #{macro_map := ExternalMacroMap,
+        #{macro_map := SnapshotMacroMap,
           macro_options := MacroOptions,
           inject_forms := InjectFormsSnapshot}} = Request,
-  WorkflowContext, MacroOps, State) ->
+  MacroOps, State) ->
     TargetFA = form_fa(FormId),
-    Direct = internal_direct(Options, ClosureFAs),
-    Excluded = ordsets:add_element(
-                 TargetFA, ordsets:union(Direct, GroupMembers)),
-    EffectiveReferenced = ordsets:subtract(Referenced, Excluded),
-    LocalVersions = local_versions(EffectiveReferenced, State),
-    LocalMacroMap = macro_map_for_fas(
-                      maps:get(local_macro_map, WorkflowContext),
-                      EffectiveReferenced),
-    Merge = maps:get(merge_macro_maps, MacroOps),
-    do([ return ||
-           EffectiveMacroMap <- Merge(ExternalMacroMap, LocalMacroMap),
-           Fingerprint = env_fingerprint(
-                           EffectiveMacroMap, LocalVersions, MacroOptions,
-                           InjectFormsSnapshot),
-           case expanded_form(FormId, Fingerprint, State) of
-               {ok, Form} ->
-                   astranaut_return:return({Form, State});
-               error ->
-                   expand_and_cache_form(
-                     FormId, TargetFA, EffectiveMacroMap, Fingerprint,
-                     Request, MacroOps, State)
-           end
-       ]).
+    LocalVersions = local_versions(Referenced, State),
+    EffectiveMacroMap = keep_allowed_local_fas(
+                          SnapshotMacroMap, Referenced),
+    Fingerprint = env_fingerprint(
+                    EffectiveMacroMap, LocalVersions, MacroOptions,
+                    InjectFormsSnapshot),
+    case expanded_form(FormId, Fingerprint, State) of
+        {ok, Form} ->
+            astranaut_return:return({Form, State});
+        error ->
+            expand_and_cache_form(
+              FormId, TargetFA, EffectiveMacroMap, Fingerprint,
+              Request, MacroOps, State)
+    end.
 
 -spec expand_and_cache_form(form_id(), fa(), map(), binary(),
                             expansion_request(), macro_ops(), state()) ->
@@ -640,14 +601,6 @@ cache_form_result(FormId, Fingerprint, Form, State) ->
         {ok, State1} -> astranaut_return:return({Form, State1});
         {error, Error} -> astranaut_return:error_fail(Error)
     end.
-
--spec macro_map_for_fas(map(), [fa()]) -> map().
-macro_map_for_fas(MacroMap, FAs) ->
-    FASet = ordsets:from_list(FAs),
-    maps:filter(
-      fun(_Key, #{function := Function, arity := Arity}) ->
-              ordsets:is_element({Function, Arity}, FASet)
-      end, MacroMap).
 
 -spec form_fa(form_id()) -> fa().
 form_fa({function, Name, Arity}) -> {Name, Arity};
@@ -859,8 +812,7 @@ compilation_boundaries(all, Ordered, Frozen) ->
     Sorted = lists:sort(
                fun(A, B) -> boundary_order(A, Ordered) =< boundary_order(B, Ordered) end,
                Boundaries),
-    mark_final_boundary(
-      [plan_boundary(Members, Ordered, Frozen) || Members <- Sorted]);
+    [plan_boundary(Members, Ordered, Frozen) || Members <- Sorted];
 compilation_boundaries(Needed, Ordered, Frozen) ->
     Prefix = [FA || {_Order, FA, _Entry} <- Ordered],
     Dependencies = dependency_boundaries(Needed, Ordered),
@@ -869,10 +821,6 @@ compilation_boundaries(Needed, Ordered, Frozen) ->
     %% order by the final member's declaration index.
     Sorted = lists:sort(fun(A, B) -> boundary_order(A, Ordered) =< boundary_order(B, Ordered) end, Boundaries),
     [plan_boundary(Members, Ordered, Frozen) || Members <- Sorted].
-
-mark_final_boundary([]) -> [];
-mark_final_boundary(Plans) ->
-    lists:sublist(Plans, length(Plans) - 1) ++ [(lists:last(Plans))#{final => true}].
 
 dependency_boundaries(FA, Ordered) ->
     Entry = entry_for(FA, Ordered),
@@ -887,34 +835,31 @@ prefix_to(FA, Ordered) ->
     [F || {Order, F, _Entry} <- Ordered, Order =< DependencyOrder].
 
 boundary_order(Members, Ordered) ->
-    case lists:last(Members) of
-        FA -> element(1, lists:keyfind(FA, 2, Ordered))
-    end.
+    FA = lists:last(Members),
+    element(1, lists:keyfind(FA, 2, Ordered)).
 
 -spec plan_boundary([fa()], [{non_neg_integer(), fa(), map()}],
                     #{form_id() => term()}) -> compilation_boundary().
 plan_boundary(Members, Ordered, Frozen) ->
     Entries = [{FA, entry_for(FA, Ordered)} || FA <- Members],
     #{members => Members,
-      requests => [request_for_entry(FA, Entry, Frozen)
-                   || {FA, Entry} <- Entries]}.
+      requests => [request_for_entry(Entry, Frozen)
+                   || {_FA, Entry} <- Entries]}.
 
 -spec requests_for_fas([fa()], state()) -> [expansion_request()].
 requests_for_fas(FAs, State) ->
     Macros = maps:get(local_macros, State),
     Frozen = maps:get(frozen_forms, State),
-    [request_for_entry(FA, maps:get(FA, Macros), Frozen) || FA <- FAs].
+    [request_for_entry(maps:get(FA, Macros), Frozen) || FA <- FAs].
 
--spec request_for_entry(fa(), map(), #{form_id() => term()}) ->
+-spec request_for_entry(map(), #{form_id() => term()}) ->
           expansion_request().
-request_for_entry(FA, Entry, Frozen) ->
-    #{group_members => maps:get(group_members, Entry, ordsets:from_list([FA])),
-      closure_ids => maps:get(closure_ids, Entry),
+request_for_entry(Entry, Frozen) ->
+    #{closure_ids => maps:get(closure_ids, Entry),
       closure_fas => maps:get(closure_fas, Entry),
       referenced_local_macros => maps:get(referenced_local_macros, Entry),
       runtime_context_snapshot => maps:get(runtime_context_snapshot, Entry),
       source_view => maps:get(source_view, Entry),
-      options => maps:get(options, Entry),
       forms => maps:with(maps:get(closure_ids, Entry), Frozen)}.
 
 retained_ids(Roots, Macros) ->

@@ -25,7 +25,7 @@ local declaration 预展开、retain 和最终 function pass 都调用该实现�
 ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 ```
 
-该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、候选环境和 `internal_function` direct-call 集合由 `astranaut_local_macro` 决定。同一个 declaration 的全部 members 共享 context，并整体从该 declaration MacroEnv 排除；成员之间的直接调用保持普通 Erlang 调用。
+该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、候选环境和 `internal_function` direct-call 集合由 `astranaut_local_macro` 决定。匹配结果保存为闭包的 `referenced_local_macros` 白名单，并同时约束 declaration 与 final 展开的 LocalEnv；同一 declaration 成员因不在声明前候选环境中而保持普通 Erlang 调用。
 
 两个操作均返回 `astranaut_return` 结果。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
 
@@ -39,7 +39,7 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
    1.2 逐 form 统一 scan-and-splice
        - 外部与可调用本地属性宏按当前位置展开
        - import/use/macro_options 前向更新 ExternalEnv
-       - local_macro declaration 注册 group、冻结 context、更新依赖并尝试预展开
+       - local_macro declaration 注册逐 FA 条目、冻结 context/引用白名单、更新依赖并尝试预展开
        - 任意展开/调用需要未就绪 local macro 时产生通用 NeedCallable
    1.3 收尾 local-macro 工作流，取得 FinalLocalEnv、RetainIds 与 FinalSkipIds
    1.4 构造 FinalMacroRuntimeContext
@@ -92,7 +92,7 @@ ClosureSourceView = passed_forms ++ 当前及剩余 queue
 | `-import_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-use_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-macro_options(...)` | 更新全局 options，保留该 form，并记入 `passed_forms`。 |
-| `-local_macro(...)` | 注册 declaration group、更新依赖并尝试预展开。 |
+| `-local_macro(...)` | 注册共享 order/context 的逐 FA 条目、更新依赖并尝试预展开。 |
 | 外部属性宏调用 | 用当前环境展开，结果 splice 回队列。 |
 | 已可调用的本地属性宏 | 用当前环境展开，结果 splice 回队列。 |
 | 已注册但尚不可调用的本地属性宏 | 产生通用 `NeedCallable`，成功后仍在原位置展开。 |

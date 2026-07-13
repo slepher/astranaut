@@ -78,14 +78,14 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 规格
 
 - [x] 记录 attribute、local declaration、retain 和 Step 2 function 使用同一个 `MacroRuntimeContext` 构造逻辑，仅快照时点不同。
-- [x] 记录同一 `-local_macro([...])` declaration 的成员共享环境并整体从该环境排除。
+- [x] 记录同一 `-local_macro([...])` declaration 的成员共享声明前环境；form 扫描结果成为 declaration/final 共用 local-macro 白名单。
 - [x] 记录宏环境用于展开缓存和多次展开结果一致性，而 GenerationCompiler 只消费 canonical forms。
 - [x] 记录 retain 与普通 Step 2 function 均使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较。
 
 ### 实现
 
 - [x] **P0：统一 MacroRuntimeContext builder。** 让 attribute 调用点、local declaration 快照和 final function context 使用同一个数据模型与宏映射/options/injection 规则。
-- [x] **P0：DeclarationGroup。** 同一 declaration 的成员引用同一个 context fingerprint，并整体从 group MacroEnv 排除；删除按单个 TargetFA 生成 group 环境的行为。
+- [x] **P0：声明条目。** 同一 declaration 的逐 FA 条目共享 order/context fingerprint；删除独立 group 状态和按单个 TargetFA 生成声明环境的行为。
 - [x] **P1：ExpansionValidator。** 将 function expansion 从 `compile_boundary` 分离为显式准备阶段，维护 last environment/result、canonical result 与可选 per-environment cache。
 - [x] **P1：Canonical GenerationCompiler。** 编译 boundary 只读取 canonical expanded forms，不接收 declaration environment 或 expansion requests。
 - [x] **P2：声明点预展开。** local declaration 注册、冻结和依赖建图后立即预展开就绪 forms；需要未就绪 local dependency 时产生通用 `NeedCallable`。
@@ -96,13 +96,21 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 测试
 
 - [x] `-local_macro([foo/1, bar/1])` 的 foo/bar 共享 fingerprint，且双方调用保持普通 Erlang 调用。
-- [x] declaration 注册后在无未就绪 local 依赖时完成预展开，但不因此编译当前 group。
+- [x] declaration 注册后在无未就绪 local 依赖时完成预展开，但不因此编译当前 declaration。
 - [x] declaration 预展开需要先声明 local macro 时，通过 `NeedCallable` 编译最小依赖 boundary 后恢复展开。
 - [x] 同一 FormId 在相同环境复用 last result；不同环境结果相同则更新 record，结果不同则诊断冲突。
 - [x] GenerationCompiler 在已有 canonical forms 时不调用 function expander。
 - [x] 同一累计 members boundary 由预展开、attribute 或 finalize 触发时只编译一次；独立连续 declaration 在预展开后 generation 仍为 0。
 - [x] retained helper、retained local macro 宏头和普通 Step 2 function 均与最后一次 local result 做 final-context 比对。
 - [x] final fingerprint 相同时直接复用，fingerprint 不同时从 original form 重新展开，禁止在 expanded AST 上继续展开。
+
+### 简洁性复核收口
+
+- [x] scan form 分派直接使用互斥 form pattern，删除无语义的分类器/布尔跳转和 monadic bind。
+- [x] local-macro 注册接口只接收完整 RuntimeContext；workflow context 不再携带重复宏映射。
+- [x] 删除 DeclarationGroup、重复 expanded cache、final boundary flag 和 retained 专用校验旁路。
+- [x] 验证同声明成员在 final context 仍互为普通调用，且普通 attribute 不阻止独立 declarations 合并为一个累计 boundary。
+- [x] 验证 local closure 的 final 环境不包含白名单外的后声明宏，而普通 final function 仍使用完整 local 环境。
 
 ### 上下文接口收敛
 

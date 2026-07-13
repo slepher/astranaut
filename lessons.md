@@ -46,6 +46,26 @@ fun(Form) ->
 end.
 ```
 
+## 不要用 `_ <-` 表示仅执行 monadic action
+
+在 `do` 块内，如果一个 monadic action 只需要被串联，而其返回值不参与后续计算或模式匹配，直接写 action 即可。`_ <- Action` 中的 `_` 匹配任何值，不提供验证或数据传递，只会增加绑定噪音。
+
+```erlang
+%% 冗余 — 返回值被无条件丢弃
+do([ traverse ||
+       _ <- astranaut_traverse:warning(invalid_macro_attribute),
+       return(Form)
+   ]).
+
+%% 正确 — 直接表达“发出 warning 后继续”
+do([ traverse ||
+       astranaut_traverse:warning(invalid_macro_attribute),
+       return(Form)
+   ]).
+```
+
+只有在返回值会被使用、需要通过模式匹配约束结果，或当前 `do` 语法明确要求 bind 时才使用 `<-`。这不改变上一节规则：monadic action 仍必须位于 `do`/bind 流程内；在普通函数体中用逗号分隔仍会丢弃 monad 状态。
+
 ## expand_macro 必须用 scoped_state 隔离 State
 
 `expand_macro` 内部使用 traverse State 做 depth tracking（`put(1)`），与 handler 的 State 冲突。

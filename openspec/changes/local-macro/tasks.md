@@ -65,14 +65,14 @@
 - [x] 验证声明后 use/options 变化不改变 frozen forms 的宏名称、调用参数与注入配置。
 - [x] 验证同一 frozen form 在不同 declaration 注入快照下按 fingerprint 分离缓存，并在展开结果不一致时维持既有冲突诊断。
 
-## DeclarationGroup、预展开与 canonical 编译任务（新增）
+## 声明快照、预展开与 canonical 编译任务
 
 > 本节取代旧实现中的逐 TargetFA 环境、编译计划内展开以及 retain 宏头跳过最终比对规则；保留上述条目作为历史完成记录。
 
 ### 实现
 
-- [x] 新增 declaration group 状态，使 members 共享 order、`MacroRuntimeContext`、options 与 environment fingerprint。
-- [x] 构造 group MacroEnv 时整体排除 declaration members，成员间调用不记录为 local macro dependency。
+- [x] 让同 declaration members 的逐 FA 条目共享 order、`MacroRuntimeContext`、options 与 environment fingerprint，不建立独立 group 状态。
+- [x] declaration-time form 扫描以声明前候选环境产生 `referenced_local_macros` 白名单；declaration/final 展开均只开放白名单 local FAs，成员间调用不记录为 local macro dependency。
 - [x] 注册完成后调用统一预展开操作，仅在真实依赖需要 callable local macro 时进入 dependency scheduler。
 - [x] 用 `ExpansionRecord` 取代编译计划内的 `{FormId, EnvFingerprint}` request 展开：记录 last env/result、canonical result 与 per-env cache。
 - [x] 让 `execute_plan` 显式协调 expansion preparation、dependency scheduling 和 canonical generation compilation，并保持 `compile_boundary` 不执行展开。
@@ -82,7 +82,7 @@
 
 ### 测试
 
-- [x] 同 declaration 多 FA 共享 context，互相不作为宏，但仍可形成普通闭包调用。
+- [x] 同 declaration 多 FA 共享 order/context，互相不作为宏，但仍可形成普通闭包调用。
 - [x] 预展开无依赖、预展开触发依赖编译、预展开失败的 record 原子性。
 - [x] 环境 E1 → E2 → E1 时命中 per-env cache，且 canonical result 保持唯一。
 - [x] compiler 对 canonical forms 的输入不触发任何 request-specific 展开。
@@ -91,6 +91,15 @@
 
 ### 上下文接口收敛
 
-- [x] Entry、DeclarationGroup 和 ExpansionRequest 只保存一份完整的 `runtime_context_snapshot`。
-- [x] 删除 ExpansionRequest 中未消费的 `fa`、`group_id`、`already_compiled` 及重复 snapshot 字段，仅保留 8 个必需字段。
+- [x] Entry 和 ExpansionRequest 只保存一份完整的 `runtime_context_snapshot`；删除 `declaration_groups`、`group_id` 和 `group_members` 双重状态。
+- [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options` 及重复 snapshot 字段，仅保留 6 个必需字段。
 - [x] 用命名 map type 约束 workflow context、MacroRuntimeContext、MacroOps、ExpansionRequest 和 CompilationBoundary。
+
+### 简洁性复核收口
+
+- [x] 删除 workflow context 中重复的 `local_macro_map` 和 MacroOps 中只做 map merge 的回调，注册时直接保存完整 RuntimeContext。
+- [x] 用扫描得到的 `referenced_local_macros` 作为 declaration/final 共用白名单，删除按 order/self/direct-call 计算的 final 排除路径。
+- [x] 删除重复的 expanded-form cache、final boundary 标记、空 retained forms 返回值和仅供测试的 retained 校验旁路。
+- [x] 将扫描主流程改为直接呈现互斥 form 分支，并删除无语义 monadic bind。
+- [x] 覆盖同声明成员最终普通调用，以及普通 attribute 分隔的独立 declaration 合并边界。
+- [x] 覆盖后声明 local macro 不进入先前闭包的 final 环境，以及普通 final function 仍可见完整 FinalLocalEnv。

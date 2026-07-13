@@ -19,13 +19,14 @@
 - **当** 解析闭包实际引用的 local macros
 - **那么** 使用与普通 function 展开相同的调用匹配语义
 
-#### Scenario: 同一 declaration group 成员整体移除
+#### Scenario: 同一 declaration 成员保持普通调用
 
-- **给定** `-local_macro([foo/1, bar/1])` 注册为同一 declaration group
+- **给定** `-local_macro([foo/1, bar/1])` 在同一 declaration 中注册
 - **当** 工作流预展开 foo/1 或 bar/1
 - **那么** 二者使用相同 declaration MacroRuntimeContext
-- **并且** foo/1 与 bar/1 均不在该 context 的 MacroEnv 中
+- **并且** declaration-time MacroEnv 按构造时点自然不包含 foo/1 与 bar/1
 - **并且** 它们之间的调用保持普通 Erlang 本地调用
+- **并且** declaration 与 final 的 LocalEnv 都按 form 扫描得到的引用白名单构造，无需最终排除二者
 
 ### Requirement: 属性宏统一参与 scan-and-splice
 
@@ -229,7 +230,7 @@ local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declar
 
 ### Requirement: 最终 function 使用统一 FinalMacroRuntimeContext
 
-retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个 `FinalMacroRuntimeContext` 和同一个 ExpansionValidator。
+retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个 `FinalMacroRuntimeContext` 和同一个 ExpansionValidator。local closure target 的 LocalEnv MUST 由其 declaration form 扫描白名单过滤；非 local-closure ordinary target MUST 保留完整 FinalLocalEnv。
 
 #### Scenario: 最终展开跳过工作流指定的 forms
 

@@ -6,7 +6,7 @@
 
 ## 职责边界
 
-`astranaut_local_macro` 管理 declaration group、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
+`astranaut_local_macro` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
 local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供统一的
 `MacroRuntimeContext` 构造、引用匹配和 `ExpandAndValidate` 能力。local declaration
@@ -20,7 +20,7 @@ astranaut_macro
   ├─ 统一 scan、环境更新、attribute splice
   ├─ 通用宏引用匹配、function 展开与错误/monad 流
   └─ 调用 astranaut_local_macro
-       ├─ declaration group 注册、依赖规划与状态转换
+       ├─ declaration 成员注册、依赖规划与状态转换
        ├─ 闭包、internal policy、冻结、ExpansionRecord、retain、FinalSkipIds
        └─ canonical forms 的累计编译与 local macro 模块加载
 ```
@@ -64,19 +64,16 @@ MacroRuntimeContext = #{
 }
 
 LocalMacroWorkflowContext = #{
-  local_macro_map := MacroMap,
   source_view := Forms,
   compile_opts := CompileOptions
 }
 
 ExpansionRequest = #{
-  group_members,
   closure_ids,
   closure_fas,
   referenced_local_macros,
   runtime_context_snapshot,
   source_view,
-  options,
   forms
 }
 ```
@@ -94,16 +91,13 @@ context；注册时必须保存完整的 `runtime_context_snapshot`，不得同�
 
 ```text
 State = #{
-  declaration_groups => #{GroupId => #{
-    members => [FA],
+  local_macros => #{FA => #{
     order => ScanSequence,
     runtime_context_snapshot => MacroRuntimeContext,
-    closure_source_view => MaterializedSourceAtDeclaration,
-    options => Options
-  }},
-  local_macros => #{FA => #{
-    group_id => GroupId,
+    source_view => MaterializedSourceAtDeclaration,
+    options => Options,
     closure_ids => [FormId],
+    closure_fas => [FA],
     referenced_local_macros => [FA],
     status => pending | compiled
   }},
@@ -119,12 +113,12 @@ State = #{
 }
 ```
 
-declaration group 是环境快照单位，FA 注册表是查找和生命周期索引。多个 FA 出现在同一个 declaration form 时共同引用一个 group；后声明 group 可引用前面已注册的 group 成员作为 local macro。重复 FA declaration 报 `duplicate_local_macro_declaration`。
+FA 注册表同时保存不可变声明快照和逐 FA 生命周期。多个 FA 出现在同一个 declaration form 时，由同一次注册写入相同的 `order`、`runtime_context_snapshot`、`source_view` 和 options；不为这一事实建立独立 group 对象。后声明 FA 可引用前面已注册的 FA 作为 local macro。重复 FA declaration 报 `duplicate_local_macro_declaration`。
 
 ### 状态不变量
 
-- `declaration_groups` 保存不可变 context；`local_macros` 只引用 group 并维护逐 FA 闭包与 callable 状态。
-- group 的 `order` 是 declaration 的扫描顺序，不得由 map 遍历顺序推断。
+- `local_macros` 的每个条目直接保存不可变 context、闭包与 callable 状态，不保留 `group_id` 或第二份声明表。
+- 同一次 declaration 写入相同的 `order`；它只提供稳定扫描和累计编译顺序，不参与最终宏环境裁剪，也不得由 map 遍历顺序推断。
 - `frozen_forms` 永远保存原始源码 form；任何环境下的展开都从该原始 form 开始。
 - `canonical_expanded_forms` 是所有环境比对通过后的唯一编译候选；`compiled_forms` 是当前 `<Module>__local_macro` 已提交 generation 的完整累计源码。
 - `local_macro_expanded_ids` 只记录已作为 local macro closure 完成 canonical 展开验证的 form ID；它与 `frozen_forms`、`retained_form_ids` 是不同集合。
@@ -133,11 +127,11 @@ declaration group 是环境快照单位，FA 注册表是查找和生命周期�
 
 ### 声明单位与 FA
 
-`-local_macro([foo/1, bar/2])` 是一个 declaration group。`foo/1` 和 `bar/2` 分别拥有查找条目、宏头、闭包根和 callable 状态，但必须引用同一份扫描顺序、MacroRuntimeContext 快照和 options。
+`-local_macro([foo/1, bar/2])` 一次注册两个 FA 条目。`foo/1` 和 `bar/2` 分别拥有宏头、闭包根和 callable 状态，同时保存相同的扫描顺序、MacroRuntimeContext 快照和 options。
 
 处理 declaration 时必须先检查全部 FA 是否已经存在；任一重复均以 `duplicate_local_macro_declaration` 失败，不能部分注册。
 
-注册成功后，group 的 `order` 与 declaration 当时的 context 快照不可变。逐 FA `status` 和 generation 可以随累计编译推进而更新，但不得以新的环境重写旧 declaration group。
+注册成功后，条目中的 `order` 与 declaration 当时的 context 快照不可变。逐 FA `status` 和 generation 可以随累计编译推进而更新，但不得以新的环境重写旧声明快照。
 
 ### 注册过程
 
@@ -147,9 +141,9 @@ register_and_preexpand(LocalMacroAttribute, ClosureSourceView, DeclarationRuntim
   2. 对每个 FA 计算静态函数闭包
   3. 校验 extra_functions 与 internal_function 策略
   4. 将闭包原始 function/spec forms 写入 frozen_forms
-  5. 把 declaration 的全部 members 整体从共同 MacroEnv 排除
-  6. 以该共同环境调用统一引用解析，取得闭包实际引用的先前 local FA
-  7. 建立一个 DeclarationGroup，并让各 FA 条目引用它
+  5. 使用 declaration 前的完整 MacroRuntimeContext；该环境按构造时点自然不含本次新增 FA
+  6. 按 internal_function 策略裁剪 direct-call FA，并调用统一引用解析取得实际引用的先前 local FA
+  7. 为各 FA 建立带相同 order 和 context 快照的独立条目
   8. 将各 FA status 设为 pending，更新依赖图
   9. 对依赖已就绪的 frozen forms 调用统一 ExpansionValidator
 ```
@@ -180,21 +174,27 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 `internal_function` 的解析、共享闭包冲突校验和有效环境裁剪全部属于
 `astranaut_local_macro`。通用展开器不会读取该 option。
 
-### DeclarationGroup 的共同有效环境
+### 同一 declaration 的有效环境
 
 同一个 declaration 的全部 members 使用同一个环境：
 
 ```text
-GroupMacroEnv(Declaration)
+DeclarationMacroEnv
   = PreDeclarationEffectiveMacroMap
-  - DeclarationMembers
   - InternalFunctions(Declaration)
 ```
 
-对于 `-local_macro([foo/1, bar/1])`，`foo/1` 与 `bar/1` 均不出现在该 group
-MacroEnv 中。`bar/1` 对 `foo/1` 的调用以及反向调用都是普通 Erlang 本地调用；
-不能按当前 TargetFA 为二者构造不同环境。先前 declaration 中真正被引用的 local
-macro 仍可进入 group 环境，并由依赖调度器保证需要执行时可调用。
+对于 `-local_macro([foo/1, bar/1])`，declaration 前的环境按定义尚未注册
+`foo/1` 与 `bar/1`，因此无需再执行“排除当前 members”的操作。`bar/1` 对
+`foo/1` 的调用以及反向调用都是普通 Erlang 本地调用。form 扫描使用 declaration 前
+候选环境识别实际 local macro 引用，并把结果保存为 `referenced_local_macros` 白名单。
+
+declaration 预展开和最终展开都保留各自时点的 external macros，但 local-macro 部分只保留
+该闭包白名单中的 FA。因而 self、同声明成员、`internal_function` direct calls 和后声明
+local macros 都不会进入宏匹配，不需要 final 排除逻辑。目标本身是 local macro 宏头时，
+必须只使用其自身 declaration 条目的白名单，避免后声明闭包把该宏重新加入自身环境；
+仅作为 helper 且同时属于多个 local 闭包时，允许集合才取这些闭包扫描结果的并集。
+不属于任何 local 闭包的普通最终 function 仍使用完整 FinalLocalEnv。
 
 spec form 不执行 function-body 展开，但与对应 function 使用同一个 declaration
 环境指纹参与冻结和一致性记录。
@@ -203,9 +203,9 @@ spec form 不执行 function-body 展开，但与对应 function 使用同一个
 
 注册时的源码视图是当前已 materialize 的 forms 流：已 pass 的输出前缀加上当前尚未 pass 的队列。此前 splice 生成但尚未处理的 form 已经在该队列中，不是额外的第三类输入；未来尚未执行的 attribute splice 输出不属于源码视图。该视图只用于寻找函数与闭包。
 
-环境快照则严格取 declaration 前已经 pass 的 `import_macro`、`use_macro`、`macro_options`，再加上该闭包实际引用的 local macro。后续环境更新不会回溯改变已记录的 declaration 快照。
+环境快照严格取 declaration 前已经 pass 的完整 effective macro map、`macro_options` 和 inject forms；`referenced_local_macros` 另行记录 form 扫描得出的 local 允许集合。展开时再以该白名单过滤快照中的 local 部分。后续环境更新不会回溯改变已记录的 declaration 快照或白名单。
 
-`use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；不同定义占用同一 key 时仍须通过统一 `force_override` 规则。该时点已生效的 checked effective map 写入 declaration group 的 runtime context snapshot。
+`use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；不同定义占用同一 key 时仍须通过统一 `force_override` 规则。该时点已生效的 checked effective map 直接写入每个声明条目的 runtime context snapshot。
 
 local macro 的上下文特殊规则是：预展开其 function forms 时，`MacroRuntimeContext` 仅取 `-local_macro` declaration 之前的状态。宏名称、alias、调用参数、options 和 `inject_attrs` 实际值必须来自同一时点。generation 编译不读取该 context，只读取已经确认的 canonical expanded forms。
 
@@ -234,9 +234,9 @@ ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
 
 1. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
 2. 以 declaration 前的 effective map、options 和 passed forms 构造一个共同 `MacroRuntimeContext`。
-3. 将 declaration 的全部 members 整体从共同 MacroEnv 排除。
+3. 直接使用该 declaration 前的环境；它自然不含本次新增 members，仅按 `internal_function` 裁剪 direct-call FA。
 4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；任何展开都从该输入开始。
-5. 建立 declaration group 和逐 FA 生命周期索引，更新实际 local macro 依赖。
+5. 建立带相同 order/context 的逐 FA 生命周期条目，更新实际 local macro 依赖。
 6. 对依赖已就绪的 forms 立即预展开；需要尚不可调用 local macro 时产生 `NeedCallable`。
 
 后续属性 splice 不得改写 `frozen_forms` 中的 form ID，否则报 `illegal_locked_form_mutation`。
@@ -251,7 +251,7 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ## 多环境展开与缓存
 
-每次展开从 `frozen_forms` 中的原始 form 开始。每个 FormId 保存一个 `ExpansionRecord`：最后一次环境/结果、canonical result，以及可选的按 fingerprint 结果缓存。fingerprint 包含有效宏映射与可调用 local 版本、macro options、`inject_forms` 和 declaration group 排除策略。
+每次展开从 `frozen_forms` 中的原始 form 开始。每个 FormId 保存一个 `ExpansionRecord`：最后一次环境/结果、canonical result，以及按 fingerprint 的结果缓存。fingerprint 包含裁剪后的有效宏映射与可调用 local 版本、macro options 和 `inject_forms`。
 
 同一 form 可属于多个闭包：
 
@@ -260,7 +260,7 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ### 环境指纹
 
-`EnvFingerprint` 必须反映 `MacroRuntimeContext` 的所有可观察输入，不能只比较 external map。不得使用包含 remaining queue 的 `closure_source_view` 代替 `inject_forms`。FormId 已是 record 的外层 key；同 declaration group 不得再因单个 TargetFA 不同而产生不同 fingerprint。
+`EnvFingerprint` 必须反映 `MacroRuntimeContext` 的所有可观察输入，不能只比较 external map。不得使用包含 remaining queue 的 `closure_source_view` 代替 `inject_forms`。FormId 已是 record 的外层 key；同 declaration 的成员共享快照，不能另造 TargetFA 维度改变声明环境。
 
 ### 冲突检测时机
 
@@ -365,7 +365,7 @@ FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 7. 返回 FinalLocalEnv 与 FinalSkipIds 给统一扫描流程的最终展开阶段
 ```
 
-所有 retained functions（包括 local macro 宏头）都参与第 5 步。若 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 在 final context 下展开，并与最后一次已接受 local result 比较。普通 Step 2 function 使用完全相同的规则。
+所有 retained functions（包括 local macro 宏头）都参与第 5 步。属于 local 闭包的目标先按 `referenced_local_macros` 白名单过滤 FinalLocalEnv；不属于任何 local 闭包的普通 Step 2 function 使用完整 FinalLocalEnv。若所得 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 展开，并与最后一次已接受 local result 比较。
 
 `FinalSkipIds` 的计算不删除原始 forms；它是交给最终函数体遍历器的过滤条件。这样同一 forms 列表可继续用于 record、attribute injection 和诊断，而 local macro 已预展开且未 retain 的 functions 不会被再次递归展开。
 

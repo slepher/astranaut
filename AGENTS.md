@@ -23,4 +23,6 @@ powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 --version
 powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct
 ```
 
+When running the full Common Test suite, give the command a real test timeout (at least 120 seconds; use longer when the environment is slow). Do not set a short command timeout merely to make the tool yield and then expect to wait on it: the command timeout terminates `rebar3` and aborts the CT run. If the tool returns a live process or cell identifier, keep the original long command timeout and use the corresponding wait operation for incremental output. Report a command-timeout termination as an interrupted run, not as a test failure.
+
 Outside Codex app sandbox mode, normal `rebar3` commands can be used directly if the local environment allows Erlang to execute `inet_gethost`.

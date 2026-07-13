@@ -31,7 +31,7 @@ GenerationCompiler
 | retain function 展开 | attribute scan 完成后的最终上下文 |
 | Step 2 普通 function 展开 | attribute scan 完成后的最终上下文 |
 
-四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local macro 的特殊性只剩 declaration-time 快照、declaration group 成员排除、闭包/依赖及 callable generation 生命周期。
+四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local macro 的特殊性只剩 declaration-time 快照、同声明成员的普通调用语义、闭包/依赖及 callable generation 生命周期。
 
 ## 2. 与当前实现对照
 
@@ -40,13 +40,13 @@ GenerationCompiler
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
 | 统一 attribute runtime | `resolve_attribute_macro_target/2`、`need_callable/4`、`build_attribute_macro_invocation/2` | 已实现；local 只增加通用可调用性前置条件。 |
-| declaration group 共享一个环境 | `register/7` 的 `declaration_groups`、`group_members` | 已实现；同 declaration 成员整体排除，成员间调用保持普通 Erlang 调用。 |
+| local 调用白名单 | `register/6` 保存 `referenced_local_macros`；`apply_local_macro_whitelist/3` 复用于 final | 已实现；声明与 final 均只开放 form 扫描实际识别的 local refs，同声明成员自然保持普通调用。 |
 | declaration 时尽可能预展开 | `prepare_declaration/4` | 已实现；无真实 local 依赖时只预展开、不编译。 |
-| 环境只控制展开与一致性 | `prepare_requests/4`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
-| 编译仅消费 canonical forms | `compile_boundary/4`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |
+| 环境只控制展开与一致性 | `prepare_requests/3`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
+| 编译仅消费 canonical forms | `compile_boundary/3`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |
 | 编译由 `NeedCallable` 驱动 | `need_callable/4` | 已实现；仅真实 local 依赖可产生中间 boundary。 |
 | retain 与 Step 2 共用最终上下文和验证器 | `expand_final_functions/5` | 已实现；两类目标走同一 final-context 路径。 |
-| retain 宏头也比较最后一次 local 展开结果 | `verify_retained/2`、`expand_final_functions/5` | 已实现；宏头没有跳过例外。 |
+| retain 宏头也比较最后一次 local 展开结果 | `expand_final_functions/5`、`cache_expanded/4` | 已实现；宏头没有专用校验旁路。 |
 | 相同最终环境直接复用 | `expansion_records.results_by_env` | 已实现；E1 → E2 → E1 可直接复用 E1。 |
 | `__original__` spec 局部 merge | `map_forms_splice_merge_specs/1` | 已实现并保留。 |
 
@@ -66,8 +66,8 @@ Module Macro Pipeline
 │  │  │  └─ Update EffectiveMacroMap in source order
 │  │  ├─ local_macro declaration
 │  │  │  ├─ Build DeclarationMacroRuntimeContext from pre-declaration state
-│  │  │  ├─ Register one DeclarationGroup
-│  │  │  ├─ Exclude every group member from the group MacroEnv
+│  │  │  ├─ Register one entry per FA with the same order/context snapshot
+│  │  │  ├─ Use the pre-declaration MacroEnv, which contains no new member
 │  │  │  ├─ Freeze original function/spec forms and closure source view
 │  │  │  ├─ Update static local dependency graph
 │  │  │  └─ Pre-expand ready forms through ExpansionValidator
@@ -148,13 +148,12 @@ FinalMacroRuntimeContext
 
 `inject_forms` 与宏映射必须来自同一个时点。完整 `ClosureSourceView = passed + current + remaining` 只用于静态闭包、冻结和模块结构物化，不属于 `MacroRuntimeContext`。
 
-## 5. DeclarationGroup 语义
+## 5. 同一 declaration 的成员语义
 
-一个 declaration form 对应一个不可变 group：
+一个 declaration form 写入多个独立 FA 条目：
 
 ```text
-DeclarationGroup = {
-  members,                    % 例如 [foo/1, bar/1]
+LocalMacroEntry = {
   declaration_order,
   runtime_context_snapshot,
   closure_source_view,
@@ -170,15 +169,17 @@ DeclarationGroup = {
 -local_macro([foo/1, bar/1]).
 ```
 
-`foo/1` 与 `bar/1` 共享完全相同的 declaration MacroRuntimeContext。group 的全部 members 整体从该 MacroEnv 排除：
+`foo/1` 与 `bar/1` 的条目共享相同的 declaration order、MacroRuntimeContext 和 options。这个 MacroRuntimeContext 取自 declaration 前，因此按定义尚不包含本次新增的两个宏，无需专门排除 members：
 
 ```text
-GroupMacroEnv = PreDeclarationEffectiveMacroMap - {foo/1, bar/1}
+DeclarationMacroEnv = PreDeclarationEffectiveMacroMap
 ```
 
-因此 `bar/1` 中对 `foo/1` 的直接调用是普通 Erlang 本地调用和闭包边，不是 local macro 调用；反向同理。不能因为当前展开 form 或 TargetFA 不同而为 group members 制造不同宏环境或不同环境 fingerprint。
+form 扫描以该声明前候选环境识别实际 local macro 引用，并保存为闭包的 `referenced_local_macros` 白名单。因此 `bar/1` 中对 `foo/1` 的直接调用是普通 Erlang 本地调用和闭包边，不是 local macro 调用；反向同理。
 
-group 内各 FA 仍可拥有各自的宏头、闭包根、retain 状态和 callable 状态，但这些生命周期字段不能改变共同的 declaration context。
+declaration 与 final 展开都只开放该白名单中的 local macros；final 的 external macros、options 和 inject forms 仍取 FinalMacroRuntimeContext。不需要按 order、自身、同声明成员或 direct-call 集合做最终减法。local macro 宏头只使用自身 declaration 白名单，避免后声明闭包反向污染；仅作为共享 helper 时才合并所属闭包白名单。非 local-closure 普通 function 使用完整 FinalLocalEnv。
+
+各 FA 仍拥有各自的宏头、闭包根、retain 状态和 callable 状态。无需为共享 order/context 单独维护 group id、members map 或第二份声明状态。
 
 ## 6. ExpansionValidator
 
@@ -193,7 +194,7 @@ ExpansionRecord = {
 }
 ```
 
-环境 fingerprint 覆盖该次展开的全部可观察输入：有效宏映射及可调用 local 版本、macro options、`inject_forms` 和 declaration group 排除策略。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把同 declaration group 切成不同环境。
+环境 fingerprint 覆盖该次展开的全部可观察输入：裁剪后的有效宏映射及可调用 local 版本、macro options 和 `inject_forms`。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把共享的 declaration 快照切成不同环境。
 
 ### 6.2 统一操作
 
@@ -219,7 +220,7 @@ expand_and_validate(FormId, OriginalForm, MacroRuntimeContext):
 
 ### 6.3 预展开
 
-扫描到 local declaration 后立即注册依赖并尝试预展开，但“声明出现”本身不要求编译该 group。预展开若只使用 external 或已可调用 local macros，结果直接进入 expansion record。
+扫描到 local declaration 后立即注册依赖并尝试预展开，但“声明出现”本身不要求编译这些 FA。预展开若只使用 external 或已可调用 local macros，结果直接进入 expansion record。
 
 若预展开真正需要执行一个尚不可调用的 local macro，则产生 `NeedCallable(FA)`。scheduler 可以当场编译最小必要依赖边界，随后恢复预展开。这不是 declaration 编译策略，而是通用的依赖可调用性规则。
 
@@ -258,7 +259,7 @@ NeedCallable(FA)
 - retain 或 Step 2 function 展开需要 local macro；
 - scan completion 构造最终 local generation。
 
-只有真实 local macro 依赖产生中间编译边界。普通 Erlang direct call、闭包成员关系和 declaration group 内成员调用不产生宏依赖边界。
+只有真实 local macro 依赖产生中间编译边界。普通 Erlang direct call、闭包成员关系和同一 declaration 内成员调用不产生宏依赖边界。
 
 ### 7.2 编译输入
 
@@ -362,7 +363,7 @@ Compile/load failure
 
 ## 12. 最终不变量
 
-1. 所有宏环境都由同一个 `MacroRuntimeContext` builder 构造，差异仅来自源码时点和明确的 declaration group 排除。
+1. 所有宏环境都由同一个 `MacroRuntimeContext` builder 构造；local closure 的 local-macro 部分统一按 form 扫描得到的 `referenced_local_macros` 白名单过滤。
 2. 一个 `-local_macro([...])` declaration 的全部 members 共享同一个 context，且成员之间不互为宏。
 3. 每次 function-form 展开都从 original/frozen form 开始。
 4. 相同 FormId、相同 fingerprint 直接复用；不同 fingerprint 必须比较展开结果。
@@ -378,10 +379,10 @@ Compile/load failure
 
 ## 13. 实现结果
 
-### P0：DeclarationGroup 与统一上下文
+### P0：声明条目与统一上下文
 
-- 把同一个 `-local_macro([...])` 注册为共享 context 的 group。
-- group members 整体从 declaration MacroEnv 排除。
+- 把同一个 `-local_macro([...])` 注册为共享 order/context 的逐 FA 条目。
+- declaration 前环境自然不含本次 members；declaration/final 均复用扫描引用白名单，无需最终排除路径。
 - 提供 attribute/local/retain/function 共用的 `MacroRuntimeContext` builder。
 
 状态：已实现。
