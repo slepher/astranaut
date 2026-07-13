@@ -4,7 +4,7 @@
 
 ### Requirement: local 与普通 function 使用同构展开
 
-`astranaut_macro` MUST 以同一 function 展开实现处理最终普通 function pass 与 local-macro 工作流提交的目标 functions。
+`astranaut_macro` MUST 以同一 `MacroRuntimeContext` 构造和展开验证实现处理 local declaration 预展开、retain 与最终普通 function pass。
 
 #### Scenario: 展开器不解释 local 专属策略
 
@@ -19,12 +19,13 @@
 - **当** 解析闭包实际引用的 local macros
 - **那么** 使用与普通 function 展开相同的调用匹配语义
 
-#### Scenario: 目标自身移除由 local 工作流完成
+#### Scenario: 同一 declaration group 成员整体移除
 
-- **给定** local-macro 工作流请求展开 TargetFA
-- **当** 统一展开器收到 MacroEnv
-- **那么** TargetFA 已由 local-macro 工作流从环境移除
-- **并且** 展开器不包含 local macro 自身递归特判
+- **给定** `-local_macro([foo/1, bar/1])` 注册为同一 declaration group
+- **当** 工作流预展开 foo/1 或 bar/1
+- **那么** 二者使用相同 declaration MacroRuntimeContext
+- **并且** foo/1 与 bar/1 均不在该 context 的 MacroEnv 中
+- **并且** 它们之间的调用保持普通 Erlang 本地调用
 
 ### Requirement: 属性宏统一参与 scan-and-splice
 
@@ -50,12 +51,13 @@
 - **那么** function form 保留在 forms 流中
 - **并且** 不在属性扫描阶段递归展开其函数体
 
-#### Scenario: 尚不可调用的本地属性宏触发工作流
+#### Scenario: 尚不可调用的本地属性宏产生通用 NeedCallable
 
 - **给定** `-local_macro([foo/1])` 已注册但尚不可调用
 - **并且** 扫描遇到 `-foo(...)`
 - **当** 处理该属性时
-- **那么** 扫描委托 local-macro 工作流完成必要编译
+- **那么** 扫描向通用 dependency scheduler 提交 `NeedCallable(foo/1)`
+- **并且** compiler 只消费已经确认的 canonical expanded forms
 - **并且** 随后在当前位置展开 `-foo(...)`
 
 #### Scenario: 无法执行的宏 attribute 只诊断一次
@@ -161,16 +163,16 @@ attribute 宏的运行期注入环境 MUST 只由调用位置之前已经通过�
 - **那么** 二者都使用各自调用点前已生效的 MacroEnv 与 passed forms
 - **并且** local macro 不具有独立的运行期上下文规则
 
-### Requirement: local macro 编译使用声明位点注入快照
+### Requirement: local macro 预展开使用声明位点运行时上下文
 
-local macro 的唯一特殊上下文规则是：其 frozen function forms 的编译 MUST 使用 `-local_macro` declaration 前 passed forms 所确定的完整宏展开上下文，包括已生效的宏名称、调用参数、options 与可注入 attribute。完整 remaining source view MUST 只用于闭包发现，不能作为编译上下文或 `inject_attrs` 输入。更晚的 attribute 调用即使触发按需编译，也不得把调用点环境传入 local macro forms 展开。
+local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declaration 前 passed forms 所确定的 `MacroRuntimeContext`，包括已生效的宏名称、调用参数、options 与可注入 attribute。完整 remaining source view MUST 只用于闭包发现，不能作为 context 或 `inject_attrs` 输入。GenerationCompiler MUST 只消费 canonical expanded forms，不得载入每个 declaration context 后重新展开。
 
-#### Scenario: 按需编译不改变 declaration-time 编译上下文
+#### Scenario: NeedCallable 不改变 declaration-time 预展开上下文
 
 - **给定** `-local_macro([foo/1])` 前存在 attribute `early`
 - **并且** declaration 后存在 `use_macro` 配置变化和 attribute `late`
-- **并且** 更晚的 `-foo(...)` 触发 foo 按需编译
-- **当** 编译 foo 的 frozen forms 并随后展开 `-foo(...)`
+- **并且** 更晚的 `-foo(...)` 产生 `NeedCallable(foo/1)`
+- **当** 准备 canonical forms、完成必要编译并随后展开 `-foo(...)`
 - **那么** frozen forms 使用 declaration 时的宏名称、调用参数和 `inject_attrs` 配置
 - **并且** frozen forms 的注入值只来自 declaration 前 passed forms，因此可见 `early` 而不可见 `late`
 - **并且** `-foo(...)` 本身随后按所有 attribute 宏共用的运行期规则执行
@@ -178,7 +180,7 @@ local macro 的唯一特殊上下文规则是：其 frozen function forms 的编
 #### Scenario: remaining queue 只参与闭包发现
 
 - **给定** local declaration 后方的 helper function 与 attribute 尚在 remaining queue
-- **当** 注册并最终编译该 local macro
+- **当** 注册、预展开并最终编译该 local macro
 - **那么** helper function 可以进入 closure source view
 - **并且** 尚未 pass 的 attribute 不能进入 local macro forms 的 `inject_attrs`
 
@@ -225,15 +227,15 @@ local macro 的唯一特殊上下文规则是：其 frozen function forms 的编
 - **那么** 每次宏执行的私有 state 不泄漏到调用方或兄弟调用
 - **并且** formatter、位置和错误仍沿外层遍历传播
 
-### Requirement: 最终展开使用 local-macro 收尾结果
+### Requirement: 最终 function 使用统一 FinalMacroRuntimeContext
 
-最终 function pass MUST 使用 local-macro 收尾返回的最终环境和跳过集合。
+retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个 `FinalMacroRuntimeContext` 和同一个 ExpansionValidator。
 
 #### Scenario: 最终展开跳过工作流指定的 forms
 
 - **给定** local-macro 收尾返回 `FinalLocalEnv` 和 `FinalSkipIds`
 - **当** 最终函数体展开执行时
-- **那么** 使用 `ExternalEnv + FinalLocalEnv`
+- **那么** 使用包含 FinalLocalEnv、最终 options 与最终 injection forms 的 `FinalMacroRuntimeContext`
 - **并且** 不展开 `FinalSkipIds` 中的 forms
 
 #### Scenario: 最终映射不包含未编译 local macro
@@ -242,3 +244,19 @@ local macro 的唯一特殊上下文规则是：其 frozen function forms 的编
 - **当** 构造 function pass 的宏映射
 - **那么** local macro 映射按 FinalLocalEnv 过滤
 - **并且** 未编译或不可用的 FA 不参与最终匹配
+
+#### Scenario: 最终环境与最后一次 local 展开结果比对
+
+- **给定** function form 曾在 declaration MacroRuntimeContext 下作为 local closure 展开
+- **并且** 该 form 被 retain 或被 Step 2 caller detection 选中
+- **当** FinalMacroRuntimeContext fingerprint 与最后一次 local expansion 不同
+- **那么** 从原始 form 在 FinalMacroRuntimeContext 下重新展开
+- **并且** 与最后一次已接受的 local expansion result 比较
+- **并且** 结果不同时报告 `conflicting_local_macro_closure_environment`
+
+#### Scenario: retained local macro 宏头不跳过最终比对
+
+- **给定** retained function 是 local macro 宏头
+- **当** 它进入最终 function 展开
+- **那么** 使用与 helper 和普通 function 相同的 ExpansionValidator
+- **并且** 不存在宏头专用的跳过比对规则

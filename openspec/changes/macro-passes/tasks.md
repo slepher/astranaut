@@ -45,7 +45,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 增加测试：local macro function 与普通 function 复用同一展开语义。
 - [x] 增加测试：目标 FA 自身移除和 internal_function 不在通用展开器中实现。
 
-## Hierarchy_final 后续任务（新增，保留既有任务状态）
+## Hierarchy_final 任务（新增，保留既有任务状态）
 
 ### 规格
 
@@ -55,18 +55,51 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ### 实现
 
-- [ ] **P0：声明位点注入快照。** 注册 local declaration 时单独保存 declaration 前 `passed_forms`；展开 frozen local forms 时用它执行 `inject_attrs` 和构造环境 fingerprint，不再把包含 remaining queue 的 closure source view 作为 `InjectForms`。
-- [ ] **P0：隔离编译期与运行期。** attribute 触发 `ensure_available` 时，只允许 declaration 前 passed forms 进入 local function-form 编译上下文；编译完成后的 attribute 调用继续走 external/local 共用的运行期 MacroEnv/PassedForms 规则，不新增 local 专用运行路径。
-- [ ] **P1：统一跨来源有效宏环境。** 让 external/local 宏 entry 按源码位置走同一冲突与 `force_override` 更新规则，避免固定 `maps:merge(External, Local)` 决定 winner 或延迟冲突。
-- [ ] **P2：明确并实现 `__original__` 的 spec merge。** 按 `Hierarchy_final.md` 的 spec 归属规则处理原 spec、生成 spec 与重命名原函数。
-- [ ] **P3：封装 local declaration 单次语义校验。** 注册和 local macro map 构造共享同一份成功校验结果，同时保留失败不回滚先前注册且诊断不重复的行为。
+- [x] **P0：声明位点注入快照。** 注册 local declaration 时单独保存 declaration 前 `passed_forms`；展开 frozen local forms 时用它执行 `inject_attrs` 和构造环境 fingerprint，不再把包含 remaining queue 的 closure source view 作为 `InjectForms`。
+- [x] **P0：隔离编译期与运行期。** attribute 触发 `ensure_available` 时，只允许 declaration 前 passed forms 进入 local function-form 编译上下文；编译完成后的 attribute 调用继续走 external/local 共用的运行期 MacroEnv/PassedForms 规则，不新增 local 专用运行路径。
+- [x] **P1：统一跨来源有效宏环境。** 让 external/local 宏 entry 按源码位置走同一冲突与 `force_override` 更新规则，避免固定 `maps:merge(External, Local)` 决定 winner 或延迟冲突。
+- [x] **P2：明确并实现 `__original__` 的 spec merge。** 按 `Hierarchy_final.md` 的 spec 归属规则处理原 spec、生成 spec 与重命名原函数。
+- [x] **P3：封装 local declaration 单次语义校验。** 注册和 local macro map 构造共享同一份成功校验结果，同时保留失败不回滚先前注册且诊断不重复的行为。
 
 ### 测试
 
-- [ ] local declaration 前后存在目标 attribute 时，frozen local forms 的 `inject_attrs` 只包含 declaration 前已 pass 的值。
-- [ ] declaration 后 `use_macro` 修改 alias、调用参数或 `inject_attrs` 配置时，frozen local forms 仍使用 declaration-time 配置。
-- [ ] 更晚 attribute 触发按需编译时，验证 local function forms 仍只使用 declaration 前 passed forms，并验证后续 attribute 与 external attribute 使用同一运行期规则。
-- [ ] remaining queue 中 helper 可进入 local closure，但尚未 pass 的 attributes 不进入 local forms 注入。
-- [ ] external → local 与 local → external 的冲突、双方 `force_override`、生成环境 form 交错均按源码顺序裁决。
-- [ ] `__original__` 合并覆盖原函数带 spec、wrapper 自带 spec、原/生成 spec 同时存在三类场景。
-- [ ] local declaration 无效、重复及部分失败场景只产生一次诊断且不破坏先前成功注册。
+- [x] local declaration 前后存在目标 attribute 时，frozen local forms 的 `inject_attrs` 只包含 declaration 前已 pass 的值。
+- [x] declaration 后 `use_macro` 修改 alias、调用参数或 `inject_attrs` 配置时，frozen local forms 仍使用 declaration-time 配置。
+- [x] 更晚 attribute 触发按需编译时，验证 local function forms 仍只使用 declaration 前 passed forms，并验证后续 attribute 与 external attribute 使用同一运行期规则。
+- [x] remaining queue 中 helper 可进入 local closure，但尚未 pass 的 attributes 不进入 local forms 注入。
+- [x] external → local 与 local → external 的冲突、双方 `force_override`、生成环境 form 交错均按源码顺序裁决。
+- [x] `__original__` 合并覆盖原函数带 spec、wrapper 自带 spec、原/生成 spec 同时存在三类场景。
+- [x] local declaration 无效、重复及部分失败场景只产生一次诊断且不破坏先前成功注册。
+
+## 最终统一展开/编译层级任务（新增，不覆盖上述历史任务）
+
+> 本节由最终 MacroRuntimeContext 讨论新增。上述已完成项目记录旧层级的实现状态；若与本节冲突，以本节和 `Hierarchy_final.md` 为最终需求。
+
+### 规格
+
+- [x] 记录 attribute、local declaration、retain 和 Step 2 function 使用同一个 `MacroRuntimeContext` 构造逻辑，仅快照时点不同。
+- [x] 记录同一 `-local_macro([...])` declaration 的成员共享环境并整体从该环境排除。
+- [x] 记录宏环境用于展开缓存和多次展开结果一致性，而 GenerationCompiler 只消费 canonical forms。
+- [x] 记录 retain 与普通 Step 2 function 均使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较。
+
+### 实现
+
+- [ ] **P0：统一 MacroRuntimeContext builder。** 让 attribute 调用点、local declaration 快照和 final function context 使用同一个数据模型与宏映射/options/injection 规则。
+- [ ] **P0：DeclarationGroup。** 同一 declaration 的成员引用同一个 context fingerprint，并整体从 group MacroEnv 排除；删除按单个 TargetFA 生成 group 环境的行为。
+- [ ] **P1：ExpansionValidator。** 从编译计划中移出 function expansion，维护 last environment/result、canonical result 与可选 per-environment cache。
+- [ ] **P1：Canonical GenerationCompiler。** 编译 boundary 只读取 canonical expanded forms，不接收 declaration environment 或 expansion requests。
+- [ ] **P2：声明点预展开。** local declaration 注册、冻结和依赖建图后立即预展开就绪 forms；需要未就绪 local dependency 时产生通用 `NeedCallable`。
+- [ ] **P2：通用 DependencyScheduler。** declaration 预展开、attribute、retain、Step 2 和 finalize 共用 `NeedCallable`，并按规范化 boundary 去重编译。
+- [ ] **P3：统一最终 function 路径。** retain 与普通目标 function 使用 `FinalMacroRuntimeContext` 和 ExpansionValidator；删除 retain 宏头跳过比对的例外。
+- [ ] 将 `PreparedFunctionIds` 降级为调度优化，确保即使重复调度也通过相同 final fingerprint 命中缓存而不会二次展开 AST。
+
+### 测试
+
+- [ ] `-local_macro([foo/1, bar/1])` 的 foo/bar 共享 fingerprint，且双方调用保持普通 Erlang 调用。
+- [ ] declaration 注册后在无未就绪 local 依赖时完成预展开，但不因此编译当前 group。
+- [ ] declaration 预展开需要先声明 local macro 时，通过 `NeedCallable` 编译最小依赖 boundary 后恢复展开。
+- [ ] 同一 FormId 在相同环境复用 last result；不同环境结果相同则更新 record，结果不同则诊断冲突。
+- [ ] GenerationCompiler 在已有 canonical forms 时不调用 function expander。
+- [ ] 同一规范化 boundary 由预展开、attribute 或 finalize 触发时只编译一次。
+- [ ] retained helper、retained local macro 宏头和普通 Step 2 function 均与最后一次 local result 做 final-context 比对。
+- [ ] final fingerprint 相同时直接复用，fingerprint 不同时从 original form 重新展开，禁止在 expanded AST 上继续展开。

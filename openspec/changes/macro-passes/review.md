@@ -20,12 +20,13 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | splice 结果在当前位置立即重扫 | `astranaut:map_forms_splice/3` | 已实现 |
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
-| attribute injection 使用 passed forms | `inject_macro_attributes/2` 调用点 | 已实现 |
-| local macro forms 使用 declaration-time inject forms | `expand_request_form/4` 当前传入 declaration `SourceView` | 未实现：会包含 remaining queue |
-| 宏映射冲突需 `force_override` | `merge_macro_maps/2`, `merge_macro_maps_pure/2` | 已实现 |
-| 生成 function/spec 仅最小整理 | `map_forms_splice_reorder/1` | 已实现 |
+| attribute runtime 先解析、确保可调用，再统一构造与执行 | `resolve_attribute_macro_target/2`, `ensure_attribute_target_callable/2`, `build_attribute_macro_invocation/2` | 已实现 |
+| attribute injection 使用调用点 passed forms | `attribute_runtime_context/1`, `build_attribute_macro_invocation/2` | 已实现 |
+| local macro forms 使用 declaration-time inject forms | `inject_forms_snapshot`, `expand_request_form/4` | 已实现 |
+| 跨来源宏映射按源码顺序冲突/覆盖 | `effective_macro_map`, `merge_macro_maps_pure/2` | 已实现 |
+| 生成 function/spec 仅最小整理 | `map_forms_splice_reorder/1`, `map_forms_splice_merge_specs/1` | 已实现 |
 | 用户宏 traverse state 隔离 | `invoke_macro_function/1` + `scoped_state/2` | 已实现 |
-| FinalLocalEnv 过滤并接入 function pass | `compiled_local_macro_map/2`, `finalize_attribute_macro_pass/7` | 已实现 |
+| FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/8` | 已实现 |
 | FinalSkipIds 在 function pass 前剔除 | `remove_final_skip_forms/2` | 已实现 |
 | local 与普通 function 共用展开器 | `expand_functions/3`, `expand_function/4` | 已实现 |
 
@@ -35,16 +36,16 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 
 1. `inject_attrs` 是调用位点语义：attribute 宏只看已经通过扫描的 forms，不能看队列后方的 attribute；function 宏使用 attribute pass 完成后的 forms。
 2. `import_macro` 和 `use_macro` 在扫描成功后被消费，`macro_options` 被保留并进入 passed 视图。
-3. 不同定义占用同一宏 key 时不会自动后者覆盖；必须声明 `force_override`，否则报 `macro_override`。相同定义仍可幂等合并。
+3. 不同来源的定义占用同一宏 key 时，在其源码位置统一裁决：必须声明 `force_override` 才能覆盖，否则当场报 `macro_override`；相同定义仍可幂等合并。
 4. 用户宏返回的 traverse computation 在私有 state 中执行，以防覆盖 attribute scan 或 function traversal state；formatter、position 与错误仍沿外层管线传播。
-5. 生成 function 只有在同名同 arity 冲突且调用 `__original__/Arity` 时才触发重命名；无关 forms 不参与全局重排。
+5. 生成 function 只有在同名同 arity 冲突且调用 `__original__/Arity` 时才触发重命名；生成 public spec 若存在则替换原 public spec，否则保留原 spec；无关 forms 不参与全局重排。
 6. 最终宏映射按 `FinalLocalEnv` 过滤，未编译或不可用的 local FA 不得进入 function pass。
 
-## 2026-07-13 声明位点注入快照复核
+## 2026-07-13 声明位点注入快照复核与实现结果
 
-进一步核对确认：当前实现正确冻结了 declaration-time `env_snapshot`，因此声明后的 `use_macro` 不会改变 local macro forms 中宏的名称、alias 和调用参数；attribute 调用也正确使用调用点前的 `passed_forms` 注入。后者是 external/local attribute macro 共用的运行期规则，不是 local-macro 特例。
+实现已同时冻结 declaration-time `env_snapshot` 与 `inject_forms_snapshot`。因此声明后的 `use_macro` 不会改变 local macro forms 中宏的名称、alias、调用参数和 `inject_attrs` 配置，声明后的 attributes 也不会进入 frozen forms 的注入视图。完整 `closure_source_view` 仍可用于查找 remaining queue 中的 helper，但不再作为宏上下文。
 
-但 local macro frozen forms 展开时，`expand_request_form/4` 将 declaration 注册时的完整 `SourceView = passed_forms ++ remaining queue` 作为 `ExpandFunction` 的 `InjectForms`。这使 declaration 后方尚未 pass 的原始 attributes 可能进入 `inject_attrs`，不符合“local macro forms 使用 declaration 前 passed forms 注入快照”的契约。现有测试只覆盖 attribute 调用点与最终普通 function pass 的 injection，没有覆盖该边界；相关实现和测试任务已追加到 tasks，而不是视为已完成。
+attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_forms`。重构后的控制流先解析目标，只有选中且未就绪的 local 目标才执行 availability prerequisite；随后 external/local 都回到同一个 invocation 构造、注入和执行路径。这个运行期规则对所有宏通用，不是 local-macro 特例。
 
 ## 对初次 review 的处理
 
@@ -53,5 +54,18 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 ## 验证
 
 - `openspec validate macro-passes --strict`：通过。
+- `openspec validate local-macro --strict`：通过；本轮已将旧规格标题转换为标准 delta 结构。
 - `git diff --check`：通过。
-- `powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct`：296/296 通过。
+- `powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct`：307/307 通过。
+
+## 2026-07-13 最终 MacroRuntimeContext 层级调整
+
+后续讨论进一步改变了目标层级，当前源码尚未实现以下新增契约：
+
+1. local declaration 注册后应尽可能预展开，而不是等编译 boundary 执行 request 时才展开。
+2. 同一个 `-local_macro([...])` declaration 的 members 共享一个 context，并整体从 group MacroEnv 排除；不按单个 TargetFA 构造不同 group 环境。
+3. ExpansionValidator 负责环境 fingerprint、last result 与 canonical result；GenerationCompiler 只消费 canonical forms，不再载入每个 declaration 环境重放展开。
+4. 编译由所有阶段共用的 `NeedCallable` 驱动，不绑定 attribute 调用点。
+5. retain 与 Step 2 ordinary function 都使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较；retain 宏头不再跳过。
+
+因此上方“当前实现核对”及 307/307 测试结果只证明上一层级实现稳定，不代表本节新增任务已经完成。最终目标和新增任务分别见 [`Hierarchy_final.md`](Hierarchy_final.md) 与 [`tasks.md`](tasks.md)。

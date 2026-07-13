@@ -175,7 +175,7 @@ scan_form(Form) ->
                _ ->
                    case is_external_env_form(Form) of
                        true -> scan_env_form(Form, State);
-                       false -> scan_attribute(Form, State)
+                       false -> scan_attribute_runtime(Form, State)
                    end
            end
        ]).
@@ -338,23 +338,11 @@ scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
 scan_env_form(Form, _State) ->
     keep_scanned_form(Form).
 
-scan_attribute(Form, State) ->
-    #{effective_macro_map := MacroMap} = State,
-    ExecutionMacroMap = inject_macro_attributes(MacroMap, passed_forms(State)),
-    AttributeMacroMap = attribute_macro_map(ExecutionMacroMap),
-    case attribute_find_macro(Form, ExecutionMacroMap, AttributeMacroMap) of
-        {ok, Macro} ->
-            do([ traverse ||
-                   State1 <- ensure_local_attribute_macro(Macro, State),
-                   %% Macro lookup depends on the already-passed forms, which
-                   %% ensuring availability does not change.  Only the local
-                   %% macro module generation changes, so reuse Macro and
-                   %% avoid a second, partial match-based lookup.
-                   Expanded <- expand_macro(Macro, #{expected_role => form}),
-                   ExpandedForms = to_list(Expanded),
-                   assert_scan_frozen_forms(ExpandedForms, maps:get(local_macro_state, State1)),
-                   return({splice, ExpandedForms})
-               ]);
+scan_attribute_runtime(Form, State) ->
+    RuntimeContext = attribute_runtime_context(State),
+    case resolve_attribute_macro_target(Form, RuntimeContext) of
+        {ok, Target} ->
+            run_attribute_macro(Target, RuntimeContext, State);
         error ->
             %% `error' means this is syntactically a macro invocation (an
             %% exec_macro or a registered attribute macro) but no executable
@@ -369,8 +357,27 @@ scan_attribute(Form, State) ->
             keep_scanned_form(Form)
     end.
 
-ensure_local_attribute_macro(
-    #{macro_source := local_macro, function := Function, arity := Arity},
+attribute_runtime_context(#{effective_macro_map := MacroMap} = State) ->
+    #{macro_map => MacroMap,
+      passed_forms => passed_forms(State)}.
+
+%% All attribute macros return to this path after any local compilation
+%% prerequisite.  Argument grouping and inject_attrs therefore have exactly
+%% one call-site implementation for external and local macros.
+run_attribute_macro(Target, RuntimeContext, State) ->
+    do([ traverse ||
+           State1 <- ensure_attribute_target_callable(Target, State),
+           Invocation = build_attribute_macro_invocation(Target, RuntimeContext),
+           Expanded <- expand_macro(Invocation, #{expected_role => form}),
+           ExpandedForms = to_list(Expanded),
+           assert_scan_frozen_forms(
+             ExpandedForms, maps:get(local_macro_state, State1)),
+           return({splice, ExpandedForms})
+       ]).
+
+ensure_attribute_target_callable(
+    #{macro := #{macro_source := local_macro,
+                 function := Function, arity := Arity}},
     #{local_macro_state := LocalState,
       scan_local_macro_map := LocalMap,
       compile_opts := CompileOpts,
@@ -393,7 +400,8 @@ ensure_local_attribute_macro(
                ]);
         error -> astranaut_traverse:return(State)
     end;
-ensure_local_attribute_macro(_Macro, State) -> astranaut_traverse:return(State).
+ensure_attribute_target_callable(_ExternalTarget, State) ->
+    astranaut_traverse:return(State).
 
 assert_scan_frozen_forms(Forms, LocalState) ->
     case astranaut_local_macro:reject_locked_mutation(Forms, LocalState) of
@@ -1334,30 +1342,63 @@ should_transform_function(Function, Arity, {except, Functions}) ->
 should_transform_function(Function, Arity, LocalMacroCaller) ->
     ordsets:is_element({function, Function, Arity}, LocalMacroCaller).
 
-%% for -exec_macro, if there is no macro found, error is returned
-%% for other -Attr, if there is no macro with same name, not_macro is returned
-%% for other -Attr, if there is macro with same name, but arity not matched, error is returned
-attribute_find_macro({attribute, Pos, exec_macro, {Function, Arguments}}, Macros, _AttributeMacros) ->
-    find_macro_with_arguments(Function, Arguments, Pos, Macros,
-                              {attribute, Pos, exec_macro, {Function, Arguments}});
-attribute_find_macro({attribute, Pos, exec_macro, {Module, Function, Arguments}}, Macros, _AttributeMacros) ->
-    find_macro_with_arguments({Module, Function}, Arguments, Pos, Macros,
-                              {attribute, Pos, exec_macro, {Module, Function, Arguments}});
-attribute_find_macro({attribute, Pos, Attribute, Arguments}, _Macros, AttributeMacros) ->
-    find_attribute_macro_with_arguments(Attribute, Arguments, Pos, AttributeMacros,
-                                       {attribute, Pos, Attribute, Arguments});
-attribute_find_macro(_Node, _Macros, _AttributeMacros) ->
+%% Resolve only the call-site macro identity here.  Local availability is a
+%% prerequisite between resolution and the shared invocation builder below.
+%% For -exec_macro, a missing definition is an error; for another attribute,
+%% an absent name is not_macro while a present name with wrong arity is error.
+resolve_attribute_macro_target(
+  {attribute, Pos, exec_macro, {Function, Arguments}},
+  #{macro_map := Macros}) ->
+    resolve_macro_target(
+      Function, Arguments, Pos, Macros,
+      {attribute, Pos, exec_macro, {Function, Arguments}});
+resolve_attribute_macro_target(
+  {attribute, Pos, exec_macro, {Module, Function, Arguments}},
+  #{macro_map := Macros}) ->
+    resolve_macro_target(
+      {Module, Function}, Arguments, Pos, Macros,
+      {attribute, Pos, exec_macro, {Module, Function, Arguments}});
+resolve_attribute_macro_target(
+  {attribute, Pos, Attribute, Arguments},
+  #{macro_map := Macros}) ->
+    AttributeMacros = attribute_macro_map(Macros),
+    resolve_attribute_macro_target_by_name(
+      Attribute, Arguments, Pos, AttributeMacros,
+      {attribute, Pos, Attribute, Arguments});
+resolve_attribute_macro_target(_Node, _RuntimeContext) ->
     not_macro.
 
-find_attribute_macro_with_arguments(Function, Arguments, Pos, AttributeMacroMap, CallAst) ->
+resolve_attribute_macro_target_by_name(
+  Function, Arguments, Pos, AttributeMacroMap, CallAst) ->
     case maps:find(Function, AttributeMacroMap) of
         {ok, MacroMap} ->
-            find_macro_with_arguments(Function, Arguments, Pos, MacroMap, CallAst);
+            resolve_macro_target(
+              Function, Arguments, Pos, MacroMap, CallAst);
         error ->
             not_macro
     end.
 
+resolve_macro_target(MacroName, Arguments, Pos, Macros, CallAst) ->
+    RawArguments = to_list(Arguments),
+    case find_macro(MacroName, length(RawArguments), Macros) of
+        {ok, Macro} ->
+            {ok, #{macro => Macro,
+                   raw_arguments => RawArguments,
+                   pos => Pos,
+                   call_ast => CallAst}};
+        error ->
+            error
+    end.
 
+build_attribute_macro_invocation(
+  #{macro := Macro0, raw_arguments := RawArguments,
+    pos := Pos, call_ast := CallAst},
+  #{passed_forms := PassedForms}) ->
+    Macro1 = inject_attrs(Macro0, PassedForms),
+    Macro2 = Macro1#{pos => Pos, call_ast => CallAst},
+    GroupedArguments = group_arguments(RawArguments, Macro2),
+    Arguments = append_attrs(GroupedArguments, Macro2),
+    Macro2#{arguments => Arguments}.
 
 find_macro_with_arguments(MacroName, Arguments, Pos, Macros, CallAst) ->
     Arguments1 = to_list(Arguments),

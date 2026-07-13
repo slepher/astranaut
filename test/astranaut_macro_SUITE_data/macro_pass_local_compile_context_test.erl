@@ -10,14 +10,17 @@
 -export([value/0]).
 
 -import_macro(macro_pass_inject_attrs).
+-use_macro({macro_pass_inject_attrs, generated_injected_attrs/1,
+            [{alias, snapshot_value}]}).
 -pass_seen_attr(early).
 
 -local_macro({[make_value/1], [as_attr]}).
 
+-use_macro({macro_pass_inject_attrs, generated_injected_attrs/1,
+            [{alias, later_value}]}).
 -pass_seen_attr(late).
 -make_value(ok).
 
 make_value(_Ast) ->
-    Body = astranaut_lib:abstract_form(
-             macro_pass_inject_attrs:generated_injected_attrs()),
+    Body = astranaut_lib:abstract_form(snapshot_value()),
     astranaut_lib:gen_function(value, Body).

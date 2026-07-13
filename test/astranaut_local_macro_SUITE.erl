@@ -10,6 +10,7 @@ all() -> [register_freezes_static_closure,
           duplicate_declaration_fails_atomically,
           cache_rejects_conflicting_environments,
           execute_plan_rejects_conflicting_snapshots,
+          execute_plan_rejects_conflicting_inject_snapshots,
           cache_hits_same_fingerprint,
           retain_controls_final_skip_ids,
           source_view_only_contains_materialised_forms,
@@ -93,6 +94,46 @@ execute_plan_rejects_conflicting_snapshots(_Config) ->
               astranaut_local_macro:execute_plan(Plan, Context, MacroOps, S2)),
     ?assert(lists:member(
               {conflicting_local_macro_closure_environment, {function, helper, 0}},
+              astranaut_error:errors(Error))),
+    ok.
+
+execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
+    Source = [{attribute, 1, module, local_macro_inject_conflict_plan_test},
+              first_form(), second_form(), helper_form(ok)],
+    MacroOps0 = #{resolve_local_references => fun test_resolve_local_references/2},
+    {ok, S1} = astranaut_local_macro:register(
+                 [{first, 0}], #{}, Source, [early], #{macro_map => #{}},
+                 #{}, MacroOps0, astranaut_local_macro:new()),
+    {ok, S2} = astranaut_local_macro:register(
+                 [{second, 0}], #{}, Source, [late], #{macro_map => #{}},
+                 #{}, MacroOps0, S1),
+    {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
+    Expand =
+        fun(_MacroEnv, InjectForms, Forms, {helper, 0}) ->
+                Value = case InjectForms of
+                            [early] -> early;
+                            [late] -> late
+                        end,
+                astranaut_return:return(
+                  astranaut_local_macro:materialize_forms(
+                    Forms, #{{function, helper, 0} => helper_form(Value)}));
+           (_MacroEnv, _InjectForms, Forms, _TargetFA) ->
+                astranaut_return:return(Forms)
+        end,
+    MacroOps = MacroOps0#{expand_function => Expand,
+                          merge_macro_maps =>
+                              fun(First, Second) ->
+                                      astranaut_return:return(
+                                        maps:merge(First, Second))
+                              end},
+    Context = #{local_macro_map => #{}, source_view => Source,
+                compile_opts => []},
+    Error = astranaut_return:run_error(
+              astranaut_local_macro:execute_plan(
+                Plan, Context, MacroOps, S2)),
+    ?assert(lists:member(
+              {conflicting_local_macro_closure_environment,
+               {function, helper, 0}},
               astranaut_error:errors(Error))),
     ok.
 

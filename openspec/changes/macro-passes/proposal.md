@@ -4,7 +4,7 @@
 
 将属性宏展开重构为单一的 scan-and-splice 流：外部属性宏与已经可调用的本地属性宏按源码顺序处理，宏环境变更只前向生效。
 
-`-local_macro(...)` 的注册、闭包快照、按需累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更只定义统一扫描如何调用该流程。
+`-local_macro(...)` 的 declaration group 注册、闭包快照、预展开/一致性记录、依赖驱动累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更定义统一扫描如何调用该流程，以及 retain/普通 function 如何共享最终 `MacroRuntimeContext`。
 
 `astranaut_macro` 继续提供唯一的 function 宏引用匹配和展开实现。local-macro 工作流向它传入已经应用声明位点快照、`internal_function` 及目标 FA 自身移除规则的最终 `MacroEnv`；同一展开器不区分普通 function 与 local macro function。实际 local 引用的识别也复用该统一宏匹配语义。
 

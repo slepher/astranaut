@@ -6,12 +6,12 @@
 
 ## 职责边界
 
-`astranaut_local_macro` 管理注册表、闭包、冻结、缓存、编译计划、retain 和最终跳过集合。统一扫描器仅调用其注册、确保可调用及收尾接口；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
+`astranaut_local_macro` 管理 declaration group、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
-local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供两个通用
-能力：按既有宏匹配规则识别 function 闭包实际引用的 local macro，以及在给定
-最终 `MacroEnv` 时展开指定 functions。`astranaut_local_macro` 决定候选和有效
-环境，但不复制调用匹配、`outer` / `inner`、递归展开或错误上下文语义。
+local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供统一的
+`MacroRuntimeContext` 构造、引用匹配和 `ExpandAndValidate` 能力。local declaration
+预展开、retain 及 Step 2 普通 function 展开共享该操作；generation compiler 不调用
+function 展开器，只消费已经通过多环境一致性校验的 canonical forms。
 
 ### 模块调用方向
 
@@ -20,26 +20,28 @@ astranaut_macro
   ├─ 统一 scan、环境更新、attribute splice
   ├─ 通用宏引用匹配、function 展开与错误/monad 流
   └─ 调用 astranaut_local_macro
-       ├─ 注册/规划/状态转换
-       ├─ 闭包、internal policy、有效环境、冻结、缓存、retain、FinalSkipIds
-       └─ 累计编译与 local macro 模块加载
+       ├─ declaration group 注册、依赖规划与状态转换
+       ├─ 闭包、internal policy、冻结、ExpansionRecord、retain、FinalSkipIds
+       └─ canonical forms 的累计编译与 local macro 模块加载
 ```
 
 `astranaut_local_macro` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
-注册、确保可调用和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
-工作流驱动，但实际引用解析和 function 展开通过调用方提供的 `MacroOps` 执行，
+注册/预展开、`NeedCallable` 和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
+工作流驱动，但实际引用解析和 function 展开验证通过调用方提供的 `MacroOps` 执行，
 从而复用统一错误上下文，并避免把 traverse monad 或扫描队列耦合进该模块。
 
-### 同构 function 展开接口
+### 同构 function 展开与验证接口
 
 local macro 工作流调用的展开操作与最终普通 function pass 使用同一实现：
 
 ```text
-ExpandFunctions(MacroEnv, Forms, TargetFAs) -> ExpandedForms | Error
+ExpandAndValidate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
+  -> {ExpandedForms, ExpansionRecords1} | Error
 ```
 
-展开器只解释 `MacroEnv` 中存在的宏，不知道某个目标是否为 local macro，也不
-解释 `internal_function`、generation、retain 或 declaration order。
+操作始终从 original/frozen form 展开。相同环境 fingerprint 直接复用；环境不同
+则从 original form 重新展开并与最后一次已接受结果比较。它不解释 generation、
+retain 或 declaration order。
 
 实际 local 引用同样由 `astranaut_macro` 的统一调用匹配能力识别：
 
@@ -54,57 +56,64 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 
 ```text
 State = #{
-  local_macros => #{FA => #{
+  declaration_groups => #{GroupId => #{
+    members => [FA],
     order => ScanSequence,
-    env_snapshot => EnvFromPassedForms,
-    inject_forms_snapshot => PassedFormsAtDeclaration,
+    runtime_context_snapshot => MacroRuntimeContext,
     closure_source_view => MaterializedSourceAtDeclaration,
+    options => Options
+  }},
+  local_macros => #{FA => #{
+    group_id => GroupId,
     closure_ids => [FormId],
     referenced_local_macros => [FA],
-    options => Options,
     status => pending | compiled
   }},
   frozen_forms => #{FormId => OriginalForm},
   retain_roots => [FunctionId],
   retained_form_ids => [FormId],
-  expanded_forms => #{{FormId, EnvFingerprint} => ExpandedForm},
-  compiled_forms => #{FormId => ExpandedForm},
+  expansion_records => #{FormId => ExpansionRecord},
+  canonical_expanded_forms => #{FormId => ExpandedForm},
+  compiled_forms => #{FormId => CanonicalExpandedForm},
+  committed_boundaries => #{BoundaryKey => Generation},
   local_macro_expanded_ids => [FormId],
   generation => non_neg_integer()
 }
 ```
 
-注册表以 function/arity（FA）为 key。多个 FA 出现在同一个 declaration form 时，各自保存相同的扫描顺序和初始 declaration 信息。后声明的 FA 可引用前面已注册的 FA 作为 local macro。重复 FA declaration 报 `duplicate_local_macro_declaration`。
+declaration group 是环境快照单位，FA 注册表是查找和生命周期索引。多个 FA 出现在同一个 declaration form 时共同引用一个 group；后声明 group 可引用前面已注册的 group 成员作为 local macro。重复 FA declaration 报 `duplicate_local_macro_declaration`。
 
 ### 状态不变量
 
-- `local_macros` 是整个 scan 期间的唯一注册事实来源；某个 FA 编译成功后只更新其 `status`，不得删除其 declaration 快照。
-- `order` 是 declaration 的扫描顺序，不得由 map 遍历顺序推断。
+- `declaration_groups` 保存不可变 context；`local_macros` 只引用 group 并维护逐 FA 闭包与 callable 状态。
+- group 的 `order` 是 declaration 的扫描顺序，不得由 map 遍历顺序推断。
 - `frozen_forms` 永远保存原始源码 form；任何环境下的展开都从该原始 form 开始。
-- `compiled_forms` 是当前 `<Module>__local_macro` 的完整累计源码，不是只包含最近一次新增闭包的增量。
-- `local_macro_expanded_ids` 只记录已用于 local macro 编译的 form ID；它与 `frozen_forms`、`retained_form_ids` 是不同集合。
+- `canonical_expanded_forms` 是所有环境比对通过后的唯一编译候选；`compiled_forms` 是当前 `<Module>__local_macro` 已提交 generation 的完整累计源码。
+- `local_macro_expanded_ids` 只记录已作为 local macro closure 完成 canonical 展开验证的 form ID；它与 `frozen_forms`、`retained_form_ids` 是不同集合。
 
 ## 注册规则
 
 ### 声明单位与 FA
 
-`-local_macro([foo/1, bar/2])` 在语法上是一个 declaration form，但注册表为 `foo/1` 和 `bar/2` 分别建立条目。二者共享 declaration 的扫描顺序、已 pass 环境快照、注入快照和 options；每个 FA 仍拥有自己的宏头、闭包成员和编译状态。
+`-local_macro([foo/1, bar/2])` 是一个 declaration group。`foo/1` 和 `bar/2` 分别拥有查找条目、宏头、闭包根和 callable 状态，但必须引用同一份扫描顺序、MacroRuntimeContext 快照和 options。
 
 处理 declaration 时必须先检查全部 FA 是否已经存在；任一重复均以 `duplicate_local_macro_declaration` 失败，不能部分注册。
 
-注册成功后，FA 条目的 `order` 与 declaration 当时的环境快照不可变。`status` 和 `generation` 可以随累计编译推进而更新，但不得以新的外部环境重写旧 declaration 的环境。
+注册成功后，group 的 `order` 与 declaration 当时的 context 快照不可变。逐 FA `status` 和 generation 可以随累计编译推进而更新，但不得以新的环境重写旧 declaration group。
 
 ### 注册过程
 
 ```text
-register(LocalMacroAttribute, ClosureSourceView, LocalCompileContext, State):
+register_and_preexpand(LocalMacroAttribute, ClosureSourceView, DeclarationRuntimeContext, State):
   1. 校验 declaration options、FA 格式与全部 FA 的唯一性
   2. 对每个 FA 计算静态函数闭包
   3. 校验 extra_functions 与 internal_function 策略
   4. 将闭包原始 function/spec forms 写入 frozen_forms
-  5. 以已注册 local macro 的候选环境调用统一引用解析，取得闭包实际引用的 FA
-  6. 为每个 FA 写入不可变的 order、env_snapshot、inject_forms_snapshot、closure_source_view、closure_ids 和 options
-  7. 将 status 设为 pending
+  5. 把 declaration 的全部 members 整体从共同 MacroEnv 排除
+  6. 以该共同环境调用统一引用解析，取得闭包实际引用的先前 local FA
+  7. 建立一个 DeclarationGroup，并让各 FA 条目引用它
+  8. 将各 FA status 设为 pending，更新依赖图
+  9. 对依赖已就绪的 frozen forms 调用统一 ExpansionValidator
 ```
 
 这是原子操作：任一步失败都不得留下已注册 FA、已冻结 form 或部分 retain 元数据。
@@ -133,26 +142,24 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 `internal_function` 的解析、共享闭包冲突校验和有效环境裁剪全部属于
 `astranaut_local_macro`。通用展开器不会读取该 option。
 
-### 逐目标 function 的同构有效环境
+### DeclarationGroup 的共同有效环境
 
-每个冻结 function form 都使用逐目标构造的环境：
+同一个 declaration 的全部 members 使用同一个环境：
 
 ```text
-EffectiveEnv(Declaration, TargetFA)
-  = ExternalSnapshot
-  + ReferencedLocalMacros
+GroupMacroEnv(Declaration)
+  = PreDeclarationEffectiveMacroMap
+  - DeclarationMembers
   - InternalFunctions(Declaration)
-  - TargetFA
 ```
 
-最后的 `- TargetFA` 是环境不变量，不是展开器特判：local macro 自身从不作为
-展开其自身 function form 时的宏。因此 `foo/1` 定义中的 `foo/1` 调用自然保留
-为累计模块内的普通 Erlang 递归调用。若 B 实际引用先声明的 A，则展开 B 时
-A 仍在环境中；若 A 的 form 同时属于 B 的闭包，展开该 A form 时仍按目标 FA
-规则移除 A。
+对于 `-local_macro([foo/1, bar/1])`，`foo/1` 与 `bar/1` 均不出现在该 group
+MacroEnv 中。`bar/1` 对 `foo/1` 的调用以及反向调用都是普通 Erlang 本地调用；
+不能按当前 TargetFA 为二者构造不同环境。先前 declaration 中真正被引用的 local
+macro 仍可进入 group 环境，并由依赖调度器保证需要执行时可调用。
 
 spec form 不执行 function-body 展开，但与对应 function 使用同一个 declaration
-环境指纹参与冻结、缓存和冲突比较。
+环境指纹参与冻结和一致性记录。
 
 ### 源码与环境视图
 
@@ -160,23 +167,24 @@ spec form 不执行 function-body 展开，但与对应 function 使用同一个
 
 环境快照则严格取 declaration 前已经 pass 的 `import_macro`、`use_macro`、`macro_options`，再加上该闭包实际引用的 local macro。后续环境更新不会回溯改变已记录的 declaration 快照。
 
-`use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；`import_macro` 对同名导入采用后者覆盖。这个合并后的外部环境才是写入 `env_snapshot` 的内容。
+`use_macro` 的同名 option 采用后者覆盖前者，未提及的 option 保留；不同定义占用同一 key 时仍须通过统一 `force_override` 规则。该时点已生效的 checked effective map 写入 declaration group 的 runtime context snapshot。
 
-local macro 唯一特殊的宏上下文规则是：编译其 function forms 时，整个宏展开上下文仅取 `-local_macro` declaration 之前的 `passed_forms`。实现上可将该上下文分解保存为 `env_snapshot` 与 `inject_forms_snapshot`：前者是从这些 passed forms 已经生效的 `import_macro`、`use_macro`、`macro_options` 得到的宏名称、alias、调用参数和 `inject_attrs` 配置；后者是同一份 passed forms，用于取得实际注入的 attribute 值。二者共同表示一个 declaration-time `LocalCompileContext`，而不是两个宏上下文。
+local macro 的上下文特殊规则是：预展开其 function forms 时，`MacroRuntimeContext` 仅取 `-local_macro` declaration 之前的状态。宏名称、alias、调用参数、options 和 `inject_attrs` 实际值必须来自同一时点。generation 编译不读取该 context，只读取已经确认的 canonical expanded forms。
 
 它必须与只用于结构分析的源码视图区分：
 
 ```text
-LocalCompileContext = {
-  macro_env    = macro environment derived before declaration,
-  inject_forms = PassedFormsBeforeDeclaration
+DeclarationMacroRuntimeContext = {
+  effective_macro_map = macro environment derived before declaration,
+  macro_options       = options effective before declaration,
+  inject_forms        = PassedFormsBeforeDeclaration
 }
 ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
 ```
 
-按需编译即使由更晚的 attribute 调用触发，也只能使用 request 中冻结的 `LocalCompileContext` 展开 local macro forms。触发点传入的 `CompileContext.source_view` 只用于累计模块物化、模块分析和加载，不能替换 declaration-time 编译上下文。
+后续任何 `NeedCallable` 都不能用触发点 context 覆盖 declaration 预展开 context。若所需 canonical form 尚未就绪，必须回到 ExpansionValidator 使用冻结的 declaration context；GenerationCompiler 本身不执行该展开。
 
-编译完成后执行 attribute 宏不属于 local-macro 的特殊规则。所有 attribute 宏，无论来自 external macro 还是 local macro，都统一使用调用点已经生效的宏映射、调用参数以及调用点前 `passed_forms`；local macro 只是在运行前可能多出一次按需编译步骤。
+执行 attribute 宏不属于 local-macro 的特殊规则。所有 attribute 宏都使用调用点 `MacroRuntimeContext`；选中尚不可调用的 local target 时只产生通用 `NeedCallable`。预展开、attribute、retain 和 Step 2 共用同一 dependency scheduler。
 
 闭包实际引用的 local macro 可以是此前已注册但尚未编译的 FA。统一引用解析
 基于候选宏描述而不是当前已加载代码，因此它们仍记录在 snapshot 中，并由
@@ -187,14 +195,15 @@ ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
 扫描遇到 `-local_macro(...)` 时：
 
 1. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
-2. 编译环境只快照已 pass 的 ExternalEnv，加上闭包实际引用的 local macro。
-3. 单独保存 declaration 前 `passed_forms` 为 `inject_forms_snapshot`，供 frozen function 展开时执行 `inject_attrs`。
-4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；冻结仅表示 local macro 编译使用该原始输入。
-5. 以 FA 注册元数据。先声明 A 调用后声明 B 时，B 是 A 闭包成员；即使 B 也是 local macro，也按 helper 的多环境规则处理。
+2. 以 declaration 前的 effective map、options 和 passed forms 构造一个共同 `MacroRuntimeContext`。
+3. 将 declaration 的全部 members 整体从共同 MacroEnv 排除。
+4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；任何展开都从该输入开始。
+5. 建立 declaration group 和逐 FA 生命周期索引，更新实际 local macro 依赖。
+6. 对依赖已就绪的 forms 立即预展开；需要尚不可调用 local macro 时产生 `NeedCallable`。
 
 后续属性 splice 不得改写 `frozen_forms` 中的 form ID，否则报 `illegal_locked_form_mutation`。
 
-冻结不等于从统一 scan 输出删除 form，也不等于自动跳过最终展开；它只锁定 local macro 编译所使用的原始输入。
+冻结不等于从统一 scan 输出删除 form，也不等于自动跳过最终展开；它只锁定所有环境展开共同使用的原始输入。
 
 ### Form ID 与冻结保护
 
@@ -204,42 +213,42 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 
 ## 多环境展开与缓存
 
-每次展开从 `frozen_forms` 中的原始 form 开始。缓存键为 `{FormId, EnvFingerprint}`；fingerprint 包含外部宏映射、实际引用的 local macro 版本、macro options，以及 declaration-time `inject_forms_snapshot`。
+每次展开从 `frozen_forms` 中的原始 form 开始。每个 FormId 保存一个 `ExpansionRecord`：最后一次环境/结果、canonical result，以及可选的按 fingerprint 结果缓存。fingerprint 包含有效宏映射与可调用 local 版本、macro options、`inject_forms` 和 declaration group 排除策略。
 
 同一 form 可属于多个闭包：
 
-- 相同环境直接复用缓存。
-- 不同环境分别展开；结果一致则复用，结果不同报 `conflicting_local_macro_closure_environment`。
+- 与最后一次环境相同：直接复用最后一次结果。
+- 环境不同：从原始 form 展开，与最后一次已接受结果比较；一致则更新 record，不一致则报 `conflicting_local_macro_closure_environment`。
 
 ### 环境指纹
 
-`EnvFingerprint` 必须反映 `LocalCompileContext` 的所有可观察输入，不能只比较 ExternalEnv。除外部宏映射、local macro 版本和 options 外，还必须包含 declaration-time `inject_forms_snapshot`。不得使用包含 remaining queue 的 `closure_source_view` 代替它，否则声明后的 attribute 会错误参与 local macro forms 的注入和缓存身份。这样，同一 form 在不同声明位点或不同累计模块 generation 下不会错误复用缓存。
+`EnvFingerprint` 必须反映 `MacroRuntimeContext` 的所有可观察输入，不能只比较 external map。不得使用包含 remaining queue 的 `closure_source_view` 代替 `inject_forms`。FormId 已是 record 的外层 key；同 declaration group 不得再因单个 TargetFA 不同而产生不同 fingerprint。
 
 ### 冲突检测时机
 
-当某个 form 首次需要第二个不同环境的结果时立即比较；scan 收尾还必须覆盖全部 local macro 的闭包，确保从未被 attribute 调用的 declaration 也接受相同检查。环境不同本身不是错误，只有展开 AST 结果不同才失败。
+当某个 form 首次进入第二个不同环境时立即比较；scan 收尾覆盖所有尚未预展开的 local closure，最终 retain 与 Step 2 function 则使用 `FinalMacroRuntimeContext` 做最后一次比较。环境不同本身不是错误，只有展开 AST 结果不同才失败。
 
 比较结果前应先规范化为同一抽象 form 表示，并保留错误、warning、formatter 和 file/position 上下文。若任一环境展开失败，失败按该环境的宏展开错误传播；不能把失败当作“结果不同”的普通冲突。
 
 ### 共享 form 的累计模块表示
 
-同一 FormId 的多个环境结果一致时，`compiled_forms` 只保存一份 ExpandedForm。若结果不同则根本不提交新的累计模块。由此确保最终 `<Module>__local_macro` 中一个 function/spec ID 永远只有一个确定的定义。
+同一 FormId 的多个环境结果一致时，`canonical_expanded_forms` 只保存一份 ExpandedForm。GenerationCompiler 仅从该映射取输入；若结果不同，则不得提交新的累计模块。
 
 ## 最小累计编译
 
-属性调用只触发计划，不决定计划顺序。计划按 declaration 顺序构造：
+任何阶段的 `NeedCallable` 只触发计划，不决定计划顺序。计划按 declaration 顺序和实际宏依赖构造：
 
 - 若 B 的闭包需要先声明 A 作为宏，首次调用 B 时先编译累计 `{A}`，再编译 `{A,B}`。
 - 若 B 不需要 A，可直接编译累计 `{A,B}`。
-- 每次编译包含此前已编译闭包和本次新增闭包；相同 form/environment 的结果从缓存复用。
+- 每次编译包含此前已编译闭包和本次新增闭包；输入只取 canonical expanded forms。
 - scan 收尾重新构造包含全部 local macro 的最终累计模块。
 
 ### 计划算法
 
-设 `Requested` 为当前 attribute 调用所需 FA，`Prefix` 为扫描至当前时刻已注册、且 declaration 顺序不晚于 Requested 的 FA。计划从 Requested 的实际 local macro 引用开始向前查找：
+设 `Requested` 为任意 `NeedCallable` 所需 FA，`Prefix` 为扫描至当前时刻已注册、且 declaration 顺序不晚于 Requested 的 FA。计划从 Requested 的实际 local macro 引用开始向前查找：
 
 1. 找出 Requested 的闭包在预展开时真正需要作为宏调用的先声明 FA。
-2. 对每个尚不可调用的先声明 FA，递归处理其更早的宏依赖。
+2. 对每个尚不可调用的先声明 FA，递归处理其更早的宏依赖；若 canonical form 未就绪，先调用 ExpansionValidator。
 3. 以 declaration 顺序形成必要的累计边界；只有“下一个闭包预展开需要当前模块中已可调用宏”时才插入中间编译。
 4. 每个边界都构造“此前已提交 forms + 本边界新增 forms”的完整模块。
 
@@ -250,26 +259,26 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 每一代模块的 forms 由下列部分组成：
 
 - module attribute，模块名为 `<Module>__local_macro`；
-- 当前累计闭包的展开后 function/spec forms；
+- 当前累计闭包中已经确认的 canonical function/spec forms；
 - local macro 所需的 export forms；
 - 编译所需的非函数模块 forms，但不复制原模块的普通 export 声明。
 
-编译前对 forms 执行现有的 forms 排序和合法性处理。编译成功、加载成功后，才把本代 ExpandedForm 写入 `compiled_forms`，更新相关 FA 的 `status = compiled` 和 generation。编译失败不能覆盖上一代可调用模块。
+编译前对 canonical forms 执行现有排序和合法性处理。编译成功、加载成功后，才把本代输入写入 `compiled_forms`，记录规范化 boundary key，更新相关 FA 的 `status = compiled` 和 generation。编译失败不能覆盖上一代可调用模块。
 
 ### 计划与执行的分离
 
-编译计划是纯数据：它指出须先可调用的 FA、待展开的原始 form/environment
-组合以及下一份累计模块的成员。`astranaut_local_macro` 驱动计划，逐目标构造
-`EffectiveEnv`，再调用 `astranaut_macro` 提供的同构 function 展开操作；随后
-由前者验证、缓存、生成累计 forms、加载并提交 generation。
+编译计划是纯数据：它指出须先可调用的 FA、规范化累计 boundary 及其所需
+canonical FormIds。ExpansionValidator 负责在进入 compiler 前准备缺失 forms；
+GenerationCompiler 不接收 declaration environment 或 expansion request，只负责
+生成累计 forms、编译、安全加载并提交 generation。
 
-若计划或展开失败，当前已加载的 local macro 模块和 `compiled_forms` 必须保持不变。只有全部新增 form 展开、比较和 Erlang 编译成功后，才提交新的 generation。
+若准备或编译失败，当前已加载的 local macro 模块和 `compiled_forms` 必须保持不变。ExpansionRecord 只提交完整成功的单次展开；generation 只有在全部 canonical forms 和 Erlang 编译均成功后提交。
 
 ### 最终累计编译
 
 scan 收尾不是“只编译 pending 项”。它按注册表的 declaration 顺序重建包含全部 local macro 的累计模块，并复用缓存。该最终版本是最终函数体展开唯一可见的 local macro 模块版本。
 
-若某个 FA 已在中间阶段编译，收尾仍会将它纳入最终模块；但其 form/environment 缓存命中时不重新展开。最终模块的目的不是改变 declaration 语义，而是把所有已确认结果集中到最终函数体展开可使用的单一模块版本。
+若某个 FA 已在中间阶段编译，收尾仍会将它纳入最终模块；canonical forms 不因编译阶段或触发者不同而重新展开。最终模块只集中所有已确认结果，不重新解释 declaration environment。
 
 所有累计版本均覆盖加载同一个 `<Module>__local_macro`。编译成功后才换码；加载前清理 old code。`code:soft_purge/1` 返回 `false` 时以 `local_macro_module_in_use` 失败，禁止 `code:purge/1`。调用使用完全限定调用或 `apply/3`，不得跨重载缓存 fun；换码过程以模块级互斥锁串行。
 
@@ -285,29 +294,27 @@ scan 收尾不是“只编译 pending 项”。它按注册表的 declaration �
 
 对非 frozen 函数的 `local_macro_retain` 没有额外效果，也不报错。retain roots 可在其闭包 declaration 之后出现，因此只在收尾阶段从完整 retain 根集合计算 `retained_form_ids`。
 
-冻结 form 保存原始编译输入，不直接决定最终跳过。最终跳过集合为：
+冻结 form 保存所有环境展开共用的原始输入，不直接决定最终跳过。最终跳过集合为：
 
 ```text
 FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 ```
 
-保留的冻结 form 需以最终环境完成比对；比对通过后参与最终递归展开。未 retain 的已展开 form 进入 `FinalSkipIds`，避免重复展开。
+保留的冻结 form 与普通 Step 2 function 一样使用 `FinalMacroRuntimeContext` 进入统一 ExpansionValidator。未 retain 的 local-only forms 进入 `FinalSkipIds`。
 
 ### 最终收尾顺序
 
 ```text
-1. 以全部注册 FA 构造最终累计模块
-2. 完成共享 form 的多环境展开比对并提交最终 generation
+1. 完成全部 declaration 预展开与多环境结果比对
+2. 以 canonical forms 构造并提交最终累计 generation
 3. 收集 local_macro_retain / export / export_macro 的 retain roots
 4. 计算 retained_form_ids（根的闭包及 spec forms）
-5. 对 retained frozen forms 做 declaration 环境与最终环境比对
+5. 将 retained frozen forms 与普通 function 目标一并交给 FinalMacroRuntimeContext 展开验证
 6. FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 7. 返回 FinalLocalEnv 与 FinalSkipIds 给统一扫描流程的最终展开阶段
 ```
 
-local macro 宏头自身不参与第 5 步的最终环境比对，因为自身递归调用按普通函数调用处理；但若被 retain，仍不在 `FinalSkipIds` 中并参与最终函数体展开。
-
-对于 retain 闭包中的非宏头 helper，最终环境比对比较“其所属 declaration 环境下已经确认的展开结果”与 FinalMacroEnv 下从原始 form 重新展开的结果。若共享 helper 属于多个 declaration，前序多环境比较已保证其各 declaration 结果相同，因此最终环境只需与该确定结果比较一次。
+所有 retained functions（包括 local macro 宏头）都参与第 5 步。若 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 在 final context 下展开，并与最后一次已接受 local result 比较。普通 Step 2 function 使用完全相同的规则。
 
 `FinalSkipIds` 的计算不删除原始 forms；它是交给最终函数体遍历器的过滤条件。这样同一 forms 列表可继续用于 record、attribute injection 和诊断，而 local macro 已预展开且未 retain 的 functions 不会被再次递归展开。
 
@@ -323,19 +330,20 @@ local macro 宏头自身不参与第 5 步的最终环境比对，因为自身�
 ## 建议接口
 
 ```erlang
-register(FA, Options, SourceView, ExternalEnv, CandidateLocalEnv, MacroOps, State).
-ensure_available(FA, CompileContext, MacroOps, State).
-compile_plan(NeededFA, State).
+register_and_preexpand(Declaration, SourceView, DeclarationContext, MacroOps, State).
+expand_and_validate(FormIds, RuntimeContext, MacroOps, State).
+need_callable(FA, MacroOps, State).
+compile_boundary(BoundaryKey, State).
 finalize(RetainRoots, FinalContext, MacroOps, State).
 ```
 
-`register` 负责源码快照、闭包发现和冻结，并通过 `MacroOps` 的统一引用解析
-记录实际 local 依赖；`ensure_available` 在首次 attribute 调用时执行最小累计
-计划；`finalize` 返回 `FinalLocalEnv` 与 `FinalSkipIds`。`MacroOps` 至少提供
-`resolve_local_references` 和 `expand_functions`，两者都实现于
+`register_and_preexpand` 负责 group 快照、闭包发现、冻结、依赖记录及就绪 forms
+的预展开；`need_callable` 是所有阶段共享的最小累计计划入口；`finalize` 返回
+`FinalLocalEnv`、RetainIds 与 `FinalSkipIds`。`MacroOps` 至少提供
+`resolve_local_references` 和 `expand_and_validate`，两者都实现于
 `astranaut_macro`，并以 `astranaut_return` 结果保留统一错误上下文。
 
-`astranaut_local_macro` 自己执行 `compile_plan/2`，对每个
-`{FormId, EnvFingerprint}` 先查缓存，再以逐目标 `EffectiveEnv` 调用
-`MacroOps.expand_functions`。它不依赖统一扫描器或 traverse monad；扫描器只在
-注册、按需确保可调用和收尾三个边界桥接 `astranaut_return`。
+`astranaut_local_macro` 自己调度 canonical boundary。缺失 canonical form 时先通过
+MacroOps 进入 ExpansionValidator；compiler 不接触 EnvFingerprint。该模块不依赖
+统一扫描队列或 traverse monad；扫描器在注册/预展开、NeedCallable 和收尾边界
+桥接 `astranaut_return`。

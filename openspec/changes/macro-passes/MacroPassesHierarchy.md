@@ -16,13 +16,13 @@ Module Forms
    │  ├─ Attribute Macro Resolution / Invocation
    │  └─ Ordinary Form Preservation
    ├─ Local-Macro Finalization
-   ├─ Retain Materialization / Skip Filtering
+   ├─ Final MacroRuntimeContext Construction
    └─ Minimal Merge + Compiler Ordering
       ↓
    Function Phase
-   ├─ Build Final Macro Environment
-   ├─ Select Eligible Target Functions
-   └─ Shared Recursive Function Expansion
+   ├─ Select Retain + Eligible Target Functions
+   ├─ Shared Expansion/Environment Validation
+   └─ Materialize Accepted Canonical Results
       ↓
    Expanded Module Forms
 ```
@@ -37,9 +37,9 @@ Module Forms
 
 1. 初始化外部宏环境与不透明的 local-macro state。
 2. 执行统一属性扫描。
-3. 调用 local-macro 收尾并取得 `FinalLocalEnv`、retain 物化结果和 `FinalSkipIds`。
-4. 整理 attribute phase 输出，剔除跳过项并排序到编译器可接受的 form 顺序。
-5. 使用最终环境执行唯一一次 function phase。
+3. 调用 local-macro 收尾并取得 `FinalLocalEnv`、retain IDs 和 `FinalSkipIds`。
+4. 从完整 attribute 输出构造 `FinalMacroRuntimeContext`。
+5. 让 retain 与普通目标 function 通过同一个展开/环境一致性验证器。
 
 协调器不解释 local-macro 的冻结、缓存、编译 generation、retain 闭包或安全加载计划。
 
@@ -59,24 +59,24 @@ ScanContext = {
 
 `passed_forms` 与 `queue` 必须严格分离：前者是 attribute injection 的历史视图，后者只用于扫描调度和 remaining-source 观察。尚未真正处理的 splice 结果不能进入 injection 视图。
 
-注册 local declaration 时还必须把 `passed_forms` 单独冻结为 `inject_forms_snapshot`。完整的 `passed_forms ++ queue` 只用于闭包发现；它不能替代注入快照。以后即使在 attribute 调用点按需编译 local macro forms，也必须使用 declaration-time MacroEnv 与该注入快照。
+注册 local declaration 时还必须把 `passed_forms` 单独冻结为 `inject_forms_snapshot`。完整的 `passed_forms ++ queue` 只用于闭包发现；它不能替代注入快照。注册后立即尝试以 declaration-time `MacroRuntimeContext` 预展开，编译只在某次展开或调用真正产生 `NeedCallable` 时发生。
 
 ### 2.3 Local-Macro Gateway
 
 扫描器只依赖三个语义接口：
 
 ```text
-register(Declaration, LocalState, SourceView)
+register_and_preexpand(Declaration, RuntimeContext, LocalState, SourceView)
   -> LocalState' | Error
 
-ensure_callable(AttributeFA, LocalState, SourceView)
+need_callable(LocalFA, LocalState)
   -> {CallableLocalEnv, LocalState'} | Error
 
 finalize(AllScannedForms, LocalState)
-  -> {FinalLocalEnv, MaterializedForms, FinalSkipIds} | Error
+  -> {FinalLocalEnv, RetainIds, FinalSkipIds} | Error
 ```
 
-接口返回值可按实际类型调整，但职责边界不可改变。`ensure_callable` 负责让已注册但未就绪的本地属性宏在当前调用点可执行；扫描器不自行展开编译计划。`finalize` 必须在 function phase 之前完成。
+接口返回值可按实际类型调整，但职责边界不可改变。`need_callable` 是预展开、attribute 调用、最终 function 展开和 finalize 共用的依赖入口，不属于 attribute 专用接口。编译器只消费已由展开验证器确认的 canonical forms。
 
 ### 2.4 Macro Environment Manager
 
@@ -95,14 +95,14 @@ finalize(AllScannedForms, LocalState)
 共享核心提供两项同构能力：
 
 ```text
-expand_functions(MacroEnv, Forms, TargetFAs)
+expand_and_validate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
   -> Forms' | Error
 
 resolve_local_references(CandidateLocalEnv, Forms, ClosureFAs)
   -> ReferencedFAs | Error
 ```
 
-两者必须复用相同的调用匹配规则。共享核心只消费调用方构造好的 `MacroEnv`，不读取 local-macro 的 declaration order、generation、retain 或 `internal_function` 策略。展开某个 local target 时，从环境中移除 target 自身也是 local-macro 调用方的责任。
+两者必须复用相同的调用匹配规则。共享核心从 original/frozen form 展开；相同环境复用，环境不同则与上一次已接受结果比较。一个 declaration 的全部 members 在构造 context 时整体排除，不能按单个 TargetFA 生成不同 group 环境。
 
 ## 3. Attribute Phase 详细流程
 
@@ -146,20 +146,20 @@ Handle(Form)
 │  ├─ 更新全局 options
 │  └─ keep(Form)
 ├─ local_macro declaration
-│  ├─ gateway.register(...)
+│  ├─ gateway.register_and_preexpand(...)
 │  └─ 按 local-macro 契约决定 declaration 的保留/物化，不在扫描器内猜测
 ├─ attribute-shaped form
 │  ├─ 用 ExternalEnv + CallableLocalEnv 按统一规则解析
 │  ├─ 已可调用宏 -> invoke -> validate -> splice(GeneratedForms)
 │  ├─ 已注册但未就绪 local 宏
-│  │  └─ gateway.ensure_callable -> invoke at same position -> splice
+│  │  └─ gateway.need_callable -> invoke at same position -> splice
 │  ├─ 语法上要求执行但无法执行 -> 诊断一次 + keep(original)
 │  └─ 非宏普通 attribute -> keep(Form)
 └─ ordinary form
    └─ keep(Form)
 ```
 
-属性宏产生的 function、spec 和普通 forms 在这里都只是被保留；不得提前递归展开 function body。属性宏产生的环境 form 或 local declaration 则因为 splice 回队首，会自然经过同一决策树并只影响后续 forms。
+属性宏产生的普通 function/spec 在这里先被保留，不作为普通 Step 2 target 提前展开。local declaration 是显式例外：注册时可从其 frozen originals 预展开以填充 ExpansionRecord。属性宏产生的环境 form 或 local declaration 因 splice 回队首，会自然经过同一决策树并只影响后续 forms。
 
 ### 3.4 Attribute Injection
 
@@ -172,7 +172,7 @@ Handle(Form)
 
 函数宏的注入视图不同：它使用 attribute phase 完成后的完整保留 forms。
 
-local macro forms 的编译具有唯一的 local 特殊规则：其宏名称、alias、调用参数、`inject_attrs` 配置和注入值都只来自 `-local_macro` declaration 前的 `passed_forms`。用于闭包发现的 remaining queue 不属于该编译上下文。编译完成后，local attribute 与 external attribute 使用完全相同的调用点运行规则。
+local macro forms 的预展开使用 declaration 前的 `MacroRuntimeContext`：宏名称、alias、调用参数、`inject_attrs` 配置和注入值都来自该时点。用于闭包发现的 remaining queue 不属于该 context。GenerationCompiler 不读取它；local attribute 与 external attribute 使用完全相同的调用点运行规则。
 
 ### 3.5 宏调用与状态隔离
 
@@ -223,16 +223,17 @@ Resolve Macro
 ## 6. Function Phase 详细流程
 
 ```text
-FinalMacroEnv := merge_checked(ExternalEnv, FinalLocalEnv)
+FinalMacroRuntimeContext := context_from(AttributeOutput, EffectiveMacroMap, FinalLocalEnv)
 CandidateForms := AttributeOutput - FinalSkipIds
-TargetFAs := functions_that_can_contain_macro_calls(CandidateForms, FinalMacroEnv)
-Result := expand_functions(FinalMacroEnv, CandidateForms, TargetFAs)
+TargetFAs := RetainIds union functions_that_can_contain_macro_calls(CandidateForms, FinalMacroRuntimeContext)
+Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
 ```
 
 函数阶段：
 
 - 只遍历未被跳过且实际可能包含宏调用的目标 function；
-- 使用 attribute phase 完成后的最终属性视图做 injection；
+- retain 与普通 function 都使用 attribute phase 完成后的最终 `MacroRuntimeContext`；
+- 曾参与 local-macro 展开的 form 在 final context 不同时，必须与最后一次已接受结果比较；
 - 沿用既有递归、`outer` / `inner` 与 `max_depth` 语义；
 - 不再次排序 forms；
 - 不让未编译或不在 `FinalLocalEnv` 中的 local macro 参与匹配。
@@ -243,11 +244,11 @@ Result := expand_functions(FinalMacroEnv, CandidateForms, TargetFAs)
 2. **当前位置语义**：splice 结果先于原剩余队列处理，内部相对顺序不变。
 3. **历史/未来隔离**：attribute injection 只能看 `passed_forms`。
 4. **阶段隔离**：attribute phase 不递归展开 function body。
-5. **策略隔离**：扫描器不解释 local-macro 生命周期；共享展开器也不解释 local 策略。
+5. **策略隔离**：展开验证、依赖调度和 generation 编译互相分离。
 6. **状态隔离**：用户宏的 traverse state 不泄漏到框架 state。
 7. **冲突显式性**：不同宏定义占用同一 key 必须显式 `force_override`。
 8. **最小改写**：没有 `__original__` 合并需要时，不重排生成 function/spec。
-9. **最终环境真实性**：function phase 只能使用 finalize 返回的可调用 local 环境。
+9. **最终环境真实性**：retain 与普通 function phase 只能使用唯一的 `FinalMacroRuntimeContext`。
 10. **诊断稳定性**：无法执行的宏 attribute 在其扫描位置只诊断一次。
 
 ## 8. 建议的验证矩阵
@@ -257,8 +258,8 @@ Result := expand_functions(FinalMacroEnv, CandidateForms, TargetFAs)
 | 扫描顺序 | 外部/本地属性宏交错；生成属性立即重扫；旧结果不回扫 |
 | 环境演进 | 生成 import/use/options；同 splice 后项可见；冲突与 force_override |
 | injection | 只见 passed；不可见 remaining queue 与同 splice 后项 |
-| local gateway | 注册、按需可调用、finalize、FinalSkipIds、未编译项过滤 |
+| local gateway | group 注册/预展开、通用 NeedCallable、finalize、FinalSkipIds、未编译项过滤 |
 | form 顺序 | 无冲突生成 function/spec 原地；`__original__` 仅局部整理 |
 | 阶段边界 | 生成 function 的宏调用只在最终 function phase 展开 |
 | 状态/错误 | 私有 traverse state；return/traverse 桥接；兄弟诊断累计；单次 invalid attribute |
-| 共享语义 | 普通/local function 同一展开器；引用解析同一匹配规则；target 自移除在调用方 |
+| 共享语义 | attribute/local/retain/function 同一 context 逻辑；同 declaration group 整体排除；编译只消费 canonical forms |

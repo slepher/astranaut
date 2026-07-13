@@ -13,10 +13,11 @@
 `astranaut_macro` 只维护一套 function-body 宏匹配和递归展开实现：
 
 ```text
-ExpandFunctions(MacroEnv, Forms, TargetFAs) -> ExpandedForms | Error
+ExpandAndValidate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
+  -> {ExpandedForms, ExpansionRecords1} | Error
 ```
 
-最终 function pass 和 local-macro 累计编译都调用该实现。它只根据传入的 `MacroEnv` 工作，不判断目标是否为 local macro，也不读取 `internal_function`、declaration order、generation、retain 或冻结状态。
+local declaration 预展开、retain 和最终 function pass 都调用该实现。每次从 original/frozen form 开始；环境相同直接复用，环境不同则与上一次已接受结果比较。local-macro generation 编译不调用展开器，只消费已经确认的 canonical expanded forms。
 
 `astranaut_macro` 还提供与展开器相同调用匹配语义的引用解析操作：
 
@@ -24,7 +25,7 @@ ExpandFunctions(MacroEnv, Forms, TargetFAs) -> ExpandedForms | Error
 ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 ```
 
-该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、候选环境、`internal_function` direct-call 集合以及逐目标 FA 的环境裁剪由 `astranaut_local_macro` 决定。特别地，展开 TargetFA 时传入的最终环境不包含 TargetFA；这是调用方构造环境的规则，不是通用展开器中的递归特判。
+该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、候选环境和 `internal_function` direct-call 集合由 `astranaut_local_macro` 决定。同一个 declaration 的全部 members 共享 context，并整体从该 declaration MacroEnv 排除；成员之间的直接调用保持普通 Erlang 调用。
 
 两个操作均返回 `astranaut_return` 结果。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
 
@@ -38,21 +39,20 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
    1.2 逐 form 统一 scan-and-splice
        - 外部与可调用本地属性宏按当前位置展开
        - import/use/macro_options 前向更新 ExternalEnv
-       - local_macro declaration 委托 local-macro 工作流注册
-       - 未就绪本地属性宏请求工作流确保可调用后在原位置展开
-   1.3 收尾 local-macro 工作流，取得 FinalLocalEnv 与 FinalSkipIds
-   1.4 物化 retain 结果并从 function-pass 输入中剔除 FinalSkipIds
-   1.5 对 attribute pass 的最终输出排序
+       - local_macro declaration 注册 group、冻结 context、更新依赖并尝试预展开
+       - 任意展开/调用需要未就绪 local macro 时产生通用 NeedCallable
+   1.3 收尾 local-macro 工作流，取得 FinalLocalEnv、RetainIds 与 FinalSkipIds
+   1.4 构造 FinalMacroRuntimeContext
 
 2. Function pass
-   - 使用最终 ExternalEnv + FinalLocalEnv
-   - 只遍历 attribute pass 输出的保留 forms
-   - 不再排序 forms
+   - retain 与普通目标 function 使用相同 FinalMacroRuntimeContext
+   - 通过共享 ExpansionValidator 展开或比较最后一次 local 结果
+   - 物化 accepted canonical forms，并只在既定边界排序
 ```
 
 ## 统一属性扫描
 
-扫描 state 持有当前 `ExternalEnv`、已通过扫描的 `passed_forms`，以及不透明的 `LocalMacroState`。local macro 的注册表、缓存和编译产物不在本变更中定义。扫描 local declaration 时，local macro function forms 的编译上下文冻结为 declaration 前的 `passed_forms`；另可交付 `passed_forms + 当前及剩余 queue` 作为结构性的闭包源码视图，但后者不是宏展开上下文。
+扫描 state 持有当前 `EffectiveMacroMap`、已通过扫描的 `passed_forms`，以及不透明的 `LocalMacroState`。local macro 的注册表、缓存和编译产物不在本变更中定义。扫描 local declaration 时，function forms 的预展开 `MacroRuntimeContext` 冻结为 declaration 前的状态；另可交付 `passed_forms + 当前及剩余 queue` 作为结构性的闭包源码视图，但后者不是宏展开上下文。
 
 ### 队列与输出模型
 
@@ -74,27 +74,28 @@ while Queue 非空:
 
 `passed_forms` 以输出顺序保存已处理 form，供 attribute injection 使用；新 splice form 在真正被处理前不属于 `passed_forms`。启用 queue state 时，扫描器可见的 remaining source view 是“当前 form + 精确剩余队列”，其中包含尚未处理的生成 forms，但这不会使它们提前成为 attribute injection 输入。
 
-遇到 `local_macro` declaration 时，扫描器冻结一份 local function-form 编译上下文，并提供一份独立的结构源码视图：
+遇到 `local_macro` declaration 时，扫描器冻结一份 local function-form 预展开上下文，并提供一份独立的结构源码视图：
 
 ```text
-LocalCompileContext = {
-  MacroEnv    = declaration 前已生效的 import/use/options 与可引用 local 宏,
-  InjectForms = declaration 前的 passed_forms
+DeclarationMacroRuntimeContext = {
+  EffectiveMacroMap = declaration 前已生效的 import/use/options 与可引用 local 宏,
+  MacroOptions      = declaration 点 options,
+  InjectForms       = declaration 前的 passed_forms
 }
 ClosureSourceView = passed_forms ++ 当前及剩余 queue
 ```
 
-`ClosureSourceView` 只用于定位 function/spec 与计算静态闭包；编译 frozen local macro forms 时，宏名称、alias、调用参数及 `inject_attrs` 配置和实际注入值全部由 `LocalCompileContext` 决定。更晚 attribute 触发的 `ensure_available` 不得用触发点环境覆盖该编译上下文。
+`ClosureSourceView` 只用于定位 function/spec 与计算静态闭包；预展开 frozen local macro forms 时，宏名称、alias、调用参数及 `inject_attrs` 配置和实际注入值全部由 `DeclarationMacroRuntimeContext` 决定。generation 编译不读取该 context。
 
 | 扫描到的 form | 行为 |
 |---|---|
 | `-import_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-use_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-macro_options(...)` | 更新全局 options，保留该 form，并记入 `passed_forms`。 |
-| `-local_macro(...)` | 调用 local-macro 注册流程。 |
+| `-local_macro(...)` | 注册 declaration group、更新依赖并尝试预展开。 |
 | 外部属性宏调用 | 用当前环境展开，结果 splice 回队列。 |
 | 已可调用的本地属性宏 | 用当前环境展开，结果 splice 回队列。 |
-| 已注册但尚不可调用的本地属性宏 | 请求 local-macro 工作流确保可调用，再在原位置展开。 |
+| 已注册但尚不可调用的本地属性宏 | 产生通用 `NeedCallable`，成功后仍在原位置展开。 |
 | 其他 form | 原样保留。 |
 
 属性宏可生成新的 `import_macro`、`use_macro`、`macro_options` 或 `local_macro` form；这些 form 重新进入同一扫描流。`export_macro` 单独出现时不会使宏在定义模块内变为可调用的 local macro；其专属保留语义见 local-macro 文档。
@@ -113,7 +114,7 @@ ClosureSourceView = passed_forms ++ 当前及剩余 queue
 
 每次处理 attribute 时，从 `ExternalEnv + 当前可调用 LocalEnv` 构造执行宏映射，并按既有 `as_attr`、`exec_macro` 规则匹配。宏声明的 `inject_attrs` 在调用时注入，而不是导入时固化：所有 attribute 宏无论来自 external 还是 local，都只看当前位置之前的 `passed_forms`；最终 function 宏则看 attribute pass 完成后的完整 forms。
 
-若当前 attribute 触发某个 local macro 的按需编译，先用该 local declaration 的 `LocalCompileContext` 编译其 function forms；随后对 attribute 的解析和运行仍进入上述通用 attribute 规则。调用点规则不是 local macro 特例，local macro 的唯一特例只是 function-form 编译上下文被限制在 declaration 前的 `passed_forms`。
+若当前 attribute 需要尚不可调用的 local macro，只产生与其他阶段相同的 `NeedCallable`。scheduler 使用已经确认的 canonical forms 编译必要 boundary；随后 attribute 仍按调用点 `MacroRuntimeContext` 运行。attribute 不拥有专用编译策略。
 
 若命中外部或已就绪本地属性宏，使用当前映射展开并返回 `splice(NewForms)`。若 attribute 对应已注册但尚不可调用的 local macro，扫描器调用 local-macro 工作流的确保可调用接口；成功后仍在同一队列位置展开，不能延后到独立本地 pass。
 
@@ -142,8 +143,8 @@ attribute pass 全部收尾完成后可调用 `sort_forms/1` 生成 Erlang 编�
 
 ## Attribute pass 收尾与 function pass
 
-扫描完成后调用 local-macro 收尾流程。该流程返回最终可调用的本地宏环境及 `FinalSkipIds`；具体如何冻结、保留、比较和构建该集合见 [local-macro 设计](../local-macro/design.md)。
+扫描完成后调用 local-macro 收尾流程。该流程返回最终可调用的本地宏环境、RetainIds 及 `FinalSkipIds`；具体如何冻结、预展开、比较和编译 canonical forms 见 [local-macro 设计](../local-macro/design.md)。
 
-function pass 使用 `ExternalEnv + FinalLocalEnv`，并从输入剔除 `FinalSkipIds`。`FinalLocalEnv` 中不存在的未编译 local macro 不得残留在最终执行映射中。function pass 只遍历实际包含宏调用且未被跳过的目标 functions，保留当前递归展开、`outer` / `inner` 和 `max_depth` 规则。
+function pass 从最终 attribute 输出构造唯一 `FinalMacroRuntimeContext`。retain 与普通目标 functions 均调用共享 ExpansionValidator；若某个 form 曾在 declaration context 中展开，final context 不同时必须从 original form 展开并与最后一次结果比较。该规则同样适用于 retained local macro 宏头。
 
 扫描器在收尾前不自行删除 local macro 相关原始 forms，也不解释 local-macro 的编译计划；它只传递完整 forms 流和不透明状态，并消费工作流返回的最终环境、物化 forms 与跳过集合。

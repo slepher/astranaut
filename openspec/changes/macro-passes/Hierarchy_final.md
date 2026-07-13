@@ -1,329 +1,382 @@
 # Macro Passes 最终处理层级
 
-> 本文先以 [`MacroPassesHierarchy.md`](MacroPassesHierarchy.md) 的独立设计为基线，再对照当前 `astranaut_macro.erl`、`astranaut_local_macro.erl` 与 `astranaut.erl` 实现。最终方案吸收实现中已验证的工程细节，同时保留规范要求的源码顺序语义。
+> 本文以 [`MacroPassesHierarchy.md`](MacroPassesHierarchy.md) 的独立设计为起点，并吸收后续关于 declaration 预展开、依赖驱动编译、统一 `MacroRuntimeContext`、多环境结果比对和最终 function 展开的讨论结果。本文是 macro-passes 与 local-macro 协作关系的最终权威模型。
 
-## 1. 对比结论
+## 1. 最终结论
 
-当前实现的主干结构与独立设计一致：统一 attribute scan-and-splice、local-macro 收尾、最终 function pass 已经形成清晰的两阶段模型；队列重扫、passed/remaining 分离、宏 state 隔离、retain/skip 处理以及共享 function 展开也都落在正确边界。
+整个流程不再按“attribute 阶段展开并编译 local macro、finalize 再按 request 环境重放、Step 2 另行展开 function”划分责任，而是由三个正交组件组成：
 
-最终方案需要保留实现中的三项细化：
+```text
+ExpansionValidator
+  -> 使用某个 MacroRuntimeContext 从原始 form 展开
+  -> 缓存环境与结果
+  -> 验证同一 FormId 在不同环境下结果一致
 
-1. `prepare_exports` 位于扫描结束与 local finalize 之间。
-2. retain forms 在 finalize 中按最终环境展开并物化，随后以 `PreparedFunctionIds` 阻止 function pass 二次展开。
-3. scan handler 失败时由 splice 驱动层继续处理后续 forms，从而保留诊断累计能力。
+DependencyScheduler
+  -> 在某次展开或调用真正需要 local macro 可调用时产生 NeedCallable
+  -> 计算规范化的最小累计编译边界
 
-同时有三个应在后续实现中收敛的差距：
+GenerationCompiler
+  -> 只消费已经确认的 CanonicalExpandedForms
+  -> 编译、加载并提交 local macro module generation
+  -> 不读取 declaration MacroRuntimeContext，不按 request 重新展开 forms
+```
 
-1. **local macro function-form 编译上下文错误混入了闭包源码视图。** 当前 declaration-time `env_snapshot` 已正确冻结宏名称、alias、调用参数和 `inject_attrs` 配置，但 frozen forms 展开时把 `passed_forms + remaining queue` 的完整 `SourceView` 作为 `InjectForms`，使声明后的原始 attribute 可能进入编译上下文。最终设计要求整个 local function-form 编译上下文仅由 declaration 前 `passed_forms` 决定；完整 source view 只参与闭包发现。
-2. **跨 External/Local 宏表的覆盖顺序不完全由源码顺序决定。** 当前 `scan_attribute/2` 使用 `maps:merge(ExternalMacroMap, ScanLocalMap)`，local 固定覆盖 external；最终又以 `merge_macro_maps(External, Local)` 合并。因此“local 声明后又出现带 `force_override` 的 import/use”并不能自然表达后声明 external 生效，冲突也可能延迟到 finalize 才报告。最终设计要求有效宏环境在每个声明位置按统一冲突规则事务性更新，独立的 external/local 表只用于所有权和生命周期记录。
-3. **`__original__` 整理对 spec 的契约与测试证据不足。** 当前 splice 层会标记生成 spec，但重命名实现只显式改写 function 和 call；现有单测证明了 function 的局部位置与重命名，没有证明关联 spec 在冲突时应保留、归属生成 function，还是随原 function 重命名。最终设计把它定义成显式的局部 merge policy，并要求补足 spec 场景测试。
+源码阶段只决定使用哪个 `MacroRuntimeContext`：
 
-## 2. 独立设计与当前实现对照
+| 场景 | MacroRuntimeContext |
+|---|---|
+| attribute macro 调用 | 当前 attribute 调用点上下文 |
+| local macro function-form 预展开 | `-local_macro` declaration 前的上下文快照 |
+| retain function 展开 | attribute scan 完成后的最终上下文 |
+| Step 2 普通 function 展开 | attribute scan 完成后的最终上下文 |
 
-| 设计契约 | 当前实现证据 | 结论 / 最终取舍 |
+四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local macro 的特殊性只剩 declaration-time 快照、declaration group 成员排除、闭包/依赖及 callable generation 生命周期。
+
+## 2. 与当前实现对照
+
+当前实现已经具备统一 attribute scan-and-splice、源码顺序 `effective_macro_map`、declaration-time `env_snapshot + inject_forms_snapshot`、展开缓存、累计 generation、安全加载和共享 function 展开器。以下最终逻辑仍需要结构性调整：
+
+| 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
-| 两阶段模型 | `run_attribute_pass/5`、`run_function_macro_pass/2` | 一致；finalize 是 attribute phase 收尾，不是第三个 pass。 |
-| 单向 scan-and-splice | `scan_attribute_forms/5` 调用 `astranaut:map_forms_splice/3` | 一致；`splice` 插到队首，已处理项不回扫。 |
-| passed 与 remaining 分离 | `passed_forms`、`remaining_forms`、`queue_state => true` | 一致；最终方案沿用双视图。 |
-| import/use 消费，options 保留 | `scan_env_form/2` | 一致；consume 用 `{splice, []}` 表达。 |
-| local declaration 原位注册 | `scan_local_macro/2`、`register_local_declaration/8` | 一致；实现先记入 passed，扫描后由 `drop_local_declarations` 清理。最终方案允许这一规范化步骤，但必须保证注册快照已完成。 |
-| 未就绪 local 属性宏按需编译 | `ensure_local_attribute_macro/2` | 一致；在原调用位置调用 `ensure_available` 后继续展开。 |
-| attribute injection 只看历史 | `inject_macro_attributes(..., passed_forms(State))` | 一致。 |
-| local macro forms 使用声明点注入快照 | request 保存完整 declaration `SourceView`，`expand_request_form/4` 将它作为 `InjectForms` | 不一致；必须拆分 `closure_source_view` 与 `inject_forms_snapshot`。 |
-| 用户宏 state 隔离 | `invoke_macro_function/1` 使用 `scoped_state/2` | 一致；保留外层 Attr 与诊断管线。 |
-| return/traverse 正确桥接 | `astranaut:traverse_return/1` 用于校验与 local workflow | 一致。 |
-| 局部生成顺序与最小整理 | `map_forms_splice_reorder/1` | function 主路径一致；spec 契约需明确和补测。 |
-| finalize 后过滤 local env | `compiled_local_macro_map/2` | 一致；未编译 local FA 不进入 function pass。 |
-| retain 物化与 skip | `astranaut_local_macro:finalize/4`、`materialize_forms/2`、`remove_final_skip_forms/2` | 实现比独立方案更具体；全部吸收。 |
-| 避免 retain form 二次展开 | `prepared_function_ids` 参与 `find_function_macro_callers` | 独立方案遗漏；吸收到最终方案。 |
-| function/local 共用展开器 | `expand_function/4`、`expand_functions/3` | 一致；local 策略由调用方构造环境。 |
-| local 引用复用调用匹配 | `resolve_local_references/2`、`call_find_macro` | 一致。 |
-| 宏 key 按源码顺序冲突/覆盖 | 单表内 `merge_macro_maps_pure/2`，跨表使用固定 merge 顺序 | 部分一致；最终方案采用统一的有效环境更新规则。 |
-| 失败后累计兄弟诊断 | `map_forms_splice_loop` 的 `catch_on_error`；`recover_macro_call/2` | 一致；区分 form 级失败恢复和 macro-call 级原节点恢复。 |
+| 统一 attribute runtime | `resolve_attribute_macro_target/2`、`ensure_attribute_target_callable/2`、`build_attribute_macro_invocation/2` | 主路径一致；`ensure` 应改成通用 `NeedCallable`，而非 attribute 专属编译入口。 |
+| declaration group 共享一个环境 | `register/8` 为每个 FA 分别建立 entry | 快照数据相同，但展开仍按单个 target 构造环境；需整体排除同 declaration 的所有成员。 |
+| declaration 时尽可能预展开 | 注册当前只冻结 request | 未实现；应在注册和依赖建图后调用统一 ExpansionValidator。 |
+| 环境只控制展开与一致性 | `execute_plan/4` 在每个编译 boundary 中按 request 环境展开 | 不一致；展开验证必须与 generation 编译分离。 |
+| 编译仅消费 canonical forms | `compiled_forms` 在成功编译后提交 | 数据边界接近，但 compiler 入口仍接收 expansion requests；需改为 canonical forms。 |
+| 编译由 `NeedCallable` 驱动 | attribute ensure 与 finalize 触发计划 | 部分一致；预展开依赖也必须能够触发相同 scheduler，attribute 不拥有特殊编译时机。 |
+| retain 与 Step 2 共用最终上下文和验证器 | retain 在 local finalize 内展开，普通 function 走最终 pass | 不一致；两者应统一使用 `FinalMacroRuntimeContext` 和同一结果比对操作。 |
+| retain 宏头也比较最后一次 local 展开结果 | 当前 retain 宏头跳过最终环境比对 | 不一致；该例外必须删除。 |
+| 相同最终环境直接复用 | `expanded_forms` 按 fingerprint 缓存 | 基础能力已有；应扩展成显式 last/canonical expansion record。 |
+| `__original__` spec 局部 merge | `map_forms_splice_merge_specs/1` | 已实现并保留。 |
 
-## 3. 最终层级
+## 3. 最终 Hierarchy
 
 ```text
 Module Macro Pipeline
-├─ 1. Attribute Phase
+├─ 1. Attribute Scan-and-Splice
 │  ├─ 1.1 Initialize
-│  │  ├─ EffectiveMacroEnv
-│  │  ├─ ExternalRegistry
-│  │  ├─ LocalMacroState / LocalRegistry
+│  │  ├─ EffectiveMacroMap
+│  │  ├─ ExternalRegistry / LocalRegistry
+│  │  ├─ LocalMacroState
 │  │  ├─ PassedForms
 │  │  └─ Queue
-│  ├─ 1.2 Forward Scan-and-Splice
-│  │  ├─ Publish Remaining Source View
-│  │  ├─ Dispatch Current Form
-│  │  │  ├─ import_macro / use_macro
-│  │  │  ├─ macro_options
-│  │  │  ├─ local_macro declaration
-│  │  │  │  └─ Freeze LocalCompileContext from pre-declaration PassedForms
-│  │  │  ├─ generic attribute macro runtime (external / local)
-│  │  │  │  ├─ Resolve with CallSiteMacroEnv
-│  │  │  │  ├─ If selected local macro is unavailable
-│  │  │  │  │  └─ Ensure Local Macro Compiled
-│  │  │  │  │     ├─ Expand frozen function forms with LocalCompileContext
-│  │  │  │  │     └─ Compile / load cumulative local macro module
-│  │  │  │  ├─ Return to generic runtime path
-│  │  │  │  ├─ Build call arguments from call-site configuration
-│  │  │  │  ├─ Inject CallSitePassedForms
-│  │  │  │  └─ Invoke compiled macro
-│  │  │  └─ ordinary form
-│  │  ├─ Keep / Consume / Splice
-│  │  └─ Local __original__/spec Merge Policy
-│  ├─ 1.3 Scan Normalization
-│  │  ├─ Drop already-registered local declarations
-│  │  └─ Prepare exports
-│  ├─ 1.4 Local-Macro Finalization
-│  │  ├─ Build / execute final generation
-│  │  ├─ Compute FinalLocalEnv
-│  │  ├─ Expand and verify retained forms
-│  │  └─ Compute FinalSkipIds
-│  ├─ 1.5 Materialize Function Input
-│  │  ├─ Replace retained forms
-│  │  ├─ Record PreparedFunctionIds
-│  │  ├─ Remove FinalSkipIds
-│  │  ├─ Build final checked macro environment
-│  │  └─ Find remaining macro callers
-│  └─ 1.6 Sort Once for Erlang Compiler
-└─ 2. Function Phase
-   ├─ Exclude skipped and prepared functions
-   ├─ Expand selected functions through shared core
-   ├─ Preserve outer / inner / max_depth semantics
-   └─ Return without another form sort
+│  ├─ 1.2 Forward Scan
+│  │  ├─ import_macro / use_macro / macro_options
+│  │  │  └─ Update EffectiveMacroMap in source order
+│  │  ├─ local_macro declaration
+│  │  │  ├─ Build DeclarationMacroRuntimeContext from pre-declaration state
+│  │  │  ├─ Register one DeclarationGroup
+│  │  │  ├─ Exclude every group member from the group MacroEnv
+│  │  │  ├─ Freeze original function/spec forms and closure source view
+│  │  │  ├─ Update static local dependency graph
+│  │  │  └─ Pre-expand ready forms through ExpansionValidator
+│  │  │     └─ NeedCallable(dependency) when expansion needs unavailable local macro
+│  │  ├─ generic attribute macro runtime (external / local)
+│  │  │  ├─ Build CallSiteMacroRuntimeContext
+│  │  │  ├─ Resolve target
+│  │  │  ├─ NeedCallable(target) only when selected local target is unavailable
+│  │  │  ├─ Build invocation from the same call-site context
+│  │  │  └─ Invoke / validate / splice
+│  │  └─ ordinary form
+│  └─ 1.3 Scan Completion
+│     ├─ Drop successfully registered local declarations
+│     ├─ Prepare exports
+│     ├─ Drain remaining local expansion validation
+│     ├─ Build the required final cumulative local generation
+│     ├─ Compute FinalLocalEnv / FinalSkipIds / RetainIds
+│     └─ Build FinalMacroRuntimeContext
+├─ Shared Services
+│  ├─ ExpansionValidator
+│  │  ├─ Start every expansion from Original/FrozenForm
+│  │  ├─ Same EnvFingerprint -> reuse
+│  │  ├─ Different EnvFingerprint -> expand and compare last accepted result
+│  │  └─ Maintain CanonicalExpandedForm
+│  ├─ DependencyScheduler
+│  │  ├─ Accept NeedCallable from any phase
+│  │  ├─ Compute minimal canonical cumulative boundary
+│  │  └─ Reuse an already committed boundary
+│  └─ GenerationCompiler
+│     ├─ Read CanonicalExpandedForms only
+│     ├─ Compile / safe-load cumulative module
+│     └─ Commit generation atomically
+└─ 2. Final Function Expansion
+   ├─ Select retain functions and ordinary macro callers
+   ├─ Exclude FinalSkipIds unless retained
+   ├─ Expand every selected function with FinalMacroRuntimeContext
+   ├─ Compare against its last local-macro expansion result when one exists
+   ├─ Materialize the accepted canonical result
+   └─ Sort only at the established compiler boundary
 ```
 
-## 4. 最终状态模型
+## 4. 统一 MacroRuntimeContext
 
-逻辑扫描状态定义为：
+所有宏展开入口使用同一个逻辑类型：
 
 ```text
-ScanContext = {
-  effective_macro_env,       % 当前调用点唯一可信的执行映射
-  external_registry,         % 外部来源、模块和 options 元数据
-  local_registry,            % local macro 描述到执行宏记录的映射
-  local_macro_state,         % 冻结、generation、缓存、retain 等不透明状态
-  global_macro_opts,
-  passed_forms,              % 正序语义，具体可反向存储
-  remaining_forms,
-  scan_local_declarations,
-  diagnostics
+MacroRuntimeContext = {
+  effective_macro_map,
+  macro_options,
+  inject_forms
 }
 ```
 
-每个成功注册的 local declaration 还必须保存不可变的 function-form 编译上下文，并与结构源码视图区分：
-
-```text
-LocalCompileContext = {
-  env_snapshot,           % 从 declaration 前 passed forms 得到的名称、alias、参数和 options
-  inject_forms_snapshot   % 同一份 declaration 前 passed forms
-}
-ClosureSourceView          % passed forms + 当前及 remaining queue；仅结构分析
-```
-
-`env_snapshot` 与 `inject_forms_snapshot` 是同一个 `LocalCompileContext` 的实现分解，不代表两个宏上下文。`ClosureSourceView` 不是宏上下文。按需编译的触发点只能提供累计模块的物化/加载信息，不能改写 request 的 declaration-time 编译上下文。
-
-`effective_macro_env` 是最终方案相对当前实现最重要的收敛点。ExternalRegistry 和 LocalRegistry 可以继续分开，但每次 import/use/local declaration 都必须通过同一个更新操作修改有效环境：
+`effective_macro_map` 按源码顺序维护。import/use/local declaration 使用同一个 checked update：
 
 ```text
 update_effective_env(CurrentEnv, IncomingEntries, SourcePosition)
   -> UpdatedEnv | macro_override
 ```
 
-更新规则是：
-
 - key 不存在：加入；
-- 定义完全相同：幂等；
-- 定义不同且 incoming 没有 `force_override`：在当前声明位置报 `macro_override`；
+- 定义相同：幂等；
+- 定义不同且 incoming 没有 `force_override`：在声明位置报错；
 - 定义不同且 incoming 有 `force_override`：incoming 覆盖 existing。
 
-这样 local 与 external 的先后顺序都由源码位置决定，不依赖最终 `maps:merge/2` 的参数顺序。finalize 返回的 `FinalLocalEnv` 只负责过滤 local 可调用性；它不得重新解释已经决定的覆盖顺序。过滤后应重新验证最终映射中引用的 local FA 均可执行。
-
-## 5. Forward Scan-and-Splice
-
-### 5.1 调度循环
+上下文构造逻辑相同，但取值时点不同：
 
 ```text
-scan(Queue, Context, Output):
-  Queue = []
-    -> {Output, Context}
+DeclarationMacroRuntimeContext
+  = context_at(pre-declaration PassedForms, pre-declaration EffectiveMacroMap)
 
-  Queue = [Form | Rest]
-    -> Context1 = Context#{remaining_forms => [Form | Rest]}
-    -> Decision = handle(Form, Context1)
-    -> case Decision of
-         keep(Form1, Context2)
-           -> scan(Rest, note_passed(Form1, Context2), Output ++ [Form1])
-         consume(Context2)
-           -> scan(Rest, Context2, Output)
-         splice(NewForms, Context2)
-           -> scan(NewForms ++ Rest, Context2, Output)
-       end
+CallSiteMacroRuntimeContext
+  = context_at(call-site PassedForms, call-site EffectiveMacroMap)
+
+FinalMacroRuntimeContext
+  = context_at(completed attribute forms, final EffectiveMacroMap)
 ```
 
-实现可以继续用 traverse monad 和反向 accumulator，以上只是语义模型。`remaining_forms` 必须包含当前 form，以便 local declaration snapshot 与按需编译获得精确 source view。
+`inject_forms` 与宏映射必须来自同一个时点。完整 `ClosureSourceView = passed + current + remaining` 只用于静态闭包、冻结和模块结构物化，不属于 `MacroRuntimeContext`。
 
-### 5.2 Form 处理表
+## 5. DeclarationGroup 语义
 
-| Form | 状态更新 | 调度结果 |
-|---|---|---|
-| `import_macro` | 解析外部定义并更新 external registry、effective env | consume |
-| `use_macro` | 基于已导入定义选择/alias，合并逐宏 options，更新 effective env | consume |
-| `macro_options` | 后值覆盖同名全局 option | keep，并加入 passed |
-| `local_macro` | 校验、冻结 source view、注册 state、构造 local entries、更新 effective env | keep 到扫描结束；随后 normalization 删除 declaration |
-| 可执行 attribute macro | 注入 passed attributes，在私有 state 中执行并校验 | splice generated forms |
-| 已注册但未就绪 local attribute | `ensure_available`，成功后在同一位置执行 | splice generated forms |
-| 要求执行但无法执行的 macro attribute | 当前点诊断一次 | keep original |
-| 普通 attribute/form | 无 | keep original |
-
-local declaration 的校验应产生一次语义结果并同时供注册与映射构造使用。若现有 traverse 事务模型要求“无诊断的准备检查 + 有诊断的正式校验”两步实现，应封装为单一 gateway 行为，避免未来两份校验规则漂移。
-
-### 5.3 Injection 与 source view
-
-必须区分 local function-form 编译输入、结构源码视图和所有 attribute 共用的运行期视图：
+一个 declaration form 对应一个不可变 group：
 
 ```text
-LocalCompileContext = {
-  MacroEnv    = derived from DeclarationPassedForms,
-  InjectForms = DeclarationPassedForms
+DeclarationGroup = {
+  members,                    % 例如 [foo/1, bar/1]
+  declaration_order,
+  runtime_context_snapshot,
+  closure_source_view,
+  closure_ids,
+  referenced_local_macros,
+  options
 }
-LocalClosureSourceView = DeclarationPassedForms ++ CurrentAndRemainingForms
-AttributeRuntimeView   = CallSiteMacroEnv + CallSitePassedForms
 ```
 
-- 属性宏不能看当前及未来 attribute。
-- local macro frozen forms 使用 declaration-time MacroEnv；其中 `use_macro` 等确定的名称、alias、调用参数和 `inject_attrs` 配置不会被后续环境更新覆盖。
-- local macro frozen forms 的实际注入值只来自 `LocalInjectFormsSnapshot`，不能看到 declaration 自身或 remaining queue。
-- local-macro 工作流可以使用 `LocalClosureSourceView` 查找函数、计算闭包和冻结原始 forms，但不能把它传给 `inject_macro_attributes`。
-- 更晚 attribute 触发按需编译时，local forms 使用 `LocalCompileContext`；编译完成后的 attribute 与 external attribute 一样进入统一 `AttributeRuntimeView` 规则，这不是 local 特例。
-- 同一 splice 的后项只有真正 keep 后，才进入后续 attribute 调用的 injection view。
+对于：
 
-### 5.4 错误恢复层级
+```erlang
+-local_macro([foo/1, bar/1]).
+```
+
+`foo/1` 与 `bar/1` 共享完全相同的 declaration MacroRuntimeContext。group 的全部 members 整体从该 MacroEnv 排除：
+
+```text
+GroupMacroEnv = PreDeclarationEffectiveMacroMap - {foo/1, bar/1}
+```
+
+因此 `bar/1` 中对 `foo/1` 的直接调用是普通 Erlang 本地调用和闭包边，不是 local macro 调用；反向同理。不能因为当前展开 form 或 TargetFA 不同而为 group members 制造不同宏环境或不同环境 fingerprint。
+
+group 内各 FA 仍可拥有各自的宏头、闭包根、retain 状态和 callable 状态，但这些生命周期字段不能改变共同的 declaration context。
+
+## 6. ExpansionValidator
+
+### 6.1 状态
+
+```text
+ExpansionRecord = {
+  last_env_fingerprint,
+  last_expanded_form,
+  canonical_expanded_form,
+  results_by_env_fingerprint   % 可选但推荐，用于避免环境来回切换时重复展开
+}
+```
+
+环境 fingerprint 覆盖该次展开的全部可观察输入：有效宏映射及可调用 local 版本、macro options、`inject_forms` 和 declaration group 排除策略。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把同 declaration group 切成不同环境。
+
+### 6.2 统一操作
+
+```text
+expand_and_validate(FormId, OriginalForm, MacroRuntimeContext):
+  Record 不存在
+    -> 从 OriginalForm 展开
+    -> 保存为 last 和 canonical result
+
+  fingerprint(CurrentContext) == Record.last_env_fingerprint
+    -> 直接复用 Record.last_expanded_form
+
+  fingerprint 不同
+    -> 始终从同一 OriginalForm 重新展开
+    -> 与 Record.last_expanded_form 比较
+       ├─ 相同：接受并更新 last record
+       └─ 不同：conflicting_local_macro_closure_environment
+```
+
+每个新环境只需与上一次已接受结果比较；由于每次成功转换都要求结果相同，该关系能传递到 canonical result。保留 `results_by_env_fingerprint` 不改变语义，只避免 E1 → E2 → E1 时重复执行 E1。
+
+禁止在已经展开的 AST 上继续展开。local declaration、retain 和 Step 2 function 都必须从同一个 original/frozen form 开始。
+
+### 6.3 预展开
+
+扫描到 local declaration 后立即注册依赖并尝试预展开，但“声明出现”本身不要求编译该 group。预展开若只使用 external 或已可调用 local macros，结果直接进入 expansion record。
+
+若预展开真正需要执行一个尚不可调用的 local macro，则产生 `NeedCallable(FA)`。scheduler 可以当场编译最小必要依赖边界，随后恢复预展开。这不是 declaration 编译策略，而是通用的依赖可调用性规则。
+
+## 7. DependencyScheduler 与 GenerationCompiler
+
+### 7.1 编译时机
+
+编译时机不绑定 attribute，也不绑定 declaration 或 finalize：
+
+```text
+NeedCallable(FA)
+  -> calculate canonical minimal cumulative boundary
+  -> boundary 已提交：复用
+  -> boundary 未提交：确保所需 canonical forms 已就绪，编译并提交
+```
+
+`NeedCallable` 可以来自：
+
+- declaration 预展开需要调用先声明 local macro；
+- external/local attribute runtime 选中尚不可调用的 local target；
+- retain 或 Step 2 function 展开需要 local macro；
+- scan completion 构造最终 local generation。
+
+只有真实 local macro 依赖产生中间编译边界。普通 Erlang direct call、闭包成员关系和 declaration group 内成员调用不产生宏依赖边界。
+
+### 7.2 编译输入
+
+GenerationCompiler 的输入是：
+
+```text
+GenerationInput = {
+  boundary_members,
+  canonical_expanded_forms,
+  module_compile_forms,
+  compile_options
+}
+```
+
+它不得接收或解释每个 declaration 的 MacroRuntimeContext，不得遍历 expansion requests，也不得为了编译而按环境重放 function expansion。若 canonical form 尚未就绪，应先返回 ExpansionValidator/DependencyScheduler 完成准备，再进入 compiler。
+
+成功 compile + safe load 后才更新 generation、callable status 和已提交 boundary。失败不得覆盖上一代模块或 canonical expansion records。
+
+## 8. Attribute Scan-and-Splice
+
+attribute runtime 对 external/local 完全通用：
+
+```text
+scan attribute
+  -> capture CallSiteMacroRuntimeContext
+  -> resolve macro target
+  -> if selected local target unavailable: NeedCallable(target)
+  -> build invocation from the captured context
+  -> invoke / validate / splice
+```
+
+local 只可能在 invocation 前多出一次通用 `NeedCallable`，调用参数、alias、`inject_attrs` 和 passed forms 规则没有 local 分支。编译过程也不得用 call-site context 覆盖 local declaration 的预展开 context。
+
+scan-and-splice 继续满足：
+
+- splice forms 插到当前位置队首并立即扫描；
+- 已通过 forms 不回扫；
+- attribute injection 只读取调用点前 passed forms；
+- import/use 成功后消费，macro_options 保留；
+- 用户宏 traverse state 与扫描 state 隔离；
+- frozen function/spec ID 被生成 splice 改写时拒绝该 mutation。
+
+## 9. Scan Completion 与 Step 2 Function Expansion
+
+attribute scan 结束后：
+
+1. 删除成功注册的 local declaration forms，并执行 `prepare_exports`。
+2. drain 尚未验证的 local declaration expansion；依赖未就绪时通过 `NeedCallable` 推进。
+3. 按需要构造最终累计 local macro generation，得到 `FinalLocalEnv`。
+4. 计算 `FinalSkipIds` 与 retain closure IDs，但此处不使用专用 retain 展开算法。
+5. 从完整 attribute 输出构造唯一的 `FinalMacroRuntimeContext`。
+6. 选择 retain functions 与普通 macro caller functions。
+7. 对每个目标调用同一个 `expand_and_validate(..., FinalMacroRuntimeContext)`。
+8. 物化结果并在既定边界排序。
+
+retain 与普通 function 的差异只有选择和生命周期：retain 必须保留，普通 function 由 caller detection 决定是否进入目标集合。两者的展开、环境 fingerprint 和多环境结果比较完全相同。
+
+如果某个 retained 或普通 function 曾作为 local macro closure form 展开：
+
+- final fingerprint 与 last local fingerprint 相同：直接复用最后一次结果；
+- fingerprint 不同：从 original form 在 final context 下展开，并与最后一次 local 结果比较；
+- 结果不同：报 `conflicting_local_macro_closure_environment`。
+
+该规则适用于 retained local macro 宏头，不再存在“宏头跳过最终环境比对”的例外。
+
+`PreparedFunctionIds` 可以保留为避免重复调度的优化，但不再是正确性边界：即使同一 form 再次进入 Step 2，相同 final context 也必须通过 ExpansionValidator 命中缓存，而不是在已展开 AST 上二次展开。
+
+## 10. `__original__` 与 Spec 局部 Merge
+
+scan-and-splice 层继续只对实际冲突的 `F/A` 做局部整理：
+
+1. 生成 wrapper 调用 `__original__/A` 且存在原 `F/A` 时，为原函数选择唯一内部名字。
+2. 重命名原 function 及必要自调用，并改写 wrapper 的 `__original__` 调用。
+3. 没有生成 public spec 时保留原 `-spec F(...)`。
+4. 存在生成 public spec 时由生成 spec 替换原 public spec。
+5. 不把 public wrapper spec 复制给重命名后的内部函数。
+6. 无关 forms 的相对顺序不变。
+
+## 11. 错误与事务边界
 
 ```text
 Form handler failure
-  -> 记录诊断，终止该 form 的状态提交，继续扫描后续 forms
+  -> 回滚该 form 的 scanner state 提交，记录诊断并继续兄弟 forms
 
-Resolved macro execution/validation failure
-  -> 以原 call/form 作为临时恢复值，继续遍历兄弟节点
+Expansion failure
+  -> 不更新 ExpansionRecord，不提交 generation
 
-Syntactic macro attribute cannot execute
-  -> 当前扫描位置诊断一次并保留原 form
+Different environment + different expansion result
+  -> conflicting_local_macro_closure_environment
+
+Compile/load failure
+  -> 保留上一代 callable module 和 boundary 状态
 ```
 
-环境 state 的 `put/modify` 必须通过 do/bind 串联。所有 `astranaut_return` 结果通过 `astranaut:traverse_return/1` 进入 traverse；用户宏 computation 使用 `scoped_state/2`，不能修改框架扫描或函数遍历 state。
+用户宏 computation 继续在 scoped state 中运行；formatter、position、warning 和 error 使用外层诊断管线。
 
-## 6. Scan Normalization 与 Finalization
+## 12. 最终不变量
 
-队列清空后执行以下固定顺序：
+1. 所有宏环境都由同一个 `MacroRuntimeContext` builder 构造，差异仅来自源码时点和明确的 declaration group 排除。
+2. 一个 `-local_macro([...])` declaration 的全部 members 共享同一个 context，且成员之间不互为宏。
+3. 每次 function-form 展开都从 original/frozen form 开始。
+4. 相同 FormId、相同 fingerprint 直接复用；不同 fingerprint 必须比较展开结果。
+5. 同一 FormId 只有一个已确认的 canonical expanded form 可以进入 local module generation。
+6. GenerationCompiler 不读取 MacroRuntimeContext，也不执行按 request 环境展开。
+7. 编译仅由 `NeedCallable` 和最终 generation 需求驱动，不绑定某种 form 或扫描阶段。
+8. external/local attribute 调用使用相同 call-site runtime 规则。
+9. retain 与 Step 2 function 使用相同 FinalMacroRuntimeContext 和 ExpansionValidator。
+10. retained local macro 宏头同样参与最终环境结果比对。
+11. 编译、加载和 generation 提交原子化；失败保留上一代。
+12. source-ordered override、scan-and-splice、state 隔离及局部 `__original__` merge 规则保持不变。
 
-1. 删除已经成功注册并由 `scan_local_declarations` 记录的 `local_macro` declaration。失败或未注册的 form 不得被静默当作已注册项删除。
-2. 执行 `prepare_exports`，使 export/export_macro 的编译器 forms 就绪；`export_macro` 本身不把 FA 加入本模块 local 执行环境。
-3. 将规范化 forms、最终 external registry/context 与 local state 交给 local-macro finalize；每个 request 展开 frozen forms 时仍必须使用自身的 declaration-time `env_snapshot` 与 `inject_forms_snapshot`。
-4. finalize 执行完整最终 generation，返回：
-   - `FinalLocalEnv`；
-   - `FinalSkipIds`；
-   - 已按最终有效环境展开并验证的 retained forms；
-   - 最终 local state。
-5. 将 retained forms 物化回 forms 流，并记录这些 function 的 `PreparedFunctionIds`。
-6. 删除 `FinalSkipIds` 指定的 function/spec；同步清理由此变空的 `nowarn_unused_function` 项。
-7. 以最终可调用 FA 过滤 local registry，构造最终执行环境并进行一次冲突/一致性校验。
-8. 基于最终 forms 和 macro env 查找仍需展开的 function callers，排除 skip 与 prepared IDs。
-9. 只在此处调用一次 `sort_forms/1`。
+## 13. 后续实现任务优先级
 
-`PreparedFunctionIds` 是必要集合：retained function 已经在 finalize 中按最终 local 环境展开，若再次进入 function phase，会造成重复展开或改变深度语义。
+### P0：DeclarationGroup 与统一上下文
 
-## 7. `__original__` 与 Spec 的最终局部策略
+- 把同一个 `-local_macro([...])` 注册为共享 context 的 group。
+- group members 整体从 declaration MacroEnv 排除。
+- 提供 attribute/local/retain/function 共用的 `MacroRuntimeContext` builder。
 
-scan-and-splice 层继续给新生成的 function/spec 加内部 tag，但不得做全局 Generated/Base partition。
+### P1：拆分展开验证与编译
 
-当生成 function `F/A` 调用 `__original__/A` 且已存在 `F/A` 时：
+- 从 `execute_plan` 中移出 request-specific expansion。
+- 实现显式 `ExpansionRecord` 和 `expand_and_validate`。
+- GenerationCompiler 只消费 canonical expanded forms。
 
-1. 在全模块已有 `*/A` 名字中选择唯一原函数名，例如 `F_1/A`。
-2. 把被包装的原 `F/A` 重命名为新名字，并改写其必要的自调用。
-3. 把生成 wrapper 中的 `__original__/A` 改写为新名字。
-4. spec 采用明确归属规则：
-   - 原有 `-spec F(...)` 默认描述公开 wrapper，保留 `F/A`；
-   - 若系统需要为重命名后的原函数保留 spec，必须复制并改写为新名字，而不能只移动旧 spec；
-   - 生成的 `-spec F(...)` 与原 spec 冲突时，必须走显式去重/覆盖规则，不能留下重复 spec 交给最终排序偶然处理。
-5. 除参与该 `F/A` 合并的 function/spec 外，所有 forms 相对顺序不变。
+### P2：声明点预展开与通用 NeedCallable
 
-建议至少新增三类测试：原函数带 spec、wrapper 自带 spec、原/生成 spec 同时存在。
+- declaration 注册后尝试预展开。
+- 预展开、attribute、retain、Step 2 和 finalize 共用 dependency scheduler。
+- 用规范化 boundary cache 保证触发时点不制造额外编译。
 
-## 8. Function Phase
+### P3：统一最终 function 路径
 
-最终目标集合为：
-
-```text
-EligibleIds = DetectedMacroCallerIds
-              - FinalSkipFunctionIds
-              - PreparedFunctionIds
-```
-
-然后调用共享核心：
-
-```text
-expand_functions(FinalMacroEnv, AttributeForms, EligibleFAs)
-```
-
-共享核心只负责：
-
-- 使用统一 call matcher 找到宏调用；
-- 对目标 function 执行递归展开；
-- 保留 `outer` / `inner` / `max_depth`；
-- 处理宏返回校验、位置、变量与 formatter。
-
-它不负责：
-
-- local target 自身移除；
-- `internal_function` direct-call 集合；
-- declaration snapshot、generation、retain 或 skip；
-- forms 排序。
-
-local reference resolution 使用同一个 call matcher；每个 target 的 CandidateEnv 由 local-macro 工作流预先裁剪。
-
-## 9. 最终不变量与验收条件
-
-1. 环境更新按源码顺序立即生效，且只影响后续 forms。
-2. external/local 的不同来源不会绕过统一冲突与 `force_override` 规则。
-3. splice 结果保持局部顺序并立即重扫；旧结果永不回扫。
-4. attribute injection 只读取调用点 passed forms；local frozen forms injection 只读取 declaration 前 passed forms；local closure source view 才包含 current + remaining。
-5. attribute phase 不递归展开普通 function body。
-6. local declaration 的冻结/注册发生在声明点，生命周期计划只由 local-macro 模块解释。
-7. retained function 只展开一次；skip 和 prepared 项不进入最终 function pass。
-8. 用户宏 state 与框架 state 隔离，但诊断、位置与 formatter 继续传播。
-9. `__original__` 只触发局部整理，spec 归属有确定规则且有测试证明。
-10. attribute phase 末尾只排序一次，function phase 不排序。
-11. 无法执行的宏 attribute 只诊断一次；单个失败不妨碍兄弟诊断累计。
-12. 普通与 local function 共用展开器和调用匹配语义，共享核心不含 local 专属策略。
-
-## 10. 实现收敛优先级
-
-### P0：限制 local macro function-form 编译上下文
-
-保证 local frozen function 的全部宏展开上下文只来自 declaration 前 `passed_forms`。实现可把它分解为 `env_snapshot` 与 `inject_forms_snapshot`；`closure_source_view` 只用于闭包发现和累计模块结构物化。按需编译完成后，attribute 按 external/local 共用的运行期规则执行。
-
-必须覆盖以下测试：
-
-- declaration 前后存在同名目标 attribute，local forms 只注入前者；
-- declaration 后 `use_macro` 改 alias、调用参数或 `inject_attrs`，不影响 frozen local forms；
-- 后续 attribute 触发按需编译时，local function forms 仍只使用 declaration 前 passed forms，随后 attribute 使用通用运行期规则；
-- remaining queue 中 helper 可进入闭包，但其中尚未 pass 的 attributes 不进入注入。
-
-### P1：统一跨来源有效环境的顺序语义
-
-引入 `effective_macro_env` 或等价的有序更新机制；为以下顺序补测试：
-
-- external → local，无 force / local force；
-- local → external，无 force / external force；
-- 生成的 import/use 与 local declaration 交错；
-- 冲突发生后不得执行使用错误 winner 的后续属性宏。
-
-### P2：明确并验证 spec merge
-
-为 `map_forms_splice_reorder` 的 spec 行为建立契约与测试，再决定是否扩展重命名/复制逻辑。
-
-### P3：封装 local declaration 单次语义校验
-
-保持现有“坏声明不回滚先前注册、诊断不重复”的行为，同时让注册和 local map 构造共享同一份成功校验结果。
+- retain 与普通 function 都使用 `FinalMacroRuntimeContext`。
+- 删除 retain 宏头跳过比对的例外。
+- 将 `PreparedFunctionIds` 降级为调度优化，并用缓存命中保证语义正确。
