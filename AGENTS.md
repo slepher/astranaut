@@ -45,3 +45,18 @@ both `inet_gethost` and rebar3's junction helper normally.
 When running the full Common Test suite, give the command a real test timeout (at least 120 seconds; use longer when the environment is slow). Do not set a short command timeout merely to make the tool yield and then expect to wait on it: the command timeout terminates `rebar3` and aborts the CT run. If the tool returns a live process or cell identifier, keep the original long command timeout and use the corresponding wait operation for incremental output. Report a command-timeout termination as an interrupted run, not as a test failure.
 
 Outside Codex app sandbox mode, normal `rebar3` commands can be used directly if the local environment allows Erlang to execute `inet_gethost`.
+
+## Tool Call Completion
+
+If a normally short command such as `git add`, `git status`, or `git commit`
+returns a live process or cell identifier, call the corresponding wait
+operation immediately. Do not leave the task showing as active or assume the
+underlying command is genuinely slow; the command may already have completed
+while the tool result is waiting to be collected. If it still has not
+completed after the immediate wait, inspect the process or lock state instead
+of waiting silently.
+
+When the user asks only to commit existing changes, keep the task scoped to
+`git status`, staging, committing, and confirming the final status. Do not
+rerun tests or perform unrelated audits unless the user requests them or a
+newly discovered condition makes the commit unsafe.
