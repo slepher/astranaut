@@ -9,6 +9,7 @@
 all() -> [register_freezes_static_closure,
           duplicate_declaration_fails_atomically,
           cache_rejects_conflicting_environments,
+          cache_rejects_conflicting_whitelists,
           cache_reuses_environment_after_intervening_context,
           execute_plan_rejects_conflicting_snapshots,
           execute_plan_rejects_conflicting_inject_snapshots,
@@ -29,6 +30,11 @@ all() -> [register_freezes_static_closure,
           declaration_expansion_uses_reference_whitelist,
           final_local_macro_environment_uses_reference_whitelist,
           ordinary_final_function_sees_all_local_macros,
+          shared_expander_collects_recursive_replacement_whitelist,
+          shared_expander_rejects_unexpected_whitelist_immediately,
+          shared_expander_rejects_missing_whitelist_after_completion,
+          shared_expander_requests_uncallable_local_macro,
+          shared_expander_disables_whitelist_for_ordinary_function,
           declaration_preexpands_without_compiling,
           independent_declaration_does_not_compile,
           dependency_preexpansion_compiles_only_needed_boundary,
@@ -62,29 +68,45 @@ duplicate_declaration_fails_atomically(_Config) ->
 
 cache_rejects_conflicting_environments(_Config) ->
     State0 = astranaut_local_macro:new(),
-    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, helper_form(a), State0),
-    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_b, helper_form(a), State1),
+    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
+    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_b, [], helper_form(a), State1),
     ?assertEqual({error, {conflicting_local_macro_closure_environment, {function, helper, 0}}},
-                 astranaut_local_macro:cache_expanded({function, helper, 0}, env_c, helper_form(b), State1)),
+                 astranaut_local_macro:cache_expanded({function, helper, 0}, env_c, [], helper_form(b), State1)),
+    ok.
+
+cache_rejects_conflicting_whitelists(_Config) ->
+    FormId = {function, helper, 0},
+    Form = helper_form(a),
+    {ok, State1} = astranaut_local_macro:cache_expanded(
+                     FormId, env_a, [{a, 0}], Form,
+                     astranaut_local_macro:new()),
+    ?assertEqual(
+       {error,
+        {conflicting_local_macro_whitelist, FormId,
+         #{expected => [{a, 0}], observed => [{b, 0}],
+           unexpected => [{b, 0}], missing => [{a, 0}]}}},
+       astranaut_local_macro:cache_expanded(
+         FormId, env_b, [{b, 0}], Form, State1)),
     ok.
 
 cache_hits_same_fingerprint(_Config) ->
     State0 = astranaut_local_macro:new(),
-    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, helper_form(a), State0),
-    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, helper_form(a), State1),
+    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
+    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State1),
     ok.
 
 cache_reuses_environment_after_intervening_context(_Config) ->
     FormId = {function, helper, 0},
     Form = helper_form(a),
     {ok, State1} = astranaut_local_macro:cache_expanded(
-                     FormId, env_a, Form, astranaut_local_macro:new()),
+                     FormId, env_a, [], Form, astranaut_local_macro:new()),
     {ok, State2} = astranaut_local_macro:cache_expanded(
-                     FormId, env_b, Form, State1),
+                     FormId, env_b, [], Form, State1),
     {ok, State3} = astranaut_local_macro:cache_expanded(
-                     FormId, env_a, Form, State2),
+                     FormId, env_a, [], Form, State2),
     Record = maps:get(FormId, maps:get(expansion_records, State3)),
-    ?assertEqual(2, map_size(maps:get(results_by_env, Record))),
+    ?assertEqual(2, map_size(maps:get(results_by_input, Record))),
+    ?assertEqual([], maps:get(canonical_whitelist, Record)),
     ?assertEqual(Form, maps:get(canonical_result, Record)),
     ok.
 
@@ -98,16 +120,17 @@ execute_plan_rejects_conflicting_snapshots(_Config) ->
                  [{second, 0}], #{}, Source, #{snapshot => second}, S1),
     {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
     Expand =
-        fun(MacroEnv, _InjectForms, Forms, {helper, 0}) ->
+        fun(MacroEnv, _InjectForms, Forms, {helper, 0}, Control) ->
                 Value = case maps:is_key(snapshot, MacroEnv) of
                             true -> maps:get(snapshot, MacroEnv);
                             false -> none
                         end,
-                astranaut_return:return(
+                expansion_return(
                   astranaut_local_macro:materialize_forms(
-                    Forms, #{{function, helper, 0} => helper_form(Value)}));
-           (_MacroEnv, _InjectForms, Forms, _TargetFA) ->
-                astranaut_return:return(Forms)
+                    Forms, #{{function, helper, 0} => helper_form(Value)}),
+                  Control);
+           (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
+                expansion_return(Forms, Control)
         end,
     MacroOps = #{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
@@ -130,16 +153,17 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
                  MacroOps0, S1),
     {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
     Expand =
-        fun(_MacroEnv, InjectForms, Forms, {helper, 0}) ->
+        fun(_MacroEnv, InjectForms, Forms, {helper, 0}, Control) ->
                 Value = case InjectForms of
                             [early] -> early;
                             [late] -> late
                         end,
-                astranaut_return:return(
+                expansion_return(
                   astranaut_local_macro:materialize_forms(
-                    Forms, #{{function, helper, 0} => helper_form(Value)}));
-           (_MacroEnv, _InjectForms, Forms, _TargetFA) ->
-                astranaut_return:return(Forms)
+                    Forms, #{{function, helper, 0} => helper_form(Value)}),
+                  Control);
+           (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
+                expansion_return(Forms, Control)
         end,
     MacroOps = MacroOps0#{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
@@ -187,7 +211,7 @@ declaration_inject_snapshot_is_preserved(_Config) ->
     {ok, [Boundary]} = astranaut_local_macro:compile_plan({foo, 0}, State),
     [Request] = maps:get(requests, Boundary),
     ?assertEqual(
-       lists:sort([closure_ids, closure_fas,
+       lists:sort([closure_ids, closure_fas, candidate_local_macros,
                    referenced_local_macros, runtime_context_snapshot,
                    source_view, forms]),
        lists:sort(maps:keys(Request))),
@@ -321,23 +345,27 @@ same_declaration_members_remain_direct_in_final_context(_Config) ->
                     [{a, 0}, {b, 0}], #{}, Source,
                     runtime_context(#{}, []), MacroOps0,
                     astranaut_local_macro:new()),
+    Context = #{source_view => Source, compile_opts => []},
+    {just, PreparedState} = astranaut_return:run(
+                              astranaut_local_macro:prepare_declaration(
+                                [{a, 0}, {b, 0}], Context, MacroOps0, State)),
     FinalMacroMap =
         #{{a, 0} => #{macro_source => local_macro,
                        function => a, arity => 0},
           {b, 0} => #{macro_source => local_macro,
                        function => b, arity => 0}},
     Expand =
-        fun(MacroEnv, _InjectForms, Forms, {b, 0}) ->
+        fun(MacroEnv, _InjectForms, Forms, {b, 0}, Control) ->
                 ?assertNot(maps:is_key({a, 0}, MacroEnv)),
                 ?assertNot(maps:is_key({b, 0}, MacroEnv)),
-                astranaut_return:return(Forms)
+                expansion_return(Forms, Control)
         end,
     MacroOps = MacroOps0#{expand_function => Expand},
     {just, {_Forms, _State1}} = astranaut_return:run(
                                  astranaut_local_macro:expand_final_functions(
                                    Source, [{b, 0}],
                                    runtime_context(FinalMacroMap, []),
-                                   MacroOps, State)),
+                                   MacroOps, PreparedState)),
     ok.
 
 declaration_expansion_uses_reference_whitelist(_Config) ->
@@ -349,12 +377,12 @@ declaration_expansion_uses_reference_whitelist(_Config) ->
     {ok, S2} = register([{unused, 0}], #{}, Source, #{}, S1),
     {ok, State} = register([{b, 0}], #{}, Source, #{}, S2),
     Expand =
-        fun(MacroEnv, _InjectForms, Forms, {b, 0}) ->
+        fun(MacroEnv, _InjectForms, Forms, {b, 0}, Control) ->
                 ?assert(maps:is_key({a, 0}, MacroEnv)),
-                ?assertNot(maps:is_key({unused, 0}, MacroEnv)),
-                astranaut_return:return(Forms);
-           (_MacroEnv, _InjectForms, Forms, _TargetFA) ->
-                astranaut_return:return(Forms)
+                ?assert(maps:is_key({unused, 0}, MacroEnv)),
+                expansion_return(Forms, Control, [{a, 0}]);
+           (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
+                expansion_return(Forms, Control)
         end,
     MacroOps = (identity_macro_ops())#{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
@@ -369,18 +397,21 @@ final_local_macro_environment_uses_reference_whitelist(_Config) ->
                         astranaut_local_macro:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
     {ok, RegisteredState} = register([{c, 0}], #{}, Source, #{}, S2),
+    {ok, State0} = astranaut_local_macro:cache_expanded(
+                     {function, b, 0}, seeded, [{a, 0}],
+                     b_form_calls_a(), RegisteredState),
     State = astranaut_local_macro:commit_compiled(
-              [{a, 0}, {b, 0}, {c, 0}], #{}, RegisteredState),
+              [{a, 0}, {b, 0}, {c, 0}], #{}, State0),
     erlang:put(local_whitelist_expand_count, 0),
     Expand =
-        fun(MacroEnv, _InjectForms, Forms, {b, 0}) ->
+        fun(MacroEnv, _InjectForms, Forms, {b, 0}, Control) ->
                 ?assert(maps:is_key({a, 0}, MacroEnv)),
                 ?assertNot(maps:is_key({b, 0}, MacroEnv)),
                 ?assertNot(maps:is_key({c, 0}, MacroEnv)),
                 erlang:put(
                   local_whitelist_expand_count,
                   erlang:get(local_whitelist_expand_count) + 1),
-                astranaut_return:return(Forms)
+                expansion_return(Forms, Control, [{a, 0}])
         end,
     MacroOps = (identity_macro_ops())#{expand_function => Expand},
     FinalContext = runtime_context(
@@ -390,10 +421,16 @@ final_local_macro_environment_uses_reference_whitelist(_Config) ->
                                   Source, [{b, 0}], FinalContext,
                                   MacroOps, State)),
     State2 = astranaut_local_macro:commit_compiled([{c, 0}], #{}, State1),
-    {just, {_Forms2, _State3}} = astranaut_return:run(
+    {just, {_Forms2, State3}} = astranaut_return:run(
+                                 astranaut_local_macro:expand_final_functions(
+                                   Source, [{b, 0}], FinalContext,
+                                   MacroOps, State2)),
+    {just, {_Forms3, _State4}} = astranaut_return:run(
                                   astranaut_local_macro:expand_final_functions(
                                     Source, [{b, 0}], FinalContext,
-                                    MacroOps, State2)),
+                                    MacroOps, State3)),
+    %% The canonical whitelist is part of the final local environment, so
+    %% unrelated descriptors and generation changes never enter its key.
     ?assertEqual(1, erlang:erase(local_whitelist_expand_count)),
     ok.
 
@@ -403,18 +440,120 @@ ordinary_final_function_sees_all_local_macros(_Config) ->
                         astranaut_local_macro:new()),
     {ok, State} = register([{b, 0}], #{}, Source, #{}, S1),
     Expand =
-        fun(MacroEnv, _InjectForms, Forms, {unused, 0}) ->
+        fun(MacroEnv, _InjectForms, Forms, {unused, 0}, disabled) ->
                 ?assert(maps:is_key({a, 0}, MacroEnv)),
                 ?assert(maps:is_key({b, 0}, MacroEnv)),
-                astranaut_return:return(Forms)
+                expansion_return(Forms, disabled)
         end,
     MacroOps = (identity_macro_ops())#{expand_function => Expand},
-    {just, {_Forms, _State1}} = astranaut_return:run(
-                                 astranaut_local_macro:expand_final_functions(
-                                   Source, [{unused, 0}],
-                                   runtime_context(
-                                     local_macro_map([{a, 0}, {b, 0}]), []),
-                                   MacroOps, State)),
+    {just, {_Forms, State1}} = astranaut_return:run(
+                                astranaut_local_macro:expand_final_functions(
+                                  Source, [{unused, 0}],
+                                  runtime_context(
+                                    local_macro_map([{a, 0}, {b, 0}]), []),
+                                  MacroOps, State)),
+    ?assertEqual(maps:get(expansion_records, State),
+                 maps:get(expansion_records, State1)),
+    ok.
+
+shared_expander_collects_recursive_replacement_whitelist(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    Control = #{mode => collect, form_id => FormId},
+    reset_whitelist_macro_counts(),
+    {just, #{forms := Forms, local_macro_whitelist := Whitelist}} =
+        astranaut_return:run(
+          astranaut_macro:expand_function(
+            whitelist_macro_map(), [], [whitelist_target_form()],
+            {whitelist_target, 0}, Control)),
+    ?assertEqual([{whitelist_chain_a, 0}, {whitelist_chain_b, 0}],
+                 Whitelist),
+    ?assertMatch(
+       [{function, _, whitelist_target, 0,
+         [{clause, _, [], [], [{atom, _, whitelist_done}]}]}],
+       Forms),
+    ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
+    ok.
+
+shared_expander_rejects_unexpected_whitelist_immediately(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    Expected = [{whitelist_chain_a, 0}],
+    reset_whitelist_macro_counts(),
+    erlang:erase(whitelist_after_unexpected),
+    Error = astranaut_return:run_error(
+              astranaut_macro:expand_function(
+                whitelist_macro_map(), [],
+                [whitelist_immediate_target_form()],
+                {whitelist_target, 0},
+                #{mode => verify, form_id => FormId,
+                  expected => Expected})),
+    ?assertEqual(
+       [{1, astranaut_macro,
+         {conflicting_local_macro_whitelist, FormId,
+          #{expected => Expected,
+            observed => [{whitelist_chain_a, 0},
+                         {whitelist_chain_b, 0}],
+            unexpected => [{whitelist_chain_b, 0}],
+            missing => []}}},
+        {2, astranaut_macro,
+         {conflicting_local_macro_whitelist, FormId,
+          #{expected => Expected,
+            observed => [{whitelist_after, 0},
+                         {whitelist_chain_a, 0},
+                         {whitelist_chain_b, 0}],
+            unexpected => [{whitelist_after, 0},
+                           {whitelist_chain_b, 0}],
+            missing => []}}}],
+       maps:get(formatted_errors, astranaut_error:printable(Error))),
+    ?assertEqual(undefined, erlang:erase(whitelist_after_unexpected)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
+    %% Each unexpected match is rejected before its macro function runs.
+    ?assertEqual(undefined, erlang:erase(whitelist_chain_b_count)),
+    ok.
+
+shared_expander_rejects_missing_whitelist_after_completion(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    Expected = [{whitelist_chain_a, 0}, {whitelist_chain_b, 0},
+                {whitelist_chain_c, 0}],
+    Error = astranaut_return:run_error(
+              astranaut_macro:expand_function(
+                whitelist_macro_map(), [], [whitelist_target_form()],
+                {whitelist_target, 0},
+                #{mode => verify, form_id => FormId,
+                  expected => Expected})),
+    ?assertEqual(
+       [{conflicting_local_macro_whitelist, FormId,
+         #{expected => Expected,
+           observed => [{whitelist_chain_a, 0},
+                        {whitelist_chain_b, 0}],
+           unexpected => [], missing => [{whitelist_chain_c, 0}]}}],
+       astranaut_error:errors(Error)),
+    ok.
+
+shared_expander_requests_uncallable_local_macro(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    MacroMap0 = whitelist_macro_map(),
+    Macro = maps:get({whitelist_chain_a, 0}, MacroMap0),
+    MacroMap = maps:put(
+                 {whitelist_chain_a, 0},
+                 Macro#{local_macro_callable => false}, MacroMap0),
+    reset_whitelist_macro_counts(),
+    {just, #{local_macro_whitelist := [{whitelist_chain_a, 0}],
+             needed_local_macros := [{whitelist_chain_a, 0}]}} =
+        astranaut_return:run(
+          astranaut_macro:expand_function(
+            MacroMap, [], [whitelist_target_form()],
+            {whitelist_target, 0},
+            #{mode => collect, form_id => FormId})),
+    ?assertEqual(undefined, erlang:erase(whitelist_chain_a_count)),
+    ok.
+
+shared_expander_disables_whitelist_for_ordinary_function(_Config) ->
+    {just, #{forms := _Forms, local_macro_whitelist := disabled}} =
+        astranaut_return:run(
+          astranaut_macro:expand_function(
+            whitelist_macro_map(), [], [whitelist_target_form()],
+            {whitelist_target, 0}, disabled)),
     ok.
 
 declaration_preexpands_without_compiling(_Config) ->
@@ -499,7 +638,7 @@ compiler_reuses_canonical_forms(_Config) ->
                    astranaut_local_macro:prepare_declaration(
                      [{a, 0}], Context, MacroOps, S0)),
     NoExpandOps = MacroOps#{expand_function =>
-                               fun(_, _, _, _) -> error(unexpected_reexpand) end},
+                               fun(_, _, _, _, _) -> error(unexpected_reexpand) end},
     {ok, Plan} = astranaut_local_macro:compile_plan({a, 0}, S1),
     {just, S2} = astranaut_return:run(
                    astranaut_local_macro:execute_plan(
@@ -517,9 +656,9 @@ final_retained_helper_comparison(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
     {ok, S00} = astranaut_local_macro:cache_expanded(
-                  {function, foo, 0}, declaration_env, Foo, S0),
+                  {function, foo, 0}, declaration_env, [], Foo, S0),
     {ok, S01} = astranaut_local_macro:cache_expanded(
-                  {function, helper, 0}, declaration_env, Helper, S00),
+                  {function, helper, 0}, declaration_env, [], Helper, S00),
     S1 = astranaut_local_macro:commit_compiled(
            [{foo, 0}],
            #{{function, foo, 0} => Foo,
@@ -527,12 +666,13 @@ final_retained_helper_comparison(_Config) ->
     {_Env, _Skip, S2} = astranaut_local_macro:finalize([{helper, 0}], S1),
     HelperOps = (identity_macro_ops())#{
                   expand_function =>
-                      fun(_MacroEnv, _InjectForms, Forms0, {helper, 0}) ->
-                              astranaut_return:return(
+                      fun(_MacroEnv, _InjectForms, Forms0, {helper, 0},
+                          #{mode := verify} = Control) ->
+                              expansion_return(
                                 astranaut_local_macro:materialize_forms(
                                   Forms0,
                                   #{{function, helper, 0} =>
-                                        helper_form(changed)}))
+                                        helper_form(changed)}), Control)
                       end},
     HelperError = astranaut_return:run_error(
                     astranaut_local_macro:expand_final_functions(
@@ -545,11 +685,13 @@ final_retained_helper_comparison(_Config) ->
     {_Env2, _Skip2, S3} = astranaut_local_macro:finalize([{foo, 0}], S1),
     FooOps = (identity_macro_ops())#{
                expand_function =>
-                   fun(_MacroEnv, _InjectForms, Forms0, {foo, 0}) ->
-                           astranaut_return:return(
+                   fun(_MacroEnv, _InjectForms, Forms0, {foo, 0},
+                       #{mode := verify} = Control) ->
+                           expansion_return(
                              astranaut_local_macro:materialize_forms(
                                Forms0,
-                               #{{function, foo, 0} => foo_form(changed)}))
+                               #{{function, foo, 0} => foo_form(changed)}),
+                             Control)
                    end},
     FooError = astranaut_return:run_error(
                  astranaut_local_macro:expand_final_functions(
@@ -634,9 +776,78 @@ test_resolve_local_references(TargetEnvs, Forms) ->
 identity_macro_ops() ->
     #{resolve_local_references => fun test_resolve_local_references/2,
       expand_function =>
-          fun(_MacroEnv, _InjectForms, Forms, _TargetFA) ->
-                  astranaut_return:return(Forms)
+          fun(_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
+                  expansion_return(Forms, Control)
           end}.
+
+expansion_return(Forms, Control) ->
+    Observed = case Control of
+                   #{mode := verify, expected := Expected} -> Expected;
+                   _ -> ordsets:new()
+               end,
+    expansion_return(Forms, Control, Observed).
+
+expansion_return(Forms, disabled, _Observed) ->
+    astranaut_return:return(
+      #{forms => Forms,
+        local_macro_whitelist => disabled,
+        needed_local_macros => ordsets:new()});
+expansion_return(Forms, _Control, Observed) ->
+    astranaut_return:return(
+      #{forms => Forms,
+        local_macro_whitelist => ordsets:from_list(Observed),
+        needed_local_macros => ordsets:new()}).
+
+whitelist_macro_map() ->
+    maps:from_list(
+      [{{Function, 0}, whitelist_macro(Function)}
+       || Function <- [whitelist_chain_a, whitelist_chain_b,
+                       whitelist_after]]).
+
+whitelist_macro(Function) ->
+    #{macro_source => local_macro,
+      module => ?MODULE,
+      macro_module => whitelist_origin,
+      macro => Function,
+      function => Function,
+      arity => 0,
+      call_arity => 0,
+      max_depth => 100,
+      order => inner,
+      formatter => astranaut_macro,
+      file => [],
+      local_module => ?MODULE}.
+
+whitelist_target_form() ->
+    {function, 1, whitelist_target, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, whitelist_chain_a}, []}]}]}.
+
+whitelist_immediate_target_form() ->
+    {function, 1, whitelist_target, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, whitelist_chain_a}, []},
+        {call, 2, {atom, 2, whitelist_after}, []}]}]}.
+
+whitelist_chain_a() ->
+    increment_whitelist_macro_count(whitelist_chain_a_count),
+    {call, 1, {atom, 1, whitelist_chain_b}, []}.
+
+whitelist_chain_b() ->
+    increment_whitelist_macro_count(whitelist_chain_b_count),
+    {atom, 1, whitelist_done}.
+
+whitelist_after() ->
+    erlang:put(whitelist_after_unexpected, reached),
+    {atom, 2, should_not_be_reached}.
+
+reset_whitelist_macro_counts() ->
+    erlang:erase(whitelist_chain_a_count),
+    erlang:erase(whitelist_chain_b_count).
+
+increment_whitelist_macro_count(Key) ->
+    Count = case erlang:get(Key) of undefined -> 0; Value -> Value end,
+    erlang:put(Key, Count + 1).
 
 forms() ->
     [foo_form(), helper_form(ok), {attribute, 1, spec, {{helper, 0}, []}}].

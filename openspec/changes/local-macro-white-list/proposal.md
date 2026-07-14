@@ -4,7 +4,7 @@
 
 为 local-macro frozen function 的宏展开增加显式、可关闭的 local-macro 白名单控制。白名单只记录该 function 在自身展开及宏返回 AST 的递归处理过程中实际匹配的 local macro FA；普通 function forms 继续使用现有通用展开路径，不收集也不比较白名单。
 
-白名单处理复用宏返回值已有的 `process_macro_return` traversal。宏返回的 replacement AST 在完成规范化、位置和变量更新时同步参与后续宏匹配，不增加第二次完整 AST traverse。
+白名单处理接入既有的 macro 发现—执行点：`match_macro_call` 成功后、调用 macro 前同步观察 local FA。`process_macro_return` 仍只负责宏返回值的规范化、位置和变量更新；replacement AST 随后通过原有递归展开路径发现和执行 macro，不增加 whitelist 专用扫描。
 
 ## 动机
 
@@ -16,8 +16,10 @@
 
 - 为通用 function 展开入口增加显式 whitelist control 参数。
 - 仅在 `astranaut_local_macro` 发起的 frozen function 展开及其宏返回 AST 处理中启用。
-- 将 local macro 匹配观察接入 `process_macro_return` 已有 traversal，不新增扫描 pass。
+- 将 local macro 匹配观察接入统一的发现—执行路径，不让 `process_macro_return` 承担展开职责，也不新增 whitelist 扫描 pass。
 - 在 ExpansionRecord 中保存 canonical whitelist，并区分白名单冲突与展开结果冲突。
+- 将 canonical whitelist 作为 retained final local env 的能力过滤条件；名单外 local 调用保持普通调用。
+- replacement 首次发现尚未 callable 的候选 local macro 时，通过 `need_callable` 按需编译后重试 frozen form。
 - 保持普通 Step 2 function、普通 retained function 和一般 attribute macro 调用的 whitelist control 为 `disabled`。
 
 ## 非目标
@@ -26,4 +28,3 @@
 - 不用白名单替代不同运行环境下的最终 AST 一致性比较。
 - 不为白名单单独建立 declaration group、额外 forms 扫描器或 AST diff。
 - 不改变 GenerationCompiler、累计 boundary、safe load 或 retain 生命周期规则。
-

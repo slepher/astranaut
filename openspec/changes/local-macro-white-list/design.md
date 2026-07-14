@@ -16,7 +16,7 @@ LocalMacroWhitelistControl =
 
 - `disabled`：不分配白名单 accumulator，不观察 local macro match，不做完成检查。
 - `collect`：累计实际匹配的 local FAs，完整 function expansion 成功后返回 canonical whitelist。
-- `verify`：累计实际匹配的 local FAs；发现 `expected` 之外的 FA 时立即失败，完成后检查是否缺少 expected FA。
+- `verify`：累计实际匹配的 local FAs；declaration/非-final context 中发现 `expected` 之外的 FA 时立即记录冲突并跳过该 macro 调用，完成后检查是否缺少 expected FA。final retained 展开先用 `expected` 过滤 FinalEnv，因此名单外调用不匹配为 local macro。
 
 布尔参数不足以区分首次收集和后续校验，因此不采用 `check_whitelist => true | false`。
 
@@ -42,30 +42,29 @@ LocalMacroWhitelistControl =
 ExpandFunction(MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl)
   -> {
        forms := ExpandedForms,
-       local_macro_whitelist := disabled | ordsets:ordset(FA)
+       local_macro_whitelist := disabled | ordsets:ordset(FA),
+       needed_local_macros := ordsets:ordset(FA)
      }
   | Error
 ```
 
-普通 function 传 `disabled`，结果字段固定为 `disabled`。local-macro 工作流使用返回的 ordset 建立或校验 ExpansionRecord。不得通过回调、process dictionary 或另一份隐式 traverse state 把结果传回调用方。
+普通 function 传 `disabled`，白名单结果固定为 `disabled` 且 callable 请求为空。local-macro 工作流使用返回的 whitelist 建立或校验 ExpansionRecord，并消费 `needed_local_macros` 完成按需调度。不得通过回调、process dictionary 或另一份隐式 traverse state 把结果传回调用方。
 
-## 单 traversal 接入
+## 统一发现—执行接入
 
-`process_macro_return` 已经对宏返回 AST 执行结构规范化、位置和 quoted-variable 更新。local match 观察必须接入这次已有 traversal：
+白名单观察必须位于既有 macro 发现—执行路径，而不是 `process_macro_return`：
 
-```erlang
-Node1 <- process_macro_return(Node, Macro, Opts)
+```text
+match_macro_call
+  -> observe local FA
+  -> conflict: add error and skip invocation
+  -> uncallable: request dependency
+  -> callable: invoke macro
 ```
 
-其中 `Opts` 传播 `local_macro_whitelist` control。处理每个返回节点时：
+`process_macro_return` 保持单一职责，只执行结构规范化、位置和 quoted-variable 更新。它不匹配或调用 replacement 中的 macro。宏返回 AST 随后按原有 pre/post 递归展开路径进入 `transform_exprs`，并在真正发现、即将执行 macro 时继承相同 whitelist control 和 accumulator。
 
-1. 按现有 pre/post 规则调用统一 `match_macro_call`。
-2. 未匹配或匹配 external macro：白名单不变。
-3. 匹配 `macro_source := local_macro`：在调用宏之前观察其 `{Function, Arity}`。
-4. 宏返回的 replacement AST 继续通过其自身 `process_macro_return` 处理，并继承同一个 control/accumulator。
-5. replacement 完成后恢复原 traversal continuation，不重扫父节点、已处理 siblings 或完整 function forms。
-
-原始 frozen function 的首次 traversal 和宏返回 AST 的后续处理必须使用同一个观察规则。不得在 `process_macro_return` 返回后再次调用 `transform_exprs(Node1)` 只为扫描白名单。
+因此原始 frozen function 和所有 replacement AST 共用同一个观察规则；不得为了 whitelist 增加独立 scanner、完整 function 重扫或 expanded/original AST diff。原有 macro expansion 对 replacement AST 的递归处理不属于 whitelist 扫描。
 
 宏私有 State 继续由 `scoped_state` 隔离；白名单 accumulator 属于框架 expansion state，不能暴露给用户宏 computation。
 
@@ -81,7 +80,13 @@ ObservedLocalFAs
   = 本次完整递归展开中实际匹配的 CandidateLocalEnv 子集
 ```
 
-local-macro 工作流负责为 declaration 和后续 final 处理构造相同能力边界的 CandidateLocalEnv；通用展开器只观察实际匹配，不解释 declaration order、self、retain 或 generation。
+whitelist 是 local-macro 环境的组成部分，不是 FinalEnv 之外的事后结果过滤器。local-macro 工作流按阶段构造能力边界：
+
+- declaration `collect` 使用冻结的 CandidateLocalEnv；
+- declaration/非-final `verify` 使用当前 CandidateLocalEnv，并由观察器在调用前拒绝 whitelist 外匹配；
+- final retained `verify` 使用 `FinalEnv + canonical whitelist` 构造有效 local env，名单外 local entries 不参与匹配，其调用保持普通 Erlang 调用。
+
+通用展开器只观察传入环境中的实际匹配，不解释 declaration order、self、retain 或 generation。
 
 普通 function 在 `disabled` 模式使用完整 FinalMacroEnv，不受 CandidateLocalEnv/ObservedLocalFAs 约束。
 
@@ -108,7 +113,9 @@ CanonicalWhitelist(FormId) = ObservedLocalFAs
     -> conflicting_local_macro_whitelist
 ```
 
-缺失项不能在 traversal 中途报告，因为后续 replacement AST 仍可能生成对应调用。白名单只单调增长，因此多出的 FA 可以立即报告。
+缺失项不能在 traversal 中途报告，因为后续 replacement AST 仍可能生成对应调用。白名单只单调增长，因此每个多出的 FA 可以在匹配点立即报告并跳过调用；遍历可继续收集其他独立冲突，不需要额外的全局 conflict state。
+
+上述 unexpected 检测适用于非-final verify。final retained 的有效环境已经按 canonical whitelist 过滤，名单外 FA 不会成为 local macro match，因此不会产生 unexpected 错误。
 
 错误应携带：
 
@@ -146,6 +153,12 @@ InputFingerprint 继续覆盖当前展开可观察的 external macro map、候�
 
 白名单外 local generation 不得进入该 local-macro function 的有效 fingerprint。普通 function 为 `disabled`，继续使用现有普通 function fingerprint/展开规则。
 
+final retained 已有 canonical whitelist 时，fingerprint 使用过滤后的有效 MacroEnv；名单外 local descriptor 与 generation 都不进入该 form 的 final input key。
+
+## 动态 callable 调度
+
+`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配到尚未 callable 的候选 local macro。该情况不是 whitelist 冲突。通用展开器返回 `needed_local_macros` 调度请求，不调用该宏，也不提交本次部分 expansion；`astranaut_local_macro` 通过 `need_callable` 编译所需累计 boundary，然后从 frozen form 重新展开。这样保留按真实匹配驱动的最小编译策略，无需预编译全部 candidates。
+
 ## 循环与错误传播
 
 白名单观察不建立新的递归驱动器。现有 macro depth、origin/current macro、异常恢复、warning/formatter 和结构验证继续由同一 traversal/monad 管线处理。
@@ -155,4 +168,3 @@ InputFingerprint 继续覆盖当前展开可观察的 external macro map、候�
 ## 复杂度约束
 
 本变更允许增加一个显式 control、一个 expansion accumulator 和 ExpansionRecord 中的一份 canonical whitelist。不得同时保留 final order/self/member 排除链作为第二套正确性机制；白名单上线后应删除已失去职责依据的排除与 owner-union 路径。
-

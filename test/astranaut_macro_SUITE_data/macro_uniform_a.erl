@@ -9,7 +9,8 @@
 -export([format_error/1]).
 
 -export_macro([to_a/1, gen_b/1, gen_b_to_a/1, direct_b/1, recurse_a/1,
-               fail_after_b/1, gen_invalid/1, invalid_return/1]).
+               fail_after_b/1, gen_invalid/1, invalid_return/1,
+               emit_local_call/1]).
 -export_macro({[outer_capture/1], [{order, outer}]}).
 
 to_a(Ast) ->
@@ -26,6 +27,11 @@ gen_invalid(Ast) ->
 
 invalid_return(_Ast) ->
     {not_ast}.
+
+emit_local_call(Name) when is_atom(Name) ->
+    {call, 0, {atom, 0, Name}, []};
+emit_local_call({atom, Pos, Name}) ->
+    {call, Pos, {atom, Pos, Name}, []}.
 
 direct_b(Ast) ->
     B = macro_uniform_b:to_b(Ast),

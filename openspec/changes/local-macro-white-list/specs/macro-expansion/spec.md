@@ -28,36 +28,55 @@
 - **那么** 调用方传入 `verify(Expected)`
 - **并且** retained local-macro head 与 frozen helper 使用相同校验规则
 
-### Requirement: 宏返回 AST 在既有 traversal 中继续观察
+#### Scenario: final retained 环境按 canonical whitelist 过滤
 
-启用白名单时，系统 MUST 在原始 function 和所有递归宏返回 AST 中观察实际匹配的 local macro FA。宏返回 AST 的观察 MUST 接入 `process_macro_return` 已有 traversal；系统 MUST NOT 为白名单重新 traverse 完整 function forms 或对 expanded/original forms 做 AST diff。
+- **给定** retained frozen FormId 已有 canonical whitelist
+- **并且** FinalEnv 包含其他同声明或后声明 local macros
+- **当** 系统构造该 FormId 的 final expansion env
+- **那么** 只有 canonical whitelist 中的 local entries 进入有效 MacroEnv
+- **并且** 名单外调用保持普通 Erlang 调用，不产生 unexpected whitelist 错误
+
+### Requirement: 宏返回 AST 在统一发现—执行点观察
+
+启用白名单时，系统 MUST 在原始 function 和所有递归宏返回 AST 中观察实际匹配的 local macro FA。观察 MUST 位于 `match_macro_call` 成功后、macro 调用前的统一路径。`process_macro_return` MUST 只负责返回 AST 的规范化、位置和变量更新，不负责 macro 匹配或展开。系统 MUST NOT 为白名单重新 traverse 完整 function forms 或对 expanded/original forms 做 AST diff。
 
 #### Scenario: 宏返回值生成新的 local macro 调用
 
 - **给定** local frozen function 首先调用 external macro A
 - **并且** A 的 replacement AST 包含 local macro B 调用
-- **当** `process_macro_return` 处理 A 的返回 AST
-- **那么** B 在同一 continuation 中被匹配和展开
-- **并且** B 进入当前 FormId 的 observed whitelist
+- **当** A 的返回 AST 通过原有递归展开路径发现 B
+- **那么** B 在统一发现—执行点、调用前进入当前 FormId 的 observed whitelist
+- **并且** B 随后由同一发现—执行路径展开
 - **并且** original function 的其他节点和已处理 siblings 不被重扫
 
 #### Scenario: 多层 replacement 继承同一控制参数
 
 - **给定** A 的 replacement 调用 B，B 的 replacement 又调用 C
 - **当** local frozen function 以 `collect` 或 `verify` 展开
-- **那么** A、B、C 的所有 replacement 处理继承同一 whitelist control 和 accumulator
-- **并且** 不启动独立 whitelist scan pass
+- **那么** A、B、C 的发现—执行路径继承同一 whitelist control 和 accumulator
+- **并且** `process_macro_return` 不执行 B 或 C，也不启动独立 whitelist scan pass
+
+#### Scenario: replacement 首次发现尚未 callable 的 local macro
+
+- **给定** external macro replacement 首次生成候选 local macro B 调用
+- **并且** B 尚未进入 callable generation
+- **当** 展开器匹配到 B
+- **那么** 展开器返回 B 的 callable 调度请求且不调用 B
+- **并且** local-macro workflow 通过 `need_callable` 编译所需 boundary
+- **并且** 系统从 frozen form 重试并在成功后才提交 whitelist 与 expanded form
 
 ### Requirement: 白名单不匹配必须独立报告
 
-首次成功的 `collect` 结果 MUST 成为该 FormId 的 canonical whitelist。后续 `verify` MUST 在观察到 expected 之外的 local FA 时立即失败，并在完整 function expansion 结束后检查缺失 FA。
+首次成功的 `collect` 结果 MUST 成为该 FormId 的 canonical whitelist。后续 `verify` MUST 在观察到 expected 之外的 local FA 时立即记录错误并跳过该 macro 调用，并在完整 function expansion 结束后检查缺失 FA。
 
 #### Scenario: 多出 FA 时提前失败
 
 - **给定** canonical whitelist 是 `[a/1]`
 - **当** 后续 traversal 实际匹配到 `b/1`
-- **那么** 系统立即报告 `conflicting_local_macro_whitelist`
+- **那么** 系统立即报告 `conflicting_local_macro_whitelist` 并且不调用 `b/1`
+- **并且** traversal 可以继续报告后续独立冲突，无需维护全局 conflict state
 - **并且** 不要求先展开完整 function forms
+- **并且** 本场景适用于 declaration/非-final verify；final retained 已先过滤环境
 
 #### Scenario: 缺失 FA 只在完成后失败
 

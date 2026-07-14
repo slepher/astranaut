@@ -13,7 +13,7 @@
 -export([new/0, register/6, prepare_declaration/4,
          need_callable/4,
          compile_plan/2,
-         cache_expanded/4, commit_compiled/3, finalize/2,
+         cache_expanded/5, commit_compiled/3, finalize/2,
          finalize/4,
          frozen_ids/1, local_macros/1,
          retained_form_ids/1, expand_final_functions/5,
@@ -27,17 +27,28 @@
 -type macro_runtime_context() :: #{macro_map := map(),
                                    macro_options := map(),
                                    inject_forms := [term()]}.
+-type local_macro_whitelist_control() ::
+        astranaut_macro:local_macro_whitelist_control().
+-type function_expansion() :: astranaut_macro:function_expansion().
+-type expansion_record() ::
+        #{canonical_whitelist := disabled | ordsets:ordset(fa()),
+          canonical_result := term(),
+          results_by_input :=
+              #{term() => #{whitelist := disabled | ordsets:ordset(fa()),
+                            result := term()}}}.
 -type workflow_context() :: #{source_view := [term()],
                               compile_opts := [compile:option()]}.
 -type macro_ops() ::
         #{resolve_local_references :=
               fun(([{fa(), map()}], [term()]) -> ordsets:ordset(fa())),
           expand_function :=
-              fun((map(), [term()], [term()], fa()) ->
-                      astranaut_return:struct([term()]))}.
+              fun((map(), [term()], [term()], fa(),
+                   local_macro_whitelist_control()) ->
+                      astranaut_return:struct(function_expansion()))}.
 -type expansion_request() ::
         #{closure_ids := ordsets:ordset(form_id()),
           closure_fas := ordsets:ordset(fa()),
+          candidate_local_macros := ordsets:ordset(fa()),
           referenced_local_macros := ordsets:ordset(fa()),
           runtime_context_snapshot := macro_runtime_context(),
           source_view := [term()],
@@ -45,7 +56,9 @@
 -type compilation_boundary() ::
         #{members := [fa()],
           requests := [expansion_request()]}.
--type state() :: map().
+-type state() ::
+        #{expansion_records := #{form_id() => expansion_record()},
+          atom() => term()}.
 
 -spec new() -> state().
 new() ->
@@ -69,23 +82,15 @@ register(FAs, Options, SourceView,
   when is_list(FAs), is_map(Options), is_map(MacroOps) ->
     Resolve = maps:get(resolve_local_references, MacroOps),
     CandidateLocalMap = local_macro_entries(MacroMap),
-    ResolveReferences =
-        fun(Closure) ->
-                Direct = internal_direct(Options, Closure),
-                DeclarationEnv = remove_local_fas(CandidateLocalMap, Direct),
-                TargetEnvs =
-                    [{TargetFA, DeclarationEnv}
-                     || TargetFA <- Closure],
-                Resolve(TargetEnvs, SourceView)
-        end,
     do_register(FAs, Options, SourceView, RuntimeContext,
-                ResolveReferences, State).
+                CandidateLocalMap, Resolve, State).
 
 -spec do_register([fa()], map(), [term()], macro_runtime_context(),
-                  fun(([fa()]) -> [fa()]), state()) ->
+                  map(), fun(([{fa(), map()}], [term()]) -> [fa()]),
+                  state()) ->
           {ok, state()} | {error, term()}.
 do_register(FAs, Options, SourceView, RuntimeContext,
-            ResolveReferences, State) ->
+            CandidateLocalMap, Resolve, State) ->
     Macros = maps:get(local_macros, State),
     case duplicate_or_existing(FAs, Macros) of
         none ->
@@ -100,12 +105,26 @@ do_register(FAs, Options, SourceView, RuntimeContext,
                             NewMacros = lists:foldl(
                                           fun(FA, Acc) ->
                                                   Closure = maps:get(FA, Closures),
-                                                  Refs = ResolveReferences(Closure),
+                                                  Direct = internal_direct(
+                                                             Options, Closure),
+                                                  CandidateEnv = remove_local_fas(
+                                                                   CandidateLocalMap,
+                                                                   Direct),
+                                                  CandidateFAs = local_macro_fas(
+                                                                   CandidateEnv),
+                                                  TargetEnvs =
+                                                      [{TargetFA, CandidateEnv}
+                                                       || TargetFA <- Closure],
+                                                  Refs = Resolve(
+                                                           TargetEnvs,
+                                                           SourceView),
                                                   maps:put(FA, #{order => Order,
                                                                  runtime_context_snapshot =>
                                                                      RuntimeContext,
                                                                  closure_ids => closure_ids(Closure, FormMap),
                                                                  closure_fas => Closure,
+                                                                 candidate_local_macros =>
+                                                                     CandidateFAs,
                                                                  referenced_local_macros => Refs,
                                                                  source_view => SourceView,
                                                                  options => Options,
@@ -177,7 +196,8 @@ prepare_declaration(FAs, WorkflowContext, MacroOps, State) ->
                                  Dependency, WorkflowContext, MacroOps, StateAcc)
                        end, State, Dependencies),
            Requests = requests_for_fas(FAs, State1),
-           State2 <- prepare_requests(Requests, MacroOps, State1),
+           State2 <- prepare_requests(
+                       Requests, WorkflowContext, MacroOps, State1),
            return(State2)
        ]).
 
@@ -208,35 +228,66 @@ compile_plan(Needed, #{local_macros := Macros} = State) ->
 -spec finalize_plan(state()) -> {ok, [compilation_boundary()]}.
 finalize_plan(State) -> compile_plan(all, State).
 
--spec cache_expanded(form_id(), term(), term(), state()) -> {ok, state()} | {error, term()}.
-cache_expanded(FormId, Fingerprint, ExpandedForm, State) ->
+-spec cache_expanded(form_id(), term(), disabled | ordsets:ordset(fa()),
+                     term(), state()) -> {ok, state()} | {error, term()}.
+cache_expanded(FormId, Fingerprint, Whitelist, ExpandedForm, State) ->
     Records = maps:get(expansion_records, State, #{}),
     Canonical = maps:get(canonical_expanded_forms, State, #{}),
-    case maps:find(FormId, Records) of
-        {ok, #{last_result := LastResult}} when LastResult =/= ExpandedForm ->
+    Record0 = maps:get(FormId, Records, #{}),
+    CanonicalWhitelist = maps:get(canonical_whitelist, Record0, Whitelist),
+    CanonicalResult = maps:get(canonical_result, Record0, ExpandedForm),
+    case whitelist_matches(CanonicalWhitelist, Whitelist) of
+        false ->
+            {error, whitelist_conflict(
+                      FormId, CanonicalWhitelist, Whitelist)};
+        true when CanonicalResult =/= ExpandedForm ->
             {error, {conflicting_local_macro_closure_environment, FormId}};
-        _ ->
-            Record0 = maps:get(FormId, Records, #{}),
-            Results0 = maps:get(results_by_env, Record0, #{}),
+        true ->
+            Results0 = maps:get(results_by_input, Record0, #{}),
+            Result = #{whitelist => Whitelist, result => ExpandedForm},
             case maps:find(Fingerprint, Results0) of
-                {ok, Existing} when Existing =/= ExpandedForm ->
-                    {error, {conflicting_local_macro_closure_environment, FormId}};
+                {ok, Existing} when Existing =/= Result ->
+                    cache_input_conflict(
+                      FormId, CanonicalWhitelist, Existing, Result);
                 _ ->
-                    Record = #{last_env_fingerprint => Fingerprint,
-                               last_result => ExpandedForm,
-                               canonical_result => maps:get(FormId, Canonical, ExpandedForm),
-                               results_by_env => maps:put(Fingerprint, ExpandedForm, Results0)},
-                    {ok, State#{expansion_records => maps:put(FormId, Record, Records),
+                    Record = #{canonical_whitelist => CanonicalWhitelist,
+                               canonical_result => CanonicalResult,
+                               results_by_input =>
+                                   maps:put(Fingerprint, Result, Results0)},
+                    {ok, State#{expansion_records =>
+                                   maps:put(FormId, Record, Records),
                                canonical_expanded_forms =>
-                                   maps:put(FormId, ExpandedForm, Canonical)}}
+                                   maps:put(FormId, CanonicalResult,
+                                            Canonical)}}
             end
     end.
 
--spec expanded_form(form_id(), term(), state()) -> {ok, term()} | error.
+whitelist_matches(disabled, disabled) -> true;
+whitelist_matches(Expected, Observed) -> Expected =:= Observed.
+
+cache_input_conflict(FormId, CanonicalWhitelist,
+                     #{whitelist := ExistingWhitelist},
+                     #{whitelist := Whitelist})
+  when ExistingWhitelist =/= Whitelist ->
+    {error, whitelist_conflict(
+              FormId, CanonicalWhitelist, Whitelist)};
+cache_input_conflict(FormId, _CanonicalWhitelist, _Existing, _Result) ->
+    {error, {conflicting_local_macro_closure_environment, FormId}}.
+
+whitelist_conflict(FormId, Expected, Observed) ->
+    {conflicting_local_macro_whitelist, FormId,
+     #{expected => Expected,
+       observed => Observed,
+       unexpected => ordsets:subtract(Observed, Expected),
+       missing => ordsets:subtract(Expected, Observed)}}.
+
+-spec expanded_form(form_id(), term(), state()) ->
+          {ok, #{whitelist := disabled | ordsets:ordset(fa()),
+                 result := term()}} | error.
 expanded_form(FormId, Fingerprint, State) ->
     case maps:find(FormId, maps:get(expansion_records, State, #{})) of
         {ok, Record} ->
-            maps:find(Fingerprint, maps:get(results_by_env, Record, #{}));
+            maps:find(Fingerprint, maps:get(results_by_input, Record, #{}));
         error ->
             error
     end.
@@ -309,9 +360,9 @@ local_macros(State) -> maps:get(local_macros, State).
 retained_form_ids(State) ->
     maps:get(retained_form_ids, State, ordsets:new()).
 
-%% Retain and ordinary Step-2 functions share this exact final-context path.
-%% Existing local expansion records are validated; unrelated functions simply
-%% establish their first (final) canonical result.
+%% Retain and ordinary Step-2 functions share this final-context path. Frozen
+%% functions verify their local expansion records; ordinary functions use the
+%% same expander with whitelist control disabled and do not touch those records.
 -spec expand_final_functions([term()], [fa()], macro_runtime_context(),
                              macro_ops(), state()) ->
           astranaut_return:struct({[term()], state()}).
@@ -343,14 +394,19 @@ expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
                       #{macro_map := MacroMap} = RuntimeContext,
                       MacroOps, State) ->
     RuntimeInjectForms = maps:get(inject_forms, RuntimeContext),
-    EffectiveMacroMap = apply_local_macro_whitelist(
-                          TargetFA, MacroMap, State),
-    LocalVersions = local_versions(local_macro_fas(EffectiveMacroMap), State),
+    WhitelistControl = final_whitelist_control(FormId, State),
+    AllowedLocalFAs = final_allowed_local_fas(
+                        WhitelistControl, local_macro_fas(MacroMap)),
+    EffectiveMacroMap = keep_allowed_local_fas(MacroMap, AllowedLocalFAs),
+    FingerprintLocalFAs = fingerprint_local_fas(
+                            WhitelistControl, AllowedLocalFAs),
+    LocalVersions = local_versions(FingerprintLocalFAs, State),
     Fingerprint = env_fingerprint(
                     EffectiveMacroMap, LocalVersions,
                     maps:get(macro_options, RuntimeContext),
                     RuntimeInjectForms),
-    case expanded_form(FormId, Fingerprint, State) of
+    case cached_final_expansion(
+           FormId, Fingerprint, WhitelistControl, State) of
         {ok, ExpandedForm} ->
             astranaut_return:return({ExpandedForm, State});
         error ->
@@ -358,40 +414,50 @@ expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
             ExpansionSource = materialize_forms(
                                 SourceForms, #{FormId => OriginalForm}),
             do([ return ||
-                   ExpandedSource <- Expand(
-                                       EffectiveMacroMap, RuntimeInjectForms,
-                                       ExpansionSource, TargetFA),
+                   #{forms := ExpandedSource,
+                     local_macro_whitelist := Whitelist} <-
+                       Expand(EffectiveMacroMap, RuntimeInjectForms,
+                              ExpansionSource, TargetFA,
+                              WhitelistControl),
                    ExpandedMap = forms_id_map(ExpandedSource),
                    ExpandedForm = maps:get(FormId, ExpandedMap, OriginalForm),
-                   cache_form_result(
-                     FormId, Fingerprint, ExpandedForm, State)
+                   cache_final_expansion(
+                     FormId, Fingerprint, Whitelist, ExpandedForm,
+                     WhitelistControl, State)
                ])
     end.
 
--spec apply_local_macro_whitelist(fa(), map(), state()) -> map().
-apply_local_macro_whitelist(TargetFA, MacroMap, State) ->
-    Macros = maps:get(local_macros, State),
-    ClosureEntries = case maps:find(TargetFA, Macros) of
-                         {ok, TargetEntry} ->
-                             [TargetEntry];
-                         error ->
-                             [Entry || Entry <- maps:values(Macros),
-                                       ordsets:is_element(
-                                         TargetFA,
-                                         maps:get(closure_fas, Entry))]
-                     end,
-    case ClosureEntries of
-        [] ->
-            MacroMap;
-        _ ->
-            Allowed = lists:foldl(
-                        fun(Entry, Acc) ->
-                                ordsets:union(
-                                  maps:get(referenced_local_macros, Entry),
-                                  Acc)
-                        end, ordsets:new(), ClosureEntries),
-            keep_allowed_local_fas(MacroMap, Allowed)
+final_whitelist_control(FormId, State) ->
+    case maps:is_key(FormId, maps:get(frozen_forms, State)) of
+        false -> disabled;
+        true -> whitelist_control(FormId, State)
     end.
+
+final_allowed_local_fas(#{mode := verify, expected := Expected}, _Candidates) ->
+    Expected;
+final_allowed_local_fas(_Control, Candidates) ->
+    Candidates.
+
+fingerprint_local_fas(#{mode := verify, expected := Expected}, _Candidates) ->
+    Expected;
+fingerprint_local_fas(_Control, Candidates) ->
+    Candidates.
+
+cached_final_expansion(_FormId, _Fingerprint, disabled, _State) ->
+    error;
+cached_final_expansion(FormId, Fingerprint, _Control, State) ->
+    case expanded_form(FormId, Fingerprint, State) of
+        {ok, #{result := ExpandedForm}} -> {ok, ExpandedForm};
+        error -> error
+    end.
+
+cache_final_expansion(_FormId, _Fingerprint, disabled, ExpandedForm,
+                      disabled, State) ->
+    astranaut_return:return({ExpandedForm, State});
+cache_final_expansion(FormId, Fingerprint, Whitelist, ExpandedForm,
+                      _Control, State) ->
+    cache_form_result(
+      FormId, Fingerprint, Whitelist, ExpandedForm, State).
 
 %% The declaration source view is deliberately a two-part concatenation.  A
 %% generated form becomes visible only after it has entered Queue; no future
@@ -449,7 +515,7 @@ execute_plan([Boundary | Rest], WorkflowContext, MacroOps, State) ->
             do([ return ||
                    PreparedState <- prepare_requests(
                                       maps:get(requests, Boundary),
-                                      MacroOps, State),
+                                      WorkflowContext, MacroOps, State),
                    State1 <- compile_boundary(
                                Boundary, WorkflowContext, PreparedState),
                    execute_plan(Rest, WorkflowContext, MacroOps, State1)
@@ -522,82 +588,148 @@ boundary_source_view([], WorkflowContext) ->
 boundary_source_view(Requests, _WorkflowContext) ->
     maps:get(source_view, lists:last(Requests)).
 
--spec prepare_requests([expansion_request()], macro_ops(), state()) ->
+-spec prepare_requests([expansion_request()], workflow_context(), macro_ops(),
+                       state()) ->
           astranaut_return:struct(state()).
-prepare_requests(Requests, MacroOps, State) ->
+prepare_requests(Requests, WorkflowContext, MacroOps, State) ->
     astranaut_return:foldl_m(
       fun(Request, StateAcc) ->
-              prepare_request(Request, MacroOps, StateAcc)
+              prepare_request(Request, WorkflowContext, MacroOps, StateAcc)
       end, State, Requests).
 
--spec prepare_request(expansion_request(), macro_ops(), state()) ->
+-spec prepare_request(expansion_request(), workflow_context(), macro_ops(),
+                      state()) ->
           astranaut_return:struct(state()).
-prepare_request(#{forms := FrozenForms} = Request, MacroOps, State) ->
+prepare_request(#{forms := FrozenForms} = Request, WorkflowContext,
+                MacroOps, State) ->
     astranaut_return:foldl_m(
       fun(FormId, StateAcc) ->
               do([ return ||
                      {_ExpandedForm, State1} <-
                          prepare_request_form(
-                           FormId, Request, MacroOps, StateAcc),
+                           FormId, Request, WorkflowContext,
+                           MacroOps, StateAcc),
                      return(State1)
                  ])
       end, State, maps:keys(FrozenForms)).
 
--spec prepare_request_form(form_id(), expansion_request(), macro_ops(), state()) ->
+-spec prepare_request_form(form_id(), expansion_request(), workflow_context(),
+                           macro_ops(), state()) ->
           astranaut_return:struct({term(), state()}).
 prepare_request_form(
   FormId,
-  #{referenced_local_macros := Referenced,
+  #{candidate_local_macros := Candidates,
     runtime_context_snapshot :=
         #{macro_map := SnapshotMacroMap,
           macro_options := MacroOptions,
           inject_forms := InjectFormsSnapshot}} = Request,
-  MacroOps, State) ->
+  WorkflowContext, MacroOps, State) ->
     TargetFA = form_fa(FormId),
-    LocalVersions = local_versions(Referenced, State),
-    EffectiveMacroMap = keep_allowed_local_fas(
-                          SnapshotMacroMap, Referenced),
+    WhitelistControl = request_whitelist_control(FormId, State),
+    LocalVersions = local_versions(
+                      fingerprint_local_fas(
+                        WhitelistControl, Candidates), State),
+    EffectiveMacroMap0 = keep_allowed_local_fas(
+                           SnapshotMacroMap, Candidates),
+    EffectiveMacroMap = mark_local_macro_callable(
+                          EffectiveMacroMap0, State),
     Fingerprint = env_fingerprint(
-                    EffectiveMacroMap, LocalVersions, MacroOptions,
+                    EffectiveMacroMap0, LocalVersions, MacroOptions,
                     InjectFormsSnapshot),
     case expanded_form(FormId, Fingerprint, State) of
-        {ok, Form} ->
+        {ok, #{result := Form}} ->
             astranaut_return:return({Form, State});
         error ->
             expand_and_cache_form(
               FormId, TargetFA, EffectiveMacroMap, Fingerprint,
-              Request, MacroOps, State)
+              WhitelistControl, Request, WorkflowContext,
+              MacroOps, State)
+    end.
+
+request_whitelist_control({spec, _Name, _Arity}, _State) ->
+    disabled;
+request_whitelist_control(FormId, State) ->
+    whitelist_control(FormId, State).
+
+whitelist_control(FormId, State) ->
+    case maps:find(FormId, maps:get(expansion_records, State, #{})) of
+        {ok, #{canonical_whitelist := Expected}} when Expected =/= disabled ->
+            #{mode => verify, form_id => FormId, expected => Expected};
+        _ ->
+            #{mode => collect, form_id => FormId}
     end.
 
 -spec expand_and_cache_form(form_id(), fa(), map(), binary(),
-                            expansion_request(), macro_ops(), state()) ->
+                             local_macro_whitelist_control(),
+                             expansion_request(), workflow_context(),
+                             macro_ops(), state()) ->
           astranaut_return:struct({term(), state()}).
 expand_and_cache_form(FormId, TargetFA, EffectiveMacroMap, Fingerprint,
+                      WhitelistControl,
                       #{forms := FrozenForms, source_view := SourceView,
                         runtime_context_snapshot :=
-                            #{inject_forms := InjectFormsSnapshot}} = _Request,
-                      MacroOps, State) ->
+                            #{inject_forms := InjectFormsSnapshot}} = Request,
+                      WorkflowContext, MacroOps, State) ->
     OriginalForm = maps:get(FormId, FrozenForms),
     case FormId of
         {spec, _Name, _Arity} ->
-            cache_form_result(FormId, Fingerprint, OriginalForm, State);
+            cache_form_result(
+              FormId, Fingerprint, disabled, OriginalForm, State);
         {function, _Name, _Arity} ->
             SnapshotForms = materialize_forms(SourceView, FrozenForms),
             Expand = maps:get(expand_function, MacroOps),
             do([ return ||
-                   ExpandedSource <- Expand(
-                                       EffectiveMacroMap, InjectFormsSnapshot,
-                                       SnapshotForms, TargetFA),
-                   ExpandedMap = forms_id_map(ExpandedSource),
-                   ExpandedForm = maps:get(FormId, ExpandedMap, OriginalForm),
-                   cache_form_result(FormId, Fingerprint, ExpandedForm, State)
-               ])
+                   Expansion <-
+                       Expand(EffectiveMacroMap, InjectFormsSnapshot,
+                              SnapshotForms, TargetFA,
+                               WhitelistControl),
+                   finish_or_schedule_expansion(
+                     Expansion, FormId, TargetFA, OriginalForm, Fingerprint,
+                     Request, WorkflowContext, MacroOps, State)
+                ])
     end.
 
--spec cache_form_result(form_id(), term(), term(), state()) ->
+finish_or_schedule_expansion(
+  #{needed_local_macros := [_ | _] = Needed}, FormId, _TargetFA,
+  _OriginalForm, _Fingerprint, Request, WorkflowContext, MacroOps, State) ->
+    do([ return ||
+           State1 <- astranaut_return:foldl_m(
+                       fun(Dependency, StateAcc) ->
+                               need_callable(
+                                 Dependency, WorkflowContext,
+                                 MacroOps, StateAcc)
+                       end, State, Needed),
+           prepare_request_form(
+             FormId, Request, WorkflowContext, MacroOps, State1)
+       ]);
+finish_or_schedule_expansion(
+  #{forms := ExpandedSource,
+    local_macro_whitelist := Whitelist}, FormId, _TargetFA, OriginalForm,
+  Fingerprint, _Request, _WorkflowContext, _MacroOps, State) ->
+    ExpandedMap = forms_id_map(ExpandedSource),
+    ExpandedForm = maps:get(FormId, ExpandedMap, OriginalForm),
+    cache_form_result(
+      FormId, Fingerprint, Whitelist, ExpandedForm, State).
+
+mark_local_macro_callable(MacroMap, State) ->
+    Macros = maps:get(local_macros, State),
+    maps:map(
+      fun(_Key, #{macro_source := local_macro,
+                  function := Function, arity := Arity} = Macro) ->
+              Callable = case maps:find({Function, Arity}, Macros) of
+                             {ok, #{status := compiled}} -> true;
+                             _ -> false
+                         end,
+              Macro#{local_macro_callable => Callable};
+         (_Key, Macro) ->
+              Macro
+      end, MacroMap).
+
+-spec cache_form_result(form_id(), term(), disabled | ordsets:ordset(fa()),
+                        term(), state()) ->
           astranaut_return:struct({term(), state()}).
-cache_form_result(FormId, Fingerprint, Form, State) ->
-    case cache_expanded(FormId, Fingerprint, Form, State) of
+cache_form_result(FormId, Fingerprint, Whitelist, Form, State) ->
+    case cache_expanded(FormId, Fingerprint, Whitelist, Form, State) of
         {ok, State1} -> astranaut_return:return({Form, State1});
         {error, Error} -> astranaut_return:error_fail(Error)
     end.
@@ -857,6 +989,7 @@ requests_for_fas(FAs, State) ->
 request_for_entry(Entry, Frozen) ->
     #{closure_ids => maps:get(closure_ids, Entry),
       closure_fas => maps:get(closure_fas, Entry),
+      candidate_local_macros => maps:get(candidate_local_macros, Entry),
       referenced_local_macros => maps:get(referenced_local_macros, Entry),
       runtime_context_snapshot => maps:get(runtime_context_snapshot, Entry),
       source_view => maps:get(source_view, Entry),

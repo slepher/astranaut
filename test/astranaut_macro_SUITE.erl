@@ -37,6 +37,8 @@ init_per_suite(Config) ->
                    macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
                    macro_pass_local_dependency_test,
+                   macro_pass_local_replacement_whitelist_test,
+                   macro_pass_external_replacement_local_test,
                    macro_pass_local_declaration_group_test,
                    macro_pass_external_helper, macro_pass_inject_attrs,
                    macro_pass_external_local_helper_test,
@@ -148,6 +150,8 @@ all() ->
      test_macro_pass_generated_import,
      test_macro_pass_no_backscan,
      test_macro_pass_local_attribute_chain,
+     test_macro_pass_local_replacement_whitelist,
+     test_macro_pass_external_replacement_local_dependency,
      test_macro_pass_local_dependency,
      test_macro_pass_local_declaration_group,
      test_macro_pass_external_generated_local_helper,
@@ -381,6 +385,18 @@ test_macro_pass_no_backscan(_Config) ->
 
 test_macro_pass_local_attribute_chain(_Config) ->
     ?assertEqual({local_attribute_chain, ok}, macro_pass_local_chain_test:local_chain_value()),
+    ok.
+
+test_macro_pass_local_replacement_whitelist(_Config) ->
+    ?assertEqual(
+       {replacement_whitelist, ok},
+       macro_pass_local_replacement_whitelist_test:value()),
+    ok.
+
+test_macro_pass_external_replacement_local_dependency(_Config) ->
+    ?assertEqual(
+       {external_replacement_local, ok},
+       macro_pass_external_replacement_local_test:value()),
     ok.
 
 test_macro_pass_local_dependency(_Config) ->
