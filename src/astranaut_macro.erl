@@ -1331,15 +1331,16 @@ expand_macro_recursive(_Module, _MacroMap, #{ max_depth := MaxDepth } = Macro,
 expand_macro_recursive(Module, MacroMap, Macro, #{step := post } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     expand_macro_with(
-      Macro, DepthOpts1,
+      Macro, DepthOpts1#{module => Module, macro_map => MacroMap},
       fun(Node1) ->
               transform_exprs(Module, MacroMap, Node1, DepthOpts1)
       end);
-expand_macro_recursive(_Module, _MacroMap, Macro, #{step := pre } = DepthOpts) ->
+expand_macro_recursive(Module, MacroMap, Macro, #{step := pre } = DepthOpts) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     %% A pre return remains in the surrounding traversal.  Its children are
     %% discovered and expanded at their normal pre/post steps.
-    expand_macro(Macro, DepthOpts1).
+    expand_macro(
+      Macro, DepthOpts1#{module => Module, macro_map => MacroMap}).
 
 observe_local_macro(#{macro_source := local_macro,
                       function := Function, arity := Arity},
@@ -1348,22 +1349,61 @@ observe_local_macro(#{macro_source := local_macro,
     FA = {Function, Arity},
     do([ traverse ||
            State <- astranaut_traverse:get(),
+           Observed0 = maps:get(observed_local_macro_whitelist, State),
+           IsNew = not ordsets:is_element(FA, Observed0),
            Observed = ordsets:add_element(
-                        FA, maps:get(observed_local_macro_whitelist, State)),
+                        FA, Observed0),
            astranaut_traverse:put(
              State#{observed_local_macro_whitelist => Observed}),
-           verify_observed_local_macro(Control, Observed)
+           verify_observed_local_macro(Control, FA, IsNew, Observed)
        ]);
 observe_local_macro(_Macro, _Opts) ->
     astranaut_traverse:return(expand).
 
 verify_observed_local_macro(#{mode := verify, form_id := FormId,
-                              expected := Expected}, Observed) ->
-    Unexpected = ordsets:subtract(Observed, Expected),
-    case Unexpected of
+                              expected := Expected}, FA, IsNew, Observed) ->
+    case ordsets:is_element(FA, Expected) of
+        true ->
+            astranaut_traverse:return(expand);
+        false when IsNew ->
+            Unexpected = ordsets:subtract(Observed, Expected),
+            Error = {conflicting_local_macro_whitelist, FormId,
+                     whitelist_conflict_detail(
+                       Expected, Observed, Unexpected, ordsets:new())},
+            do([ traverse ||
+                   astranaut_traverse:error(Error),
+                   return(skip)
+               ]);
+        false ->
+            astranaut_traverse:return(skip)
+    end;
+verify_observed_local_macro(#{mode := collect}, _FA, _IsNew, _Observed) ->
+    astranaut_traverse:return(expand).
+
+observe_macro_return([], _Opts) ->
+    astranaut_traverse:return(expand);
+observe_macro_return(_ReturnObserved,
+                     #{local_macro_whitelist := disabled}) ->
+    astranaut_traverse:return(expand);
+observe_macro_return(ReturnObserved,
+                     #{local_macro_whitelist := Control}) ->
+    do([ traverse ||
+           State <- astranaut_traverse:get(),
+           Observed = ordsets:union(
+                        ReturnObserved,
+                        maps:get(observed_local_macro_whitelist, State)),
+           astranaut_traverse:put(
+             State#{observed_local_macro_whitelist => Observed}),
+           verify_macro_return(Control, ReturnObserved, Observed)
+       ]).
+
+verify_macro_return(#{mode := verify, form_id := FormId,
+                      expected := Expected}, ReturnObserved, Observed) ->
+    case ordsets:subtract(ReturnObserved, Expected) of
         [] ->
             astranaut_traverse:return(expand);
         _ ->
+            Unexpected = ordsets:subtract(Observed, Expected),
             Error = {conflicting_local_macro_whitelist, FormId,
                      whitelist_conflict_detail(
                        Expected, Observed, Unexpected, ordsets:new())},
@@ -1372,7 +1412,7 @@ verify_observed_local_macro(#{mode := verify, form_id := FormId,
                    return(skip)
                ])
     end;
-verify_observed_local_macro(#{mode := collect}, _Observed) ->
+verify_macro_return(#{mode := collect}, _ReturnObserved, _Observed) ->
     astranaut_traverse:return(expand).
 
 whitelist_conflict_detail(Expected, Observed, Unexpected, Missing) ->
@@ -1430,9 +1470,14 @@ expand_macro_with(#{pos := Pos, formatter := Formatter} = Macro, Opts, Success) 
                        Pos, Formatter, invoke_macro_function(Macro)),
              %% Validate the returned tree while traversing it once for
              %% structure-preserving variable and position updates.
-             Node1 <- process_macro_return(Node, Macro, Opts),
+             {Node1, ReturnObserved} <-
+                 process_macro_return(Node, Macro, Opts),
+             Decision <- observe_macro_return(ReturnObserved, Opts),
              format_node(Node1, Macro),
-             Success(Node1)
+             case Decision of
+                 expand -> Success(Node1);
+                 skip -> return(Node1)
+             end
          ])).
 
 recover_macro_call(Macro, Monad) ->
@@ -1464,6 +1509,10 @@ invoke_macro_function(#{module := Module, function := Function, arguments := Arg
 
 process_macro_return(Return, Macro, Opts) ->
     ValidateOpts = #{record_defs => maps:get(forms, Opts, []), fail => collect},
+    CollectLocalMacros =
+        maps:get(local_macro_whitelist, Opts, disabled) =/= disabled,
+    Module = maps:get(module, Opts, uniform),
+    MacroMap = maps:get(macro_map, Opts, #{}),
     do([ traverse ||
            Attr <- astranaut_traverse:ask(),
            RenameContext <- macro_return_rename_context(Macro, Opts),
@@ -1477,9 +1526,11 @@ process_macro_return(Return, Macro, Opts) ->
                  end,
                  astranaut:map_m(
                    fun(Node) ->
-                           astranaut_traverse:return(
-                             update_macro_return_node(
-                               Node, RenameContext, maps:get(pos, Macro)))
+                           Node1 = update_macro_return_node(
+                                     Node, RenameContext,
+                                     maps:get(pos, Macro)),
+                           collect_return_local_macro(
+                             Module, Node1, MacroMap, CollectLocalMacros)
                    end, Return,
                    #{traverse => post,
                      validate => input,
@@ -1487,10 +1538,31 @@ process_macro_return(Return, Macro, Opts) ->
                      %% environment of the return-tree traversal.
                      attr => Attr,
                      validate_opts => ValidateOpts})),
-           Return1 <- astranaut_traverse:fail_on_error(ProcessReturn),
+           {Return1, ReturnObserved} <-
+               astranaut_traverse:scoped_state_run(
+                 ordsets:new(),
+                 astranaut_traverse:fail_on_error(ProcessReturn)),
            commit_macro_return_counter(Opts),
-           return(Return1)
+           return({Return1, ReturnObserved})
        ]).
+
+collect_return_local_macro(_Module, Node, _MacroMap, false) ->
+    astranaut_traverse:return(Node);
+collect_return_local_macro(Module, Node, MacroMap, true) ->
+    case call_find_macro(Module, Node, MacroMap) of
+        {ok, #{macro_source := local_macro,
+               function := Function, arity := Arity}} ->
+            do([ traverse ||
+                   astranaut_traverse:modify(
+                     fun(Observed) ->
+                             ordsets:add_element(
+                               {Function, Arity}, Observed)
+                     end),
+                   return(Node)
+               ]);
+        _ ->
+            astranaut_traverse:return(Node)
+    end.
 
 macro_return_detail(Macro, Opts, Detail) ->
     Current = macro_call_ref(Macro),

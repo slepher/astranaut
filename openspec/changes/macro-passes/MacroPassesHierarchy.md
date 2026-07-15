@@ -92,17 +92,19 @@ finalize(AllScannedForms, LocalState)
 
 ### 2.5 Shared Macro Expansion Core
 
-共享核心提供两项同构能力：
+共享核心提供单一 function 展开能力，并由调用方显式指定白名单控制：
 
 ```text
-expand_and_validate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
+expand_and_validate(MacroRuntimeContext, OriginalForms, TargetFAs,
+                    WhitelistControl, ExpansionRecords)
   -> Forms' | Error
 
-resolve_local_references(CandidateLocalEnv, Forms, ClosureFAs)
-  -> ReferencedFAs | Error
+WhitelistControl = disabled | collect(FormId) | verify(FormId, Expected)
 ```
 
-两者必须复用相同的调用匹配规则。共享核心从 original/frozen form 展开；相同环境复用，环境不同则与上一次已接受结果比较。declaration-time form 扫描以注册前候选环境产生 `referenced_local_macros` 白名单；declaration 与 final 展开都用它过滤 local-macro 部分，不再维护 final 排除规则。
+共享核心从 original/frozen form 展开。local frozen function 首次使用 `collect`：原始 AST 在 `match_macro_call` 成功后观察真实 local FA；每个 macro 返回 AST 由 `process_macro_return` 在既有 traversal 中一次性收集 local FAs，并以 `{Node, ReturnObserved}` 交给调用方合并。后续 declaration/final context 使用 `verify`；普通 function 与 attribute 使用 `disabled`。
+
+相同 input fingerprint 复用缓存的 whitelist/result；不同 input 先验证 canonical whitelist，再比较 expanded AST。final local closure 按 canonical whitelist 过滤 local-macro 部分，不再维护 final 排除规则。`process_macro_return` 规范化 AST、位置和变量并收集当前 Return AST 的 local macro presence，但不校验或执行 replacement；不得增加第二次 return-tree scanner、whole-form rescan 或 AST diff。
 
 ## 3. Attribute Phase 详细流程
 
@@ -226,14 +228,16 @@ Resolve Macro
 FinalMacroRuntimeContext := context_from(AttributeOutput, EffectiveMacroMap, FinalLocalEnv)
 CandidateForms := AttributeOutput - FinalSkipIds
 TargetFAs := RetainIds union functions_that_can_contain_macro_calls(CandidateForms, FinalMacroRuntimeContext)
-Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
+Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs,
+                              per_form_whitelist_control, ExpansionRecords)
 ```
 
 函数阶段：
 
 - 只遍历未被跳过且实际可能包含宏调用的目标 function；
 - retain 与普通 function 都使用 attribute phase 完成后的最终 `MacroRuntimeContext`；
-- 曾参与 local-macro 展开的 form 在 final context 不同时，必须与最后一次已接受结果比较；
+- 曾参与 local-macro 展开的 form 先按 canonical whitelist 过滤 FinalLocalEnv、使用 `verify`，并在 whitelist 相同后比较 expanded result；
+- 非 local-closure 普通 function 使用完整 FinalLocalEnv，并显式传 `disabled`；
 - 沿用既有递归、`outer` / `inner` 与 `max_depth` 语义；
 - 不再次排序 forms；
 - 不让未编译或不在 `FinalLocalEnv` 中的 local macro 参与匹配。
@@ -250,6 +254,8 @@ Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs
 8. **最小改写**：没有 `__original__` 合并需要时，不重排生成 function/spec。
 9. **最终环境真实性**：retain 与普通 function phase 只能使用唯一的 `FinalMacroRuntimeContext`。
 10. **诊断稳定性**：无法执行的宏 attribute 在其扫描位置只诊断一次。
+11. **白名单真实性**：canonical whitelist 来自原始 AST 的真实 local match，以及每个未被 traversal skip 的 macro 返回 AST 在规范化 traversal 中收集的 local macro presence，不来自独立预扫描。
+12. **冲突独立性**：whitelist 不同报告 `conflicting_local_macro_whitelist`；whitelist 相同但 AST 不同报告 closure-environment conflict。
 
 ## 8. 建议的验证矩阵
 
@@ -263,3 +269,4 @@ Result := expand_and_validate(FinalMacroRuntimeContext, OriginalForms, TargetFAs
 | 阶段边界 | 生成 function 的宏调用只在最终 function phase 展开 |
 | 状态/错误 | 私有 traverse state；return/traverse 桥接；兄弟诊断累计；单次 invalid attribute |
 | 共享语义 | attribute/local/retain/function 同一 context 逻辑；同 declaration 成员保持普通调用；编译只消费 canonical forms |
+| whitelist | disabled/collect/verify 显式边界；replacement 递归观察；unexpected/missing；final env 过滤；普通 function 禁用 |

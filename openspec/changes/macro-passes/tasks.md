@@ -78,7 +78,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 规格
 
 - [x] 记录 attribute、local declaration、retain 和 Step 2 function 使用同一个 `MacroRuntimeContext` 构造逻辑，仅快照时点不同。
-- [x] 记录同一 `-local_macro([...])` declaration 的成员共享声明前环境；form 扫描结果成为 declaration/final 共用 local-macro 白名单。
+- [x] 记录同一 `-local_macro([...])` declaration 的成员共享声明前环境；首次完整递归展开的真实匹配结果成为 declaration/final 共用 canonical whitelist。
 - [x] 记录宏环境用于展开缓存和多次展开结果一致性，而 GenerationCompiler 只消费 canonical forms。
 - [x] 记录 retain 与普通 Step 2 function 均使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较。
 
@@ -110,7 +110,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] local-macro 注册接口只接收完整 RuntimeContext；workflow context 不再携带重复宏映射。
 - [x] 删除 DeclarationGroup、重复 expanded cache、final boundary flag 和 retained 专用校验旁路。
 - [x] 验证同声明成员在 final context 仍互为普通调用，且普通 attribute 不阻止独立 declarations 合并为一个累计 boundary。
-- [x] 验证 local closure 的 final 环境不包含白名单外的后声明宏，而普通 final function 仍使用完整 local 环境。
+- [x] 验证 local closure 的 final 环境不包含 canonical whitelist 外的后声明宏，而普通 final function 仍使用完整 local 环境并禁用 whitelist control。
 
 ### 上下文接口收敛
 
@@ -118,3 +118,87 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 强制 declaration snapshot 使用唯一的 `MacroRuntimeContext` 形状，删除裸 MacroMap、`env_snapshot` 和独立 inject snapshot 兼容路径。
 - [x] 为 MacroRuntimeContext、workflow context、MacroOps、ExpansionRequest 和 CompilationBoundary 增加命名 map 类型。
 - [x] 将 `expand_final_functions/5` 参数调整为业务输入在前、`RuntimeContext, MacroOps, State` 固定收尾。
+
+## Local macro whitelist 合并任务
+
+> 本节合并原 `local-macro-white-list` change。它以展开期间的真实 local macro match 取代旧的独立 form 引用扫描，并保持既有 scan-and-splice 与 GenerationCompiler 边界。
+
+### 规格
+
+- [x] 明确 whitelist control 的 `disabled`、`collect`、`verify(Expected)` 三种模式。
+- [x] 明确仅 local frozen function 及其 replacement AST 启用，普通 function forms 禁用。
+- [x] 明确白名单冲突和 expanded-form 冲突是两条独立不变量。
+- [x] 明确 whitelist 观察接入统一 macro 发现—执行点，`process_macro_return` 不负责展开，也不增加扫描 pass。
+
+### 数据契约
+
+- [x] 为 `LocalMacroWhitelistControl` 和带 whitelist 结果的 function expansion 定义命名类型。
+- [x] 在 ExpansionRecord 中增加 `canonical_whitelist` 和 per-input whitelist/result。
+- [x] 保证 input fingerprint 只包含展开前可知输入，并排除白名单外 local generations。
+- [x] final retained 使用 canonical whitelist 过滤 FinalEnv，名单外 local descriptors 不进入有效环境或 fingerprint。
+- [x] 删除普通 function 接口中的隐式 whitelist 推断和双重返回形状容错。
+
+### 展开接入
+
+- [x] 为通用 function 展开入口增加 whitelist control 参数，所有调用点显式传值。
+- [x] local declaration 首次展开传 `collect`，已有 canonical 的后续处理传 `verify`。
+- [x] 普通 Step 2 function、普通 retained function 和 attribute invocation 传 `disabled`。
+- [x] 将 local macro match 观察接入原始 function 与 replacement 共用的发现—执行路径。
+- [x] replacement AST 递归处理继承相同 control、accumulator、depth 和错误上下文。
+- [x] replacement 首次匹配未 callable local macro 时请求 `NeedCallable`，编译后从 frozen form 重试。
+- [x] 保留既有 post-return 递归展开路径；不为 whitelist 增加额外 `transform_exprs` traversal。
+- [x] 保持用户宏 State 通过 `scoped_state` 隔离，whitelist accumulator 由框架拥有。
+
+### 冲突与事务
+
+- [x] `collect` 成功后原子提交 canonical whitelist 与 canonical result。
+- [x] 非-final `verify` 观察到 unexpected FA 时立即报告 `conflicting_local_macro_whitelist` 并跳过该 macro 调用。
+- [x] 完整 function expansion 后检查 missing FA。
+- [x] whitelist 相同后继续执行 `conflicting_local_macro_closure_environment` AST 比较。
+- [x] whitelist/AST/宏执行任一失败时不提交部分 cache、canonical form 或 generation。
+
+### 简化
+
+- [x] 删除 final order/self/declaration-member 排除路径。
+- [x] 删除共享 helper owner whitelist 的运行时猜测或无条件并集路径。
+- [x] 不新增独立 whitelist scanner、whole-form rescan、AST diff 或 callback map。
+- [x] 检查参数顺序保持 `subject, runtime context, control, state` 的函数族一致性。
+
+### 测试
+
+- [x] 普通 function 调用 local macro 时保持 `disabled`，不创建或校验 whitelist。
+- [x] local frozen function 原始 AST 中的 local 调用进入 canonical whitelist。
+- [x] external/local macro replacement 生成的新 local 调用在统一发现—执行点进入 whitelist。
+- [x] 多层 replacement 递归继承同一 whitelist control，且不增加 whitelist 专用遍历。
+- [x] unexpected FA 在完整 function 结束前立即失败；missing FA 只在完整 function expansion 后失败。
+- [x] whitelist 不同但 AST 相同仍报告 whitelist conflict；whitelist 相同但 AST 不同仍报告 closure-environment conflict。
+- [x] retained local-macro head 和 frozen helper 使用 `verify`。
+- [x] final retained 的名单外同声明/后声明 local 调用保持普通调用。
+- [x] external replacement 首次生成 pending local 调用时按需编译并成功重试。
+- [x] 普通 retained/function forms 不启用 whitelist。
+- [x] whitelist 冲突不提交部分 declaration、ExpansionRecord 或 generation。
+- [x] 完整 Common Test suite 通过。
+
+## Return AST whitelist 批量收集变更
+
+> 本节取代上方“replacement 仅在发现—执行点逐个观察和立即校验”的历史策略；原有已完成项目保留为变更历史。
+
+### 文档与契约
+
+- [x] 规定 `process_macro_return` 在既有规范化 traversal 中只收集当前 Return AST 的 local macro FAs，不校验、不展开。
+- [x] 规定返回形状为 `{ProcessedNode, ReturnObserved}`，其中 ReturnObserved 是 scoped traversal state。
+- [x] 规定调用方合并并批量校验 ReturnObserved；missing 仍只在完整 function expansion 后检查。
+
+### 实现
+
+- [x] 让 `process_macro_return` 通过 `scoped_state_run` 返回 `{Node, ReturnObserved}`。
+- [x] 在 `expand_macro_with` 中合并 ReturnObserved，并对同一返回 AST 的 unexpected FAs 只生成一个错误。
+- [x] 冲突批次不得进入 replacement 递归展开；accepted replacement 继续使用原有 pre/post 展开路径。
+- [x] 修正逐个发现逻辑，使既已收集的 FA 不重复写入，并且 earlier unexpected 不会阻止 later expected macro。
+
+### 验证
+
+- [x] 同一返回 AST 包含两个 unexpected local macros 时只报告一个包含完整集合的错误。
+- [x] `process_macro_return` 收集阶段不调用任何 replacement macro。
+- [x] accepted replacement、动态 NeedCallable、missing 和 final whitelist 过滤场景继续通过。
+- [x] 完整 Common Test suite 与 OpenSpec strict validation 通过。

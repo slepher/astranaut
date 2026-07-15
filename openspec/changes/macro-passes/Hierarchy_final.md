@@ -1,6 +1,6 @@
 # Macro Passes 最终处理层级
 
-> 本文以 [`MacroPassesHierarchy.md`](MacroPassesHierarchy.md) 的独立设计为起点，并吸收后续关于 declaration 预展开、依赖驱动编译、统一 `MacroRuntimeContext`、多环境结果比对和最终 function 展开的讨论结果。本文是 macro-passes 与 local-macro 协作关系的最终权威模型。
+> 本文以 [`MacroPassesHierarchy.md`](MacroPassesHierarchy.md) 的独立设计为起点，并吸收后续关于 declaration 预展开、依赖驱动编译、统一 `MacroRuntimeContext`、多环境结果比对、local macro canonical whitelist 和最终 function 展开的讨论结果。本文是 macro-passes 与 local-macro 协作关系的最终权威模型。
 
 ## 1. 最终结论
 
@@ -9,8 +9,9 @@
 ```text
 ExpansionValidator
   -> 使用某个 MacroRuntimeContext 从原始 form 展开
-  -> 缓存环境与结果
-  -> 验证同一 FormId 在不同环境下结果一致
+  -> 以显式 disabled / collect / verify 控制观察真实 local macro match
+  -> 缓存环境、canonical whitelist 与结果
+  -> 分别验证同一 FormId 的 whitelist 和 expanded AST 一致
 
 DependencyScheduler
   -> 在某次展开或调用真正需要 local macro 可调用时产生 NeedCallable
@@ -31,7 +32,7 @@ GenerationCompiler
 | retain function 展开 | attribute scan 完成后的最终上下文 |
 | Step 2 普通 function 展开 | attribute scan 完成后的最终上下文 |
 
-四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local macro 的特殊性只剩 declaration-time 快照、同声明成员的普通调用语义、闭包/依赖及 callable generation 生命周期。
+四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local frozen function 通过显式 whitelist control 启用真实匹配观察；普通 function/attribute 传 `disabled`。local macro 的特殊性只剩 declaration-time 快照、canonical whitelist、同声明成员的普通调用语义、闭包/依赖及 callable generation 生命周期。
 
 ## 2. 与当前实现对照
 
@@ -40,14 +41,14 @@ GenerationCompiler
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
 | 统一 attribute runtime | `resolve_attribute_macro_target/2`、`need_callable/4`、`build_attribute_macro_invocation/2` | 已实现；local 只增加通用可调用性前置条件。 |
-| local 调用白名单 | `register/6` 保存 `referenced_local_macros`；`apply_local_macro_whitelist/3` 复用于 final | 已实现；声明与 final 均只开放 form 扫描实际识别的 local refs，同声明成员自然保持普通调用。 |
+| local 调用白名单 | `expand_function/5`、`process_macro_return/3`、`canonical_whitelist` | 已实现；原始 AST 观察真实 match，返回 AST 一次性收集并批量 verify，final 按 canonical whitelist 过滤。 |
 | declaration 时尽可能预展开 | `prepare_declaration/4` | 已实现；无真实 local 依赖时只预展开、不编译。 |
 | 环境只控制展开与一致性 | `prepare_requests/3`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
 | 编译仅消费 canonical forms | `compile_boundary/3`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |
 | 编译由 `NeedCallable` 驱动 | `need_callable/4` | 已实现；仅真实 local 依赖可产生中间 boundary。 |
 | retain 与 Step 2 共用最终上下文和验证器 | `expand_final_functions/5` | 已实现；两类目标走同一 final-context 路径。 |
 | retain 宏头也比较最后一次 local 展开结果 | `expand_final_functions/5`、`cache_expanded/4` | 已实现；宏头没有专用校验旁路。 |
-| 相同最终环境直接复用 | `expansion_records.results_by_env` | 已实现；E1 → E2 → E1 可直接复用 E1。 |
+| 相同最终输入直接复用 | `expansion_records.results_by_input` | 已实现；E1 → E2 → E1 可直接复用 E1 的 whitelist/result。 |
 | `__original__` spec 局部 merge | `map_forms_splice_merge_specs/1` | 已实现并保留。 |
 
 ## 3. 最终 Hierarchy
@@ -71,7 +72,9 @@ Module Macro Pipeline
 │  │  │  ├─ Freeze original function/spec forms and closure source view
 │  │  │  ├─ Update static local dependency graph
 │  │  │  └─ Pre-expand ready forms through ExpansionValidator
-│  │  │     └─ NeedCallable(dependency) when expansion needs unavailable local macro
+│  │  │     ├─ collect actual local matches on first success
+│  │  │     ├─ verify against canonical whitelist on later contexts
+│  │  │     └─ NeedCallable(dependency) when a matched local macro is unavailable
 │  │  ├─ generic attribute macro runtime (external / local)
 │  │  │  ├─ Build CallSiteMacroRuntimeContext
 │  │  │  ├─ Resolve target
@@ -89,9 +92,13 @@ Module Macro Pipeline
 ├─ Shared Services
 │  ├─ ExpansionValidator
 │  │  ├─ Start every expansion from Original/FrozenForm
-│  │  ├─ Same EnvFingerprint -> reuse
-│  │  ├─ Different EnvFingerprint -> expand and compare last accepted result
-│  │  └─ Maintain CanonicalExpandedForm
+│  │  ├─ Explicit WhitelistControl: disabled / collect / verify
+│  │  ├─ Observe original matches at match-before-invoke
+│  │  ├─ Collect each Return AST once in process_macro_return
+│  │  ├─ Merge and batch-verify ReturnObserved before replacement expansion
+│  │  ├─ Same InputFingerprint -> reuse whitelist + result
+│  │  ├─ Different InputFingerprint -> verify whitelist, then compare AST
+│  │  └─ Maintain CanonicalWhitelist + CanonicalExpandedForm
 │  ├─ DependencyScheduler
 │  │  ├─ Accept NeedCallable from any phase
 │  │  ├─ Compute minimal canonical cumulative boundary
@@ -103,7 +110,8 @@ Module Macro Pipeline
 └─ 2. Final Function Expansion
    ├─ Select retain functions and ordinary macro callers
    ├─ Exclude FinalSkipIds unless retained
-   ├─ Expand every selected function with FinalMacroRuntimeContext
+   ├─ Filter local-closure env by canonical whitelist and use verify
+   ├─ Expand ordinary functions with full FinalMacroRuntimeContext and disabled
    ├─ Compare against its last local-macro expansion result when one exists
    ├─ Materialize the accepted canonical result
    └─ Sort only at the established compiler boundary
@@ -158,7 +166,6 @@ LocalMacroEntry = {
   runtime_context_snapshot,
   closure_source_view,
   closure_ids,
-  referenced_local_macros,
   options
 }
 ```
@@ -175,9 +182,11 @@ LocalMacroEntry = {
 DeclarationMacroEnv = PreDeclarationEffectiveMacroMap
 ```
 
-form 扫描以该声明前候选环境识别实际 local macro 引用，并保存为闭包的 `referenced_local_macros` 白名单。因此 `bar/1` 中对 `foo/1` 的直接调用是普通 Erlang 本地调用和闭包边，不是 local macro 调用；反向同理。
+首次预展开把 declaration 前可匹配的 local entries 作为 `CandidateLocalEnv`，并传 `collect(FormId)`。原始 AST 在 `match_macro_call` 成功后观察实际 local FA；每个 macro 返回 AST 则由 `process_macro_return` 在既有规范化 traversal 中一次性收集 local macro presence，并以 `{ProcessedNode, ReturnObserved}` 返回。调用方把各批结果合并到 function-level accumulator。成功结果成为该 FormId 的 `canonical_whitelist`。因此 `bar/1` 中对 `foo/1` 的直接调用仍是普通 Erlang 本地调用和闭包边，因为 declaration 前 CandidateLocalEnv 尚不包含本次 members；反向同理。
 
-declaration 与 final 展开都只开放该白名单中的 local macros；final 的 external macros、options 和 inject forms 仍取 FinalMacroRuntimeContext。不需要按 order、自身、同声明成员或 direct-call 集合做最终减法。local macro 宏头只使用自身 declaration 白名单，避免后声明闭包反向污染；仅作为共享 helper 时才合并所属闭包白名单。非 local-closure 普通 function 使用完整 FinalLocalEnv。
+后续 declaration context 使用 `verify(Expected)` 和当前 CandidateLocalEnv。每个 Return AST 完成收集后，调用方批量拒绝名单外 presence；同一返回 AST 的所有 unexpected FAs 只产生一个汇总错误，并且该 replacement 不进入递归展开。完整 function expansion 结束后再检查缺失项。final retained local closure 先以 canonical whitelist 过滤 FinalLocalEnv，再传 `verify(Expected)`；名单外同声明或后声明调用不匹配为 local macro，保持普通调用。final 的 external macros、options 和 inject forms 仍取 FinalMacroRuntimeContext。
+
+不需要按 order、自身、同声明成员或 direct-call 集合做最终减法，也不得维护独立引用 scanner、owner whitelist union 或共享 helper 的运行时猜测。非 local-closure 普通 function 使用完整 FinalLocalEnv，并传 `disabled`。
 
 各 FA 仍拥有各自的宏头、闭包根、retain 状态和 callable 状态。无需为共享 order/context 单独维护 group id、members map 或第二份声明状态。
 
@@ -187,42 +196,44 @@ declaration 与 final 展开都只开放该白名单中的 local macros；final 
 
 ```text
 ExpansionRecord = {
-  last_env_fingerprint,
-  last_expanded_form,
-  canonical_expanded_form,
-  results_by_env_fingerprint   % 可选但推荐，用于避免环境来回切换时重复展开
+  canonical_whitelist,
+  canonical_result,
+  results_by_input = #{
+    InputFingerprint => #{whitelist, result}
+  }
 }
 ```
 
-环境 fingerprint 覆盖该次展开的全部可观察输入：裁剪后的有效宏映射及可调用 local 版本、macro options 和 `inject_forms`。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把共享的 declaration 快照切成不同环境。
+InputFingerprint 覆盖展开前可知的全部可观察输入：external macro map、候选 local descriptors/versions、macro options 和 `inject_forms`。白名单是展开输出，不能作为首次 lookup 的唯一 key。final retained 使用 canonical whitelist 裁剪后的有效 MacroEnv 计算 fingerprint，因此名单外 local descriptor/generation 不进入该 form 的 final input key。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把共享的 declaration 快照切成不同环境。
 
 ### 6.2 统一操作
 
 ```text
-expand_and_validate(FormId, OriginalForm, MacroRuntimeContext):
-  Record 不存在
-    -> 从 OriginalForm 展开
-    -> 保存为 last 和 canonical result
+expand_and_validate(FormId, OriginalForm, MacroRuntimeContext, WhitelistControl):
+  results_by_input 命中 InputFingerprint
+    -> 直接复用缓存的 whitelist + result
 
-  fingerprint(CurrentContext) == Record.last_env_fingerprint
-    -> 直接复用 Record.last_expanded_form
-
-  fingerprint 不同
-    -> 始终从同一 OriginalForm 重新展开
-    -> 与 Record.last_expanded_form 比较
-       ├─ 相同：接受并更新 last record
+  未命中
+    -> 始终从同一 OriginalForm 展开
+    -> collect: 以 ObservedLocalFAs 建立 canonical whitelist
+    -> verify: 校验 ObservedLocalFAs == canonical whitelist
+       └─ 不同：conflicting_local_macro_whitelist
+    -> whitelist 相同后比较 canonical/accepted expanded result
+       ├─ 相同：缓存本 input 的 whitelist + result
        └─ 不同：conflicting_local_macro_closure_environment
 ```
 
-每个新环境只需与上一次已接受结果比较；由于每次成功转换都要求结果相同，该关系能传递到 canonical result。保留 `results_by_env_fingerprint` 不改变语义，只避免 E1 → E2 → E1 时重复执行 E1。
+非-final `verify` 对每个 `process_macro_return` 返回的完整 `ReturnObserved` 批量比较：同一返回 AST 的 unexpected FAs 只报告一次，冲突批次不进入 replacement 展开；missing FA 只能在完整递归展开结束后报告。不同 whitelist 即使产生相同 AST 也冲突；相同 whitelist 也不能免除 AST 一致性比较。
 
 禁止在已经展开的 AST 上继续展开。local declaration、retain 和 Step 2 function 都必须从同一个 original/frozen form 开始。
 
+原始 AST 的白名单观察接在共享的 macro match-before-invoke 点。`process_macro_return` 在规范化返回树、位置和变量的同一次 traversal 中收集该 Return AST 的 local FAs，但不校验或展开，并通过 `scoped_state_run` 返回 `{Node, ReturnObserved}`。调用方合并与批量校验后，accepted replacement 才进入原有 pre/post 递归路径。不得增加第二次 return-tree scan 或 whole-form rescan。
+
 ### 6.3 预展开
 
-扫描到 local declaration 后立即注册依赖并尝试预展开，但“声明出现”本身不要求编译这些 FA。预展开若只使用 external 或已可调用 local macros，结果直接进入 expansion record。
+扫描到 local declaration 后立即注册依赖并尝试以 `collect` 或已有 canonical 时的 `verify` 预展开，但“声明出现”本身不要求编译这些 FA。预展开若只使用 external 或已可调用 local macros，完整 whitelist/result 直接进入 expansion record。
 
-若预展开真正需要执行一个尚不可调用的 local macro，则产生 `NeedCallable(FA)`。scheduler 可以当场编译最小必要依赖边界，随后恢复预展开。这不是 declaration 编译策略，而是通用的依赖可调用性规则。
+若原始或 replacement AST 的统一匹配点真正发现一个尚不可调用的 candidate local macro，则 expansion 返回 `needed_local_macros`。scheduler 可以当场通过 `NeedCallable(FA)` 编译最小必要依赖边界，随后从 frozen form 重试；部分 whitelist/result 不提交。这不是 declaration 编译策略或 whitelist 冲突，而是通用的依赖可调用性规则。
 
 ## 7. DependencyScheduler 与 GenerationCompiler
 
@@ -317,16 +328,17 @@ attribute scan 结束后：
 4. 计算 `FinalSkipIds` 与 retain closure IDs，但此处不使用专用 retain 展开算法。
 5. 从完整 attribute 输出构造唯一的 `FinalMacroRuntimeContext`。
 6. 选择 retain functions 与普通 macro caller functions。
-7. 对每个目标调用同一个 `expand_and_validate(..., FinalMacroRuntimeContext)`。
+7. local frozen target 以 canonical whitelist 过滤有效 LocalEnv 并传 `verify`；普通 target 使用完整 FinalLocalEnv 并传 `disabled`，二者调用同一个 `expand_and_validate`。
 8. 物化结果并在既定边界排序。
 
-retain 与普通 function 的差异只有选择和生命周期：retain 必须保留，普通 function 由 caller detection 决定是否进入目标集合。两者的展开、环境 fingerprint 和多环境结果比较完全相同。
+retain 与普通 function 的差异只有选择、生命周期与显式 whitelist control：属于 local frozen closure 的 retained target 使用 `verify`，非 local-closure ordinary target 使用 `disabled`。两者共享展开实现和 FinalMacroRuntimeContext 构造规则。
 
 如果某个 retained 或普通 function 曾作为 local macro closure form 展开：
 
-- final fingerprint 与 last local fingerprint 相同：直接复用最后一次结果；
-- fingerprint 不同：从 original form 在 final context 下展开，并与最后一次 local 结果比较；
-- 结果不同：报 `conflicting_local_macro_closure_environment`。
+- final input fingerprint 已缓存：直接复用该 input 的 whitelist/result；
+- fingerprint 不同：从 original form 在按 canonical whitelist 过滤的 final context 下展开并执行 `verify`；
+- observed whitelist 不同：报 `conflicting_local_macro_whitelist`；
+- whitelist 相同但结果不同：报 `conflicting_local_macro_closure_environment`。
 
 该规则适用于 retained local macro 宏头，不再存在“宏头跳过最终环境比对”的例外。
 
@@ -352,7 +364,10 @@ Form handler failure
 Expansion failure
   -> 不更新 ExpansionRecord，不提交 generation
 
-Different environment + different expansion result
+Different observed local whitelist
+  -> conflicting_local_macro_whitelist
+
+Same whitelist + different expansion result
   -> conflicting_local_macro_closure_environment
 
 Compile/load failure
@@ -363,26 +378,28 @@ Compile/load failure
 
 ## 12. 最终不变量
 
-1. 所有宏环境都由同一个 `MacroRuntimeContext` builder 构造；local closure 的 local-macro 部分统一按 form 扫描得到的 `referenced_local_macros` 白名单过滤。
+1. 所有宏环境都由同一个 `MacroRuntimeContext` builder 构造；local closure 的 local-macro 部分统一按完整递归展开观察得到的 canonical whitelist 过滤。
 2. 一个 `-local_macro([...])` declaration 的全部 members 共享同一个 context，且成员之间不互为宏。
-3. 每次 function-form 展开都从 original/frozen form 开始。
-4. 相同 FormId、相同 fingerprint 直接复用；不同 fingerprint 必须比较展开结果。
-5. 同一 FormId 只有一个已确认的 canonical expanded form 可以进入 local module generation。
-6. GenerationCompiler 不读取 MacroRuntimeContext，也不执行按 request 环境展开。
-7. 编译仅由 `NeedCallable` 和最终 generation 需求驱动，不绑定某种 form 或扫描阶段。
-8. external/local attribute 调用使用相同 call-site runtime 规则。
-9. retain 与 Step 2 function 使用相同 FinalMacroRuntimeContext 和 ExpansionValidator。
-10. retained local macro 宏头同样参与最终环境结果比对。
-11. 编译、加载和 generation 提交原子化；失败保留上一代。
-12. source-ordered override、scan-and-splice、state 隔离及局部 `__original__` merge 规则保持不变。
-13. generation boundary identity 只由累计 local macro members 决定；未引入新 local macro 时不得重新编译。
+3. whitelist control 始终显式传入：local frozen function 使用 `collect/verify`，普通 function 与 attribute 使用 `disabled`。
+4. 原始 AST 在统一 match-before-invoke 点观察；每个 macro 返回 AST 由 `process_macro_return` 在既有 traversal 中一次性收集，调用方随后合并和批量校验；该函数不承担校验或展开。
+5. 每次 function-form 展开都从 original/frozen form 开始。
+6. 相同 FormId、相同 input fingerprint 直接复用完整 whitelist/result；不同 input 必须先比较 whitelist、再比较展开结果。
+7. 同一 FormId 只有一个已确认的 canonical whitelist 和 canonical expanded form 可以进入 local module generation。
+8. GenerationCompiler 不读取 MacroRuntimeContext，也不执行按 request 环境展开。
+9. 编译仅由真实匹配产生的 `NeedCallable` 和最终 generation 需求驱动，不绑定某种 form 或扫描阶段。
+10. external/local attribute 调用使用相同 call-site runtime 规则。
+11. retain 与 Step 2 function 使用相同 FinalMacroRuntimeContext 和 ExpansionValidator；普通 target 禁用 whitelist。
+12. retained local macro 宏头同样参与最终 whitelist 与环境结果比对。
+13. 编译、加载、whitelist/result cache 和 generation 提交原子化；失败保留上一代。
+14. source-ordered override、scan-and-splice、state 隔离及局部 `__original__` merge 规则保持不变。
+15. generation boundary identity 只由累计 local macro members 决定；未引入新 local macro 时不得重新编译。
 
 ## 13. 实现结果
 
 ### P0：声明条目与统一上下文
 
 - 把同一个 `-local_macro([...])` 注册为共享 order/context 的逐 FA 条目。
-- declaration 前环境自然不含本次 members；declaration/final 均复用扫描引用白名单，无需最终排除路径。
+- declaration 前环境自然不含本次 members；首次递归展开收集 canonical whitelist，后续 declaration/final 复用并校验，无需最终排除路径。
 - 提供 attribute/local/retain/function 共用的 `MacroRuntimeContext` builder。
 
 状态：已实现。
@@ -390,7 +407,8 @@ Compile/load failure
 ### P1：拆分展开验证与编译
 
 - 将 request-specific expansion 与 `compile_boundary` 分离，由 `execute_plan` 仅按“准备后编译”顺序协调。
-- 实现显式 `ExpansionRecord` 和 `expand_and_validate`。
+- 实现显式 `LocalMacroWhitelistControl`、带 whitelist/result 的 `ExpansionRecord` 和 `expand_and_validate`。
+- 原始 AST 在共享 macro 发现—执行点观察；`process_macro_return` 返回 `{Node, ReturnObserved}`，调用方批量合并/校验后再展开 accepted replacement。
 - GenerationCompiler 只消费 canonical expanded forms。
 
 状态：已实现。

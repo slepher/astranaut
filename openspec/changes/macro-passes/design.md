@@ -10,24 +10,111 @@
 
 ## 统一 function 展开能力
 
-`astranaut_macro` 只维护一套 function-body 宏匹配和递归展开实现：
+`astranaut_macro` 只维护一套 function-body 宏匹配和递归展开实现。白名单是 local frozen function expansion 的可选观察/校验策略；调用方必须显式传入控制值，展开器不得根据 MacroEnv、FormId 或阶段隐式推断：
 
 ```text
-ExpandAndValidate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecords)
-  -> {ExpandedForms, ExpansionRecords1} | Error
+LocalMacroWhitelistControl =
+    disabled
+  | #{mode := collect, form_id := FormId}
+  | #{mode := verify,
+      form_id := FormId,
+      expected := ordsets:ordset(FA)}
+
+ExpandFunction(MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl)
+  -> #{forms := ExpandedForms,
+       local_macro_whitelist := disabled | ordsets:ordset(FA),
+       needed_local_macros := ordsets:ordset(FA)}
+  | Error
 ```
 
-local declaration 预展开、retain 和最终 function pass 都调用该实现。每次从 original/frozen form 开始；环境相同直接复用，环境不同则与上一次已接受结果比较。local-macro generation 编译不调用展开器，只消费已经确认的 canonical expanded forms。
+- `disabled` 不分配 accumulator、不观察 local match、不做完成检查，结果 whitelist 固定为 `disabled` 且 `needed_local_macros` 为空。
+- `collect` 累计原始 function 中实际发现的 local FAs，以及每个 macro 返回 AST 在 `process_macro_return` 中一次性收集的 local FAs；成功后返回 canonical whitelist。
+- `verify` 使用相同来源累计 FAs；每个返回 AST 收集完成后由调用方批量拒绝 expected 之外的集合，完整展开后检查缺失项。final retained context 先用 expected 过滤 LocalEnv，使名单外调用保持普通调用。
 
-`astranaut_macro` 还提供与展开器相同调用匹配语义的引用解析操作：
+local declaration 预展开、retain 和最终 function pass 都调用该实现。首次 local frozen FormId 使用 `collect`，已有 canonical whitelist 后使用 `verify`；普通 Step 2 function、普通 retained function 与 attribute invocation 使用 `disabled`。每次从 original/frozen form 开始；环境相同直接复用完整结果，环境不同则先校验 whitelist、再与上一次已接受 AST 比较。local-macro generation 编译不调用展开器，只消费已经确认的 canonical expanded forms。
+
+原始 function 的白名单观察位于统一发现—执行路径；macro 返回 AST 则复用 `process_macro_return` 已有的完整返回树 traversal，一次性收集后再交回调用方：
 
 ```text
-ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
+Original function match
+  -> observe matched local FA
+  -> unavailable: add needed_local_macros and do not invoke
+  -> callable: invoke macro
+
+process_macro_return(Return)
+  -> normalize/update every returned node
+  -> collect all local macro FAs in this Return AST
+  -> return {ProcessedNode, ReturnObserved}
+
+expand_macro_with
+  -> merge ReturnObserved into function-level Observed
+  -> verify the completed ReturnObserved batch
+  -> unexpected batch: emit one conflict and do not expand this replacement
+  -> accepted batch: continue through the existing replacement expansion path
 ```
 
-该操作负责判断闭包中的调用是否实际匹配某个 local macro。静态函数闭包、候选环境和 `internal_function` direct-call 集合由 `astranaut_local_macro` 决定。匹配结果保存为闭包的 `referenced_local_macros` 白名单，并同时约束 declaration 与 final 展开的 LocalEnv；同一 declaration 成员因不在声明前候选环境中而保持普通 Erlang 调用。
+`process_macro_return` 只收集，不校验也不调用 replacement 中的宏。它以 `scoped_state_run` 使用局部 ordset state，并返回常规 `{Node, State}` 结果；调用方再把该 state 合并到 function-level accumulator 并执行批量校验。被接受的宏返回 AST 随后沿既有 pre/post 递归路径进入 `transform_exprs`。不得为 whitelist 增加第二次 return-tree scanner、whole-form rescan 或 expanded/original AST diff。宏私有 State 与返回树收集 State 均不得覆盖 function expansion 的外层 State。
 
-两个操作均返回 `astranaut_return` 结果。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
+展开操作返回 `astranaut_return` 结果。whitelist/result 必须通过该单一返回形状交回调用方，不得使用 callback、process dictionary 或另一份隐式 traverse state。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
+
+### 候选环境与启用边界
+
+必须区分候选能力与真实观察结果：
+
+```text
+CandidateLocalEnv
+  = declaration 时冻结、可能被该 local frozen function 匹配的 local entries
+
+ObservedLocalFAs
+  = 原始 function 的真实 local match
+    ∪ 每个未被 traversal skip 的 macro 返回 AST 中一次性收集的 local macro presence
+```
+
+declaration `collect` 使用冻结的 CandidateLocalEnv；declaration/非-final `verify` 使用当前 CandidateLocalEnv，并在每个返回 AST 完成收集后批量拒绝 whitelist 外 presence；final retained `verify` 使用 `FinalEnv + canonical whitelist` 构造有效 local env。通用展开器不解释 declaration order、self、retain 或 generation。
+
+同一 declaration 的 members 因 declaration 前 CandidateLocalEnv 尚不包含本次新增 entries 而保持普通调用。白名单上线后不再并存 final order/self/member 排除链、owner union 或共享 helper 的运行时猜测。普通 function 的 `disabled` 模式使用完整 FinalMacroEnv。
+
+### 白名单与展开结果冲突
+
+首次成功的 `collect` 原子建立：
+
+```text
+CanonicalWhitelist(FormId) = ObservedLocalFAs
+```
+
+非-final `verify` 采用非对称检查：`process_macro_return` 先完整收集当前 Return AST，再由调用方计算 `ReturnObserved - Expected`。非空时只报告一个包含该批全部 unexpected FAs 的 `conflicting_local_macro_whitelist`，并且不进入该 replacement 的递归展开。收集过程中不得校验或提前中断。原始 function 中直接发现的 unexpected match 仍在调用前拒绝。缺失项只能在完整递归展开结束后以 `Expected - Observed` 检查，因为后续 replacement AST 仍可能生成该调用。final retained 已先过滤环境，不产生 unexpected whitelist 错误。
+
+错误携带：
+
+```text
+{conflicting_local_macro_whitelist,
+ FormId,
+ #{expected => Expected,
+   observed => Observed,
+   unexpected => Unexpected,
+   missing => Missing}}
+```
+
+白名单相同后仍执行最终 AST 一致性比较：whitelist 不同即使 AST 相同也报告 `conflicting_local_macro_whitelist`；whitelist 相同但 AST 不同报告 `conflicting_local_macro_closure_environment`。任何冲突或宏执行失败都不得提交部分 ExpansionRecord、canonical form 或 generation。
+
+### ExpansionRecord 与 fingerprint
+
+```text
+ExpansionRecord = #{
+  canonical_whitelist := ordsets:ordset(FA),
+  canonical_result := Form,
+  results_by_input := #{InputFingerprint => #{
+    whitelist := ordsets:ordset(FA),
+    result := Form
+  }}
+}
+```
+
+InputFingerprint 覆盖展开前可知的 external macro map、候选 local descriptors/versions、macro options 和 inject forms。whitelist 是展开输出，不能作为首次 cache lookup 的唯一输入 key。final retained 已有 canonical whitelist 时，fingerprint 使用过滤后的有效 MacroEnv；名单外 local descriptor/generation 不进入该 form 的 input key。普通 function 为 `disabled`，继续使用普通 function fingerprint/展开规则。
+
+### replacement 驱动 callable 调度
+
+`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_local_macros`，不调用该宏，也不提交部分 expansion；`astranaut_local_macro` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
 
 ## 两步模型
 
@@ -39,7 +126,7 @@ ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
    1.2 逐 form 统一 scan-and-splice
        - 外部与可调用本地属性宏按当前位置展开
        - import/use/macro_options 前向更新 ExternalEnv
-       - local_macro declaration 注册逐 FA 条目、冻结 context/引用白名单、更新依赖并尝试预展开
+       - local_macro declaration 注册逐 FA 条目、冻结 context/CandidateLocalEnv、更新依赖并尝试预展开及收集 canonical whitelist
        - 任意展开/调用需要未就绪 local macro 时产生通用 NeedCallable
    1.3 收尾 local-macro 工作流，取得 FinalLocalEnv、RetainIds 与 FinalSkipIds
    1.4 构造 FinalMacroRuntimeContext

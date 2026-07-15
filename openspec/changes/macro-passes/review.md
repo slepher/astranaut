@@ -31,7 +31,11 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | 用户宏 traverse state 隔离 | `invoke_macro_function/1` + `scoped_state/2` | 已实现 |
 | FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/8` | 已实现 |
 | FinalSkipIds 在 function pass 前剔除 | `remove_final_skip_forms/2` | 已实现 |
-| local 与普通 function 共用展开器 | `expand_functions/3`, `expand_function/4` | 已实现 |
+| local 与普通 function 共用展开器 | `expand_functions/4`, `expand_function/5` | 已实现 |
+| whitelist control 显式区分 disabled/collect/verify | `local_macro_whitelist_control/0`, `whitelist_control/2` | 已实现 |
+| 原始与 replacement AST 在统一发现点观察 local match | `observe_local_macro/2`, `expand_macro_recursive/4` | 已实现 |
+| whitelist/result 共同进入 ExpansionRecord | `cache_expanded/4`, `results_by_input` | 已实现 |
+| final local closure 按 canonical whitelist 过滤 | `final_whitelist_control/2`, `final_allowed_local_fas/2`, `keep_allowed_local_fas/2` | 已实现 |
 
 ## 从实现补入规范的细节
 
@@ -66,8 +70,8 @@ attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_fo
 后续讨论确定的最终契约现已实现：
 
 1. local declaration 注册后应尽可能预展开，而不是等编译 boundary 执行 request 时才展开。
-2. 同一个 `-local_macro([...])` declaration 的 members 共享一个 context；form 扫描得到的 `referenced_local_macros` 是 declaration/final 共用 LocalEnv 白名单，不再构造 group 或 final 排除环境。
-3. ExpansionValidator 负责环境 fingerprint、last result 与 canonical result；GenerationCompiler 只消费 canonical forms，不再载入每个 declaration 环境重放展开。
+2. 同一个 `-local_macro([...])` declaration 的 members 共享一个 context；首次完整递归展开观察到的 local matches 是 declaration/final 共用 canonical whitelist，不再构造 group、独立引用 scanner 或 final 排除环境。
+3. ExpansionValidator 负责 input fingerprint、canonical whitelist/result 与 per-input cache；GenerationCompiler 只消费 canonical forms，不再载入每个 declaration 环境重放展开。
 4. 编译由所有阶段共用的 `NeedCallable` 驱动，不绑定 attribute 调用点。
 5. retain 与 Step 2 ordinary function 都使用 `FinalMacroRuntimeContext`，并与最后一次 local expansion result 比较；retain 宏头不再跳过。
 
@@ -77,3 +81,15 @@ foo 作为宏，bar 的注册和预展开不会产生中间编译；首次需要
 `{foo,bar}`。MacroRuntimeContext、注入 forms、触发阶段和 compile options 均不制造新代次。
 
 最终目标与完成任务分别见 [`Hierarchy_final.md`](Hierarchy_final.md) 与 [`tasks.md`](tasks.md)。
+
+## 2026-07-14 Local Macro Whitelist 合并
+
+原 `local-macro-white-list` change 已合并进本 change。权威模型现在明确：
+
+1. 通用 function 展开入口必须显式接收 `disabled`、`collect` 或 `verify(Expected)`；普通 function/attribute 不隐式参与白名单。
+2. canonical whitelist 来自原始 frozen AST 的真实 local match，以及每个 macro 返回 AST 在 `process_macro_return` 既有 traversal 中一次性收集的 local macro presence；不增加独立 form scan。
+3. non-final verify 在每个 Return AST 收集完成后批量报告该批全部 unexpected FAs，并阻止该 replacement 展开；missing FA 在完整递归展开结束后报告；final retained 先过滤环境。
+4. whitelist conflict 与 expanded-form conflict 分别诊断，且失败不提交部分 ExpansionRecord、canonical form 或 generation。
+5. replacement 首次匹配未 callable local macro 时返回调度请求，经 `NeedCallable` 编译后从 frozen form 重试。
+
+合并后的 proposal、design、spec、tasks 与两份 hierarchy 文档均使用上述模型；原独立 change 目录不再保留。

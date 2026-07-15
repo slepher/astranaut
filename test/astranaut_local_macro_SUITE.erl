@@ -32,6 +32,8 @@ all() -> [register_freezes_static_closure,
           ordinary_final_function_sees_all_local_macros,
           shared_expander_collects_recursive_replacement_whitelist,
           shared_expander_rejects_unexpected_whitelist_immediately,
+          shared_expander_batches_return_whitelist_conflicts,
+          shared_expander_expands_expected_after_unexpected,
           shared_expander_rejects_missing_whitelist_after_completion,
           shared_expander_requests_uncallable_local_macro,
           shared_expander_disables_whitelist_for_ordinary_function,
@@ -511,6 +513,58 @@ shared_expander_rejects_unexpected_whitelist_immediately(_Config) ->
     ?assertEqual(undefined, erlang:erase(whitelist_chain_b_count)),
     ok.
 
+shared_expander_batches_return_whitelist_conflicts(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    Expected = [{whitelist_return_batch, 0}],
+    reset_whitelist_macro_counts(),
+    erlang:erase(whitelist_after_unexpected),
+    Error = astranaut_return:run_error(
+              astranaut_macro:expand_function(
+                whitelist_macro_map(), [],
+                [whitelist_batch_target_form()],
+                {whitelist_target, 0},
+                #{mode => verify, form_id => FormId,
+                  expected => Expected})),
+    Formatted = maps:get(
+                  formatted_errors, astranaut_error:printable(Error)),
+    ?assertEqual(1, length(Formatted)),
+    ?assertMatch(
+       [{1, astranaut_macro,
+         {conflicting_local_macro_whitelist, FormId,
+          #{expected := Expected,
+            observed := [{whitelist_after, 0},
+                         {whitelist_chain_b, 0},
+                         {whitelist_return_batch, 0}],
+            unexpected := [{whitelist_after, 0},
+                           {whitelist_chain_b, 0}],
+            missing := []}}}],
+       Formatted),
+    %% Collection sees both calls, but the conflicting return AST is never
+    %% handed to recursive macro expansion.
+    ?assertEqual(undefined, erlang:erase(whitelist_after_unexpected)),
+    ?assertEqual(undefined, erlang:erase(whitelist_chain_b_count)),
+    ok.
+
+shared_expander_expands_expected_after_unexpected(_Config) ->
+    FormId = {function, whitelist_target, 0},
+    Expected = [{whitelist_chain_a, 0}, {whitelist_chain_b, 0}],
+    reset_whitelist_macro_counts(),
+    erlang:erase(whitelist_after_unexpected),
+    Error = astranaut_return:run_error(
+              astranaut_macro:expand_function(
+                whitelist_macro_map(), [],
+                [whitelist_expected_after_unexpected_form()],
+                {whitelist_target, 0},
+                #{mode => verify, form_id => FormId,
+                  expected => Expected})),
+    ?assertEqual(1, length(maps:get(
+                             formatted_errors,
+                             astranaut_error:printable(Error)))),
+    ?assertEqual(undefined, erlang:erase(whitelist_after_unexpected)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
+    ok.
+
 shared_expander_rejects_missing_whitelist_after_completion(_Config) ->
     FormId = {function, whitelist_target, 0},
     Expected = [{whitelist_chain_a, 0}, {whitelist_chain_b, 0},
@@ -802,7 +856,7 @@ whitelist_macro_map() ->
     maps:from_list(
       [{{Function, 0}, whitelist_macro(Function)}
        || Function <- [whitelist_chain_a, whitelist_chain_b,
-                       whitelist_after]]).
+                       whitelist_after, whitelist_return_batch]]).
 
 whitelist_macro(Function) ->
     #{macro_source => local_macro,
@@ -829,6 +883,17 @@ whitelist_immediate_target_form() ->
        [{call, 1, {atom, 1, whitelist_chain_a}, []},
         {call, 2, {atom, 2, whitelist_after}, []}]}]}.
 
+whitelist_batch_target_form() ->
+    {function, 1, whitelist_target, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, whitelist_return_batch}, []}]}]}.
+
+whitelist_expected_after_unexpected_form() ->
+    {function, 1, whitelist_target, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, whitelist_after}, []},
+        {call, 2, {atom, 2, whitelist_chain_a}, []}]}]}.
+
 whitelist_chain_a() ->
     increment_whitelist_macro_count(whitelist_chain_a_count),
     {call, 1, {atom, 1, whitelist_chain_b}, []}.
@@ -836,6 +901,11 @@ whitelist_chain_a() ->
 whitelist_chain_b() ->
     increment_whitelist_macro_count(whitelist_chain_b_count),
     {atom, 1, whitelist_done}.
+
+whitelist_return_batch() ->
+    {block, 1,
+     [{call, 1, {atom, 1, whitelist_chain_b}, []},
+      {call, 2, {atom, 2, whitelist_after}, []}]}.
 
 whitelist_after() ->
     erlang:put(whitelist_after_unexpected, reached),
