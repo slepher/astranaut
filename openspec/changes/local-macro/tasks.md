@@ -16,7 +16,7 @@
 
 ## 实现
 
-- [x] 新增 `astranaut_local_macro.erl`，实现按 FA 的注册表和状态转换。
+- [x] 新增 `astranaut_macro_local.erl`，实现按 FA 的注册表和状态转换。
 - [x] 实现闭包计算、`extra_functions`、`internal_function` 策略和重复声明检查。
 - [x] 实现冻结 form 改写保护及按环境展开缓存。
 - [x] 实现多环境结果比较和 `conflicting_local_macro_closure_environment`。

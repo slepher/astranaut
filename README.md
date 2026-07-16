@@ -571,7 +571,7 @@ macro.hrl enables the astranaut macro parse transform.
 
 Internally, `astranaut_macro` owns the source-ordered passes and macro
 environment, `astranaut_macro_expander` owns shared attribute/function macro
-matching and recursive expansion, and `astranaut_local_macro` owns local
+matching and recursive expansion, and `astranaut_macro_local` owns local
 closure and generation lifecycle. All expansion paths use the same expander.
 
 *export_macro*

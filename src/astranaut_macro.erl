@@ -44,7 +44,7 @@
 %% position. Import, use and option forms, including generated ones, affect only
 %% later forms and already processed attributes are not rescanned. Attribute
 %% macro injection sees only forms already passed at the call site.</li>
-%% <li>Local macro declarations are registered with `astranaut_local_macro'
+%% <li>Local macro declarations are registered with `astranaut_macro_local'
 %% using the materialised source view. Their closure forms are pre-expanded in
 %% the macro environment and injection view captured before the declaration;
 %% later forms participate only in closure discovery. Direct local calls are
@@ -230,7 +230,7 @@ scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
                   file => File,
                   compile_opts => CompileOpts,
                   passed_forms => [],
-                  local_macro_state => astranaut_local_macro:new(),
+                  local_macro_state => astranaut_macro_local:new(),
                   scan_local_declarations => #{},
                   macro_map => #{},
                   effective_macro_map => #{}},
@@ -259,7 +259,7 @@ scan_local_macro({attribute, Pos, local_macro, Attr} = Form,
                                #{local_macro_state := LocalState,
                                  scan_local_declarations := ScanLocalDeclarations,
                                  remaining_forms := Queue} = State) ->
-    SourceView = astranaut_local_macro:source_view(passed_forms(State), Queue),
+    SourceView = astranaut_macro_local:source_view(passed_forms(State), Queue),
     ClauseMap = function_clauses_map(SourceView, #{}),
     Validation = validate_local_macro_attribute(#{clause_map => ClauseMap}, Attr),
     case astranaut_return:run(Validation) of
@@ -290,7 +290,7 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
            WorkflowContext = local_macro_workflow_context(
                                SourceView, maps:get(compile_opts, State)),
            LocalState1 <- astranaut:traverse_return(
-                            astranaut_local_macro:prepare_declaration(
+                            astranaut_macro_local:prepare_declaration(
                               FAs, WorkflowContext, local_macro_ops(),
                               RegisteredLocalState)),
            EffectiveMacroMap1 <- astranaut:traverse_return(
@@ -321,7 +321,7 @@ add_local_macro(#{module := Module, file := File, global_macro_opts := GlobalOpt
 
 register_local_declaration(FAs, Options, Pos, SourceView, RuntimeContext,
                            MacroOps, LocalState) ->
-    case astranaut_local_macro:register(
+    case astranaut_macro_local:register(
            FAs, Options, SourceView, RuntimeContext,
            MacroOps, LocalState) of
         {ok, LocalState1} -> astranaut_traverse:return(LocalState1);
@@ -463,15 +463,15 @@ ensure_attribute_target_callable(
     #{local_macro_state := LocalState,
       compile_opts := CompileOpts,
       remaining_forms := Queue} = State) ->
-    case maps:find({Function, Arity}, astranaut_local_macro:local_macros(LocalState)) of
+    case maps:find({Function, Arity}, astranaut_macro_local:local_macros(LocalState)) of
         {ok, #{status := compiled}} -> astranaut_traverse:return(State);
         {ok, _} ->
-            SourceView = astranaut_local_macro:source_view(passed_forms(State), Queue),
+            SourceView = astranaut_macro_local:source_view(passed_forms(State), Queue),
             do([ traverse ||
                    WorkflowContext = local_macro_workflow_context(
                                        SourceView, CompileOpts),
                    LocalState1 <- astranaut:traverse_return(
-                                    astranaut_local_macro:need_callable(
+                                    astranaut_macro_local:need_callable(
                                       {Function, Arity}, WorkflowContext,
                                       local_macro_ops(), LocalState)),
                    State1 = State#{local_macro_state => LocalState1},
@@ -486,7 +486,7 @@ ensure_attribute_target_callable(_ExternalTarget, State) ->
 -spec assert_scan_frozen_forms([term()], map()) ->
           astranaut_traverse:struct(scanner_state(), ok).
 assert_scan_frozen_forms(Forms, LocalState) ->
-    case astranaut_local_macro:reject_locked_mutation(Forms, LocalState) of
+    case astranaut_macro_local:reject_locked_mutation(Forms, LocalState) of
         ok -> astranaut_traverse:return(ok);
         {error, {illegal_locked_form_mutation, Form} = Error} ->
             astranaut_traverse:update_pos(form_pos(Form), ?MODULE, astranaut_traverse:fail(Error))
@@ -637,14 +637,14 @@ macro_options_by_fa(FAs, Options) ->
 local_macro_global_opts(Module, ClauseMap, GlobalMacroOpts) ->
     case maps:is_key({format_error, 1}, ClauseMap) of
         true ->
-            GlobalMacroOpts#{formatter => astranaut_local_macro:module_name(Module)};
+            GlobalMacroOpts#{formatter => astranaut_macro_local:module_name(Module)};
         false ->
             GlobalMacroOpts#{formatter => astranaut_macro}
     end.
 
 local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
     MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
-    MacroOptions1#{module => astranaut_local_macro:module_name(Module),
+    MacroOptions1#{module => astranaut_macro_local:module_name(Module),
                    macro_module => Module,
                    macro => Function,
                    function => Function,
@@ -925,7 +925,7 @@ finalize_attribute_macro_pass(Module, File, GlobalMacroOpts, ScanEffectiveMacroM
                                Forms, CompileOpts),
            RetainRoots = retain_roots(Forms),
            {FinalLocalEnv, FinalSkipIds, FinalLocalState} <-
-               astranaut_local_macro:finalize(
+               astranaut_macro_local:finalize(
                  RetainRoots, WorkflowContext,
                  local_macro_ops(), ScanLocalState),
            RetainWarnings = local_macro_retain_warnings(
@@ -977,7 +977,7 @@ finalize_attribute_forms(
                  Forms2, FinalMacroMap),
            RetainedFunctionIds = ordsets:from_list(
                                    [Id || Id = {function, _, _} <-
-                                      astranaut_local_macro:retained_form_ids(
+                                      astranaut_macro_local:retained_form_ids(
                                         FinalLocalState)]),
            FinalMacroCallers = ordsets:union(
                                  DetectedMacroCallers, RetainedFunctionIds),
@@ -1001,7 +1001,7 @@ run_function_macro_pass(
            callers := Callers}) ->
     do([ return ||
            {ExpandedForms, _FinalState} <-
-               astranaut_local_macro:expand_final_functions(
+               astranaut_macro_local:expand_final_functions(
                  Forms,
                  [{Name, Arity} || {function, Name, Arity} <- Callers],
                  RuntimeContext,
@@ -1025,7 +1025,7 @@ remove_final_skip_form({attribute, Pos, compile, {nowarn_unused_function, FAs}},
             [{attribute, Pos, compile, {nowarn_unused_function, RemainingFAs}}]
     end;
 remove_final_skip_form(Form, Skip) ->
-    case ordsets:is_element(astranaut_local_macro:form_id(Form), Skip) of
+    case ordsets:is_element(astranaut_macro_local:form_id(Form), Skip) of
         true -> [];
         false -> [Form]
     end.
@@ -1108,7 +1108,7 @@ local_macro_retain_warnings(Forms, LocalMacroState) ->
               Roots = ordsets:from_list(retain_fas(Attr, [])),
               Undefined = ordsets:subtract(Roots, DefinedFAs),
               Existing = ordsets:subtract(Roots, Undefined),
-              Nonclosure = astranaut_local_macro:nonclosure_retain_roots(
+              Nonclosure = astranaut_macro_local:nonclosure_retain_roots(
                              Existing, LocalMacroState),
               retain_root_warnings(Pos, Undefined, Nonclosure);
          (_Form) ->

@@ -6,7 +6,7 @@
 
 ## 职责边界
 
-`astranaut_local_macro` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
+`astranaut_macro_local` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
 local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责统一的
 `MacroRuntimeContext` 构造与 pass 编排；`astranaut_macro_expander` 负责宏引用匹配、
@@ -22,13 +22,13 @@ astranaut_macro
   ├─ 构造阶段化 MacroRuntimeContext
   ├─ 调用 astranaut_macro_expander
   │    └─ 通用目标解析、宏调用、function 递归展开与展开期 monad state
-  └─ 调用 astranaut_local_macro
+  └─ 调用 astranaut_macro_local
        ├─ declaration 成员注册、依赖规划与状态转换
        ├─ 闭包、internal policy、冻结、ExpansionRecord、retain、FinalSkipIds
        └─ canonical forms 的累计编译与 local macro 模块加载
 ```
 
-`astranaut_local_macro` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
+`astranaut_macro_local` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
 注册/预展开、`NeedCallable` 和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
 工作流驱动，但实际引用解析和 function 展开验证通过调用方提供的 `MacroOps` 直接指向
 `astranaut_macro_expander`，从而复用统一错误上下文，并避免把 traverse monad 或扫描
@@ -53,7 +53,7 @@ retain 或 declaration order。
 ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
 ```
 
-`astranaut_local_macro` 提供候选环境和闭包，保存返回的 `ReferencedFAs` 并据此
+`astranaut_macro_local` 提供候选环境和闭包，保存返回的 `ReferencedFAs` 并据此
 规划累计边界；它不以“静态闭包中包含某 FA”替代真实的宏调用匹配。
 
 ## 显式数据接口
@@ -195,7 +195,7 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 fingerprint/result 校验保证一致。
 
 `internal_function` 的解析、共享闭包冲突校验和有效环境裁剪全部属于
-`astranaut_local_macro`。通用展开器不会读取该 option。
+`astranaut_macro_local`。通用展开器不会读取该 option。
 
 ### 同一 declaration 的有效环境
 
@@ -427,7 +427,7 @@ finalize(RetainRoots, WorkflowContext, MacroOps, State).
 `resolve_local_references` 和 `expand_and_validate`，两者都实现于
 `astranaut_macro`，并以 `astranaut_return` 结果保留统一错误上下文。
 
-`astranaut_local_macro` 自己调度 canonical boundary。缺失 canonical form 时先通过
+`astranaut_macro_local` 自己调度 canonical boundary。缺失 canonical form 时先通过
 MacroOps 进入 ExpansionValidator；compiler 不接触 EnvFingerprint。该模块不依赖
 统一扫描队列或 traverse monad；扫描器在注册/预展开、NeedCallable 和收尾边界
 桥接 `astranaut_return`。

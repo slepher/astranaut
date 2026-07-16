@@ -37,7 +37,7 @@ GenerationCompiler
 实现模块按此边界拆分：`astranaut_macro` 是 parse-transform 门面和 pass 编排器，拥有
 source-ordered scan、环境更新、splice、final context 及诊断入口；
 `astranaut_macro_expander` 拥有 attribute/function 共用的目标解析、宏调用、返回 AST
-规范化、递归展开和展开期 traversal state；`astranaut_local_macro` 拥有声明、闭包、
+规范化、递归展开和展开期 traversal state；`astranaut_macro_local` 拥有声明、闭包、
 一致性记录、调度及 generation 生命周期。expander 不反向调用扫描器或 local-macro
 工作流。为兼容既有调用，`astranaut_macro:expand_function/5` 只做一次委托；内部
 `MacroOps` 直接引用 expander，避免门面往返。

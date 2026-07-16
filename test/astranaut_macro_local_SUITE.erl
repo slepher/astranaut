@@ -2,7 +2,7 @@
 %%% Focused tests for the local-macro state machine.  These intentionally do
 %%% not invoke the parse transform: the scanner integration has separate tests.
 %%%-------------------------------------------------------------------
--module(astranaut_local_macro_SUITE).
+-module(astranaut_macro_local_SUITE).
 -compile(export_all).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -51,60 +51,60 @@ all() -> [register_freezes_static_closure,
 register_freezes_static_closure(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{imports => [a]},
-                                                  astranaut_local_macro:new()),
-    #{ {foo, 0} := Entry } = astranaut_local_macro:local_macros(State),
+                                                  astranaut_macro_local:new()),
+    #{ {foo, 0} := Entry } = astranaut_macro_local:local_macros(State),
     ?assertEqual([{function, foo, 0}, {function, helper, 0}, {spec, helper, 0}],
                  maps:get(closure_ids, Entry)),
     ?assertEqual(ordsets:from_list([{function, foo, 0}, {function, helper, 0}, {spec, helper, 0}]),
-                 astranaut_local_macro:frozen_ids(State)),
+                 astranaut_macro_local:frozen_ids(State)),
     ok.
 
 duplicate_declaration_fails_atomically(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
-                                                  astranaut_local_macro:new()),
+                                                  astranaut_macro_local:new()),
     ?assertEqual({error, {duplicate_local_macro_declaration, {foo, 0}}},
                  register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, State)),
-    ?assertEqual(1, map_size(astranaut_local_macro:local_macros(State))),
+    ?assertEqual(1, map_size(astranaut_macro_local:local_macros(State))),
     ok.
 
 cache_rejects_conflicting_environments(_Config) ->
-    State0 = astranaut_local_macro:new(),
-    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
-    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_b, [], helper_form(a), State1),
+    State0 = astranaut_macro_local:new(),
+    {ok, State1} = astranaut_macro_local:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
+    {ok, _State2} = astranaut_macro_local:cache_expanded({function, helper, 0}, env_b, [], helper_form(a), State1),
     ?assertEqual({error, {conflicting_local_macro_closure_environment, {function, helper, 0}}},
-                 astranaut_local_macro:cache_expanded({function, helper, 0}, env_c, [], helper_form(b), State1)),
+                 astranaut_macro_local:cache_expanded({function, helper, 0}, env_c, [], helper_form(b), State1)),
     ok.
 
 cache_rejects_conflicting_whitelists(_Config) ->
     FormId = {function, helper, 0},
     Form = helper_form(a),
-    {ok, State1} = astranaut_local_macro:cache_expanded(
+    {ok, State1} = astranaut_macro_local:cache_expanded(
                      FormId, env_a, [{a, 0}], Form,
-                     astranaut_local_macro:new()),
+                     astranaut_macro_local:new()),
     ?assertEqual(
        {error,
         {conflicting_local_macro_whitelist, FormId,
          #{expected => [{a, 0}], observed => [{b, 0}],
            unexpected => [{b, 0}], missing => [{a, 0}]}}},
-       astranaut_local_macro:cache_expanded(
+       astranaut_macro_local:cache_expanded(
          FormId, env_b, [{b, 0}], Form, State1)),
     ok.
 
 cache_hits_same_fingerprint(_Config) ->
-    State0 = astranaut_local_macro:new(),
-    {ok, State1} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
-    {ok, _State2} = astranaut_local_macro:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State1),
+    State0 = astranaut_macro_local:new(),
+    {ok, State1} = astranaut_macro_local:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State0),
+    {ok, _State2} = astranaut_macro_local:cache_expanded({function, helper, 0}, env_a, [], helper_form(a), State1),
     ok.
 
 cache_reuses_environment_after_intervening_context(_Config) ->
     FormId = {function, helper, 0},
     Form = helper_form(a),
-    {ok, State1} = astranaut_local_macro:cache_expanded(
-                     FormId, env_a, [], Form, astranaut_local_macro:new()),
-    {ok, State2} = astranaut_local_macro:cache_expanded(
+    {ok, State1} = astranaut_macro_local:cache_expanded(
+                     FormId, env_a, [], Form, astranaut_macro_local:new()),
+    {ok, State2} = astranaut_macro_local:cache_expanded(
                      FormId, env_b, [], Form, State1),
-    {ok, State3} = astranaut_local_macro:cache_expanded(
+    {ok, State3} = astranaut_macro_local:cache_expanded(
                      FormId, env_a, [], Form, State2),
     Record = maps:get(FormId, maps:get(expansion_records, State3)),
     ?assertEqual(2, map_size(maps:get(results_by_input, Record))),
@@ -117,10 +117,10 @@ execute_plan_rejects_conflicting_snapshots(_Config) ->
               first_form(), second_form(), helper_form(ok)],
     {ok, S1} = register(
                  [{first, 0}], #{}, Source, #{snapshot => first},
-                 astranaut_local_macro:new()),
+                 astranaut_macro_local:new()),
     {ok, S2} = register(
                  [{second, 0}], #{}, Source, #{snapshot => second}, S1),
-    {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
+    {ok, Plan} = astranaut_macro_local:finalize_plan(S2),
     Expand =
         fun(MacroEnv, _InjectForms, Forms, {helper, 0}, Control) ->
                 Value = case maps:is_key(snapshot, MacroEnv) of
@@ -128,7 +128,7 @@ execute_plan_rejects_conflicting_snapshots(_Config) ->
                             false -> none
                         end,
                 expansion_return(
-                  astranaut_local_macro:materialize_forms(
+                  astranaut_macro_local:materialize_forms(
                     Forms, #{{function, helper, 0} => helper_form(Value)}),
                   Control);
            (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
@@ -137,7 +137,7 @@ execute_plan_rejects_conflicting_snapshots(_Config) ->
     MacroOps = #{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
     Error = astranaut_return:run_error(
-              astranaut_local_macro:execute_plan(Plan, Context, MacroOps, S2)),
+              astranaut_macro_local:execute_plan(Plan, Context, MacroOps, S2)),
     ?assert(lists:member(
               {conflicting_local_macro_closure_environment, {function, helper, 0}},
               astranaut_error:errors(Error))),
@@ -147,13 +147,13 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
     Source = [{attribute, 1, module, local_macro_inject_conflict_plan_test},
               first_form(), second_form(), helper_form(ok)],
     MacroOps0 = identity_macro_ops(),
-    {ok, S1} = astranaut_local_macro:register(
+    {ok, S1} = astranaut_macro_local:register(
                  [{first, 0}], #{}, Source, runtime_context(#{}, [early]),
-                 MacroOps0, astranaut_local_macro:new()),
-    {ok, S2} = astranaut_local_macro:register(
+                 MacroOps0, astranaut_macro_local:new()),
+    {ok, S2} = astranaut_macro_local:register(
                  [{second, 0}], #{}, Source, runtime_context(#{}, [late]),
                  MacroOps0, S1),
-    {ok, Plan} = astranaut_local_macro:finalize_plan(S2),
+    {ok, Plan} = astranaut_macro_local:finalize_plan(S2),
     Expand =
         fun(_MacroEnv, InjectForms, Forms, {helper, 0}, Control) ->
                 Value = case InjectForms of
@@ -161,7 +161,7 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
                             [late] -> late
                         end,
                 expansion_return(
-                  astranaut_local_macro:materialize_forms(
+                  astranaut_macro_local:materialize_forms(
                     Forms, #{{function, helper, 0} => helper_form(Value)}),
                   Control);
            (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
@@ -170,7 +170,7 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
     MacroOps = MacroOps0#{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
     Error = astranaut_return:run_error(
-              astranaut_local_macro:execute_plan(
+              astranaut_macro_local:execute_plan(
                 Plan, Context, MacroOps, S2)),
     ?assert(lists:member(
               {conflicting_local_macro_closure_environment,
@@ -181,17 +181,17 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
 retain_controls_final_skip_ids(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, State0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
-                                                   astranaut_local_macro:new()),
+                                                   astranaut_macro_local:new()),
     Forms = #{{function, foo, 0} => Foo, {function, helper, 0} => Helper, {spec, helper, 0} => Spec},
-    State1 = astranaut_local_macro:commit_compiled([{foo, 0}], Forms, State0),
-    {_Env0, Skip0, _} = astranaut_local_macro:finalize([], State1),
+    State1 = astranaut_macro_local:commit_compiled([{foo, 0}], Forms, State0),
+    {_Env0, Skip0, _} = astranaut_macro_local:finalize([], State1),
     ?assertEqual(ordsets:from_list(maps:keys(Forms)), Skip0),
-    {_Env1, Skip1, _} = astranaut_local_macro:finalize([{helper, 0}], State1),
+    {_Env1, Skip1, _} = astranaut_macro_local:finalize([{helper, 0}], State1),
     ?assertEqual([], Skip1),
     ok.
 
 source_view_only_contains_materialised_forms(_Config) ->
-    ?assertEqual([passed, queued], astranaut_local_macro:source_view([passed], [queued])),
+    ?assertEqual([passed, queued], astranaut_macro_local:source_view([passed], [queued])),
     ok.
 
 declaration_inject_snapshot_is_preserved(_Config) ->
@@ -199,18 +199,18 @@ declaration_inject_snapshot_is_preserved(_Config) ->
     Source = [early, Foo, Helper, Spec, late],
     InjectForms = [early],
     MacroOps = identity_macro_ops(),
-    {ok, State} = astranaut_local_macro:register(
+    {ok, State} = astranaut_macro_local:register(
                     [{foo, 0}], #{}, Source,
                     runtime_context(#{}, InjectForms), MacroOps,
-                    astranaut_local_macro:new()),
-    #{{foo, 0} := Entry} = astranaut_local_macro:local_macros(State),
+                    astranaut_macro_local:new()),
+    #{{foo, 0} := Entry} = astranaut_macro_local:local_macros(State),
     ?assertEqual(Source, maps:get(source_view, Entry)),
     ?assertNot(maps:is_key(env_snapshot, Entry)),
     ?assertNot(maps:is_key(inject_forms_snapshot, Entry)),
     ?assertEqual(
        InjectForms,
        maps:get(inject_forms, maps:get(runtime_context_snapshot, Entry))),
-    {ok, [Boundary]} = astranaut_local_macro:compile_plan({foo, 0}, State),
+    {ok, [Boundary]} = astranaut_macro_local:compile_plan({foo, 0}, State),
     [Request] = maps:get(requests, Boundary),
     ?assertEqual(
        lists:sort([closure_ids, closure_fas, candidate_local_macros,
@@ -224,25 +224,25 @@ declaration_inject_snapshot_is_preserved(_Config) ->
     ok.
 
 fingerprint_includes_injected_forms(_Config) ->
-    A = astranaut_local_macro:env_fingerprint(#{imports => [a]}, #{foo => 1}, #{}, [early]),
-    B = astranaut_local_macro:env_fingerprint(#{imports => [a]}, #{foo => 1}, #{}, [late]),
+    A = astranaut_macro_local:env_fingerprint(#{imports => [a]}, #{foo => 1}, #{}, [early]),
+    B = astranaut_macro_local:env_fingerprint(#{imports => [a]}, #{foo => 1}, #{}, [late]),
     ?assertNotEqual(A, B),
     ok.
 
 frozen_splice_is_rejected(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
-                                                  astranaut_local_macro:new()),
+                                                  astranaut_macro_local:new()),
     ?assertEqual({error, {illegal_locked_form_mutation, Helper}},
-                 astranaut_local_macro:reject_locked_mutation([Helper], State)),
-    ?assertEqual(ok, astranaut_local_macro:reject_locked_mutation([helper_form(other)], astranaut_local_macro:new())),
+                 astranaut_macro_local:reject_locked_mutation([Helper], State)),
+    ?assertEqual(ok, astranaut_macro_local:reject_locked_mutation([helper_form(other)], astranaut_macro_local:new())),
     ok.
 
 later_declaration_remains_helper_in_earlier_closure(_Config) ->
     Source = [a_calls_b(), b_form_independent()],
-    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
-    #{ {a, 0} := A, {b, 0} := B } = astranaut_local_macro:local_macros(S2),
+    #{ {a, 0} := A, {b, 0} := B } = astranaut_macro_local:local_macros(S2),
     ?assert(lists:member({function, b, 0}, maps:get(closure_ids, A))),
     ?assertEqual([], maps:get(referenced_local_macros, A)),
     ?assert(lists:member({function, b, 0}, maps:get(closure_ids, B))),
@@ -250,10 +250,10 @@ later_declaration_remains_helper_in_earlier_closure(_Config) ->
 
 declaration_snapshot_and_actual_local_references(_Config) ->
     Source = [a_form(), b_form_calls_a(), unused_form()],
-    {ok, S1} = register([{a, 0}], #{}, Source, #{imports => [early]}, astranaut_local_macro:new()),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{imports => [early]}, astranaut_macro_local:new()),
     {ok, S2} = register([{unused, 0}], #{}, Source, #{imports => [middle]}, S1),
     {ok, S3} = register([{b, 0}], #{}, Source, #{imports => [late]}, S2),
-    #{ {a, 0} := A, {b, 0} := B } = astranaut_local_macro:local_macros(S3),
+    #{ {a, 0} := A, {b, 0} := B } = astranaut_macro_local:local_macros(S3),
     ?assertEqual(#{imports => [early]},
                  maps:get(macro_map, maps:get(runtime_context_snapshot, A))),
     BMacroMap = maps:get(
@@ -268,61 +268,61 @@ declaration_snapshot_and_actual_local_references(_Config) ->
 extra_functions_and_self_recursion(_Config) ->
     Source = [recursive_form(), helper_form(ok)],
     {ok, State} = register([{recursive, 0}], #{extra_functions => [{helper, 0}]}, Source, #{},
-                                                  astranaut_local_macro:new()),
-    #{ {recursive, 0} := Entry } = astranaut_local_macro:local_macros(State),
+                                                  astranaut_macro_local:new()),
+    #{ {recursive, 0} := Entry } = astranaut_macro_local:local_macros(State),
     ?assertEqual([], maps:get(referenced_local_macros, Entry)),
     ?assert(lists:member({function, helper, 0}, maps:get(closure_ids, Entry))),
     ?assertEqual({error, {invalid_extra_functions, [{missing, 0}]}},
                  register([{recursive, 0}], #{extra_functions => [{missing, 0}]}, Source, #{},
-                                                  astranaut_local_macro:new())),
+                                                  astranaut_macro_local:new())),
     ok.
 
 internal_function_conflict(_Config) ->
     Source = [first_form(), second_form(), helper_form(ok)],
     MacroMap = local_macro_map([{helper, 0}]),
     {ok, State} = register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, MacroMap,
-                                                  astranaut_local_macro:new()),
+                                                  astranaut_macro_local:new()),
     ?assertMatch({error, {conflicting_internal_function_policy, {helper, 0}, _}},
                  register([{second, 0}], #{}, Source, MacroMap, State)),
     ok.
 
 minimal_cumulative_compile_boundaries(_Config) ->
     Source = [a_form(), b_form_calls_a()],
-    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
-    {ok, [P1, P2]} = astranaut_local_macro:compile_plan({b, 0}, S2),
+    {ok, [P1, P2]} = astranaut_macro_local:compile_plan({b, 0}, S2),
     ?assertEqual([{a, 0}], maps:get(members, P1)),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, P2)),
     [RequestA] = maps:get(requests, P1),
     ?assert(maps:is_key({function, a, 0}, maps:get(forms, RequestA))),
-    {ok, [FinalDependency, Final]} = astranaut_local_macro:finalize_plan(S2),
+    {ok, [FinalDependency, Final]} = astranaut_macro_local:finalize_plan(S2),
     ?assertEqual([{a, 0}], maps:get(members, FinalDependency)),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Final)),
     ok.
 
 independent_macros_share_one_boundary(_Config) ->
     Source = [a_form(), b_form_independent()],
-    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+    {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
-    {ok, [Plan]} = astranaut_local_macro:compile_plan({b, 0}, S2),
+    {ok, [Plan]} = astranaut_macro_local:compile_plan({b, 0}, S2),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     ok.
 
 attribute_between_independent_macros_shares_one_boundary(_Config) ->
     Source = [a_form(), {attribute, 1, attr_a, a}, b_form_independent()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{},
-                        astranaut_local_macro:new()),
+                        astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
-    {ok, [Plan]} = astranaut_local_macro:compile_plan({b, 0}, S2),
+    {ok, [Plan]} = astranaut_macro_local:compile_plan({b, 0}, S2),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     ok.
 
 shared_declaration_stays_in_one_boundary(_Config) ->
     Source = [a_form(), b_form_independent(), c_form_calls_a()],
     {ok, S1} = register(
-                 [{a, 0}, {b, 0}], #{}, Source, #{}, astranaut_local_macro:new()),
+                 [{a, 0}, {b, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{c, 0}], #{}, Source, #{}, S1),
-    {ok, [Dependency, Final]} = astranaut_local_macro:finalize_plan(S2),
+    {ok, [Dependency, Final]} = astranaut_macro_local:finalize_plan(S2),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Dependency)),
     ?assertEqual([{a, 0}, {b, 0}, {c, 0}], maps:get(members, Final)),
     ok.
@@ -332,26 +332,26 @@ same_declaration_members_share_order_and_context(_Config) ->
     {ok, State} = register(
                     [{a, 0}, {b, 0}], #{}, Source,
                     #{shared => true},
-                    astranaut_local_macro:new()),
+                    astranaut_macro_local:new()),
     #{{a, 0} := A, {b, 0} := B} =
-        astranaut_local_macro:local_macros(State),
+        astranaut_macro_local:local_macros(State),
     ?assertEqual(maps:get(order, A), maps:get(order, B)),
     ?assertEqual(maps:get(runtime_context_snapshot, A),
                  maps:get(runtime_context_snapshot, B)),
-    {ok, [Plan]} = astranaut_local_macro:compile_plan({b, 0}, State),
+    {ok, [Plan]} = astranaut_macro_local:compile_plan({b, 0}, State),
     ?assertEqual(2, length(maps:get(requests, Plan))),
     ok.
 
 same_declaration_members_remain_direct_in_final_context(_Config) ->
     Source = [a_form(), b_form_calls_a()],
     MacroOps0 = identity_macro_ops(),
-    {ok, State} = astranaut_local_macro:register(
+    {ok, State} = astranaut_macro_local:register(
                     [{a, 0}, {b, 0}], #{}, Source,
                     runtime_context(#{}, []), MacroOps0,
-                    astranaut_local_macro:new()),
+                    astranaut_macro_local:new()),
     Context = #{source_view => Source, compile_opts => []},
     {just, PreparedState} = astranaut_return:run(
-                              astranaut_local_macro:prepare_declaration(
+                              astranaut_macro_local:prepare_declaration(
                                 [{a, 0}, {b, 0}], Context, MacroOps0, State)),
     FinalMacroMap =
         #{{a, 0} => #{macro_source => local_macro,
@@ -366,7 +366,7 @@ same_declaration_members_remain_direct_in_final_context(_Config) ->
         end,
     MacroOps = MacroOps0#{expand_function => Expand},
     {just, {_Forms, _State1}} = astranaut_return:run(
-                                 astranaut_local_macro:expand_final_functions(
+                                 astranaut_macro_local:expand_final_functions(
                                    Source, [{b, 0}],
                                    runtime_context(FinalMacroMap, []),
                                    MacroOps, PreparedState)),
@@ -377,7 +377,7 @@ declaration_expansion_uses_reference_whitelist(_Config) ->
     Source = [{attribute, 1, module, Module},
               a_form(), unused_form(), b_form_calls_a()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{},
-                        astranaut_local_macro:new()),
+                        astranaut_macro_local:new()),
     {ok, S2} = register([{unused, 0}], #{}, Source, #{}, S1),
     {ok, State} = register([{b, 0}], #{}, Source, #{}, S2),
     Expand =
@@ -391,20 +391,20 @@ declaration_expansion_uses_reference_whitelist(_Config) ->
     MacroOps = (identity_macro_ops())#{expand_function => Expand},
     Context = #{source_view => Source, compile_opts => []},
     {just, _State1} = astranaut_return:run(
-                        astranaut_local_macro:prepare_declaration(
+                        astranaut_macro_local:prepare_declaration(
                           [{b, 0}], Context, MacroOps, State)),
     ok.
 
 final_local_macro_environment_uses_reference_whitelist(_Config) ->
     Source = [a_form(), b_form_calls_a(), c_form_calls_b()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{},
-                        astranaut_local_macro:new()),
+                        astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
     {ok, RegisteredState} = register([{c, 0}], #{}, Source, #{}, S2),
-    {ok, State0} = astranaut_local_macro:cache_expanded(
+    {ok, State0} = astranaut_macro_local:cache_expanded(
                      {function, b, 0}, seeded, [{a, 0}],
                      b_form_calls_a(), RegisteredState),
-    State = astranaut_local_macro:commit_compiled(
+    State = astranaut_macro_local:commit_compiled(
               [{a, 0}, {b, 0}, {c, 0}], #{}, State0),
     erlang:put(local_whitelist_expand_count, 0),
     Expand =
@@ -421,16 +421,16 @@ final_local_macro_environment_uses_reference_whitelist(_Config) ->
     FinalContext = runtime_context(
                      local_macro_map([{a, 0}, {b, 0}, {c, 0}]), []),
     {just, {_Forms, State1}} = astranaut_return:run(
-                                astranaut_local_macro:expand_final_functions(
+                                astranaut_macro_local:expand_final_functions(
                                   Source, [{b, 0}], FinalContext,
                                   MacroOps, State)),
-    State2 = astranaut_local_macro:commit_compiled([{c, 0}], #{}, State1),
+    State2 = astranaut_macro_local:commit_compiled([{c, 0}], #{}, State1),
     {just, {_Forms2, State3}} = astranaut_return:run(
-                                 astranaut_local_macro:expand_final_functions(
+                                 astranaut_macro_local:expand_final_functions(
                                    Source, [{b, 0}], FinalContext,
                                    MacroOps, State2)),
     {just, {_Forms3, _State4}} = astranaut_return:run(
-                                  astranaut_local_macro:expand_final_functions(
+                                  astranaut_macro_local:expand_final_functions(
                                     Source, [{b, 0}], FinalContext,
                                     MacroOps, State3)),
     %% The canonical whitelist is part of the final local environment, so
@@ -441,7 +441,7 @@ final_local_macro_environment_uses_reference_whitelist(_Config) ->
 ordinary_final_function_sees_all_local_macros(_Config) ->
     Source = [a_form(), b_form_independent(), unused_form()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{},
-                        astranaut_local_macro:new()),
+                        astranaut_macro_local:new()),
     {ok, State} = register([{b, 0}], #{}, Source, #{}, S1),
     Expand =
         fun(MacroEnv, _InjectForms, Forms, {unused, 0}, disabled) ->
@@ -451,7 +451,7 @@ ordinary_final_function_sees_all_local_macros(_Config) ->
         end,
     MacroOps = (identity_macro_ops())#{expand_function => Expand},
     {just, {_Forms, State1}} = astranaut_return:run(
-                                astranaut_local_macro:expand_final_functions(
+                                astranaut_macro_local:expand_final_functions(
                                   Source, [{unused, 0}],
                                   runtime_context(
                                     local_macro_map([{a, 0}, {b, 0}]), []),
@@ -615,15 +615,15 @@ shared_expander_disables_whitelist_for_ordinary_function(_Config) ->
 declaration_preexpands_without_compiling(_Config) ->
     Source = [a_form()],
     MacroOps = identity_macro_ops(),
-    {ok, State0} = astranaut_local_macro:register(
+    {ok, State0} = astranaut_macro_local:register(
                      [{a, 0}], #{}, Source, runtime_context(#{}, []),
-                     MacroOps, astranaut_local_macro:new()),
+                     MacroOps, astranaut_macro_local:new()),
     Context = #{source_view => Source, compile_opts => []},
     {just, State1} = astranaut_return:run(
-                       astranaut_local_macro:prepare_declaration(
+                       astranaut_macro_local:prepare_declaration(
                          [{a, 0}], Context, MacroOps, State0)),
     #{{a, 0} := #{status := pending}} =
-        astranaut_local_macro:local_macros(State1),
+        astranaut_macro_local:local_macros(State1),
     ?assertEqual(0, maps:get(generation, State1)),
     ?assert(maps:is_key({function, a, 0},
                         maps:get(canonical_expanded_forms, State1))),
@@ -634,23 +634,23 @@ independent_declaration_does_not_compile(_Config) ->
     Source = [{attribute, 1, module, Module}, a_form(), b_form_independent()],
     MacroOps = identity_macro_ops(),
     Context = #{source_view => Source, compile_opts => []},
-    {ok, S0} = astranaut_local_macro:register(
+    {ok, S0} = astranaut_macro_local:register(
                  [{a, 0}], #{}, Source, runtime_context(#{}, []),
-                 MacroOps, astranaut_local_macro:new()),
+                 MacroOps, astranaut_macro_local:new()),
     {just, S1} = astranaut_return:run(
-                   astranaut_local_macro:prepare_declaration(
+                   astranaut_macro_local:prepare_declaration(
                      [{a, 0}], Context, MacroOps, S0)),
-    {ok, S2} = astranaut_local_macro:register(
+    {ok, S2} = astranaut_macro_local:register(
                  [{b, 0}], #{}, Source, runtime_context(#{}, []),
                  MacroOps, S1),
     {just, S3} = astranaut_return:run(
-                   astranaut_local_macro:prepare_declaration(
+                   astranaut_macro_local:prepare_declaration(
                      [{b, 0}], Context, MacroOps, S2)),
     ?assertEqual(0, maps:get(generation, S3)),
-    {ok, [Plan]} = astranaut_local_macro:finalize_plan(S3),
+    {ok, [Plan]} = astranaut_macro_local:finalize_plan(S3),
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     {just, S4} = astranaut_return:run(
-                   astranaut_local_macro:execute_plan(
+                   astranaut_macro_local:execute_plan(
                      [Plan], Context, MacroOps, S3)),
     ?assertEqual(1, maps:get(generation, S4)),
     ok.
@@ -660,25 +660,25 @@ dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
     Source = [{attribute, 1, module, Module}, a_form(), b_form_calls_a()],
     MacroOps = identity_macro_ops(),
     AMap = #{{a, 0} => #{macro_source => local_macro,
-                         macro_module => astranaut_local_macro:module_name(Module),
+                         macro_module => astranaut_macro_local:module_name(Module),
                          function => a, arity => 0}},
-    {ok, S0} = astranaut_local_macro:register(
+    {ok, S0} = astranaut_macro_local:register(
                  [{a, 0}], #{}, Source, runtime_context(#{}, []),
-                 MacroOps, astranaut_local_macro:new()),
+                 MacroOps, astranaut_macro_local:new()),
     Context0 = #{source_view => Source, compile_opts => []},
     {just, S1} = astranaut_return:run(
-                   astranaut_local_macro:prepare_declaration(
+                   astranaut_macro_local:prepare_declaration(
                      [{a, 0}], Context0, MacroOps, S0)),
-    {ok, S2} = astranaut_local_macro:register(
+    {ok, S2} = astranaut_macro_local:register(
                  [{b, 0}], #{}, Source, runtime_context(AMap, []),
                  MacroOps, S1),
     Context1 = Context0,
     {just, S3} = astranaut_return:run(
-                   astranaut_local_macro:prepare_declaration(
+                   astranaut_macro_local:prepare_declaration(
                      [{b, 0}], Context1, MacroOps, S2)),
     #{{a, 0} := #{status := compiled},
       {b, 0} := #{status := pending}} =
-        astranaut_local_macro:local_macros(S3),
+        astranaut_macro_local:local_macros(S3),
     ?assertEqual(1, maps:get(generation, S3)),
     ok.
 
@@ -686,71 +686,71 @@ compiler_reuses_canonical_forms(_Config) ->
     Module = local_macro_canonical_compile_test,
     Source = [{attribute, 1, module, Module}, a_form()],
     MacroOps = identity_macro_ops(),
-    {ok, S0} = astranaut_local_macro:register(
+    {ok, S0} = astranaut_macro_local:register(
                  [{a, 0}], #{}, Source, runtime_context(#{}, []),
-                 MacroOps, astranaut_local_macro:new()),
+                 MacroOps, astranaut_macro_local:new()),
     Context = #{source_view => Source, compile_opts => []},
     {just, S1} = astranaut_return:run(
-                   astranaut_local_macro:prepare_declaration(
+                   astranaut_macro_local:prepare_declaration(
                      [{a, 0}], Context, MacroOps, S0)),
     NoExpandOps = MacroOps#{expand_function =>
                                fun(_, _, _, _, _) -> error(unexpected_reexpand) end},
-    {ok, Plan} = astranaut_local_macro:compile_plan({a, 0}, S1),
+    {ok, Plan} = astranaut_macro_local:compile_plan({a, 0}, S1),
     {just, S2} = astranaut_return:run(
-                   astranaut_local_macro:execute_plan(
+                   astranaut_macro_local:execute_plan(
                      Plan, Context, NoExpandOps, S1)),
     Generation = maps:get(generation, S2),
     LaterTriggerContext = Context#{source_view =>
                                        Source ++ [{attribute, 2, later, changed}]},
     {just, S3} = astranaut_return:run(
-                   astranaut_local_macro:execute_plan(
+                   astranaut_macro_local:execute_plan(
                      Plan, LaterTriggerContext, NoExpandOps, S2)),
     ?assertEqual(Generation, maps:get(generation, S3)),
     ok.
 
 final_retained_helper_comparison(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
-    {ok, S00} = astranaut_local_macro:cache_expanded(
+    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_macro_local:new()),
+    {ok, S00} = astranaut_macro_local:cache_expanded(
                   {function, foo, 0}, declaration_env, [], Foo, S0),
-    {ok, S01} = astranaut_local_macro:cache_expanded(
+    {ok, S01} = astranaut_macro_local:cache_expanded(
                   {function, helper, 0}, declaration_env, [], Helper, S00),
-    S1 = astranaut_local_macro:commit_compiled(
+    S1 = astranaut_macro_local:commit_compiled(
            [{foo, 0}],
            #{{function, foo, 0} => Foo,
              {function, helper, 0} => Helper}, S01),
-    {_Env, _Skip, S2} = astranaut_local_macro:finalize([{helper, 0}], S1),
+    {_Env, _Skip, S2} = astranaut_macro_local:finalize([{helper, 0}], S1),
     HelperOps = (identity_macro_ops())#{
                   expand_function =>
                       fun(_MacroEnv, _InjectForms, Forms0, {helper, 0},
                           #{mode := verify} = Control) ->
                               expansion_return(
-                                astranaut_local_macro:materialize_forms(
+                                astranaut_macro_local:materialize_forms(
                                   Forms0,
                                   #{{function, helper, 0} =>
                                         helper_form(changed)}), Control)
                       end},
     HelperError = astranaut_return:run_error(
-                    astranaut_local_macro:expand_final_functions(
+                    astranaut_macro_local:expand_final_functions(
                       [Foo, Helper, Spec], [{helper, 0}],
                       runtime_context(#{}, [final]), HelperOps, S2)),
     ?assertEqual(
        [{conflicting_local_macro_closure_environment,
          {function, helper, 0}}],
        astranaut_error:errors(HelperError)),
-    {_Env2, _Skip2, S3} = astranaut_local_macro:finalize([{foo, 0}], S1),
+    {_Env2, _Skip2, S3} = astranaut_macro_local:finalize([{foo, 0}], S1),
     FooOps = (identity_macro_ops())#{
                expand_function =>
                    fun(_MacroEnv, _InjectForms, Forms0, {foo, 0},
                        #{mode := verify} = Control) ->
                            expansion_return(
-                             astranaut_local_macro:materialize_forms(
+                             astranaut_macro_local:materialize_forms(
                                Forms0,
                                #{{function, foo, 0} => foo_form(changed)}),
                              Control)
                    end},
     FooError = astranaut_return:run_error(
-                 astranaut_local_macro:expand_final_functions(
+                 astranaut_macro_local:expand_final_functions(
                    [Foo, Helper, Spec], [{foo, 0}],
                    runtime_context(#{}, [final]), FooOps, S3)),
     ?assertEqual(
@@ -760,33 +760,33 @@ final_retained_helper_comparison(_Config) ->
     ok.
 
 safe_load_replaces_current_generation(_Config) ->
-    Module = astranaut_local_macro_safe_load_test,
-    {just, {Module, _}} = astranaut_return:run(astranaut_local_macro:safe_load(Module, load_forms(Module, first), [without_warnings])),
+    Module = astranaut_macro_local_safe_load_test,
+    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, load_forms(Module, first), [without_warnings])),
     ?assertEqual(first, Module:value()),
-    {just, {Module, _}} = astranaut_return:run(astranaut_local_macro:safe_load(Module, load_forms(Module, second), [without_warnings])),
+    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, load_forms(Module, second), [without_warnings])),
     ?assertEqual(second, Module:value()),
     ok.
 
 safe_load_refuses_module_with_old_code_in_use(_Config) ->
-    Module = astranaut_local_macro_busy_load_test,
-    {just, {Module, _}} = astranaut_return:run(astranaut_local_macro:safe_load(Module, busy_forms(Module, first), [without_warnings])),
+    Module = astranaut_macro_local_busy_load_test,
+    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, busy_forms(Module, first), [without_warnings])),
     Pid = spawn(Module, hold, []),
     timer:sleep(10),
     {ok, Module, Binary} = compile:forms(busy_forms(Module, second), [binary]),
     {module, Module} = code:load_binary(Module, [], Binary),
-    Error = astranaut_return:run_error(astranaut_local_macro:safe_load(Module, busy_forms(Module, third), [without_warnings])),
+    Error = astranaut_return:run_error(astranaut_macro_local:safe_load(Module, busy_forms(Module, third), [without_warnings])),
     ?assertEqual([local_macro_module_in_use], astranaut_error:errors(Error)),
     Pid ! stop,
     ok.
 
 non_frozen_retain_root_has_no_effect(_Config) ->
     [Foo, Helper, Spec] = forms(),
-    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
+    {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_macro_local:new()),
     ?assertEqual([{ordinary, 0}],
-                 astranaut_local_macro:nonclosure_retain_roots(
+                 astranaut_macro_local:nonclosure_retain_roots(
                    [{foo, 0}, {ordinary, 0}], S0)),
-    S1 = astranaut_local_macro:commit_compiled([{foo, 0}], #{{function, foo, 0} => Foo}, S0),
-    {_Env, Skip, _S2} = astranaut_local_macro:finalize([{ordinary, 0}], S1),
+    S1 = astranaut_macro_local:commit_compiled([{foo, 0}], #{{function, foo, 0} => Foo}, S0),
+    {_Env, Skip, _S2} = astranaut_macro_local:finalize([{ordinary, 0}], S1),
     ?assertEqual([{function, foo, 0}], Skip),
     ok.
 
@@ -795,10 +795,10 @@ register(FAs, Options, Source, MacroMap, State) ->
         maps:from_list(
           [{{Name, Arity}, #{macro_source => local_macro,
                             function => Name, arity => Arity}}
-           || {Name, Arity} <- maps:keys(astranaut_local_macro:local_macros(State))]),
+           || {Name, Arity} <- maps:keys(astranaut_macro_local:local_macros(State))]),
     MacroOps = identity_macro_ops(),
     EffectiveMacroMap = maps:merge(MacroMap, CandidateMap),
-    astranaut_local_macro:register(
+    astranaut_macro_local:register(
       FAs, Options, Source, runtime_context(EffectiveMacroMap, Source),
       MacroOps, State).
 

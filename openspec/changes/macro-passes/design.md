@@ -122,7 +122,7 @@ InputFingerprint 覆盖展开前可知的 external macro map、候选 local desc
 
 ### replacement 驱动 callable 调度
 
-`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_local_macros`，不调用该宏，也不提交部分 expansion；`astranaut_local_macro` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
+`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_local_macros`，不调用该宏，也不提交部分 expansion；`astranaut_macro_local` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
 
 ## 两步模型
 

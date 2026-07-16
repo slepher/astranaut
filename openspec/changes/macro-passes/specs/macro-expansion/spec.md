@@ -44,7 +44,7 @@
 #### Scenario: local frozen function 启用收集
 
 - **给定** frozen FormId 首次作为 local-macro closure function 展开
-- **当** `astranaut_local_macro` 调用通用 function 展开器
+- **当** `astranaut_macro_local` 调用通用 function 展开器
 - **那么** 调用方传入 `collect` 和该 FormId
 - **并且** 成功结果返回本次实际匹配的 local macro FA ordset
 

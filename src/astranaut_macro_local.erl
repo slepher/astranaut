@@ -6,7 +6,7 @@
 %%% expansion; this module owns the immutable declaration snapshots and the
 %%% state transitions needed to build local macro generations.
 %%%-------------------------------------------------------------------
--module(astranaut_local_macro).
+-module(astranaut_macro_local).
 
 -include("do.hrl").
 
