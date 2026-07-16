@@ -139,10 +139,10 @@ FA 注册表同时保存不可变声明快照和逐 FA 生命周期。多个 FA 
 register_and_preexpand(LocalMacroAttribute, ClosureSourceView, DeclarationRuntimeContext, State):
   1. 校验 declaration options、FA 格式与全部 FA 的唯一性
   2. 对每个 FA 计算静态函数闭包
-  3. 校验 extra_functions 与 internal_function 策略
+  3. 校验 extra_functions 存在，并把 internal_function 引用解析为声明点宏绑定
   4. 将闭包原始 function/spec forms 写入 frozen_forms
   5. 使用 declaration 前的完整 MacroRuntimeContext；该环境按构造时点自然不含本次新增 FA
-  6. 按 internal_function 策略裁剪 direct-call FA，并调用统一引用解析取得实际引用的先前 local FA
+  6. 从 MacroEnv 移除 internal macro keys，按 alias 来源改写本地调用，并调用统一引用解析取得实际引用的先前 local FA
   7. 为各 FA 建立带相同 order 和 context 快照的独立条目
   8. 将各 FA status 设为 pending，更新依赖图
   9. 对依赖已就绪的 frozen forms 调用统一 ExpansionValidator
@@ -152,7 +152,11 @@ register_and_preexpand(LocalMacroAttribute, ClosureSourceView, DeclarationRuntim
 
 ### 闭包发现
 
-闭包计算的根是该 FA 的宏头函数。静态本地调用递归纳入 helper，`extra_functions` 作为显式补充；`internal_function` 决定宏定义内部某些调用是否按普通直接调用处理。`extra_functions` 引用不存在的函数仍报 `invalid_extra_functions`。
+闭包计算的根是该 FA 的宏头函数。静态本地调用递归纳入 helper，`extra_functions` 作为显式补充。`extra_functions` 引用不存在的函数报 `invalid_extra_functions`。`internal_function` 不构造函数闭包；它选择 declaration 之前当前 MacroEnv 中的宏调用，并把这些调用固化为普通函数调用。
+
+这里的静态调用只包括 AST 中形如 `helper(Args...)` 的直接本地 call。`fun helper/1`、
+动态函数值、`apply/3` 或其他间接引用不会自动形成闭包边；需要参与冻结、编译和 retain
+的间接 helper 必须由 `extra_functions` 显式加入。
 
 同一个 function form 可出现在任意多个闭包中。闭包成员资格不表示宏依赖：先声明 A 的闭包包含后声明 B 时，B 只是 A 的 helper 成员，除非 B 自身的编译环境实际需要 A 作为宏。
 
@@ -167,9 +171,24 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 
 ### `internal_function` 的作用范围
 
-`internal_function` 是宏定义闭包中的调用策略：被标记的调用在 local macro 定义内部按普通函数直接调用，而不是在预展开阶段作为宏调用展开。它不是声明身份策略，不因函数出现在 `local_macro` 或 `export_macro` attribute 中而自动生效。
+`internal_function` 是宏定义闭包的宏环境策略：被选中的 key 必须在 declaration
+之前的当前 MacroEnv 中存在。列表项 `{F,A}` 解析本地调用 key，
+`{M,F,A}` 是 attribute term 中远程 `M:F/A` 的表示并解析远程调用 key。普通函数即使
+存在，也不能满足该校验；未找到的项报 `undefined_internal_functions`。`false` 选择
+空集，`true` 选择声明点当前可见的全部宏映射。
 
-不同 declaration 可以有不同的 `internal_function` 列表。只有某个具体函数同时出现在多个闭包中，且一方将其标为 direct-call、另一方没有时，才报 `conflicting_internal_function_policy`。没有共享函数时，名单差异不是错误。
+如果 `{F,A}` 命中 imported macro 的现有 `use_macro` `alias`，注册时保存
+`{F,A} -> {M,F,A}` 来源。展开 frozen form 前先把 `F(Args)` 改写为普通远程
+`M:F(Args)`，再从有效 MacroEnv 同时移除 alias key 与原始远程 key，防止改写后的调用
+再次匹配宏。若命中先前 local macro，则只移除其宏 key，AST 中的本地调用保持不变，
+由累计 local macro module 作为普通函数解析。直接 `{M,F,A}` 调用无需改写，只移除远程
+宏 key。
+
+不同 declaration 可以有不同的 `internal_function` 列表。没有共享 helper form 时名单
+差异不是错误；两个 declaration 共享 helper form 且为其提供不兼容的 internal macro
+环境时，报 `conflicting_internal_function_policy`。某个 local macro 自身的根 form 不参与
+这种提前策略比较，因为其唯一展开基准来自定义点快照；后续复用仍由 canonical
+fingerprint/result 校验保证一致。
 
 `internal_function` 的解析、共享闭包冲突校验和有效环境裁剪全部属于
 `astranaut_local_macro`。通用展开器不会读取该 option。
@@ -181,7 +200,7 @@ Macro FA ──静态本地调用──> Helper FA ──静态本地调用─�
 ```text
 DeclarationMacroEnv
   = PreDeclarationEffectiveMacroMap
-  - InternalFunctions(Declaration)
+  - InternalMacroKeys(Declaration)
 ```
 
 对于 `-local_macro([foo/1, bar/1])`，declaration 前的环境按定义尚未注册
@@ -190,8 +209,9 @@ DeclarationMacroEnv
 候选环境识别实际 local macro 引用，并把结果保存为 `referenced_local_macros` 白名单。
 
 declaration 预展开和最终展开都保留各自时点的 external macros，但 local-macro 部分只保留
-该闭包白名单中的 FA。因而 self、同声明成员、`internal_function` direct calls 和后声明
-local macros 都不会进入宏匹配，不需要 final 排除逻辑。目标本身是 local macro 宏头时，
+该闭包白名单中的 FA；两条路径还必须应用同一 internal key 过滤和 alias-to-remote
+改写。因而 self、同声明成员、internal ordinary calls 和后声明 local macros 都不会进入
+宏匹配。目标本身是 local macro 宏头时，
 必须只使用其自身 declaration 条目的白名单，避免后声明闭包把该宏重新加入自身环境；
 仅作为 helper 且同时属于多个 local 闭包时，允许集合才取这些闭包扫描结果的并集。
 不属于任何 local 闭包的普通最终 function 仍使用完整 FinalLocalEnv。
@@ -234,7 +254,7 @@ ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
 
 1. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
 2. 以 declaration 前的 effective map、options 和 passed forms 构造一个共同 `MacroRuntimeContext`。
-3. 直接使用该 declaration 前的环境；它自然不含本次新增 members，仅按 `internal_function` 裁剪 direct-call FA。
+3. 直接使用该 declaration 前的环境；它自然不含本次新增 members。解析并移除 `internal_function` macro keys，alias 本地调用同时按保存的来源改写为普通远程调用。
 4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；任何展开都从该输入开始。
 5. 建立带相同 order/context 的逐 FA 生命周期条目，更新实际 local macro 依赖。
 6. 对依赖已就绪的 forms 立即预展开；需要尚不可调用 local macro 时产生 `NeedCallable`。
@@ -290,7 +310,7 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 3. 以 declaration 顺序形成必要的累计边界；只有“下一个闭包预展开需要当前模块中已可调用宏”时才插入中间编译。
 4. 每个边界都构造“此前已提交 forms + 本边界新增 forms”的完整模块。
 
-因此，A 在 B 前但 B 不引用 A 时，A 与 B 可以一起编译；若 B 预展开调用 A，则必须先加载 A，再预展开并加载 A+B。闭包成员关系、普通 Erlang 直接调用和 `internal_function` direct-call 均不单独产生该累计边界。
+因此，A 在 B 前但 B 不引用 A 时，A 与 B 可以一起编译；若 B 预展开调用 A，则必须先加载 A，再预展开并加载 A+B。闭包成员关系、普通 Erlang 调用和被 internalize 后不再作为宏匹配的调用均不单独产生该累计边界。
 
 boundary identity 只取按 declaration 顺序排列的累计 local macro members。没有新增
 local macro 就没有新 identity，任何阶段再次请求同一累计 members 都直接复用，不能因
@@ -343,7 +363,13 @@ scan 收尾不是“只编译 pending 项”。它按注册表的 declaration �
 
 `export_macro` 在本工作流中仅提供隐式 retain 根；它不改变统一 scan 的宏环境。`export` 同样只作为 retain 信息来源。三类 retain 根没有优先级，任一命中即可使其闭包进入保留集合。
 
-对非 frozen 函数的 `local_macro_retain` 没有额外效果，也不报错。retain roots 可在其闭包 declaration 之后出现，因此只在收尾阶段从完整 retain 根集合计算 `retained_form_ids`。
+显式 `local_macro_retain` 的 FA 若在模块中不存在，报告
+`undefined_local_macro_retain`；若函数存在但不是任何 frozen closure 的成员，则没有
+额外生命周期效果，并报告 `ineffective_local_macro_retain`。这两种 warning 只针对
+显式 `local_macro_retain`，不针对作为隐式 retain roots 的普通
+`export`/`export_macro`。
+retain roots 可在其闭包 declaration 之后出现，因此只在收尾阶段从完整 retain 根集合
+计算 `retained_form_ids` 后才能准确诊断。
 
 冻结 form 保存所有环境展开共用的原始输入，不直接决定最终跳过。最终跳过集合为：
 
@@ -365,7 +391,7 @@ FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 7. 返回 FinalLocalEnv 与 FinalSkipIds 给统一扫描流程的最终展开阶段
 ```
 
-所有 retained functions（包括 local macro 宏头）都参与第 5 步。属于 local 闭包的目标先按 `referenced_local_macros` 白名单过滤 FinalLocalEnv；不属于任何 local 闭包的普通 Step 2 function 使用完整 FinalLocalEnv。若所得 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 展开，并与最后一次已接受 local result 比较。
+所有 retained functions（包括 local macro 宏头）都参与第 5 步。属于 local 闭包的目标先按 `referenced_local_macros` 白名单过滤 FinalLocalEnv，并重放与 declaration 相同的 internal key 移除及 alias-to-remote 改写；不属于任何 local 闭包的普通 Step 2 function 使用完整 FinalLocalEnv。internal bindings 进入 input fingerprint，避免不同 alias 来源错误复用缓存。若所得 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 展开，并与最后一次已接受 local result 比较。
 
 `FinalSkipIds` 的计算不删除原始 forms；它是交给最终函数体遍历器的过滤条件。这样同一 forms 列表可继续用于 record、attribute injection 和诊断，而 local macro 已预展开且未 retain 的 functions 不会被再次递归展开。
 
@@ -373,7 +399,10 @@ FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 
 - `duplicate_local_macro_declaration`：同一 FA 被多次注册。
 - `invalid_extra_functions`：显式 helper 不存在或无效。
-- `conflicting_internal_function_policy`：共享闭包函数的 direct-call 策略不一致。
+- `undefined_internal_functions`：`internal_function` 引用在 declaration 位点没有对应宏。
+- `undefined_local_macro_retain`（warning）：显式 retain FA 在模块中不存在。
+- `ineffective_local_macro_retain`（warning）：显式 retain FA 不属于任何冻结闭包。
+- `conflicting_internal_function_policy`：共享 helper form 的 internal macro 环境不兼容。
 - `conflicting_local_macro_closure_environment`：同一原始 form 在不同环境下的展开结果不同，或 retain form 的最终环境比对不一致。
 - `illegal_locked_form_mutation`：属性 splice 改写 frozen 原始 form。
 - `local_macro_module_in_use`：安全换码时 old code 仍被引用。

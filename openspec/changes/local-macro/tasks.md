@@ -45,6 +45,9 @@
 - [x] old code 仍被引用时安全加载以 `local_macro_module_in_use` 失败。
 - [x] local 引用识别与普通 function 展开使用相同调用匹配语义。
 - [x] internal_function 在 local 模块裁剪环境；通用展开器不解释该 option。
+- [x] internal_function 在 declaration 位点校验宏 key，支持 `{M,F,A}` 远程表示。
+- [x] 复用现有 `use_macro` `alias` 来源，将 internal alias 调用还原为普通 `M:F(...)`，并同时屏蔽 alias/remote 宏 key。
+- [x] declaration 与 FinalFunctionContext 重展开共用 internal bindings，且 bindings 进入 fingerprint。
 - [x] B 可展开 A，而展开共享 A form 时 A 不进入自身宏环境。
 
 ## 声明位点注入快照任务（新增，保留既有任务状态）
@@ -103,3 +106,10 @@
 - [x] 将扫描主流程改为直接呈现互斥 form 分支，并删除无语义 monadic bind。
 - [x] 覆盖同声明成员最终普通调用，以及普通 attribute 分隔的独立 declaration 合并边界。
 - [x] 覆盖后声明 local macro 不进入先前闭包的 final 环境，以及普通 final function 仍可见完整 FinalLocalEnv。
+
+## 最终审核落实
+
+- [x] 文档明确闭包扫描只跟随直接本地 call，间接引用使用 `extra_functions`。
+- [x] 对不存在及存在但未命中冻结闭包的显式 `local_macro_retain` 分别发出带位置 warning。
+- [x] 保留 retained frozen function 的 FinalMacroRuntimeContext 重新展开与 canonical 结果比对。
+- [x] 明确多 FA declaration 只共享注册时快照，扫描后不保留 group identity。

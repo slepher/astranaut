@@ -579,18 +579,55 @@ when both local and exported macro behaviour are required.
 
 ```erlang
 -export_macro([MacroA/A, MacroB/B]).
--export_macro({Macro/A, opts()}).
--export_macro({[MacroA/A, MacroB/B], opts()}).
+-export_macro({Macro/A, macro_definition_opts()}).
+-export_macro({[MacroA/A, MacroB/B], macro_definition_opts()}).
 ```
 
 *local_macro*
 
-&emsp;&emsp;declare local functions as macros without exporting them.
+&emsp;&emsp;declare local functions as macros without exporting them. The
+transformer freezes each declared function and its statically discovered local
+function closure. A declaration containing several functions gives those
+functions the same declaration-time macro environment; calls between members
+of that declaration remain ordinary Erlang calls. The declaration is only a
+shared registration input: after the scan, each `Function/Arity` has its own
+macro entry and no persistent group identity is retained.
 
 ```erlang
 -local_macro([MacroA/A, MacroB/B]).
--local_macro({Macro/A, opts()}).
--local_macro({[MacroA/A, MacroB/B], opts()}).
+-local_macro({Macro/A, local_macro_opts()}).
+-local_macro({[MacroA/A, MacroB/B], local_macro_opts()}).
+```
+
+Local macro closure forms are expanded using the macro environment and
+injectable attributes that appear before the `-local_macro` declaration.
+Functions later in the source may be discovered as closure helpers, but later
+imports, uses, options, and attributes do not change that declaration-time
+environment.
+
+Static closure discovery follows direct local call expressions such as
+`helper(Arg)`. It does not infer indirect references such as `fun helper/1`,
+dynamically selected functions, or `apply/3`; add those helpers explicitly with
+`extra_functions`.
+
+*local_macro_retain*
+
+&emsp;&emsp;retain a local macro function or helper in the transformed module.
+Retaining any member of a frozen local macro closure retains that closure's
+functions and specs. `-export` and `-export_macro` are also retain roots.
+Applying `local_macro_retain` to an ordinary function outside every local macro
+closure has no extra effect and produces an
+`ineffective_local_macro_retain` warning. Referring to an FA that is not defined
+in the module instead produces `undefined_local_macro_retain`.
+
+A retained frozen function is both part of its local macro definition and a
+function in the final module. It is therefore expanded again from its original
+form under the final function context and checked against the canonical result
+established from its declaration context. A mismatch is an intentional
+conflict rather than a choice of one context over the other.
+
+```erlang
+-local_macro_retain([Macro/A, Helper/B]).
 ```
 
 *import_macro*
@@ -607,10 +644,10 @@ should be configured with `-use_macro`.
 &emsp;&emsp;use an imported or local macro with extra call options.
 
 ```erlang
--use_macro({Macro/A, opts()}).
--use_macro({[MacroA/A, MacroB/B], opts()}).
--use_macro({Module, Macro/A, opts()}).
--use_macro({Module, [MacroA/A, MacroB/B], opts()}).
+-use_macro({Macro/A, use_macro_opts()}).
+-use_macro({[MacroA/A, MacroB/B], use_macro_opts()}).
+-use_macro({Module, Macro/A, use_macro_opts()}).
+-use_macro({Module, [MacroA/A, MacroB/B], use_macro_opts()}).
 ```
 
 *exec_macro*
@@ -624,28 +661,64 @@ should be configured with `-use_macro`.
 
 *macro_options*
 
-&emsp;&emsp;declare module-level macro options.
+&emsp;&emsp;declare source-ordered module-level macro defaults and final module
+debug switches.
 
 ```erlang
--macro_options(opts()).
+-macro_options(macro_options_opts()).
 ```
 
-*opts()*
+`debug`, `debug_ast`, and `max_depth` are per-macro defaults. They are copied
+into every external macro imported and every local macro declared after the
+`-macro_options` form. They do not become arguments to the macro function, and
+they do not retroactively change macros already imported or declared.
+Definition-level `max_depth` overrides the global default; `use_macro` can
+override `debug` and `debug_ast` for the selected macro.
+
+`debug_module` and `debug_module_ast` are module-only switches. Their final
+source-ordered values print the complete transformed module after expansion;
+they are not per-macro settings.
+
+*Option maps*
+
+Options are scoped by attribute; there is no single option map accepted by all
+four attributes.
 
 ```erlang
-  #{debug => Debug,
-    debug_ast => DebugAst,
-    debug_module => DebugModule,
-    debug_module_ast => DebugModuleAst,
-    alias => Alias,
-    order => Order,
+macro_options_opts() ::
+  #{debug => boolean(),
+    debug_ast => boolean(),
+    debug_module => boolean(),
+    debug_module_ast => boolean(),
+    max_depth => non_neg_integer()}.
+
+macro_definition_opts() ::
+  #{order => Order,
     inject_attrs => InjectAttrs,
     as_attr => AsAttr,
     group_args => GroupArgs,
     force_override => ForceOverride,
-    max_depth => MaxDepth}
+    max_depth => MaxDepth}.
+
+local_macro_opts() ::
+  #{order => Order,
+    inject_attrs => InjectAttrs,
+    as_attr => AsAttr,
+    group_args => GroupArgs,
+    force_override => ForceOverride,
+    max_depth => MaxDepth,
+    extra_functions => [Function/Arity],
+    internal_function => boolean() |
+                         [Function/Arity | {Module, Function, Arity}]}.
+
+use_macro_opts() ::
+  #{debug => boolean(),
+    debug_ast => boolean(),
+    alias => atom(),
+    force_override => boolean()}.
 ```
-&emsp;&emsp; opts() could also be proplists, same usage of map().
+
+Each option map may also be written as a proplist.
 
 *Debug*
 
@@ -661,7 +734,11 @@ should be configured with `-use_macro`.
 
 *InjectAttrs*
 
-&emsp;&emsp; module attributes as extra args while calling macro.
+&emsp;&emsp; module attributes as extra args while calling macro. Attribute macros
+see only attributes that have already passed the source-ordered attribute scan
+at their call site. Local macro closure forms use the attributes visible before
+their `-local_macro` declaration. Ordinary function macros are expanded after
+the attribute scan and use the final module forms.
 
 ```
 -module(a).
@@ -708,13 +785,97 @@ conflicting macro names fail with `macro_override`.
 &emsp;&emsp; maximum nested macro expansion chain depth. The default module-level
 value is 100.
 
+*ExtraFunctions*
+
+&emsp;&emsp; explicitly add local functions to a local macro's statically
+discovered closure. Use this when a helper cannot be discovered from ordinary
+local calls in the macro function. Each entry must be `Function/Arity` and must
+exist in the module.
+
+```erlang
+-local_macro({macro/1, [{extra_functions, [helper/1]}]}).
+```
+
+*InternalFunction*
+
+&emsp;&emsp; make selected macros visible immediately before a `local_macro`
+declaration behave as ordinary Erlang function calls inside that macro's
+frozen closure. `false` selects none, `true` selects all macros visible at that
+point, and a list selects exact local call keys as `Function/Arity` or remote
+call keys as `{Module, Function, Arity}`. The tuple is the attribute-term
+representation of `Module:Function/Arity`.
+
+Every listed key must resolve to a macro at the declaration point; an ordinary
+module function is not sufficient. A local macro key remains a local function
+call. If `Function/Arity` resolves through an existing `use_macro` `alias`, the
+frozen call is rewritten to the imported macro's original
+`Module:Function(...)` call and both the alias and original remote macro keys
+are removed from the expansion environment. Thus the imported macro function
+is called normally instead of being expanded as a macro. The same filtering
+and rewrite are applied when a retained function is re-expanded with the final
+function context.
+
+```erlang
+-import_macro(macro_uniform_a).
+-use_macro({macro_uniform_a, to_a/1, [{alias, direct_to_a}]}).
+-local_macro({outer/1, [{internal_function, [direct_to_a/1]}]}).
+
+outer(Ast) ->
+    direct_to_a(Ast). % frozen as macro_uniform_a:to_a(Ast)
+```
+
+Declarations whose closures overlap must use a compatible internal macro
+policy for each shared helper form.
+
 *Option Scope*
 
-| Attribute | Options |
-| --- | --- |
-| `-macro_options` | `debug`, `debug_ast`, `debug_module`, `debug_module_ast`, `max_depth` |
-| `-export_macro`, `-local_macro` | `as_attr`, `order`, `inject_attrs`, `group_args`, `force_override`, `max_depth` |
-| `-use_macro` | `debug`, `debug_ast`, `alias`, `force_override` |
+| Option | `macro_options` | `export_macro` | `local_macro` | `use_macro` | Role |
+| --- | --- | --- | --- | --- | --- |
+| `debug`, `debug_ast` | global default | — | — | per-use override | print each macro result as source or AST |
+| `debug_module`, `debug_module_ast` | module only | — | — | — | print the final transformed module |
+| `max_depth` | global default | definition override | definition override | — | maximum nested expansion depth |
+| `order` | — | definition | definition | — | nested expansion order |
+| `as_attr` | — | definition | definition | — | expose a macro as an attribute |
+| `inject_attrs` | — | definition | definition | — | append selected module attributes to invocation arguments |
+| `group_args` | — | definition | definition | — | pass source arguments as one list |
+| `force_override` | — | definition | definition | per-use | permit this incoming macro mapping to replace a conflicting key |
+| `alias` | — | — | — | use only | rename the selected macro at its use site |
+| `extra_functions` | — | — | local definition only | — | add statically undiscovered helpers to a local closure |
+| `internal_function` | — | — | local definition only | — | treat declaration-visible macro calls as ordinary functions |
+
+`extra_functions` and `internal_function` describe local macro closure
+construction and its frozen macro environment. They are relevant when the definition is declared with
+`-local_macro`; an `-export_macro` declaration alone only publishes the macro
+for importing modules. Neither option is a module-level `-macro_options`
+setting. Supplying either closure option to `-macro_options` or
+`-export_macro` reports it as an unexpected option and ignores it.
+
+*Expansion Phases and Source Order*
+
+Macro expansion has an ordered attribute pass followed by a function-body
+pass:
+
+1. External and callable local attribute macros are scanned together from left
+   to right. Their generated forms are inserted at the current queue position
+   and scanned in order before the remaining source forms.
+2. `import_macro`, `use_macro`, `macro_options`, and generated forms of those
+   kinds affect only forms scanned after them. Already processed attributes are
+   not revisited.
+3. A generated `local_macro` declaration enters the same scan and can make its
+   macro available to later attribute calls. An attribute call only invokes
+   the canonical definition captured at that declaration; it never expands or
+   redefines the local macro at the call site. Multiple attribute calls reuse
+   the same definition and callable generation.
+4. After the attribute pass and local macro finalization, ordinary function
+   bodies are recursively expanded with the completed macro environment. An
+   ordinary function can therefore use all callable final local macros, while
+   frozen local macro closure forms preserve their declaration-time local macro
+   dependencies. Retained frozen functions also run through this final context
+   and must reproduce their declaration-context canonical result.
+
+This source ordering is separate from the `order` option: source order controls
+when macro declarations and environment updates become visible, while `inner`
+or `outer` controls nested expansion at an individual macro call.
 
 *Errors*
 
@@ -725,9 +886,25 @@ value is 100.
 | `invalid_macro_return` | macro returned AST that does not fit the current traversal position |
 | `invalid_import_macro_attr` | invalid `-import_macro` attribute |
 | `import_macro_failed` | imported macro module could not be loaded |
+| `invalid_extra_functions` | `extra_functions` names functions that are not defined in the module |
+| `undefined_internal_functions` | `internal_function` names macro keys not visible at the local declaration point |
+| `duplicate_local_macro_declaration` | a local macro FA was declared more than once, including duplicates in one declaration |
+| `conflicting_internal_function_policy` | overlapping local macro closures assign incompatible internal macro environments to a shared helper |
+| `conflicting_local_macro_closure_environment` | a retained or reused local macro closure expands differently under another required environment |
+| `conflicting_local_macro_whitelist` | repeated expansion of a frozen closure observes a different set of local macro dependencies |
+| `illegal_locked_form_mutation` | attribute expansion attempted to replace a frozen local macro closure form |
+| `illegal_macro_environment_mutation` | local macro expansion generated a macro-environment form where environment mutation is not allowed |
+| `illegal_local_macro_definition_mutation` | local macro expansion attempted to change a locked local macro definition |
+| `local_macro_module_in_use` | the generated local macro module cannot be safely replaced while its old code is still in use |
+
+*Warnings*
+
+| Warning | Meaning |
+| --- | --- |
+| `undefined_local_macro_retain` | an explicitly retained FA is not defined in the module |
+| `ineffective_local_macro_retain` | an explicitly retained FA belongs to no local macro closure and is therefore handled only as an ordinary function |
 
 &emsp;&emsp;define macro as normal erlang functions.  
-&emsp;&emsp;macro expand order is the order of -use\_macro in file.  
 &emsp;&emsp;macro will be expand at compile time by parse\_transformer astranaut\_macro.  
 &emsp;&emsp;macro does not know runtime value of arguments.  
 &emsp;&emsp;arguments passed in macro is erlang ast.  

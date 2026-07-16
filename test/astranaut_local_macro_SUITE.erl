@@ -214,7 +214,8 @@ declaration_inject_snapshot_is_preserved(_Config) ->
     [Request] = maps:get(requests, Boundary),
     ?assertEqual(
        lists:sort([closure_ids, closure_fas, candidate_local_macros,
-                   referenced_local_macros, runtime_context_snapshot,
+                   internal_macro_bindings, referenced_local_macros,
+                   runtime_context_snapshot,
                    source_view, forms]),
        lists:sort(maps:keys(Request))),
     ?assertEqual(
@@ -278,10 +279,11 @@ extra_functions_and_self_recursion(_Config) ->
 
 internal_function_conflict(_Config) ->
     Source = [first_form(), second_form(), helper_form(ok)],
-    {ok, State} = register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, #{},
+    MacroMap = local_macro_map([{helper, 0}]),
+    {ok, State} = register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, MacroMap,
                                                   astranaut_local_macro:new()),
     ?assertMatch({error, {conflicting_internal_function_policy, {helper, 0}, _}},
-                 register([{second, 0}], #{}, Source, #{}, State)),
+                 register([{second, 0}], #{}, Source, MacroMap, State)),
     ok.
 
 minimal_cumulative_compile_boundaries(_Config) ->
@@ -780,6 +782,9 @@ safe_load_refuses_module_with_old_code_in_use(_Config) ->
 non_frozen_retain_root_has_no_effect(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_local_macro:new()),
+    ?assertEqual([{ordinary, 0}],
+                 astranaut_local_macro:nonclosure_retain_roots(
+                   [{foo, 0}, {ordinary, 0}], S0)),
     S1 = astranaut_local_macro:commit_compiled([{foo, 0}], #{{function, foo, 0} => Foo}, S0),
     {_Env, Skip, _S2} = astranaut_local_macro:finalize([{ordinary, 0}], S1),
     ?assertEqual([{function, foo, 0}], Skip),

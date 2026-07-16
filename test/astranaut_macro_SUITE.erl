@@ -49,6 +49,7 @@ init_per_suite(Config) ->
                    macro_pass_external_remaining_test,
                    macro_pass_extra_functions_test, macro_pass_extra_union_test,
                    macro_pass_internal_independent_test, macro_pass_internal_direct_test,
+                   macro_pass_internal_remote_test, macro_pass_internal_alias_test,
                    macro_pass_retained_helper_test,
                    macro_pass_final_outside_snapshot_test,
                    macro_pass_generated_function_delay_test,
@@ -163,8 +164,14 @@ all() ->
      test_macro_pass_extra_functions,
      test_macro_pass_extra_functions_missing_error,
      test_macro_pass_extra_functions_union,
+     test_macro_export_rejects_local_closure_options,
+     test_macro_options_rejects_local_closure_options,
+     test_macro_local_retain_warnings,
      test_macro_pass_internal_function_independent,
      test_macro_pass_internal_function_direct,
+     test_macro_pass_internal_function_remote,
+     test_macro_pass_internal_function_alias,
+     test_macro_pass_internal_function_undefined_error,
      test_macro_pass_retained_helper,
      test_macro_pass_local_body_environment_mutation_error,
      test_macro_pass_locked_spec_mutation_error,
@@ -468,6 +475,22 @@ test_macro_pass_internal_function_direct(_Config) ->
     ?assertEqual({internal_direct, ok}, macro_pass_internal_direct_test:value()),
     ok.
 
+test_macro_pass_internal_function_remote(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_pass_internal_remote_test:value()),
+    ok.
+
+test_macro_pass_internal_function_alias(_Config) ->
+    ?assertEqual({a, {from_a, ok}}, macro_pass_internal_alias_test:value()),
+    ok.
+
+test_macro_pass_internal_function_undefined_error(Config) ->
+    assert_macro_pass_error(
+      macro_pass_internal_undefined_error_test, Config,
+      fun({undefined_internal_functions, [{helper, 1}]}) -> true;
+         (_) -> false
+      end),
+    ok.
+
 test_macro_pass_retained_helper(_Config) ->
     ?assertEqual({a, {from_a, ok}}, macro_pass_retained_helper_test:value()),
     ok.
@@ -526,6 +549,58 @@ test_macro_pass_local_compile_context(_Config) ->
 test_macro_pass_local_runtime_context(_Config) ->
     ?assertEqual({runtime_attrs, [call_site]},
                  macro_pass_local_runtime_context_test:value()),
+    ok.
+
+test_macro_export_rejects_local_closure_options(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_export_local_options_warning_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], Warnings} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroWarnings =
+        [Warning || {_File, FileWarnings} <- Warnings,
+                    {_Line, astranaut_macro, Warning} <- FileWarnings],
+    ?assertEqual(
+       [[extra_functions, internal_function]],
+       [lists:sort(Keys)
+        || {unexpected_option_keys, Keys} <- MacroWarnings]),
+    ok.
+
+test_macro_options_rejects_local_closure_options(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_options_local_options_warning_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], Warnings} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroWarnings =
+        [Warning || {_File, FileWarnings} <- Warnings,
+                    {_Line, astranaut_macro, Warning} <- FileWarnings],
+    ?assertEqual(
+       [[extra_functions, internal_function]],
+       [lists:sort(Keys)
+        || {unexpected_option_keys, Keys} <- MacroWarnings]),
+    ok.
+
+test_macro_local_retain_warnings(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_retain_warning_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], Warnings} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroWarnings =
+        [{Line, Warning} || {_File, FileWarnings} <- Warnings,
+                            {Line, astranaut_macro, Warning} <- FileWarnings],
+    ?assertEqual(
+       lists:sort(
+         [{4, {undefined_local_macro_retain, [{missing, 0}]}},
+          {4, {ineffective_local_macro_retain, [{ordinary, 0}]}}]),
+       lists:sort(MacroWarnings)),
     ok.
 
 test_macro_local_declaration_single_diagnostic(Config) ->
@@ -659,7 +734,10 @@ test_macro_format_error_predefined_errors(_Config) ->
           [{atom, 1, ok}],
           {error, bad_macro, []}},
          {invalid_macro_return, DirectInvalidReturn},
-         {invalid_macro_return, NestedInvalidReturn}],
+         {invalid_macro_return, NestedInvalidReturn},
+         {undefined_internal_functions, [{missing, 1}]},
+         {undefined_local_macro_retain, [{missing, 0}]},
+         {ineffective_local_macro_retain, [{ordinary, 0}]}],
     lists:foreach(fun assert_macro_format_error/1, Errors).
 
 test_uniform_macro_error(Config) ->

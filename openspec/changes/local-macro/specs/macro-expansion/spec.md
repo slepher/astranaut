@@ -182,7 +182,9 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 
 ### Requirement: extra_functions 与 internal_function
 
-系统 MUST 将 `extra_functions` 纳入静态闭包，并在 declaration MacroEnv 上应用 `internal_function` direct-call 策略而不把该策略交给通用展开器。
+系统 MUST 将 `extra_functions` 纳入静态闭包；`internal_function` MUST 解析 declaration
+MacroEnv 中当前可见的宏 key，把选中调用固化为普通函数调用，并且不得把该策略交给
+通用展开器。
 
 #### Scenario: extra_functions 补充闭包
 
@@ -190,24 +192,54 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 - **当** 计算闭包时
 - **那么** helper/1 进入闭包并按同一冻结、展开和比对规则处理
 
+#### Scenario: 间接函数引用需要 extra_functions
+
+- **给定** local macro 只通过 `fun helper/1`、动态函数值或 `apply/3` 间接引用 helper
+- **并且** options 未声明 helper/1 为 `extra_functions`
+- **当** 计算静态闭包
+- **那么** 该间接引用不自动形成闭包边
+- **并且** 只有显式加入 `extra_functions` 后 helper/1 才进入冻结闭包
+
 #### Scenario: extra_functions 引用不存在函数失败
 
 - **给定** `{extra_functions, [missing/1]}`
 - **当** 注册 local macro 时
 - **那么** 编译以 `invalid_extra_functions` 失败
 
+#### Scenario: internal_function 必须解析声明点宏
+
+- **给定** `{internal_function, [helper/1]}`，且模块存在普通 helper/1，但 declaration 前 MacroEnv 没有 helper/1 宏
+- **当** 注册 local macro
+- **那么** 编译以 `undefined_internal_functions` 失败
+
+#### Scenario: 远程宏作为普通函数
+
+- **给定** declaration 前 MacroEnv 包含远程宏 `M:F/A`
+- **并且** `internal_function` 使用 `{M,F,A}`
+- **当** 展开 frozen closure
+- **那么** 远程宏 key 不进入通用展开器的 MacroEnv
+- **并且** AST 中的 `M:F(...)` 保持普通远程函数调用
+
+#### Scenario: alias 恢复原始远程函数
+
+- **给定** `use_macro` 已用现有 `alias` 把 `M:F/A` 暴露为 `Alias/A`
+- **并且** local declaration 的 `internal_function` 选择 `Alias/A`
+- **当** 展开 frozen closure 或 retain function 的最终重展开
+- **那么** AST 中 `Alias(Args)` 改写为 `M:F(Args)`
+- **并且** alias key 与原始远程 key 均从有效 MacroEnv 移除
+
 #### Scenario: 共享闭包函数的 internal_function 策略冲突
 
 - **给定** 同一 helper 属于两个 local macro 闭包
-- **并且** 两个 declaration 对该 helper 的 internal direct-call 策略不同
+- **并且** 两个 declaration 为该 helper 提供的 internal macro 环境不兼容
 - **当** 校验策略时
 - **那么** 编译以 `conflicting_internal_function_policy` 失败
 
 #### Scenario: internal_function 在构造环境时应用
 
-- **给定** declaration 将 helper/1 标记为 internal_function
+- **给定** declaration 将声明点可见的 helper/1 宏标记为 internal_function
 - **当** 展开该 declaration 的闭包 function
-- **那么** helper/1 不出现在传给通用 function 展开器的 MacroEnv 中
+- **那么** helper/1 宏 key 不出现在传给通用 function 展开器的 MacroEnv 中
 - **并且** 展开器无需解释 internal_function option
 
 #### Scenario: local macro 自身不进入自身宏环境
@@ -242,11 +274,21 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 - **当** 计算 retain 集合时
 - **那么** 该根的完整闭包及其 spec forms 均被保留
 
-#### Scenario: 非冻结 retain root 无额外效果
+#### Scenario: 非冻结显式 retain root 产生 warning
 
 - **给定** `-local_macro_retain([ordinary/0])` 且 ordinary/0 不属于任何 local macro 闭包
 - **当** 收尾计算 retain 集合时
-- **那么** 不报错，ordinary/0 仍按普通 form 处理
+- **那么** 报告 `ineffective_local_macro_retain` warning
+- **并且** ordinary/0 仍按普通 form 处理，不产生额外生命周期效果
+- **并且** 普通 `export`/`export_macro` 隐式 roots 不使用该 warning
+
+#### Scenario: 不存在的显式 retain root 使用独立 warning
+
+- **给定** `-local_macro_retain([missing/0])` 且模块中没有 missing/0 定义
+- **当** 收尾计算 retain 集合时
+- **那么** 报告 `undefined_local_macro_retain` warning
+- **并且** 不把它合并为 `ineffective_local_macro_retain`
+- **并且** warning 使用该 `local_macro_retain` attribute 的源码位置
 
 #### Scenario: 最终跳过未 retain 的已展开 forms
 

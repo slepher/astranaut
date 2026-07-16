@@ -8,6 +8,8 @@
 
 -export([value_a/0, value_b/0]).
 
+-local_macro([helper_a/1]).
+-local_macro([helper_b/1]).
 -local_macro({[macro_a/1], [{as_attr, macro_a},
                             {internal_function, [{helper_a, 1}]}]}).
 -local_macro({[macro_b/1], [{as_attr, macro_b},

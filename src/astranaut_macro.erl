@@ -11,33 +11,59 @@
 %%
 %% Supported module attributes:
 %% <ul>
-%% <li>`-import_macro(ModuleOrSpec).' imports macros exported by another module.</li>
+%% <li>`-import_macro(Module).' imports macros exported by another module.</li>
 %% <li>`-use_macro(UseSpec).' selects imported or local macros and may add use-site options such as `alias' or `force_override'.</li>
-%% <li>`-macro_options(Options).' updates global macro options for later macro imports and expansion.</li>
+%% <li>`-macro_options(Options).' updates source-ordered module options.
+%% `debug', `debug_ast', and `max_depth' become defaults for later imported or
+%% declared macros; `debug_module' and `debug_module_ast' control only final
+%% module output.</li>
 %% <li>`-export_macro(MacroSpec).' exports local functions as macros for other modules.</li>
 %% <li>`-local_macro(MacroSpec).' declares local functions as macros without exporting them.</li>
+%% <li>`-local_macro_retain(Functions).' retains matching local-macro closure
+%% functions and specs in the transformed module.</li>
 %% <li>`-exec_macro(Call).' expands a macro call in attribute position.</li>
 %% </ul>
 %%
 %% `MacroSpec' accepts a function, a function list, or either form paired with
 %% definition options. Definition options include `order', `as_attr',
-%% `inject_attrs', `group_args', `extra_functions', and `internal_function'.
+%% `inject_attrs', `group_args', `force_override', `max_depth',
+%% `extra_functions', and `internal_function'.
 %% `extra_functions' explicitly adds helper functions to a local macro closure.
-%% `internal_function' controls which functions in a macro definition closure are
-%% treated as direct internal calls instead of macro calls.
+%% For a local macro, `internal_function' selects macros visible at the
+%% declaration point whose calls remain ordinary function calls. A local
+%% `Function/Arity' reference may resolve through a `use_macro' alias; that
+%% call is restored to its original remote `Module:Function/Arity'.
+%% These two closure options are accepted only by `local_macro'; an
+%% `export_macro' declaration publishes a macro but does not construct its
+%% local closure, and `macro_options' does not accept closure options.
 %%
 %% Expansion uses an ordered scan followed by final body traversal:
 %% <ol>
 %% <li>Unified attribute scan. External and ready local attribute macros are
 %% processed left-to-right; generated forms are spliced at the current queue
-%% position. Import, use and option forms affect only later forms.</li>
+%% position. Import, use and option forms, including generated ones, affect only
+%% later forms and already processed attributes are not rescanned. Attribute
+%% macro injection sees only forms already passed at the call site.</li>
 %% <li>Local macro declarations are registered with `astranaut_local_macro'
-%% using the materialised source view and pre-expanded without compiling.
+%% using the materialised source view. Their closure forms are pre-expanded in
+%% the macro environment and injection view captured before the declaration;
+%% later forms participate only in closure discovery. Direct local calls are
+%% discovered statically; indirect references such as `fun helper/1' require
+%% `extra_functions'. A multi-function declaration shares this snapshot but is
+%% stored as independent FA entries rather than as a persistent group.
 %% A generation is loaded only when a real local dependency must become
 %% callable, or when finalization introduces a new cumulative member set.</li>
-%% <li>Local-macro finalization supplies the final skip set, then function
-%% bodies are recursively expanded with the completed macro environment.</li>
+%% <li>Local-macro finalization retains complete frozen closures rooted by
+%% `local_macro_retain', `export', or `export_macro', and supplies the final
+%% skip set. A retained frozen function is also a final module function, so it
+%% is re-expanded from its original form in the final function context and
+%% checked against its declaration-context canonical result. Ordinary function
+%% bodies use the same final-context path with local whitelist validation
+%% disabled.</li>
 %% </ol>
+%%
+%% An explicit `local_macro_retain' entry produces separate warnings when its
+%% FA is undefined or when the function exists outside every frozen closure.
 %%
 %% The final forms are sorted before returning to the compiler so generated
 %% attributes remain in Erlang-valid form order.
@@ -78,7 +104,18 @@
               fun((macro_map(), [term()], [term()], fa(),
                    local_macro_whitelist_control()) ->
                       astranaut_return:struct(function_expansion()))}.
--type scanner_state() :: map().
+-type scanner_state() ::
+        #{global_macro_opts := map(),
+          module_macro_maps := map(),
+          module := module(),
+          file := term(),
+          compile_opts := [compile:option()],
+          passed_forms := [term()],
+          local_macro_state := map(),
+          scan_local_declarations := #{term() => {term(), [fa()]}},
+          macro_map := macro_map(),
+          effective_macro_map := macro_map(),
+          remaining_forms => [term()]}.
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -132,6 +169,16 @@ format_error({invalid_macro_return, Detail}) ->
                   [format_mfa(invalid_macro_return_mfa(Detail)), Detail]);
 format_error({invalid_extra_functions, Functions}) ->
     io_lib:format("extra_functions contains undefined functions: ~p", [Functions]);
+format_error({undefined_internal_functions, Functions}) ->
+    io_lib:format(
+      "internal_function contains macros not visible at the declaration point: ~p",
+      [Functions]);
+format_error({undefined_local_macro_retain, Functions}) ->
+    io_lib:format("local_macro_retain contains undefined functions: ~p",
+                  [Functions]);
+format_error({ineffective_local_macro_retain, Functions}) ->
+    io_lib:format("local_macro_retain has no effect for functions outside every local macro closure: ~p",
+                  [Functions]);
 format_error({duplicate_local_macro_declaration, Function}) ->
     io_lib:format("duplicate local macro declaration for ~p", [Function]);
 format_error({conflicting_internal_function_policy, Function, Policies}) ->
@@ -174,7 +221,7 @@ run_attribute_pass(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
            %% export_macro only publishes a macro for import by other modules.
            %% The current module's execution map is defined solely by
            %% local_macro declarations collected during the scan.
-           finalize_attribute_macro_pass(Module, GlobalMacroOpts,
+           finalize_attribute_macro_pass(Module, File, GlobalMacroOpts,
                                          ScanEffectiveMacroMap,
                                          ScanLocalState, PreparedForms, CompileOpts)
        ]).
@@ -244,7 +291,7 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
     do([ traverse ||
            RegisteredLocalState <- register_local_declaration(
                                      FAs, Options, Pos, SourceView,
-                                     scan_env_snapshot(State),
+                                     declaration_runtime_context(State),
                                      local_macro_ops(), LocalState),
            WorkflowContext = local_macro_workflow_context(
                                SourceView, maps:get(compile_opts, State)),
@@ -289,8 +336,8 @@ register_local_declaration(FAs, Options, Pos, SourceView, RuntimeContext,
               Pos, ?MODULE, astranaut_traverse:fail(Error))
     end.
 
-scan_env_snapshot(#{effective_macro_map := MacroMap,
-                    global_macro_opts := GlobalOpts} = State) ->
+declaration_runtime_context(#{effective_macro_map := MacroMap,
+                              global_macro_opts := GlobalOpts} = State) ->
     macro_runtime_context(MacroMap, GlobalOpts, passed_forms(State)).
 
 scan_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
@@ -362,7 +409,7 @@ scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
            return(Form)
        ]).
 scan_attribute_runtime(Form, State) ->
-    RuntimeContext = attribute_runtime_context(State),
+    RuntimeContext = attribute_call_runtime_context(State),
     case resolve_attribute_macro_target(Form, RuntimeContext) of
         {ok, Target} ->
             run_attribute_macro(Target, RuntimeContext, State);
@@ -380,7 +427,7 @@ scan_attribute_runtime(Form, State) ->
             keep_scanned_form(Form)
     end.
 
-attribute_runtime_context(#{effective_macro_map := MacroMap} = State) ->
+attribute_call_runtime_context(#{effective_macro_map := MacroMap} = State) ->
     macro_runtime_context(
       MacroMap, maps:get(global_macro_opts, State), passed_forms(State)).
 
@@ -528,17 +575,16 @@ exported_macros(Forms, ClausesMap) ->
     astranaut_lib:forms_with_attribute(
       fun(Attr, Acc, #{pos := Pos}) ->
               do([ return ||
-                     Validator = macro_definition_validator(),
+                     Validator = export_macro_validator(),
                      {FAs, Options} <-
                          validate_macro_attribute(fun macro_without_module_attr/1, Validator, export_macro, Attr),
                      FAs1 <- remove_undefined_macros(FAs, ClausesMap),
-                     Options1 <- validate_extra_functions_defined(Options, ClausesMap),
                      case FAs1 of
                          [] ->
                              astranaut_return:return({[], Acc});
                          _ ->
                              %% exported_macro options for external usage
-                             ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options1}]),
+                             ExportedMacroAttribute = astranaut_lib:gen_attribute_node(exported_macro, Pos, [{FAs, Options}]),
                              ExportAttribute = astranaut_lib:gen_attribute_node(export, Pos, FAs),
                              astranaut_return:return({[ExportAttribute, ExportedMacroAttribute], Acc})
                      end
@@ -562,7 +608,7 @@ is_loaded(Module) ->
 
 validate_local_macro_attribute(#{clause_map := ClauseMap}, Attr) ->
     do([ return ||
-           Validator = macro_definition_validator(),
+           Validator = local_macro_validator(),
            {FAs, Options} <- validate_macro_attribute(fun macro_without_module_attr/1, Validator, local_macro, Attr),
            FAs1 <- remove_undefined_macros(FAs, ClauseMap),
            Options1 <- validate_extra_functions_defined(Options, ClauseMap),
@@ -818,16 +864,23 @@ global_macro_update_validator() ->
       max_depth => uinteger
      }.
 
-macro_definition_validator() ->
+common_macro_definition_validator() ->
     #{as_attr => atom,
       order => {one_of, [outer, inner]},
       inject_attrs => {'or', [atom, {list_of, atom}]},
       group_args => boolean,
       force_override => boolean,
-      max_depth => uinteger,
-      extra_functions => {list_of, fun validate_function_with_arity/1},
-      internal_function => fun validate_internal_function_policy/1
+      max_depth => uinteger
      }.
+
+export_macro_validator() ->
+    common_macro_definition_validator().
+
+local_macro_validator() ->
+    maps:merge(
+      common_macro_definition_validator(),
+      #{extra_functions => {list_of, fun validate_function_with_arity/1},
+        internal_function => fun validate_internal_function_policy/1}).
 
 validate_function_with_arity({Function, Arity} = FA) when is_atom(Function), is_integer(Arity), Arity >= 0 ->
     {ok, FA};
@@ -839,7 +892,7 @@ validate_internal_function_policy(Value) when is_boolean(Value) ->
 validate_internal_function_policy(Functions) when is_list(Functions) ->
     astranaut_return:foldl_m(
       fun(Function, Acc) ->
-              case validate_function_with_arity(Function) of
+              case validate_internal_function_ref(Function) of
                   {ok, Function1} ->
                       astranaut_return:return([Function1|Acc]);
                   {error, Error} ->
@@ -848,6 +901,12 @@ validate_internal_function_policy(Functions) when is_list(Functions) ->
       end, [], lists:reverse(Functions));
 validate_internal_function_policy(Value) ->
     {error, {invalid_internal_function, Value}}.
+
+validate_internal_function_ref({Module, Function, Arity} = MFA)
+  when is_atom(Module), is_atom(Function), is_integer(Arity), Arity >= 0 ->
+    {ok, MFA};
+validate_internal_function_ref(FA) ->
+    validate_function_with_arity(FA).
 
 validate_mfas({Module, FAs}) when is_atom(Module) ->
     validate_fas(FAs);
@@ -888,18 +947,21 @@ macro_without_module_attr(_Other) ->
 %%%===================================================================
 %%% ===== Attribute pass, substep 3: local macro closure and snapshots =====
 %%%===================================================================
--spec finalize_attribute_macro_pass(module(), map(), macro_map(), map(), [term()],
+-spec finalize_attribute_macro_pass(module(), file:filename(), map(), macro_map(), map(), [term()],
                                     [compile:option()]) ->
           astranaut_return:struct({[term()], map()}).
-finalize_attribute_macro_pass(Module, GlobalMacroOpts, ScanEffectiveMacroMap,
+finalize_attribute_macro_pass(Module, File, GlobalMacroOpts, ScanEffectiveMacroMap,
                               ScanLocalState, Forms, CompileOpts) ->
     do([ return ||
            WorkflowContext = local_macro_workflow_context(
                                Forms, CompileOpts),
+           RetainRoots = retain_roots(Forms),
            {FinalLocalEnv, FinalSkipIds, FinalLocalState} <-
                astranaut_local_macro:finalize(
-                 retain_roots(Forms), WorkflowContext,
+                 RetainRoots, WorkflowContext,
                  local_macro_ops(), ScanLocalState),
+           RetainWarnings = local_macro_retain_warnings(
+                              Forms, FinalLocalState),
            FinalMacroMap = compiled_effective_macro_map(
                              ScanEffectiveMacroMap, FinalLocalEnv),
            {UnsortedAttributeForms, FunctionEnv0} <-
@@ -909,8 +971,15 @@ finalize_attribute_macro_pass(Module, GlobalMacroOpts, ScanEffectiveMacroMap,
            %% The attribute-pass output is sorted before the function pass sees it.
            AttributeForms = astranaut_syntax:sort_forms(UnsortedAttributeForms),
            FunctionEnv = FunctionEnv0#{global_macro_opts => GlobalMacroOpts},
-           return({AttributeForms, FunctionEnv})
+           astranaut_return:then(
+             file_formatted_warnings(File, RetainWarnings),
+             return({AttributeForms, FunctionEnv}))
        ]).
+
+file_formatted_warnings(File, Warnings) ->
+    Error0 = astranaut_error:new(File),
+    Error1 = astranaut_error:append_formatted_warnings(Warnings, Error0),
+    astranaut_return:ok(ok, astranaut_error:eof(Error1)).
 
 %% Preserve the source-ordered winner selected by the scan, while excluding
 %% local declarations that are not callable in the final generation.
@@ -948,7 +1017,7 @@ finalize_attribute_forms(
                                                       || {function, Name, Arity} <- FinalSkipIds]),
            FunctionEnv = #{module => Module,
                            macro_map => FinalMacroMap,
-                           runtime_context => macro_runtime_context(
+                           runtime_context => final_function_runtime_context(
                                                 FinalMacroMap,
                                                 GlobalMacroOpts, Forms2),
                            local_macro_state => FinalLocalState,
@@ -1081,7 +1150,7 @@ expand_functions(MacroEnv, Forms, TargetFAs, WhitelistControl) ->
       uniform, MacroEnv, Forms, TransformIds, WhitelistControl).
 
 %% TargetEnvs is prepared by astranaut_local_macro. Each target already has
-%% internal_function calls removed from the declaration-time local env.
+%% internal_function macros removed from the declaration-time local env.
 -spec resolve_local_references([{fa(), macro_map()}], [term()]) ->
           ordsets:ordset(fa()).
 resolve_local_references(TargetEnvs, Forms) ->
@@ -1117,11 +1186,35 @@ retain_roots(Forms) ->
          (_Form, Acc) -> Acc
       end, [], Forms).
 
+local_macro_retain_warnings(Forms, LocalMacroState) ->
+    DefinedFAs = ordsets:from_list(
+                   maps:keys(function_clauses_map(Forms, #{}))),
+    lists:flatmap(
+      fun({attribute, Pos, local_macro_retain, Attr}) ->
+              Roots = ordsets:from_list(retain_fas(Attr, [])),
+              Undefined = ordsets:subtract(Roots, DefinedFAs),
+              Existing = ordsets:subtract(Roots, Undefined),
+              Nonclosure = astranaut_local_macro:nonclosure_retain_roots(
+                             Existing, LocalMacroState),
+              retain_root_warnings(Pos, Undefined, Nonclosure);
+         (_Form) ->
+              []
+      end, Forms).
+
+retain_root_warnings(Pos, Undefined, Nonclosure) ->
+    [{Pos, ?MODULE, {undefined_local_macro_retain, Undefined}}
+     || Undefined =/= []] ++
+    [{Pos, ?MODULE, {ineffective_local_macro_retain, Nonclosure}}
+     || Nonclosure =/= []].
+
 retain_fas({FAs, _Options}, Acc) when is_list(FAs) -> retain_fas(FAs, Acc);
 retain_fas(FAs, Acc) when is_list(FAs) ->
     [FA || FA = {Name, Arity} <- FAs, is_atom(Name), is_integer(Arity)] ++ Acc;
 retain_fas({Name, Arity} = FA, Acc) when is_atom(Name), is_integer(Arity) -> [FA | Acc];
 retain_fas(_Other, Acc) -> Acc.
+
+final_function_runtime_context(MacroMap, MacroOptions, InjectForms) ->
+    macro_runtime_context(MacroMap, MacroOptions, InjectForms).
 
 function_ids(Functions) ->
     lists:foldl(

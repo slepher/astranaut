@@ -110,7 +110,7 @@ ExpansionRecord = #{
 }
 ```
 
-InputFingerprint 覆盖展开前可知的 external macro map、候选 local descriptors/versions、macro options 和 inject forms。whitelist 是展开输出，不能作为首次 cache lookup 的唯一输入 key。final retained 已有 canonical whitelist 时，fingerprint 使用过滤后的有效 MacroEnv；名单外 local descriptor/generation 不进入该 form 的 input key。普通 function 为 `disabled`，继续使用普通 function fingerprint/展开规则。
+InputFingerprint 覆盖展开前可知的 external macro map、候选 local descriptors/versions、macro options、解析后的 internal macro bindings 和 inject forms。internal bindings 必须进入 key，因为两个 alias 可能在移除宏映射后留下相同 MacroEnv，却需要改写到不同的远程函数。whitelist 是展开输出，不能作为首次 cache lookup 的唯一输入 key。final retained 已有 canonical whitelist 时，fingerprint 使用过滤后的有效 MacroEnv，并带上 declaration 的 internal bindings；名单外 local descriptor/generation 不进入该 form 的 input key。普通 function 为 `disabled`，继续使用普通 function fingerprint/展开规则。
 
 ### replacement 驱动 callable 调度
 
@@ -187,11 +187,25 @@ ClosureSourceView = passed_forms ++ 当前及剩余 queue
 
 属性宏可生成新的 `import_macro`、`use_macro`、`macro_options` 或 `local_macro` form；这些 form 重新进入同一扫描流。`export_macro` 单独出现时不会使宏在定义模块内变为可调用的 local macro；其专属保留语义见 local-macro 文档。
 
+宏定义 options 使用分层 validator：`export_macro` 和 `local_macro` 共享
+`as_attr`、`order`、`inject_attrs`、`group_args`、`force_override`、`max_depth`；
+只有 `local_macro` 接受本地闭包选项 `extra_functions` 与 `internal_function`；前者补充
+函数闭包，后者解析 declaration 位点当前可见的宏 key 并把对应调用固化为普通函数；二者既不
+属于模块级 `macro_options`，也不属于 `export_macro`。把闭包构造选项写在这两种
+attribute 上应作为 unexpected option 报告并忽略，不得让全局配置或导出声明隐式参与
+本地闭包构造。
+
 ### 宏环境 form 的处理
 
 - `import_macro` 解析导入模块并更新可用外部宏映射。
 - `use_macro` 基于已导入宏映射选择或别名宏，并将 option 合并结果写入 ExternalEnv。
 - `macro_options` 以后者覆盖同名全局 option，未提及的 option 保留。
+- `debug`、`debug_ast`、`max_depth` 是逐宏 global defaults，只在其后 import external
+  macro 或声明 local macro 时复制进 macro descriptor，不反向更新已存在 descriptor，
+  也不作为宏函数实参。definition `max_depth` 覆盖 global default；use 位点的
+  `debug`/`debug_ast` 覆盖 global default。
+- `debug_module`、`debug_module_ast` 只读取 scan 完成后的最终 global value，用于打印
+  完整 transformed module，不控制单次宏调用。
 - 同一 `use_macro` 再次配置同一宏时，后声明 option 覆盖同名 key，其他 key 保留。
 - 相同宏定义可幂等合并；若新导入、alias 或本地映射占用已有宏 key 且定义不同，必须显式使用 `force_override`，否则报 `macro_override`。因此不存在无条件的“同名导入后者覆盖”。
 
@@ -232,6 +246,6 @@ attribute pass 全部收尾完成后可调用 `sort_forms/1` 生成 Erlang 编�
 
 扫描完成后调用 local-macro 收尾流程。该流程返回最终可调用的本地宏环境、RetainIds 及 `FinalSkipIds`；具体如何冻结、预展开、比较和编译 canonical forms 见 [local-macro 设计](../local-macro/design.md)。
 
-function pass 从最终 attribute 输出构造唯一 `FinalMacroRuntimeContext`。retain 与普通目标 functions 均调用共享 ExpansionValidator；若某个 form 曾在 declaration context 中展开，final context 不同时必须从 original form 展开并与最后一次结果比较。该规则同样适用于 retained local macro 宏头。
+function pass 从最终 attribute 输出构造唯一 `FinalMacroRuntimeContext`。retain 与普通目标 functions 均调用共享 ExpansionValidator；若某个 form 曾在 declaration context 中展开，final context 不同时必须从 original form 展开并与最后一次结果比较。属于 frozen closure 的 retained form 在 FinalMacroRuntimeContext 上重放 declaration 的 internal macro key 过滤与 alias-to-remote 改写；该规则同样适用于 retained local macro 宏头。
 
 扫描器在收尾前不自行删除 local macro 相关原始 forms，也不解释 local-macro 的编译计划；它只传递完整 forms 流和不透明状态，并消费工作流返回的最终环境、物化 forms 与跳过集合。

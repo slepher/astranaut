@@ -21,7 +21,7 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
 | attribute runtime 先解析、确保可调用，再统一构造与执行 | `resolve_attribute_macro_target/2`, `ensure_attribute_target_callable/2`, `build_attribute_macro_invocation/2` | 已实现 |
-| attribute injection 使用调用点 passed forms | `attribute_runtime_context/1`, `build_attribute_macro_invocation/2` | 已实现 |
+| attribute injection 使用调用点 passed forms | `attribute_call_runtime_context/1`, `build_attribute_macro_invocation/2` | 已实现 |
 | local macro forms 使用 declaration-time context | `runtime_context_snapshot`, `prepare_declaration/4`, `prepare_requests/3` | 已实现 |
 | declaration 预展开不强制编译 | `prepare_declaration/4`, `need_callable/4` | 已实现；仅真实 local 依赖产生中间代次 |
 | generation 按累计 members 去重 | `generation_boundary_key/1`, `committed_boundaries` | 已实现；未新增 local macro 不重新编译 |

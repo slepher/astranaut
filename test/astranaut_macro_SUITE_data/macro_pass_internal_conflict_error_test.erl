@@ -6,9 +6,11 @@
 -export([dummy/0]).
 
 -baseline(yep).
+-import_macro(macro_uniform_a).
+-use_macro({macro_uniform_a, to_a/1, [{alias, shared_to_a}]}).
 -local_macro({[macro_a/1], [{extra_functions, [{shared, 1}]},
                             {as_attr, macro_a},
-                            {internal_function, true}]}).
+                            {internal_function, [{shared_to_a, 1}]}]}).
 -local_macro({[macro_b/1], [{extra_functions, [{shared, 1}]},
                             {as_attr, macro_b},
                             {internal_function, []}]}).
@@ -22,7 +24,7 @@ macro_b(Ast) ->
     shared(Ast).
 
 shared(Ast) ->
-    Ast.
+    shared_to_a(Ast).
 
 dummy() ->
     ok.

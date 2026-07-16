@@ -44,6 +44,8 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 重新运行现有 uniform macro 与 macro validation 测试套件。
 - [x] 增加测试：local macro function 与普通 function 复用同一展开语义。
 - [x] 增加测试：目标 FA 自身移除和 internal_function 不在通用展开器中实现。
+- [x] internal_function 解析 declaration MacroEnv，校验本地/远程宏 key，并让 alias 调用在 local frozen form 中恢复为原始远程函数调用。
+- [x] retain 最终重展开重放同一 internal bindings，并把 bindings 纳入 input fingerprint。
 
 ## Hierarchy_final 任务（新增，保留既有任务状态）
 
@@ -202,3 +204,12 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] `process_macro_return` 收集阶段不调用任何 replacement macro。
 - [x] accepted replacement、动态 NeedCallable、missing 和 final whitelist 过滤场景继续通过。
 - [x] 完整 Common Test suite 与 OpenSpec strict validation 通过。
+
+## 最终审核落实
+
+- [x] 拆分 `export_macro` 与 `local_macro` validator，只让后者接受闭包构造 options。
+- [x] 明确 `macro_options` 同样拒绝 `extra_functions` 与 `internal_function`，并覆盖诊断测试。
+- [x] 记录 `macro_options` 的逐宏 defaults、源码顺序、覆盖优先级及 module-only debug 选项。
+- [x] 为 declaration、attribute call 与 final function context 使用阶段化构造函数命名。
+- [x] 用命名 map type 明确 attribute scanner state 的必需字段。
+- [x] 同步 retain 双重身份、间接闭包引用限制和无效 retain warning 的中英文文档与测试。

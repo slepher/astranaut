@@ -313,24 +313,55 @@ unquote_splicing = Asts
 -include_lib("astranaut/include/macro.hrl").
 ```
 
+`macro.hrl` 启用 `astranaut_macro` parse transform。
+
 *export_macro*
 
-&emsp;&emsp;在定义宏的模块中使用。导出的宏可以被其它模块 import。
+&emsp;&emsp;在定义宏的模块中使用。导出的宏可以被其它模块 import。仅声明
+`-export_macro` 不会使该函数在定义模块中成为本地宏：本模块内的非限定调用仍是
+普通 Erlang 函数调用。如果需要同时支持本地和导出宏行为，应对同一 FA 再声明
+`-local_macro`。
 
 ```erlang
 -export_macro([MacroA/A, MacroB/B]).
--export_macro({Macro/A, opts()}).
--export_macro({[MacroA/A, MacroB/B], opts()}).
+-export_macro({Macro/A, macro_definition_opts()}).
+-export_macro({[MacroA/A, MacroB/B], macro_definition_opts()}).
 ```
 
 *local_macro*
 
-&emsp;&emsp;把本地函数声明为宏，但不导出这些函数。
+&emsp;&emsp;把本地函数声明为宏，但不导出这些函数。transformer 会冻结每个声明函数
+及通过静态本地调用发现的函数闭包。同一个 declaration 中的多个函数共享声明位点
+的宏环境；这些成员之间的调用保持为普通 Erlang 调用。该 declaration 只是一次共享
+注册输入：扫描完成后每个 `Function/Arity` 都是独立宏条目，不再保留持久的分组身份。
 
 ```erlang
 -local_macro([MacroA/A, MacroB/B]).
--local_macro({Macro/A, opts()}).
--local_macro({[MacroA/A, MacroB/B], opts()}).
+-local_macro({Macro/A, local_macro_opts()}).
+-local_macro({[MacroA/A, MacroB/B], local_macro_opts()}).
+```
+
+本地宏闭包 forms 使用 `-local_macro` declaration 之前已经生效的宏环境和可注入
+attributes 展开。源码后方的函数仍可被发现为闭包 helper，但后续 import、use、
+options 和 attributes 不会反向改变该声明位点环境。
+
+静态闭包发现只跟随 `helper(Arg)` 这类直接本地调用，不会推断 `fun helper/1`、动态
+选择的函数或 `apply/3` 等间接引用；这些 helper 必须通过 `extra_functions` 显式加入。
+
+*local_macro_retain*
+
+&emsp;&emsp;在转换后的模块中保留本地宏函数或 helper。命中冻结本地宏闭包中的任一
+成员，会保留该闭包的全部函数和 specs。`-export` 与 `-export_macro` 也会成为 retain
+roots。若 `local_macro_retain` 命中的是不属于任何本地宏闭包的普通函数，则不会产生
+额外效果，并产生 `ineffective_local_macro_retain` warning；如果 FA 在模块中根本没有
+定义，则改为产生 `undefined_local_macro_retain`。
+
+保留的冻结函数既属于 local macro 定义，也属于最终模块中的 function。因此它会从
+原始 form 在最终 function context 下重新展开，并与声明位点建立的 canonical 结果
+比较；若结果不一致，应报告冲突，而不是任意选择其中一个 context。
+
+```erlang
+-local_macro_retain([Macro/A, Helper/B]).
 ```
 
 *import_macro*
@@ -346,10 +377,10 @@ unquote_splicing = Asts
 &emsp;&emsp;使用 imported 或 local macro，并附加调用选项。
 
 ```erlang
--use_macro({Macro/A, opts()}).
--use_macro({[MacroA/A, MacroB/B], opts()}).
--use_macro({Module, Macro/A, opts()}).
--use_macro({Module, [MacroA/A, MacroB/B], opts()}).
+-use_macro({Macro/A, use_macro_opts()}).
+-use_macro({[MacroA/A, MacroB/B], use_macro_opts()}).
+-use_macro({Module, Macro/A, use_macro_opts()}).
+-use_macro({Module, [MacroA/A, MacroB/B], use_macro_opts()}).
 ```
 
 *exec_macro*
@@ -363,29 +394,60 @@ unquote_splicing = Asts
 
 *macro_options*
 
-&emsp;&emsp;声明模块级宏选项。
+&emsp;&emsp;声明按源码顺序生效的模块级宏默认值，以及最终模块 debug 开关。
 
 ```erlang
--macro_options(opts()).
+-macro_options(macro_options_opts()).
 ```
 
-*opts()*
+`debug`、`debug_ast` 和 `max_depth` 是逐宏默认值：它们会复制到该
+`-macro_options` form 之后 import 的每个 external macro，以及之后声明的每个 local
+macro。它们不会成为宏函数的实参，也不会反向修改此前已经 import 或声明的宏。
+definition 位点的 `max_depth` 会覆盖 global 默认值；`use_macro` 可以为选中的宏覆盖
+`debug` 和 `debug_ast`。
+
+`debug_module` 和 `debug_module_ast` 只属于模块级最终输出。源码顺序下的最终值在展开
+结束后打印完整 transformed module，不是逐宏配置。
+
+*Option maps*
+
+options 按 attribute 分区；不存在一份同时适用于四种 attribute 的通用 option map。
 
 ```erlang
-  #{debug => Debug,
-    debug_ast => DebugAst,
-    debug_module => DebugModule,
-    debug_module_ast => DebugModuleAst,
-    alias => Alias,
-    order => Order,
+macro_options_opts() ::
+  #{debug => boolean(),
+    debug_ast => boolean(),
+    debug_module => boolean(),
+    debug_module_ast => boolean(),
+    max_depth => non_neg_integer()}.
+
+macro_definition_opts() ::
+  #{order => Order,
     inject_attrs => InjectAttrs,
     as_attr => AsAttr,
     group_args => GroupArgs,
     force_override => ForceOverride,
-    max_depth => MaxDepth}
+    max_depth => MaxDepth}.
+
+local_macro_opts() ::
+  #{order => Order,
+    inject_attrs => InjectAttrs,
+    as_attr => AsAttr,
+    group_args => GroupArgs,
+    force_override => ForceOverride,
+    max_depth => MaxDepth,
+    extra_functions => [Function/Arity],
+    internal_function => boolean() |
+                         [Function/Arity | {Module, Function, Arity}]}.
+
+use_macro_opts() ::
+  #{debug => boolean(),
+    debug_ast => boolean(),
+    alias => atom(),
+    force_override => boolean()}.
 ```
 
-&emsp;&emsp;`opts()` 也可以写成 proplists。
+每类 option map 也可以写成 proplist。
 
 *Debug / DebugAst*
 
@@ -397,7 +459,10 @@ unquote_splicing = Asts
 
 *InjectAttrs*
 
-&emsp;&emsp;把模块 attributes 作为额外参数传给宏函数。
+&emsp;&emsp;把模块 attributes 作为额外参数传给宏函数。attribute 宏只能看到其调用点
+之前已经通过源码顺序扫描的 attributes；本地宏闭包 forms 使用 `-local_macro`
+declaration 之前可见的 attributes；普通 function 宏在 attribute scan 完成后展开，
+使用最终模块 forms。
 
 *Order*
 
@@ -419,13 +484,80 @@ unquote_splicing = Asts
 
 &emsp;&emsp;最大嵌套宏展开链深度。模块级默认值为 100。
 
+*ExtraFunctions*
+
+&emsp;&emsp;显式把本地函数加入 local macro 静态发现的闭包。当 helper 无法从宏函数的
+普通本地调用中发现时使用。每一项必须是模块中已定义的 `Function/Arity`。
+
+```erlang
+-local_macro({macro/1, [{extra_functions, [helper/1]}]}).
+```
+
+*InternalFunction*
+
+&emsp;&emsp;让 `local_macro` declaration 之前立即可见的指定宏，在该宏的冻结闭包中
+作为普通 Erlang 函数调用。`false` 不选择任何宏，`true` 选择声明点可见的全部宏；
+列表可用 `Function/Arity` 选择本地调用 key，或用 `{Module, Function, Arity}` 选择
+远程调用 key。三元组是 attribute term 中对 `Module:Function/Arity` 的表示。
+
+列表中的每个 key 都必须在 declaration 位点解析为宏；仅存在同名普通模块函数并不
+满足条件。本地宏 key 保持为本地函数调用。如果 `Function/Arity` 通过现有
+`use_macro` 的 `alias` 解析到 imported macro，冻结时会把该调用改写回原始
+`Module:Function(...)`，并从展开环境同时移除 alias key 与原始远程宏 key。因此它会
+正常调用导入模块的函数，而不再作为宏展开。retain 的函数在最终 function context 中
+重展开时也应用相同的过滤和改写。
+
+```erlang
+-import_macro(macro_uniform_a).
+-use_macro({macro_uniform_a, to_a/1, [{alias, direct_to_a}]}).
+-local_macro({outer/1, [{internal_function, [direct_to_a/1]}]}).
+
+outer(Ast) ->
+    direct_to_a(Ast). % 冻结为 macro_uniform_a:to_a(Ast)
+```
+
+如果多个 declaration 的闭包重叠，它们必须为每个共享 helper form 使用兼容的
+internal macro 策略。
+
 *Option Scope*
 
-| Attribute | Options |
-| --- | --- |
-| `-macro_options` | `debug`, `debug_ast`, `debug_module`, `debug_module_ast`, `max_depth` |
-| `-export_macro`, `-local_macro` | `as_attr`, `order`, `inject_attrs`, `group_args`, `force_override`, `max_depth` |
-| `-use_macro` | `debug`, `debug_ast`, `alias`, `force_override` |
+| Option | `macro_options` | `export_macro` | `local_macro` | `use_macro` | 作用 |
+| --- | --- | --- | --- | --- | --- |
+| `debug`, `debug_ast` | global 默认值 | — | — | use 位点覆盖 | 以源码或 AST 打印每次宏展开结果 |
+| `debug_module`, `debug_module_ast` | 仅模块级 | — | — | — | 打印最终 transformed module |
+| `max_depth` | global 默认值 | definition 覆盖 | definition 覆盖 | — | 最大嵌套展开深度 |
+| `order` | — | definition | definition | — | 嵌套展开顺序 |
+| `as_attr` | — | definition | definition | — | 把宏暴露为 attribute |
+| `inject_attrs` | — | definition | definition | — | 把选中的模块 attributes 追加到调用实参 |
+| `group_args` | — | definition | definition | — | 把源码实参作为一个列表传入 |
+| `force_override` | — | definition | definition | use 位点 | 允许当前宏映射替换冲突 key |
+| `alias` | — | — | — | 仅 use | 在 use 位点重命名选中的宏 |
+| `extra_functions` | — | — | 仅 local definition | — | 把静态扫描未发现的 helper 加入本地闭包 |
+| `internal_function` | — | — | 仅 local definition | — | 把声明点可见的指定宏调用作为普通函数 |
+
+`extra_functions` 和 `internal_function` 描述本地宏闭包的构造及其冻结宏环境，仅在定义通过
+`-local_macro` 声明时有意义；单独的 `-export_macro` 只负责发布宏供其它模块导入。
+两者也都不是模块级 `-macro_options`。若把它们传给 `-macro_options` 或
+`-export_macro`，它们会作为 unexpected options 报告并忽略。
+
+*展开阶段与源码顺序*
+
+宏展开由按顺序执行的 attribute pass 和随后的 function-body pass 组成：
+
+1. external attribute 宏和已经可调用的 local attribute 宏在同一次扫描中从左到右
+   处理。宏生成的 forms 插回当前队列位置，并在剩余源码 forms 之前按顺序扫描。
+2. `import_macro`、`use_macro`、`macro_options` 以及宏生成的这些 forms 只影响其后
+   扫描到的 forms；已经处理过的 attributes 不会回扫。
+3. 宏生成的 `local_macro` declaration 会进入同一扫描，并可供后续 attribute 调用。
+   attribute 调用只调用 declaration 位点确定的 canonical 定义，不会在调用点展开或
+   重新定义 local macro；多个 attribute 调用复用同一定义和 callable generation。
+4. attribute pass 和 local macro 收尾完成后，普通函数体使用完整宏环境递归展开。
+   因此普通函数可以使用最终全部可调用的 local macros，而冻结的 local macro 闭包
+   forms 保留声明位点发现的本地宏依赖。被 retain 的冻结函数也通过该最终 context，
+   并且必须重现 declaration context 下的 canonical 结果。
+
+这种源码顺序与 `order` 选项是两个概念：源码顺序决定声明和宏环境更新何时可见，
+`inner` 或 `outer` 则决定单个宏调用中的嵌套展开顺序。
 
 *Errors*
 
@@ -436,6 +568,23 @@ unquote_splicing = Asts
 | `invalid_macro_return` | 宏返回的 AST 不适合当前位置 |
 | `invalid_import_macro_attr` | `-import_macro` attribute 无效 |
 | `import_macro_failed` | 导入的宏模块无法加载 |
+| `invalid_extra_functions` | `extra_functions` 中存在模块未定义的函数 |
+| `undefined_internal_functions` | `internal_function` 中存在 declaration 位点不可见的宏 key |
+| `duplicate_local_macro_declaration` | local macro FA 被重复声明，包括同一 declaration 内的重复项 |
+| `conflicting_internal_function_policy` | 重叠的 local macro 闭包为共享 helper 指定了不兼容的 internal macro 环境 |
+| `conflicting_local_macro_closure_environment` | 被保留或复用的 local macro 闭包在另一个必要环境中产生不同展开结果 |
+| `conflicting_local_macro_whitelist` | 冻结闭包再次展开时观察到的 local macro 依赖集合不同 |
+| `illegal_locked_form_mutation` | attribute 展开尝试替换已冻结的 local macro 闭包 form |
+| `illegal_macro_environment_mutation` | local macro 展开在不允许修改环境的位置生成了宏环境 form |
+| `illegal_local_macro_definition_mutation` | local macro 展开尝试修改已锁定的 local macro 定义 |
+| `local_macro_module_in_use` | 旧代码仍在使用中，无法安全替换生成的 local macro 模块 |
+
+*Warnings*
+
+| Warning | Meaning |
+| --- | --- |
+| `undefined_local_macro_retain` | 显式 retain 的 FA 在模块中不存在 |
+| `ineffective_local_macro_retain` | 显式 retain 的 FA 不属于任何 local macro 闭包，因此只能按普通函数处理 |
 
 &emsp;&emsp;宏定义为普通 Erlang 函数。宏在编译期由 parse transformer `astranaut_macro` 展开；宏不知道运行期值，传入宏的参数是 Erlang AST。
 
