@@ -120,7 +120,18 @@ all() ->
      test_dynamic_binding, test_dynamic_binding_pattern,
      test_unquote_splicing_1, test_unquote_splicing_2, test_unquote_splicing_map,
      test_type, test_type_atom, test_type_map, test_type_tuple, test_exp_type, test_remote_type,
-     test_record, test_spec, test_guard].
+     test_record, test_spec, test_callback, test_opaque,
+     test_empty_quote_code, test_empty_quote_type_code,
+     test_binding_warning_format,
+     test_quoted_invalid_unquote_splicing_warning,
+     test_quoted_invalid_unquote_splicing_binding_warning,
+     test_quoted_type_binding_warning,
+     test_quoted_pattern_splicing_tail_warning,
+     test_parse_transform_tuple_pos_warning,
+     test_parse_transform_literal_name_binding_warning,
+     test_quoted_tuple_pos_warning,
+     test_quoted_literal_name_binding_warning,
+     test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
 %%               ok | exit() | {skip,Reason} | {comment,Comment} |
@@ -378,6 +389,159 @@ test_spec(_Config) ->
     Spec = quote_example:spec(hello, map, world),
     Ast = merl:quote(0, "-spec hello(map()) -> world()."),
     ?assertEqual(Ast, Spec),
+    ok.
+
+test_callback(_Config) ->
+    Callback = quote_example:callback(hello),
+    Ast = merl:quote(0, "-callback hello(atom()) -> atom()."),
+    ?assertEqual(Ast, Callback),
+    ok.
+
+test_opaque(_Config) ->
+    Opaque = quote_example:opaque(hello),
+    Ast = merl:quote(0, "-opaque hello() :: atom()."),
+    ?assertEqual(Ast, Opaque),
+    ok.
+
+test_empty_quote_code(_Config) ->
+    assert_invalid_empty_quote("quote_code", quote_code).
+
+test_empty_quote_type_code(_Config) ->
+    assert_invalid_empty_quote("quote_type_code", quote_type_code).
+
+test_binding_warning_format(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"quote_binding_warning_test.erl\", 1).",
+               "-module(quote_binding_warning_test).",
+               "-export([run/2]).",
+               "run(Module, Type) ->",
+               "  quote_code(\"-type foo() :: '_V@Module':'_A@Type'().\")."])
+        ++ [{eof, 6}],
+    {warning, _QuotedForms, [{_File, Warnings}]} =
+        astranaut_quote:parse_transform(Forms, []),
+    ?assert(
+       lists:any(
+         fun({_Pos, astranaut_quote,
+              {only_bindings_supported, ["A", ""], 'Module', '_V@Module'}}) ->
+                 true;
+            (_) ->
+                 false
+         end, Warnings)),
+    astranaut_test_lib:assert_formatted_messages(Warnings),
+    ok.
+
+test_quoted_invalid_unquote_splicing_warning(_Config) ->
+    Node = merl:quote(10, "unquote_splicing(A)"),
+    {warning, _Return, [Warning]} = astranaut_quote:quoted(Node),
+    ?assertMatch(
+       {10, astranaut_quote,
+        {invalid_unquote_splicing, {var, 10, 'A'}}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_quoted_invalid_unquote_splicing_binding_warning(_Config) ->
+    Node = merl:quote(20, "_L@As"),
+    {warning, _Return, [Warning]} = astranaut_quote:quoted(Node),
+    ?assertEqual(
+       {20, astranaut_quote,
+        {invalid_unquote_splicing_binding, 'As'}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_quoted_type_binding_warning(_Config) ->
+    Node =
+        {attribute, 30, type,
+         {foo,
+          {remote_type, 31,
+           [{atom, 32, '_V@Module'}, {atom, 33, '_A@Type'}, []]},
+          []}},
+    {warning, _Return, [Warning]} = astranaut_quote:quoted(Node),
+    ?assertEqual(
+       {32, astranaut_quote,
+        {only_bindings_supported, ["A", ""], 'Module', '_V@Module'}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_quoted_pattern_splicing_tail_warning(_Config) ->
+    Node = merl:quote(40, "{unquote_splicing = Ast, tail}"),
+    {warning, _Return, [Warning]} =
+        astranaut_quote:quoted(Node, #{quote_type => pattern}),
+    ?assertEqual(
+       {40, astranaut_quote,
+        {unquote_splicing_pattern_non_empty_tail, [{atom, 40, tail}]}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_parse_transform_tuple_pos_warning(_Config) ->
+    Forms =
+        [{attribute, 1, file, {"tuple_warning.erl", 1}},
+         {attribute, 2, module, tuple_warning},
+         {attribute, 3, export, [{run, 0}]},
+         {function, 60, run, 0,
+          [{clause, 60, [], [],
+            [{call, 60, {atom, 60, quote}, [{foo, bar}]}]}]},
+         {eof, 61}],
+    {warning, _QuotedForms, [{_File, [Warning]}]} =
+        astranaut_quote:parse_transform(Forms, []),
+    ?assertEqual(
+       {60, astranaut_quote,
+        {could_not_get_tuple_pos_value, {foo, bar}}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_parse_transform_literal_name_binding_warning(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"binding_warning.erl\", 1).",
+               "-module(binding_warning).",
+               "-export([run/1]).",
+               "run(Name) -> quote(fun '_V@Name'/0)."])
+        ++ [{eof, 5}],
+    {warning, _QuotedForms, [{_File, [Warning]}]} =
+        astranaut_quote:parse_transform(Forms, []),
+    ?assertEqual(
+       {4, astranaut_quote,
+        {only_bindings_supported, ["A"], 'Name', '_V@Name'}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_quoted_tuple_pos_warning(_Config) ->
+    {warning, _Return, [Warning]} = astranaut_quote:quoted({foo, bar}),
+    ?assertEqual(
+       {bar, astranaut_quote,
+        {could_not_get_tuple_pos_value, {foo, bar}}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+test_quoted_literal_name_binding_warning(_Config) ->
+    Node = merl:quote(70, "fun '_V@Name'/0"),
+    {warning, _Return, [Warning]} = astranaut_quote:quoted(Node),
+    ?assertEqual(
+       {70, astranaut_quote,
+        {only_bindings_supported, ["A"], 'Name', '_V@Name'}},
+       Warning),
+    astranaut_test_lib:assert_formatted_messages([Warning]),
+    ok.
+
+assert_invalid_empty_quote(FunctionCode, Function) ->
+    Forms = merl:quote(
+              ["-file(\"empty_quote_test.erl\", 1).",
+               "-module(empty_quote_test).",
+               "-export([run/0]).",
+               "run() -> " ++ FunctionCode ++ "()."])
+        ++ [{eof, 5}],
+    ?assertMatch(
+       {error,
+        [{_, [{_, astranaut_quote,
+               {invalid_quote, {call, _, {atom, _, Function}, []}}}]}],
+        []},
+       astranaut_quote:parse_transform(Forms, [])),
     ok.
 
 

@@ -66,6 +66,69 @@ do([ traverse ||
 
 只有在返回值会被使用、需要通过模式匹配约束结果，或当前 `do` 语法明确要求 bind 时才使用 `<-`。这不改变上一节规则：monadic action 仍必须位于 `do`/bind 流程内；在普通函数体中用逗号分隔仍会丢弃 monad 状态。
 
+## Traversal callback 中让框架补充诊断位置
+
+`astranaut:map_m`、`mapfold` 等 traversal 会在调用 callback 时，用当前节点的
+位置包装 callback 返回的 monad，并使用当前 traversal formatter 格式化 pending
+error/warning。因此 callback 报告当前节点的诊断时，应使用
+`astranaut_traverse:error/1`、`warning/1` 或 `fail/1`，不要重复构造
+`formatted_errors/1` 或 `formatted_warnings/1`。
+
+```erlang
+%% 冗余 — 手动重复当前节点的位置和 formatter
+Pos = erl_syntax:get_pos(Node),
+astranaut_traverse:then(
+  astranaut_traverse:formatted_errors(
+    [{Pos, ?MODULE, {invalid_node, Node}}]),
+  astranaut_traverse:return(Node)).
+
+%% 正确 — 非终止错误保留节点并继续遍历
+astranaut_traverse:then(
+  astranaut_traverse:error({invalid_node, Node}),
+  astranaut_traverse:return(Node)).
+
+%% 正确 — 终止当前 traversal 分支
+astranaut_traverse:fail({invalid_node, Node}).
+```
+
+`error/1` 返回携带错误的 `state_ok`，需要通过 `then`、`bind` 或 `do` 与后续
+`return` 串联，适用于保留节点并继续收集同一分支中的错误。`fail/1` 返回
+`state_fail`，适用于当前分支不能继续处理的情况。不要仅为了自动设置位置而把
+原有 `fail/1` 改成 `error/1`；二者都会由外层 traversal 补充位置，但错误恢复
+语义不同。
+
+只有错误属于另一个节点、需要指定不同位置或不同 formatter，或者正在转发已经
+格式化的 `error_marker` 信息时，才使用 `formatted_errors/1`。
+
+## Return monad 递归处理应在节点边界格式化诊断
+
+如果递归 AST 处理使用 `astranaut_return` 而不是 traversal monad，外层 traversal
+只能看到整个入口节点，不能自动为内部节点的 warning/error 设置精确位置。不要在
+每个业务分支中散落 `formatted_warning`；应在每层递归节点的统一入口用
+`astranaut_return:with_error/2` 和 `astranaut_error:update_pos/3` 格式化该节点产生
+的 pending 诊断，业务分支只调用普通 `warning/1` 或 `error/1`。
+
+```erlang
+quote_node_boundary(Node, Opts) ->
+    Pos = node_pos(Node, Opts),
+    astranaut_return:with_error(
+      fun(ErrorStruct) ->
+              astranaut_error:update_pos(Pos, ?MODULE, ErrorStruct)
+      end,
+      quote_node(Node, Opts)).
+```
+
+子节点边界已经格式化的诊断不会被父节点的 `update_pos/3` 重写；父节点只格式化
+仍处于 pending 状态的诊断。这样直接调用 API 和经 traversal 调用时能得到一致的
+warning，同时保留内部节点位置。
+
+当 return monad 分支只是产生 warning 后返回普通值时，使用
+`astranaut_return:warning_ok(Warning, Value)`，不要展开写成
+`then(warning(Warning), return(Value))`。如果后续是一个可能失败的 monadic
+computation，则应保留 `then(warning(...), NextReturn)`；改成先执行 `NextReturn`、
+再通过 `bind` 调用 `warning_ok`，会导致 `NextReturn` 失败时丢失原本已经产生的
+warning。
+
 ## expand_macro 必须用 scoped_state 隔离 State
 
 `expand_macro` 内部使用 traverse State 做 depth tracking（`put(1)`），与 handler 的 State 冲突。

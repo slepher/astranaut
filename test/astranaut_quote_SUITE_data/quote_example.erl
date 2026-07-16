@@ -156,6 +156,12 @@ record(Name) ->
 spec(Name, Value1, Value2) ->
     quote_code("-spec '_A@Name'('_A@Value1'()) -> '_A@Value2'().").
 
+callback(Name) ->
+    quote_code("-callback '_A@Name'(atom()) -> atom().").
+
+opaque(Name) ->
+    quote_code("-opaque '_A@Name'() :: atom().").
+
 guard(Var, Cond) ->
     quote(
       case _@Var of
