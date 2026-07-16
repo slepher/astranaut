@@ -8,17 +8,20 @@
 
 `astranaut_local_macro` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
-local macro function 的展开不使用另一套遍历器。`astranaut_macro` 提供统一的
-`MacroRuntimeContext` 构造、引用匹配和 `ExpandAndValidate` 能力。local declaration
-预展开、retain 及 Step 2 普通 function 展开共享该操作；generation compiler 不调用
-function 展开器，只消费已经通过多环境一致性校验的 canonical forms。
+local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责统一的
+`MacroRuntimeContext` 构造与 pass 编排；`astranaut_macro_expander` 负责宏引用匹配、
+调用、返回 AST 规范化、递归 function 展开，以及显式 whitelist control 的观察结果。
+local declaration 预展开、retain 及 Step 2 普通 function 展开共享该 expander；
+generation compiler 不调用展开器，只消费已经通过多环境一致性校验的 canonical forms。
 
 ### 模块调用方向
 
 ```text
 astranaut_macro
   ├─ 统一 scan、环境更新、attribute splice
-  ├─ 通用宏引用匹配、function 展开与错误/monad 流
+  ├─ 构造阶段化 MacroRuntimeContext
+  ├─ 调用 astranaut_macro_expander
+  │    └─ 通用目标解析、宏调用、function 递归展开与展开期 monad state
   └─ 调用 astranaut_local_macro
        ├─ declaration 成员注册、依赖规划与状态转换
        ├─ 闭包、internal policy、冻结、ExpansionRecord、retain、FinalSkipIds
@@ -27,8 +30,9 @@ astranaut_macro
 
 `astranaut_local_macro` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
 注册/预展开、`NeedCallable` 和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
-工作流驱动，但实际引用解析和 function 展开验证通过调用方提供的 `MacroOps` 执行，
-从而复用统一错误上下文，并避免把 traverse monad 或扫描队列耦合进该模块。
+工作流驱动，但实际引用解析和 function 展开验证通过调用方提供的 `MacroOps` 直接指向
+`astranaut_macro_expander`，从而复用统一错误上下文，并避免把 traverse monad 或扫描
+队列耦合进 local-macro 模块。`astranaut_macro:expand_function/5` 仅保留为兼容入口。
 
 ### 同构 function 展开与验证接口
 
@@ -43,7 +47,7 @@ ExpandAndValidate(MacroRuntimeContext, OriginalForms, TargetFAs, ExpansionRecord
 则从 original form 重新展开并与最后一次已接受结果比较。它不解释 generation、
 retain 或 declaration order。
 
-实际 local 引用同样由 `astranaut_macro` 的统一调用匹配能力识别：
+实际 local 引用同样由 `astranaut_macro_expander` 的统一调用匹配能力识别：
 
 ```text
 ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs

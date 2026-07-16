@@ -207,6 +207,9 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ## 最终审核落实
 
+- [x] 将 attribute/function 共用的宏目标解析、调用、返回 AST 规范化和递归展开拆到 `astranaut_macro_expander`。
+- [x] 保留 `astranaut_macro:expand_function/5` 兼容入口，并让内部 `MacroOps` 直接引用 expander。
+- [x] 将 expander 加入 `erl_first_files`，确保 parse transform 使用前已经编译加载。
 - [x] 拆分 `export_macro` 与 `local_macro` validator，只让后者接受闭包构造 options。
 - [x] 明确 `macro_options` 同样拒绝 `extra_functions` 与 `internal_function`，并覆盖诊断测试。
 - [x] 记录 `macro_options` 的逐宏 defaults、源码顺序、覆盖优先级及 module-only debug 选项。

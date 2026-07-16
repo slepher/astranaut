@@ -32,8 +32,8 @@
                                    macro_options := map(),
                                    inject_forms := [term()]}.
 -type local_macro_whitelist_control() ::
-        astranaut_macro:local_macro_whitelist_control().
--type function_expansion() :: astranaut_macro:function_expansion().
+        astranaut_macro_expander:local_macro_whitelist_control().
+-type function_expansion() :: astranaut_macro_expander:function_expansion().
 -type expansion_record() ::
         #{canonical_whitelist := disabled | ordsets:ordset(fa()),
           canonical_result := term(),

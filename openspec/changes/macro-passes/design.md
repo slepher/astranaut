@@ -10,7 +10,10 @@
 
 ## 统一 function 展开能力
 
-`astranaut_macro` 只维护一套 function-body 宏匹配和递归展开实现。白名单是 local frozen function expansion 的可选观察/校验策略；调用方必须显式传入控制值，展开器不得根据 MacroEnv、FormId 或阶段隐式推断：
+`astranaut_macro_expander` 只维护一套 function-body 宏匹配和递归展开实现；
+`astranaut_macro` 只负责 scan/pass 编排、环境更新和阶段化 runtime context 构造。
+白名单是 local frozen function expansion 的可选观察/校验策略；调用方必须显式传入
+控制值，展开器不得根据 MacroEnv、FormId 或阶段隐式推断：
 
 ```text
 LocalMacroWhitelistControl =
@@ -32,6 +35,11 @@ ExpandFunction(MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl)
 - `verify` 使用相同来源累计 FAs；每个返回 AST 收集完成后由调用方批量拒绝 expected 之外的集合，完整展开后检查缺失项。final retained context 先用 expected 过滤 LocalEnv，使名单外调用保持普通调用。
 
 local declaration 预展开、retain 和最终 function pass 都调用该实现。首次 local frozen FormId 使用 `collect`，已有 canonical whitelist 后使用 `verify`；普通 Step 2 function、普通 retained function 与 attribute invocation 使用 `disabled`。每次从 original/frozen form 开始；环境相同直接复用完整结果，环境不同则先校验 whitelist、再与上一次已接受 AST 比较。local-macro generation 编译不调用展开器，只消费已经确认的 canonical expanded forms。
+
+attribute 目标解析、调用参数构造和 function caller 检测也由同一 expander 提供，因此
+attribute 与 function 路径不会各自维护一份 `find_macro`、`inject_attrs` 或返回 AST
+规范化实现。expander 不拥有扫描队列、宏环境更新或 local generation 生命周期；
+`astranaut_macro:expand_function/5` 仅作为公开兼容门面委托给它。
 
 原始 function 的白名单观察位于统一发现—执行路径；macro 返回 AST 则复用 `process_macro_return` 已有的完整返回树 traversal，一次性收集后再交回调用方：
 

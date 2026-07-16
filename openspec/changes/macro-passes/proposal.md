@@ -6,7 +6,12 @@
 
 `-local_macro(...)` 的逐 FA 声明注册、闭包快照、预展开/一致性记录、依赖驱动累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更定义统一扫描如何调用该流程，以及 retain/普通 function 如何共享最终 `MacroRuntimeContext`。
 
-`astranaut_macro` 继续提供唯一的 function 宏发现—执行实现。local-macro 工作流向它传入声明位点候选环境，以及显式的 `disabled`、`collect` 或 `verify(Expected)` 白名单控制；普通 function 始终传 `disabled`。白名单记录 frozen function 自身展开的真实 match，并由 `process_macro_return` 在既有返回树 traversal 中一次性收集每个 macro 返回 AST 的 local macro presence。
+`astranaut_macro_expander` 提供唯一的 function 宏发现—执行实现，
+`astranaut_macro` 负责 pass 编排并保留兼容门面。local-macro 工作流通过 `MacroOps`
+直接向 expander 传入声明位点候选环境，以及显式的 `disabled`、`collect` 或
+`verify(Expected)` 白名单控制；普通 function 始终传 `disabled`。白名单记录 frozen
+function 自身展开的真实 match，并由 `process_macro_return` 在既有返回树 traversal 中
+一次性收集每个 macro 返回 AST 的 local macro presence。
 
 首次成功展开建立 FormId 的 canonical whitelist；后续 declaration/final 处理在同一次 traversal 中校验。白名单冲突与最终 AST 结果冲突是两条独立不变量。final retained local closure 按 canonical whitelist 过滤 FinalLocalEnv，名单外调用保持普通 Erlang 调用；普通 Step 2 function 仍使用完整 FinalMacroEnv。
 

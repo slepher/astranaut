@@ -34,14 +34,22 @@ GenerationCompiler
 
 四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local frozen function 通过显式 whitelist control 启用真实匹配观察；普通 function/attribute 传 `disabled`。local macro 的特殊性只剩 declaration-time 快照、canonical whitelist、同声明成员的普通调用语义、闭包/依赖及 callable generation 生命周期。
 
+实现模块按此边界拆分：`astranaut_macro` 是 parse-transform 门面和 pass 编排器，拥有
+source-ordered scan、环境更新、splice、final context 及诊断入口；
+`astranaut_macro_expander` 拥有 attribute/function 共用的目标解析、宏调用、返回 AST
+规范化、递归展开和展开期 traversal state；`astranaut_local_macro` 拥有声明、闭包、
+一致性记录、调度及 generation 生命周期。expander 不反向调用扫描器或 local-macro
+工作流。为兼容既有调用，`astranaut_macro:expand_function/5` 只做一次委托；内部
+`MacroOps` 直接引用 expander，避免门面往返。
+
 ## 2. 与当前实现对照
 
 当前实现已经完成最终层级重构：
 
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
-| 统一 attribute runtime | `resolve_attribute_macro_target/2`、`need_callable/4`、`build_attribute_macro_invocation/2` | 已实现；local 只增加通用可调用性前置条件。 |
-| local 调用白名单 | `expand_function/5`、`process_macro_return/3`、`canonical_whitelist` | 已实现；原始 AST 观察真实 match，返回 AST 一次性收集并批量 verify，final 按 canonical whitelist 过滤。 |
+| 统一 attribute runtime | `astranaut_macro_expander:resolve_attribute_target/2`、`need_callable/4`、`expand_attribute_target/2` | 已实现；local 只增加通用可调用性前置条件。 |
+| local 调用白名单 | `astranaut_macro_expander:expand_function/5`、`process_macro_return/3`、`canonical_whitelist` | 已实现；原始 AST 观察真实 match，返回 AST 一次性收集并批量 verify，final 按 canonical whitelist 过滤。 |
 | declaration 时尽可能预展开 | `prepare_declaration/4` | 已实现；无真实 local 依赖时只预展开、不编译。 |
 | 环境只控制展开与一致性 | `prepare_requests/3`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
 | 编译仅消费 canonical forms | `compile_boundary/3`、`canonical_expanded_forms` | 已实现；compiler 不按 declaration context 重放展开。 |

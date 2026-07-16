@@ -20,8 +20,8 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | splice 结果在当前位置立即重扫 | `astranaut:map_forms_splice/3` | 已实现 |
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
-| attribute runtime 先解析、确保可调用，再统一构造与执行 | `resolve_attribute_macro_target/2`, `ensure_attribute_target_callable/2`, `build_attribute_macro_invocation/2` | 已实现 |
-| attribute injection 使用调用点 passed forms | `attribute_call_runtime_context/1`, `build_attribute_macro_invocation/2` | 已实现 |
+| attribute runtime 先解析、确保可调用，再统一构造与执行 | `astranaut_macro_expander:resolve_attribute_target/2`, `ensure_attribute_target_callable/2`, `expand_attribute_target/2` | 已实现 |
+| attribute injection 使用调用点 passed forms | `attribute_call_runtime_context/1`, `astranaut_macro_expander:expand_attribute_target/2` | 已实现 |
 | local macro forms 使用 declaration-time context | `runtime_context_snapshot`, `prepare_declaration/4`, `prepare_requests/3` | 已实现 |
 | declaration 预展开不强制编译 | `prepare_declaration/4`, `need_callable/4` | 已实现；仅真实 local 依赖产生中间代次 |
 | generation 按累计 members 去重 | `generation_boundary_key/1`, `committed_boundaries` | 已实现；未新增 local macro 不重新编译 |
@@ -31,7 +31,7 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | 用户宏 traverse state 隔离 | `invoke_macro_function/1` + `scoped_state/2` | 已实现 |
 | FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/8` | 已实现 |
 | FinalSkipIds 在 function pass 前剔除 | `remove_final_skip_forms/2` | 已实现 |
-| local 与普通 function 共用展开器 | `expand_functions/4`, `expand_function/5` | 已实现 |
+| local 与普通 function 共用展开器 | `astranaut_macro_expander:expand_function/5`；`astranaut_macro:expand_function/5` 为兼容门面 | 已实现 |
 | whitelist control 显式区分 disabled/collect/verify | `local_macro_whitelist_control/0`, `whitelist_control/2` | 已实现 |
 | 原始与 replacement AST 在统一发现点观察 local match | `observe_local_macro/2`, `expand_macro_recursive/4` | 已实现 |
 | whitelist/result 共同进入 ExpansionRecord | `cache_expanded/4`, `results_by_input` | 已实现 |
