@@ -18,7 +18,7 @@
 parse_transform(BaseForms, Opts) ->
     OptsAst = astranaut_lib:abstract_form(Opts),
     CompileOptsForms = astranaut_lib:gen_exported_function(compile_opts, OptsAst),
-    astranaut_syntax:insert_forms(CompileOptsForms, BaseForms).
+    astranaut_forms:insert_forms(CompileOptsForms, BaseForms).
 
 format_error(Error) ->
     astranaut:format_error(Error).

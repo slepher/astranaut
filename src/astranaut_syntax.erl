@@ -1,8 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @author Chen Slepher <slepheric@gmail.com>
 %%% @copyright (C) 2021, Chen Slepher
-%%% @doc
+%%% @doc OTP-compatible syntax-tree helpers, validation, and normalization.
 %%%
+%%% Form ordering APIs remain as compatibility proxies to astranaut_forms.
 %%% @end
 %%% Created : 18 Mar 2021 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
@@ -11,6 +12,27 @@
 -include("otp_vsn.hrl").
 
 -type form() :: erl_parse:abstract_form().
+-type node_role() :: expression | pattern | guard | form | type | clause |
+                     name | type_param | attribute_body | binary_size |
+                     map_field | binary_field.
+-type validator() :: {role, node_role()} |
+                     {slot, atom(), atom(), node_role()}.
+-type validation_opts() ::
+        #{attr => map(),
+          forms => [form()],
+          record_defs => [form()],
+          otp_vsn => integer() | 'pre-21',
+          fail => raise | collect}.
+-type validation_error() :: map().
+-type child_spec() ::
+        #{slot := atom(),
+          role := node_role(),
+          validator := validator(),
+          subtrees := term(),
+          attr := map()}.
+
+-export_type([node_role/0, validator/0, validation_opts/0,
+              validation_error/0, child_spec/0]).
 
 %% API
 -export([type/1, otp_vsn/0, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
@@ -21,15 +43,19 @@
 -export([pattern_node/1, guard_node/1, expression_node/1, update_node/2]).
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
+-spec type(term()) -> atom().
 type(Node) ->
     erl_syntax:type(Node).
 
+-spec otp_vsn() -> integer() | 'pre-21'.
 otp_vsn() ->
     ?ASTRANAUT_OTP_VSN.
 
+-spec get_pos(term()) -> term().
 get_pos(Node) ->
     erl_syntax:get_pos(Node).
 
+-spec set_pos(term(), term()) -> term().
 set_pos(Node, Pos) ->
     case erl_syntax:is_tree(Node) of
         true ->
@@ -47,6 +73,7 @@ set_pos_1({warning, {_, Formatter, Warning}}, Pos) ->
 set_pos_1(Node, Pos) ->
     setelement(2, Node, Pos).
 
+-spec is_pos(term()) -> boolean().
 is_pos(Pos) ->
     case Pos of
         Pos when is_integer(Pos) ->
@@ -57,6 +84,7 @@ is_pos(Pos) ->
             false
     end.
 
+-spec is_leaf(term()) -> boolean().
 is_leaf(Node) ->
     erl_syntax:is_leaf(Node).
 
@@ -74,6 +102,9 @@ subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= call
     NameTree = name_arity_tree(Name, Pos),
     MFATree = mfa_tree(MFA, Pos),
     [[NameTree], [MFATree|Specs]];
+subtrees({attribute, _Pos, Name, Body})
+  when Name =:= type; Name =:= opaque; Name =:= spec; Name =:= callback ->
+    erlang:error({invalid_attribute_body, Name, Body});
 subtrees({'try', _Pos, Body, Clauses, Handlers, After}) ->
     [Body, Clauses, Handlers, After];
 subtrees(Node) ->
@@ -91,6 +122,7 @@ name_arity_tree(Arity, Pos) when is_integer(Arity) ->
 update_tree(Node, Subtrees) ->
     erl_syntax:update_tree(Node, Subtrees).
 
+-spec revert(term()) -> term().
 revert(Node) ->
     case erl_syntax:is_tree(Node) of
         false ->
@@ -130,9 +162,11 @@ name_arity_value(atom, NameTree) ->
 name_arity_value(integer, ArityTree) ->
     erl_syntax:integer_value(ArityTree).
 
+-spec subtrees_pge(atom(), term(), map()) -> term().
 subtrees_pge(Type, Subtrees, Attr) ->
     child_specs_annotated_subtrees(child_specs(Type, Subtrees, Attr)).
 
+-spec attribute_subtrees_type(atom(), term(), map()) -> term().
 attribute_subtrees_type(attribute, [[NameTree], BodyTrees], #{}) ->
     Name = erl_syntax:atom_value(NameTree),
     [[NameTree], update_attribute_body_trees(Name, BodyTrees)];
@@ -148,12 +182,15 @@ update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name =:= spec; N
 update_attribute_body_trees(Name, BodyTrees) ->
     attribute(Name, BodyTrees).
 
+-spec pattern_node(term()) -> term().
 pattern_node(Subtree) ->
     update_node(pattern, Subtree).
 
+-spec guard_node(term()) -> term().
 guard_node(Subtree) ->
     update_node(guard, Subtree).
 
+-spec expression_node(term()) -> term().
 expression_node(Subtree) ->
     update_node(expression, Subtree).
 
@@ -169,31 +206,34 @@ type_param_node(Subtree) ->
 attribute(Attribute, Subtree) ->
     astranaut_uniplate:up_attr(#{attribute => Attribute}, Subtree).
 
+-spec update_node(node_role(), term()) -> term().
 update_node(Node, Subtree) ->
     astranaut_uniplate:up_attr(#{node => Node}, Subtree).
 
 %%===================================================================
 %% syntax validation functions
 %%===================================================================
--spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term()) ->
-          ok | {error, map()}.
+-spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator()) ->
+          ok | {error, validation_error()}.
 validate_node(NodeOrNodes, Validator) ->
     validate_node(NodeOrNodes, Validator, #{}).
 
--spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
-          ok | {error, map()}.
+-spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator(),
+                    validation_opts()) -> ok | {error, validation_error()}.
 validate_node(NodeOrNodes, Validator, Opts) ->
-    Attr = validation_attr(Opts, validator_role(Validator)),
     Env = validation_env(Opts),
-    validate_node(NodeOrNodes, Validator, root, Attr, Env, []).
+    validate_node(NodeOrNodes, Validator, root, Env, []).
 
--spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term()) ->
-          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} | {error, map()}.
+-spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator()) ->
+          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} |
+          {error, validation_error()}.
 normalize(NodeOrNodes, Validator) ->
     normalize(NodeOrNodes, Validator, #{}).
 
--spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], term(), map()) ->
-          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} | {error, map()}.
+-spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator(),
+                validation_opts()) ->
+          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} |
+          {error, validation_error()}.
 normalize(NodeOrNodes, Validator, Opts) ->
     Attr = validation_attr(Opts, validator_role(Validator)),
     Env = validation_env(Opts),
@@ -218,15 +258,21 @@ validation_env(Opts) ->
     #{forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
       otp_vsn => maps:get(otp_vsn, Opts, otp_vsn())}.
 
-validate_node([], _Validator, _Slot, _Attr, _Env, _Path) ->
+validate_node([], _Validator, _Slot, _Env, _Path) ->
     ok;
-validate_node(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
-    validate_node_list(fun validate_node/6, Nodes, Validator, Slot, Attr, Env, Path, 1);
-validate_node(Node, Validator, Slot, _Attr, Env, Path) ->
+validate_node(Nodes, Validator, Slot, Env, Path) when is_list(Nodes) ->
+    validate_node_list(Nodes, Validator, Slot, Env, Path, 1);
+validate_node(Node, Validator, Slot, Env, Path) ->
+    case validate_node_info(Node, Validator, Slot, Env, Path) of
+        {ok, _NodeInfo} -> ok;
+        {error, _Error} = Error -> Error
+    end.
+
+validate_node_info(Node, Validator, Slot, Env, Path) ->
     case node_info(Node) of
-        {ok, Type, Pos, _Subtrees} ->
+        {ok, Type, Pos, _Subtrees} = NodeInfo ->
             case role_allowed(Validator, Type, Node, Env) of
-                true -> ok;
+                true -> {ok, NodeInfo};
                 false ->
                     ExpectedRole = validator_role(Validator),
                     {error, invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path)}
@@ -239,30 +285,23 @@ normalize([], _Validator, _Slot, _Attr, _Env, _Path) ->
     {ok, []};
 normalize(Nodes, Validator, Slot, Attr, Env, Path) when is_list(Nodes) ->
     normalize_node_list(Nodes, Validator, Slot, Attr, Env, Path, 1, []);
-normalize({uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits},
-          Validator, Slot, Attr, Env, Path) ->
-    normalize(Node, Validator, Slot, Attr, Env, Path);
-normalize(Node, Validator, Slot, Attr, Env, Path) ->
-    case validate_node(Node, Validator, Slot, Attr, Env, Path) of
-        ok ->
-            normalize_node(Node, Validator, Slot, Attr, Env, Path);
+normalize(Node0, Validator, Slot, Attr, Env, Path) ->
+    Node = unwrap_node_context(Node0),
+    case validate_node_info(Node, Validator, Slot, Env, Path) of
+        {ok, NodeInfo} ->
+            normalize_node(Node, NodeInfo, Validator, Slot, Attr, Env, Path);
         {error, _Error} = Error ->
             Error
     end.
 
-normalize_node(Node, Validator, Slot, Attr, Env, Path) ->
-    case node_info(Node) of
-        {ok, Type, Pos, []} ->
-            normalize_revert_node(Node, Validator, Slot, Type, Pos, Attr, Env, Path);
-        {ok, Type, Pos, Subtrees} ->
-            case normalize_child_specs(child_specs(Type, Subtrees, Attr), Env, Path, []) of
-                {ok, Specs1} ->
-                    normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs1, Attr, Env, Path);
-                {error, Error} ->
-                    {error, add_parent_error(Type, Pos, Error)}
-            end;
-        {error, Exception} ->
-            {error, invalid_node_error(Validator, validator_role(Validator), Slot, Node, Exception, Path)}
+normalize_node(Node, {ok, Type, Pos, []}, Validator, Slot, _Attr, Env, Path) ->
+    normalize_revert_node(Node, Validator, Slot, Type, Pos, Env, Path);
+normalize_node(Node, {ok, Type, Pos, Subtrees}, Validator, Slot, Attr, Env, Path) ->
+    case normalize_child_specs(child_specs(Type, Subtrees, Attr), Env, Path, []) of
+        {ok, Specs1} ->
+            normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs1, Env, Path);
+        {error, Error} ->
+            {error, add_parent_error(Type, Pos, Error)}
     end.
 
 normalize_node_list([Node|Nodes], Validator, Slot, Attr, Env, Path, Index, Acc) ->
@@ -281,7 +320,7 @@ normalize_child_specs([#{slot := Slot, validator := Validator,
                       Env, Path, Acc) ->
     case normalize_child_subtrees(Subtrees, Validator, Slot, Attr, Env, Path, 1, []) of
         {ok, Subtrees1} ->
-            Spec1 = Spec#{subtrees => Subtrees1, nodes => child_nodes(Subtrees1)},
+            Spec1 = Spec#{subtrees => Subtrees1},
             normalize_child_specs(Specs, Env, Path, [Spec1|Acc]);
         {error, Error} ->
             {error, Error}
@@ -308,11 +347,11 @@ normalize_child_subtrees([Node|Nodes], Validator, Slot, Attr, Env, Path, Index, 
 normalize_child_subtrees([], _Validator, _Slot, _Attr, _Env, _Path, _Index, Acc) ->
     {ok, lists:reverse(Acc)}.
 
-normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs, Attr, Env, Path) ->
+normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs, Env, Path) ->
     Subtrees1 = child_specs_plain_subtrees(Specs),
     try
         Node1 = revert(update_tree(Node, Subtrees1)),
-        case validate_node(Node1, Validator, Slot, Attr, Env, Path) of
+        case validate_node(Node1, Validator, Slot, Env, Path) of
             ok ->
                 {ok, Node1};
             {error, Error} ->
@@ -324,10 +363,10 @@ normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs, Attr, Env, Path)
                                        Node, {Class, Reason}, Path)}
     end.
 
-normalize_revert_node(Node, Validator, Slot, Type, Pos, Attr, Env, Path) ->
+normalize_revert_node(Node, Validator, Slot, Type, Pos, Env, Path) ->
     try
         Node1 = revert(Node),
-        case validate_node(Node1, Validator, Slot, Attr, Env, Path) of
+        case validate_node(Node1, Validator, Slot, Env, Path) of
             ok ->
                 {ok, Node1};
             {error, Error} ->
@@ -339,24 +378,19 @@ normalize_revert_node(Node, Validator, Slot, Type, Pos, Attr, Env, Path) ->
                                        Node, {Class, Reason}, Path)}
     end.
 
-validate_node_list(ValidateNode, [Node|Nodes], Validator, Slot, Attr, Env, Path, Index) ->
+validate_node_list([Node|Nodes], Validator, Slot, Env, Path, Index) ->
     Path1 = Path ++ [path_item(Slot, Index, Validator, Node)],
-    case ValidateNode(Node, Validator, Slot, Attr, Env, Path1) of
+    case validate_node(Node, Validator, Slot, Env, Path1) of
         ok ->
-            validate_node_list(ValidateNode, Nodes, Validator, Slot, Attr, Env, Path, Index + 1);
+            validate_node_list(Nodes, Validator, Slot, Env, Path, Index + 1);
         {error, Error} ->
             {error, Error}
     end;
-validate_node_list(_ValidateNode, [], _Validator, _Slot, _Attr, _Env, _Path, _Index) ->
+validate_node_list([], _Validator, _Slot, _Env, _Path, _Index) ->
     ok.
 
 node_info(Node) ->
-    case Node of
-        {uniplate_node_context, Node1, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits} ->
-            node_info(Node1);
-        _ ->
-            node_info_1(Node)
-    end.
+    node_info_1(unwrap_node_context(Node)).
 
 node_info_1(default) ->
     {ok, default, none, []};
@@ -367,6 +401,7 @@ node_info_1(Node) ->
                 Type = type(Node),
                 Pos = get_pos(Node),
                 Subtrees = subtrees(Node),
+                ok = validate_subtrees_shape(Type, Subtrees),
                 _Reverted = revert(Node),
                 {ok, Type, Pos, Subtrees}
             catch
@@ -377,15 +412,24 @@ node_info_1(Node) ->
             {error, {bad_syntax_tree, Node}}
     end.
 
+validate_subtrees_shape(attribute, [[NameTree], BodyTrees]) ->
+    validate_attribute_body_shape(erl_syntax:atom_value(NameTree), BodyTrees);
+validate_subtrees_shape(_Type, _Subtrees) ->
+    ok.
+
 node_type_info(Node) ->
-    case Node of
-        {uniplate_node_context, Node1, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits} ->
-            node_type_info(Node1);
+    case unwrap_node_context(Node) of
         default ->
             {ok, default, none};
-        _ ->
-            node_type_info_1(Node)
+        Node1 ->
+            node_type_info_1(Node1)
     end.
+
+unwrap_node_context({uniplate_node_context, Node, _Withs, _Reduces, _Skip,
+                     _UpAttrs, _Entries, _Exits}) ->
+    Node;
+unwrap_node_context(Node) ->
+    Node.
 
 node_type_info_1(Node) ->
     case is_tuple(Node) orelse erl_syntax:is_tree(Node) of
@@ -607,7 +651,7 @@ validator_role({slot, _ParentType, _Slot, Role}) ->
                      {?EXPR_GUARD, [expression, guard]},
                      {?EXPR_PAT_GUARD, [expression, pattern, guard]}]).
 
--spec node_roles(atom()) -> [atom()].
+-spec node_roles(atom()) -> [node_role()].
 node_roles(Type) ->
     Roles = find_roles(Type, ?ROLE_ORDER, [expression, pattern, guard]),
     Extra = lists:append([add_if(Type, ?TYPE_ALSO, [type]),
@@ -624,119 +668,119 @@ find_roles(Type, [{Set, Roles}|T], Default) ->
 add_if(Type, Set, Roles) ->
     case lists:member(Type, Set) of true -> Roles; false -> [] end.
 
--spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [map()].
+-spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [child_spec()].
 child_specs(Type, Subtrees, Attr) ->
     add_child_validators(Type, child_specs_1(Type, Subtrees, Attr)).
 
 child_specs_1(map_expr, [Fields], Attr) ->
-    [map_field_child_spec(fields, Fields, Attr, false)];
+    [map_field_child_spec(fields, Fields, Attr)];
 child_specs_1(map_expr, [Argument, Fields], Attr) ->
-    [child_spec(argument, expression, Argument, Attr, false),
-     map_field_child_spec(fields, Fields, Attr, false)];
+    [child_spec(argument, expression, Argument, Attr),
+     map_field_child_spec(fields, Fields, Attr)];
 child_specs_1(binary, [Elements], Attr) ->
-    [binary_field_child_spec(elements, [Elements], Attr, false)];
+    [binary_field_child_spec(elements, [Elements], Attr)];
 child_specs_1(application, [Operator, Arguments], Attr) ->
-    [child_spec(operator, expression, Operator, Attr, false),
-     child_spec(arguments, expression, Arguments, Attr, false)];
+    [child_spec(operator, expression, Operator, Attr),
+     child_spec(arguments, expression, Arguments, Attr)];
 child_specs_1(binary_field, [Values, Sizes, Types], Attr) ->
     Role = maps:get(node, Attr, expression),
-    [child_spec(value, Role, Values, Attr, false),
-     child_spec(size, binary_size, Sizes, Attr, false),
-     child_spec(types, attribute_body, Types, Attr, false)];
+    [child_spec(value, Role, Values, Attr),
+     child_spec(size, binary_size, Sizes, Attr),
+     child_spec(types, attribute_body, Types, Attr)];
 child_specs_1(size_qualifier, Subtrees, Attr) ->
-    [child_spec(elements, binary_size, Subtrees, Attr, false)];
+    [child_spec(elements, binary_size, Subtrees, Attr)];
 child_specs_1(binary_field, Subtrees, Attr) ->
     Role = maps:get(node, Attr, expression),
-    [child_spec(elements, Role, Subtrees, Attr, false)];
+    [child_spec(elements, Role, Subtrees, Attr)];
 child_specs_1(Type, [Keys, Values], #{node := pattern} = Attr)
   when Type =:= map_field_assoc; Type =:= map_field_exact ->
     {KeySlot, ValueSlot} = map_field_slots(Type),
-    [child_spec(KeySlot, expression, Keys, Attr, true),
-     child_spec(ValueSlot, pattern, Values, Attr, true)];
+    [child_spec(KeySlot, expression, Keys, Attr),
+     child_spec(ValueSlot, pattern, Values, Attr)];
 child_specs_1(Type, [Keys, Values], #{node := Role} = Attr)
   when Type =:= map_field_assoc; Type =:= map_field_exact ->
     {KeySlot, ValueSlot} = map_field_slots(Type),
-    [child_spec(KeySlot, map_field_child_role(Role), Keys, Attr, true),
-     child_spec(ValueSlot, Role, Values, Attr, true)];
+    [child_spec(KeySlot, map_field_child_role(Role), Keys, Attr),
+     child_spec(ValueSlot, Role, Values, Attr)];
 child_specs_1(_Type, Subtrees, #{node := pattern} = Attr) ->
-    [child_spec(elements, pattern, Subtrees, Attr, false)];
+    [child_spec(elements, pattern, Subtrees, Attr)];
 child_specs_1(named_fun_expr, [Names, Clauses], Attr) ->
-    [child_spec(name, pattern, Names, Attr, true),
-     child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(name, pattern, Names, Attr),
+     child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(Type, [Patterns, Expressions], Attr) when Type =:= match_expr; Type =:= maybe_match_expr ->
-    [child_spec(left, pattern, Patterns, Attr, true),
-     child_spec(right, expression, Expressions, Attr, true)];
+    [child_spec(left, pattern, Patterns, Attr),
+     child_spec(right, expression, Expressions, Attr)];
 child_specs_1(clause, [Patterns, Expressions], Attr) ->
-    [child_spec(patterns, pattern, Patterns, Attr, true),
-     child_spec(body, expression, Expressions, Attr, true)];
+    [child_spec(patterns, pattern, Patterns, Attr),
+     child_spec(body, expression, Expressions, Attr)];
 child_specs_1(clause, [Patterns, Guards, Expressions], Attr) ->
-    [child_spec(patterns, pattern, Patterns, Attr, true),
-     child_spec(guards, guard, Guards, Attr, true),
-     child_spec(body, expression, Expressions, Attr, true)];
+    [child_spec(patterns, pattern, Patterns, Attr),
+     child_spec(guards, guard, Guards, Attr),
+     child_spec(body, expression, Expressions, Attr)];
 child_specs_1(Type, [Patterns, Expressions], Attr) when Type =:= generator; Type =:= strict_generator;
-                                                      Type =:= binary_generator; Type =:= strict_binary_generator;
-                                                      Type =:= map_generator; Type =:= strict_map_generator ->
-    [child_spec(pattern, pattern, Patterns, Attr, true),
-     child_spec(body, expression, Expressions, Attr, true)];
+                                                       Type =:= binary_generator; Type =:= strict_binary_generator;
+                                                       Type =:= map_generator; Type =:= strict_map_generator ->
+    [child_spec(pattern, pattern, Patterns, Attr),
+     child_spec(body, expression, Expressions, Attr)];
 child_specs_1(fun_expr, [Clauses], Attr) ->
-    [child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(case_expr, [Argument, Clauses], Attr) ->
-    [child_spec(argument, expression, Argument, Attr, false),
-     child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(argument, expression, Argument, Attr),
+     child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(if_expr, [Clauses], Attr) ->
-    [child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(receive_expr, [Clauses], Attr) ->
-    [child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(receive_expr, [Clauses, Timeout, Action], Attr) ->
-    [child_spec(clauses, clause, Clauses, Attr, false),
-     child_spec(timeout, expression, Timeout, Attr, false),
-     child_spec(action, expression, Action, Attr, false)];
+    [child_spec(clauses, clause, Clauses, Attr),
+     child_spec(timeout, expression, Timeout, Attr),
+     child_spec(action, expression, Action, Attr)];
 child_specs_1(try_expr, [Body, Clauses, Handlers, After], Attr) ->
-    [child_spec(body, expression, Body, Attr, false),
-     child_spec(clauses, clause, Clauses, Attr, false),
-     child_spec(handlers, clause, Handlers, Attr, false),
-     child_spec('after', expression, After, Attr, false)];
+    [child_spec(body, expression, Body, Attr),
+     child_spec(clauses, clause, Clauses, Attr),
+     child_spec(handlers, clause, Handlers, Attr),
+     child_spec('after', expression, After, Attr)];
 child_specs_1(try_expr, [Body, Clauses, Handlers], Attr) ->
-    [child_spec(body, expression, Body, Attr, false),
-     child_spec(clauses, clause, Clauses, Attr, false),
-     child_spec(handlers, clause, Handlers, Attr, false)];
+    [child_spec(body, expression, Body, Attr),
+     child_spec(clauses, clause, Clauses, Attr),
+     child_spec(handlers, clause, Handlers, Attr)];
 child_specs_1(function, [Name, Clauses], Attr) ->
-    [child_spec(name, name, Name, Attr, false),
-     child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(name, name, Name, Attr),
+     child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(function, [Clauses], Attr) ->
-    [child_spec(clauses, clause, Clauses, Attr, false)];
+    [child_spec(clauses, clause, Clauses, Attr)];
 child_specs_1(form_list, Subtrees, Attr) ->
-    [child_spec(forms, form, Subtrees, Attr, false)];
+    [child_spec(forms, form, Subtrees, Attr)];
 child_specs_1(attribute, [[NameTree], BodyTrees], Attr) ->
     Attribute = erl_syntax:atom_value(NameTree),
-    [child_spec(name, name, [NameTree], Attr, false)|
+    [child_spec(name, name, [NameTree], Attr)|
      attribute_body_specs(Attribute, BodyTrees, Attr#{attribute => Attribute})];
 child_specs_1(list_comp, [Template, Body], Attr) ->
-    [child_spec(template, expression, Template, Attr, true),
-     child_spec(body, expression, Body, Attr, false)];
+    [child_spec(template, expression, Template, Attr),
+     child_spec(body, expression, Body, Attr)];
 child_specs_1(map_comp, [Template, Body], Attr) ->
-    [map_field_child_spec(template, Template, Attr, true),
-     child_spec(body, expression, Body, Attr, false)];
+    [map_field_child_spec(template, Template, Attr),
+     child_spec(body, expression, Body, Attr)];
 child_specs_1(binary_comp, [Template, Body], Attr) ->
-    [child_spec(template, expression, Template, Attr, true),
-     child_spec(body, expression, Body, Attr, false)];
+    [child_spec(template, expression, Template, Attr),
+     child_spec(body, expression, Body, Attr)];
 child_specs_1(maybe_expr, [Body], Attr) ->
-    [child_spec(body, expression, Body, Attr, false)];
+    [child_spec(body, expression, Body, Attr)];
 child_specs_1(maybe_expr, [Body, Else], Attr) ->
-    [child_spec(body, expression, Body, Attr, false),
-     child_spec(else_clause, clause, Else, Attr, false)];
+    [child_spec(body, expression, Body, Attr),
+     child_spec(else_clause, clause, Else, Attr)];
 child_specs_1(implicit_fun, [Name], Attr) ->
-    [child_spec(name, expression, Name, Attr, false)];
+    [child_spec(name, expression, Name, Attr)];
 child_specs_1(record_access, [Argument, Field, Type], Attr) ->
-    [child_spec(argument, expression, Argument, Attr, false),
-     child_spec(field, expression, Field, Attr, false),
-     child_spec(type, expression, Type, Attr, false)];
+    [child_spec(argument, expression, Argument, Attr),
+     child_spec(field, expression, Field, Attr),
+     child_spec(type, expression, Type, Attr)];
 child_specs_1(zip_generator, [Body], Attr) ->
-    [child_spec(body, expression, Body, Attr, false)];
+    [child_spec(body, expression, Body, Attr)];
 child_specs_1(_Type, Subtrees, #{node := Role} = Attr) ->
-    [child_spec(elements, Role, Subtrees, Attr, false)];
+    [child_spec(elements, Role, Subtrees, Attr)];
 child_specs_1(_Type, Subtrees, Attr) ->
-    [child_spec(elements, expression, Subtrees, Attr, false)].
+    [child_spec(elements, expression, Subtrees, Attr)].
 
 add_child_validators(ParentType, Specs) ->
     lists:map(fun(Spec) -> add_child_validator(ParentType, Spec) end, Specs).
@@ -746,12 +790,10 @@ add_child_validator(ParentType, #{slot := Slot, role := Role, attr := Attr} = Sp
     ChildAttr = Attr#{validator => Validator},
     Spec#{validator => Validator, attr => ChildAttr}.
 
-child_spec(Slot, Role, Nodes, Attr, Annotate) ->
+child_spec(Slot, Role, Subtrees, Attr) ->
     #{slot => Slot,
       role => Role,
-      nodes => child_nodes(Nodes),
-      subtrees => Nodes,
-      annotate => Annotate,
+      subtrees => Subtrees,
       attr => child_attr(Role, Attr)}.
 
 child_attr(Role, Attr) ->
@@ -773,48 +815,45 @@ child_attr(Role, Attr) ->
     end.
 
 attribute_body_specs(Attribute, BodyTrees, Attr) when Attribute =:= type; Attribute =:= opaque ->
-    case BodyTrees of
-        [TypeNameTree, TypeTree|TypeParamTrees] ->
-            [child_spec(type_name, name, [TypeNameTree], Attr, false),
-             child_spec(type_body, type, [TypeTree], Attr, false),
-             child_spec(type_params, type_param, TypeParamTrees, Attr, false)];
-        _ ->
-            [child_spec(body, type, BodyTrees, Attr, false)]
-    end;
+    ok = validate_attribute_body_shape(Attribute, BodyTrees),
+    [TypeNameTree, TypeTree|TypeParamTrees] = BodyTrees,
+    [child_spec(type_name, name, [TypeNameTree], Attr),
+     child_spec(type_body, type, [TypeTree], Attr),
+     child_spec(type_params, type_param, TypeParamTrees, Attr)];
 attribute_body_specs(Attribute, BodyTrees, Attr) when Attribute =:= spec; Attribute =:= callback ->
-    case BodyTrees of
-        [MFATree|SpecTrees] ->
-            [child_spec(spec_mfa, attribute_body, [MFATree], Attr, false),
-             child_spec(specs, type, SpecTrees, Attr, false)];
-        _ ->
-            [child_spec(body, type, BodyTrees, Attr, false)]
-    end;
+    ok = validate_attribute_body_shape(Attribute, BodyTrees),
+    [MFATree|SpecTrees] = BodyTrees,
+    [child_spec(spec_mfa, attribute_body, [MFATree], Attr),
+     child_spec(specs, type, SpecTrees, Attr)];
 attribute_body_specs(Attribute, BodyTrees, Attr) ->
-    [child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr, false)].
+    [child_spec(body, attribute_body_role(Attribute), BodyTrees, Attr)].
 
-map_field_child_spec(Slot, Nodes, Attr, Annotate) ->
-    child_spec(Slot, map_field, Nodes, Attr, Annotate).
+validate_attribute_body_shape(type, [_, _|_] = BodyTrees) when is_list(BodyTrees) ->
+    ok;
+validate_attribute_body_shape(opaque, [_, _|_] = BodyTrees) when is_list(BodyTrees) ->
+    ok;
+validate_attribute_body_shape(spec, [_|_] = BodyTrees) when is_list(BodyTrees) ->
+    ok;
+validate_attribute_body_shape(callback, [_|_] = BodyTrees) when is_list(BodyTrees) ->
+    ok;
+validate_attribute_body_shape(Attribute, BodyTrees)
+  when Attribute =:= type; Attribute =:= opaque;
+       Attribute =:= spec; Attribute =:= callback ->
+    erlang:error({invalid_attribute_body, Attribute, BodyTrees});
+validate_attribute_body_shape(_Attribute, _BodyTrees) ->
+    ok.
 
-binary_field_child_spec(Slot, Nodes, Attr, Annotate) ->
-    child_spec(Slot, binary_field, Nodes, Attr, Annotate).
+map_field_child_spec(Slot, Nodes, Attr) ->
+    child_spec(Slot, map_field, Nodes, Attr).
+
+binary_field_child_spec(Slot, Nodes, Attr) ->
+    child_spec(Slot, binary_field, Nodes, Attr).
 
 map_field_child_role(pattern) -> expression;
 map_field_child_role(Role) -> Role.
 
 map_field_slots(map_field_assoc) -> {map_field_assoc_key, map_field_assoc_value};
 map_field_slots(map_field_exact) -> {map_field_exact_key, map_field_exact_value}.
-
-child_nodes([]) ->
-    [];
-child_nodes([Node|_Nodes] = Nodes) when is_tuple(Node) ->
-    Nodes;
-child_nodes([Node|_Nodes] = Nodes) ->
-    case erl_syntax:is_tree(Node) of
-        true ->
-            Nodes;
-        false ->
-            lists:append(Nodes)
-    end.
 
 attribute_body_role(record) -> attribute_body;
 attribute_body_role(type) -> type;
@@ -840,12 +879,10 @@ build_child_specs_subtrees(Specs, Wrap) ->
 attribute_child_spec_subtrees(Spec, Wrap) ->
     lists:append(build_child_spec_subtreess(Spec, Wrap)).
 
-build_child_spec_subtreess(#{slot := Slot, subtrees := Subtrees, annotate := false} = Spec, Wrap)
+build_child_spec_subtreess(#{slot := Slot, subtrees := Subtrees} = Spec, Wrap)
   when Slot =:= elements; Slot =:= forms ->
     Wrap(Spec, Subtrees);
-build_child_spec_subtreess(#{subtrees := Subtrees, annotate := false} = Spec, Wrap) ->
-    [Wrap(Spec, Subtrees)];
-build_child_spec_subtreess(#{subtrees := Subtrees, annotate := true} = Spec, Wrap) ->
+build_child_spec_subtreess(#{subtrees := Subtrees} = Spec, Wrap) ->
     [Wrap(Spec, Subtrees)].
 
 validator_node(#{attr := Attr}, Nodes) ->
@@ -858,271 +895,14 @@ validator_node(#{attr := Attr}, Nodes) ->
 %%===================================================================
 %% update forms related functions
 %%===================================================================
--spec reorder_updated_forms([form()]) -> [form()].
+-spec reorder_updated_forms([form() | {updated, form(), [form()]}]) -> [form()].
 reorder_updated_forms(Forms) ->
-    Functions = forms_functions(Forms),
-    reorder_updated_forms(Forms, Functions, grforms_new()).
-
-reorder_updated_forms([{updated, Form, NewForms}|Tails], Functions0, GRForms) ->
-    %% get new functions after transformed.
-    FormFunctions = forms_functions([Form]),
-    NewFormsFunctions = forms_functions(NewForms),
-    NewFormsFunctions1 = ordsets:subtract(NewFormsFunctions, FormFunctions),
-    {Functions1, GRForms1, Tails2} =
-        insert_forms(NewForms, NewFormsFunctions1, Functions0, GRForms, Tails),
-    reorder_updated_forms(Tails2, Functions1, GRForms1);
-reorder_updated_forms([Form|Tails], Functions, GRForms) ->
-    reorder_updated_forms(Tails, Functions, grforms_append(Form, GRForms));
-reorder_updated_forms([], _Functions, GRForms) ->
-    grforms_to_forms(GRForms).
-
-forms_functions(Forms) ->
-    forms_functions(Forms, ordsets:new()).
-
-forms_functions(Forms, Functions0) ->
-    lists:foldl(
-      fun({function, _Pos, Name, Arity, _Clauses}, Acc) ->
-              ordsets:add_element({Name, Arity}, Acc);
-         (_Node, Acc) ->
-              Acc
-      end, Functions0, Forms).
-
-grforms_new() ->
-    %% [Eof], [Function...], [Attribute...], [Module...]}.
-    %% ERForms, FRForms, ARForms, MForms.
-    {[], [], [], []}.
-
-grforms_to_forms({ERForms, FRForms, ARForms, MRForms}) ->
-    lists:reverse(MRForms) ++ lists:reverse(ARForms) ++ lists:reverse(FRForms) ++ ERForms.
-
-grforms_append({attribute, _Pos, module, _ModuleName} = Module, {[], [], [], MForms}) ->
-    {[], [], [], [Module|MForms]};
-grforms_append({attribute, _Pos, file, _FileName} = File, {[], [], [], MForms}) ->
-    {[], [], [], [File|MForms]};
-grforms_append({attribute, _Pos, file, _FileName} = File, {[], [], ARForms, MForms}) ->
-    {[], [], [File|ARForms], MForms};
-grforms_append({attribute, _Pos, file, _FileName} = File, {[], FRForms, ARForms, MForms}) ->
-    {[], [File|FRForms], ARForms, MForms};
-grforms_append({attribute, _Pos, export, _Exports} = Export, {[], FRForms, ARForms, MForms}) ->
-    {[], FRForms, [Export|ARForms], MForms};
-grforms_append({attribute, _Pos, export_type, _Exports} = ExportType, {[], FRForms, ARForms, MForms}) ->
-    {[], FRForms, [ExportType|ARForms], MForms};
-grforms_append({attribute, _Pos, spec, _SpecValue} = Spec, {ERForms, FRForms, ARForms, MRForms}) ->
-    {ERForms, [Spec|FRForms], ARForms, MRForms};
-grforms_append({function, _Pos, _Name, _Arity, _Clauses} = Function, {ERForms, FRForms, ARForms, MRForms}) ->
-    {ERForms, [Function|FRForms], ARForms, MRForms};
-grforms_append({eof, _Pos} = Eof, {[], FRForms, ARForms, MRForms}) ->
-    {[Eof], FRForms, ARForms, MRForms};
-grforms_append(Form, {[], [], ARForms, MRForms}) ->
-    {[], [], [Form|ARForms], MRForms};
-grforms_append(Form, {[], FRForms, ARForms, MRForms}) ->
-    {[], [Form|FRForms], ARForms, MRForms};
-grforms_append(Form, GRForms) ->
-    erlang:exit({insert_form_failed, Form, GRForms}).
-
-grforms_insert(Form, GRForms) ->
-    case erl_syntax:type(Form) of
-	attribute ->
-            Name = erl_syntax:concrete(erl_syntax:attribute_name(Form)),
-            grforms_insert_attribute(Name, Form, GRForms);
-	comment ->
-            grforms_insert_comment(Form, GRForms);
-	function ->
-            grforms_insert_function(Form, GRForms);
-	eof_marker ->
-            grforms_insert_eof(Form, GRForms);
-	error_marker ->
-            grforms_insert_error_marker(Form, GRForms);
-	form_list ->
-            grforms_insert_form_list(Form, GRForms);
-	warning_marker ->
-            grforms_insert_warning_marker(Form, GRForms);
-	text ->
-            grforms_insert_text(Form, GRForms);
-	_ ->
-            grforms_insert_default(Form, GRForms)
-    end.
-
-grforms_insert_attribute(file, File, {ERForms, FRForms, ARForms, []}) ->
-    {ERForms, FRForms, ARForms, [File]};
-grforms_insert_attribute(file, File, GRForms) ->
-    grforms_append(File, GRForms);
-grforms_insert_attribute(module, Module, {ERForms, FRForms, ARForms, [{attribute, _Pos2, module, _ModuleName1}|MForms]}) ->
-    {ERForms, FRForms, ARForms, [Module|MForms]};
-grforms_insert_attribute(module, Module, {ERForms, FRForms, ARForms, MForms}) ->
-    {ERForms, FRForms, ARForms, [Module|MForms]};
-grforms_insert_attribute(export, {attribute, Pos, export, Exports}, {ERForms, FRForms, ARForms, MRForms}) ->
-    Exports1 = remove_duplicated_exports(Exports, FRForms),
-    Exports2 = remove_duplicated_exports(Exports1, ARForms),
-    case Exports2 of
-        [] ->
-            {ERForms, FRForms, ARForms, MRForms};
-        _ ->
-            Export = {attribute, Pos, export, Exports2},
-            {ERForms, FRForms, [Export|ARForms], MRForms}
-    end;
-grforms_insert_attribute(spec, Spec, {ERForms, FRForms, ARForms, MRForms}) ->
-    {ERForms, [Spec|FRForms], ARForms, MRForms};
-grforms_insert_attribute(_Name, Attribute, {ERForms, FRForms, ARForms, MRForms}) ->
-    {ERForms, FRForms, [Attribute|ARForms], MRForms}.
-
-grforms_insert_comment(Comment, GRForms) ->
-    grforms_append(Comment, GRForms).
-
-grforms_insert_function(Function, {ERForms, FRForms, ARForms, MRForms}) ->
-    {ERForms, [Function|FRForms], ARForms, MRForms}.
-
-grforms_insert_eof(_Eof1, {[Eof], FRForms, ARForms, MRForms}) ->
-    {[Eof], FRForms, ARForms, MRForms};
-grforms_insert_eof(Eof, {[], FRForms, ARForms, MRForms}) ->
-    {[Eof], FRForms, ARForms, MRForms}.
-
-grforms_insert_error_marker( Error, GRForms) ->
-    grforms_append(Error, GRForms).
-
-grforms_insert_warning_marker(Warning, GRForms) ->
-    grforms_append(Warning, GRForms).
-
-grforms_insert_form_list(Form, GRForms) ->
-    lists:foldl(fun grforms_insert/2, GRForms, erl_syntax:form_list_elements(erl_syntax:flatten_form_list(Form))).
-
-grforms_insert_text(Text, GRForms) ->
-    grforms_append(Text, GRForms).
-
-grforms_insert_default(Form, GRForms) ->
-    grforms_append(Form, GRForms).
-
-remove_duplicated_exports(Exports1, [{attribute, _Pos, export, Exports}|T]) ->
-    Exports2 = Exports1 -- Exports,
-    remove_duplicated_exports(Exports2, T);
-remove_duplicated_exports(Exports, [_Form|T]) ->
-    remove_duplicated_exports(Exports, T);
-remove_duplicated_exports([], _Forms) ->
-    [];
-remove_duplicated_exports(Exports, []) ->
-    Exports.
-
-grforms_with_functions(Fun, {ERForms, FRForms, ARForms, MRForms}) ->
-    FRForms1 = Fun(FRForms),
-    {ERForms, FRForms1, ARForms, MRForms}.
+    astranaut_forms:reorder_updated_forms(Forms).
 
 -spec sort_forms([erl_parse:abstract_form()]) -> [erl_parse:abstract_form()].
-%% @doc sort forms to valid order, same as insert_forms(Forms, []).
-%% @see insert_forms/2.
 sort_forms(Forms) ->
-    insert_forms(Forms, []).
+    astranaut_forms:sort_forms(Forms).
 
 -spec insert_forms([erl_parse:abstract_form()], [erl_parse:abstract_form()]) -> [erl_parse:abstract_form()].
-%% @doc insert new forms to froms with order fillow these rules
-%% <ul>
-%% <li>rename functions in forms which function has '__original__' call in it with same name and arity in new forms.</li>
-%% <li>'__original__'(Args1, Args2, ...) will be transformed to RenamedFunction(Args1, Args2, ...).</li>
-%% <li>after rename, it dose not matter function or spec with duplicated name and arity, lint will get these errors.</li>
-%% <li>attribute in new forms will insert before first spec or function or eof.</li>
-%% <li>spec in new forms will insert before function with same name and arity or eof.</li>
-%% <li>function in new forms will insert after spec with same name and arity or insert before eof.</li>
-%% <li>eof_marker in new forms will be dropped if there is an eof_marker already exists in forms.</li>
-%% <li>eof_marker in new forms will insert at the end of forms if there is no eof_market in forms.</li>
-%% <li>if form is marked from other file (between -file(file1) and -file(file2)), do not change this mark.(not implemented)</li>
-%% <li>insert_forms does not changes the original forms order, but with some rules check.</li>
-%% <li>eof_marker should be the last element of original forms</li>
-%% <li>except file attribute, module should be the first element of original forms</li>
-%% <li>an error {insert_form_failed, Form, GRForms} is throwed when original forms check failed</li>
-%% </ul>
-%% @end
 insert_forms(NewForms, Forms) ->
-    Functions = forms_functions(Forms),
-    NewFormsFunctions = forms_functions(NewForms),
-    GRForms = lists:foldl(fun grforms_append/2, grforms_new(), Forms),
-    {_Functions, GRForms1, []} = insert_forms(NewForms, NewFormsFunctions, Functions, GRForms, []),
-    grforms_to_forms(GRForms1).
-
-%% merge forms rule
-%% 1. rename functions which generated functions has '__original__' call in it with same name and arity.
-%% 2. rename spec if new spec is generated
-%% 3. for map_forms/2, code does not know how forms will change in tails
-%$ 4. if it's need to adjust new generated form order, only forms in heads should be affeted
-%% 5. new generated attribute should insert before first -spec in heads
-%% 6. new generated spec should insert before function with same name and arity in heads
-%% 7. new generated function should insert after spec with same name and arity in heads.
-%% 8. if file of new generated form is different from oldone, file attribute should be created to mark file.
-%% new_forms, heads, tails is original order.
-%% after merge forms, Heads is reversed order, tails is original order.
-insert_forms(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
-    {Functions1, NewForms1, GRForms1, Tails1} = merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails),
-    GRForms2 = lists:foldl(fun grforms_insert/2, GRForms1, NewForms1),
-    {Functions1, GRForms2, Tails1}.
-
-%% =====================================================================
-%% merge functions
-%% =====================================================================
-merge_functions(NewForms, NewFormsFucntions, Functions, GRForms, Tails) ->
-    ExistsNewFunctions =
-        ordsets:from_list(
-          lists:filter(
-            fun(NameArity) ->
-                    ordsets:is_element(NameArity, Functions)
-            end, ordsets:to_list(NewFormsFucntions))),
-    Functions1 = ordsets:union(Functions, NewFormsFucntions),
-    {Functions2, NewFormsR2, GRForms1, Tails1} =
-        lists:foldl(
-          fun({function, _Pos, Name, Arity, _Clauses} = Form,
-              {FunctionsAcc, NewFormsAcc, GRFormsAcc, TailsAcc}) ->
-                  case ordsets:is_element({Name, Arity}, ExistsNewFunctions) andalso is_renamed(Arity, Form) of
-                      true ->
-                          NewName = new_function_name(Name, Arity, FunctionsAcc),
-                          Form1 = update_call_name('__original__', NewName, Arity, Form),
-                          GRFormsAcc1 =
-                              grforms_with_functions(
-                                fun(FRForms) ->
-                                        update_function_name(Name, Arity, NewName, FRForms)
-                                end, GRFormsAcc),
-                          TailsAcc1 = update_function_name(Name, Arity, NewName, TailsAcc),
-                          {ordsets:add_element({NewName, Arity}, FunctionsAcc), [Form1|NewFormsAcc], GRFormsAcc1, TailsAcc1};
-                      false ->
-                          {FunctionsAcc, [Form|NewFormsAcc], GRFormsAcc, TailsAcc}
-                  end;
-             (Form, {FunctionsAcc, NewFormsAcc, HeadsAcc, TailsAcc}) ->
-                  {FunctionsAcc, [Form|NewFormsAcc], HeadsAcc, TailsAcc}
-          end, {Functions1, [], GRForms, Tails}, NewForms),
-    {Functions2, lists:reverse(NewFormsR2), GRForms1, Tails1}.
-
--spec is_renamed(integer(), erl_parse:abstract_form()) -> boolean().
-is_renamed(Arity, Form) ->
-    astranaut:search(
-      fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
-              length(Arguments) =:= Arity;
-         (_Node) ->
-              false
-      end, Form, #{traverse => pre}).
-  
-new_function_name(FName, Arity, Functions) ->
-    new_function_name(FName, Arity, Functions, 1).
-
-new_function_name(FName, Arity, Functions, Counter) ->
-    FName1 = list_to_atom(atom_to_list(FName) ++ "_" ++ integer_to_list(Counter)),
-    case ordsets:is_element({FName1, Arity}, Functions) of
-        true ->
-            new_function_name(FName, Arity, Functions, Counter + 1);
-        false ->
-            FName1
-    end.
-
-update_function_name(Name, Arity, NewName, Forms) ->
-    lists:map(
-      fun({function, Pos, FName, FArity, Clauses})
-            when FName =:= Name, FArity =:= Arity ->
-              Clauses1 = update_call_name(Name, NewName, Arity, Clauses),
-              {function, Pos, NewName, Arity, Clauses1};
-         (Form) ->
-              Form
-      end, Forms).
-
-update_call_name(OrignalName, NewName, Arity, Function) ->
-    astranaut:smap(
-      fun({call, Pos, {atom, Pos2, Name}, Arguments})
-            when Name =:= OrignalName, length(Arguments) =:= Arity ->
-              {call, Pos, {atom, Pos2, NewName}, Arguments};
-         (Node) ->
-              Node
-      end, Function, #{traverse => pre}).
+    astranaut_forms:insert_forms(NewForms, Forms).

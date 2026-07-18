@@ -168,7 +168,7 @@ append_meta_forms(FormsForModule, FormsValue, ErrorsValue, WarningsValue, MetaOp
         meta_fun_forms(FormsExport, FormsValue) ++
         meta_fun_forms(ErrorsExport, ErrorsValue) ++
         meta_fun_forms(WarningsExport, WarningsValue),
-    astranaut_syntax:insert_forms(MetaForms, strip_parse_transform_attrs(FormsForModule)).
+    astranaut_forms:insert_forms(MetaForms, strip_parse_transform_attrs(FormsForModule)).
 
 meta_fun_forms(MetaFun, Value) when is_atom(MetaFun) ->
     astranaut_lib:gen_exported_function(MetaFun, astranaut_lib:abstract_form(Value));

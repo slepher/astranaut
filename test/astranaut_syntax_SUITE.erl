@@ -64,6 +64,7 @@ all() ->
      test_validate_type_accept, test_validate_type_reject,
      test_validate_type_singletons,
      test_validate_type_and_spec_attributes,
+     test_reject_malformed_type_and_spec_attributes,
      %% clause role
      test_validate_clause_accept, test_validate_clause_reject,
      %% name role
@@ -79,8 +80,8 @@ all() ->
      test_slot_roles_do_not_replace_node_role,
      test_slot_validators_reject_wrong_structural_identity,
      test_slot_validators_reject_malformed_structural_nodes,
-     test_validate_local_does_not_recurse_grandchildren,
-     test_validate_recursive_recurse_grandchildren,
+     test_validate_node_does_not_recurse_grandchildren,
+     test_normalize_recurses_into_grandchildren,
      test_otp_vsn,
      test_try_handler_validation_uses_abstract_format,
      test_legacy_catch_handler,
@@ -285,6 +286,32 @@ test_validate_type_and_spec_attributes(_Config) ->
     ?assertEqual(ok, validate(parse_form("-spec foo() -> ok."), form)),
     ?assertEqual(ok, validate(parse_form("-callback foo() -> ok."), form)).
 
+test_reject_malformed_type_and_spec_attributes(_Config) ->
+    MalformedBodies =
+        [{attribute, 1, type, []},
+         {attribute, 1, type, [{atom, 1, t}]},
+         {attribute, 1, opaque, []},
+         {attribute, 1, spec, []},
+         {attribute, 1, callback, []}],
+    lists:foreach(
+      fun(Form) ->
+              {error, Error} = validate(Form, form),
+              ?assertMatch(
+                 #{reason := invalid_node,
+                   exception := {error, {invalid_attribute_body, _, _}}},
+                 Error)
+      end, MalformedBodies),
+    {error, InvalidTypeBody} =
+        validate({attribute, 0, type, {t, ok, []}}, form),
+    ?assertMatch(#{reason := invalid_node,
+                   node := ok,
+                   parent_type := attribute},
+                 InvalidTypeBody),
+    ?assertError(
+       {invalid_attribute_body, type, []},
+       astranaut_syntax:child_specs(
+         attribute, [[{atom, 1, type}], []], #{node => form})).
+
 %%--------------------------------------------------------------------
 %% clause role
 %%--------------------------------------------------------------------
@@ -447,13 +474,13 @@ test_slot_validators_reject_malformed_structural_nodes(_Config) ->
                    validator := {slot, binary, elements, binary_field}},
                  BinError).
 
-test_validate_local_does_not_recurse_grandchildren(_Config) ->
+test_validate_node_does_not_recurse_grandchildren(_Config) ->
     DirectChildInvalid = {call, 1, {atom, 1, f}, [function_form()]},
     GrandchildInvalid = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
     ?assertEqual(ok, astranaut_syntax:validate_node(DirectChildInvalid, {role, expression})),
     ?assertEqual(ok, astranaut_syntax:validate_node(GrandchildInvalid, {role, expression})).
 
-test_validate_recursive_recurse_grandchildren(_Config) ->
+test_normalize_recurses_into_grandchildren(_Config) ->
     Tree = {call, 1, {atom, 1, f}, [{tuple, 1, [{clause, 1, [], [], [{atom, 1, ok}]}]}]},
     {error, Error} = astranaut_syntax:normalize(Tree, {role, expression}),
     ?assertMatch(#{reason := invalid_role,

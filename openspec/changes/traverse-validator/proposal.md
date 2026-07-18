@@ -4,7 +4,10 @@
 
 Add opt-in structural validation for transformed AST nodes during traversal, while always propagating slot-specific validators through traversal attributes.
 
-The validator system distinguishes local validation from recursive validation. Local validation checks one descend step: the current node and its direct child slots. Recursive validation repeats that process through the returned node subtree.
+The validator system distinguishes current-node validation from recursive
+normalization. `validate_node/2` checks the current node against its position
+contract. `normalize/2` repeats that validation through the returned subtree,
+rebuilds it, and returns abstract-format nodes.
 
 ## Motivation
 

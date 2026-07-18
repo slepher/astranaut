@@ -227,6 +227,19 @@ astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
 
 &emsp;&emsp;`child_specs/3` 是 traversal 和 normalization 使用的高级 API。它可能包含内部 validator 数据；用户代码通常应保持这些数据 opaque。
 
+# astranaut_forms
+
+`astranaut_forms` 负责 forms 排序、生成 forms 插入以及 `__original__` 函数合并：
+
+```erlang
+  astranaut_forms:reorder_updated_forms(Forms) -> Forms1.
+  astranaut_forms:sort_forms(Forms) -> Forms1.
+  astranaut_forms:insert_forms(NewForms, Forms) -> Forms1.
+```
+
+`astranaut_syntax` 中的同名函数保留为兼容薄代理；新代码应直接调用
+`astranaut_forms`。
+
 # astranaut_uniplate
 
 &emsp;&emsp;`astranaut_uniplate` 是 traversal 内部使用的 uniplate/context 实现模块。大多数用户应通过 `astranaut`、`astranaut_traverse` 和 `astranaut_syntax` 使用 traversal 能力，不应依赖其内部 context 结构。

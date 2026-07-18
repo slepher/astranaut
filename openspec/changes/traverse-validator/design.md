@@ -93,20 +93,17 @@ This prevents structural nodes from being used in ordinary expression slots. For
 Use separate functions for separate validation scopes:
 
 ```erlang
-astranaut_syntax:validate_local(NodeOrNodes, Validator) -> ok | {error, map()}.
-astranaut_syntax:validate_local(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
-astranaut_syntax:validate_recursive(NodeOrNodes, Validator) -> ok | {error, map()}.
-astranaut_syntax:validate_recursive(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
+astranaut_syntax:validate_node(NodeOrNodes, Validator) -> ok | {error, map()}.
+astranaut_syntax:validate_node(NodeOrNodes, Validator, Opts) -> ok | {error, map()}.
+astranaut_syntax:normalize(NodeOrNodes, Validator) ->
+    {ok, NodeOrNodes1} | {error, map()}.
+astranaut_syntax:normalize(NodeOrNodes, Validator, Opts) ->
+    {ok, NodeOrNodes1} | {error, map()}.
 ```
 
-Existing compatibility entry points may remain:
-
-```erlang
-astranaut_syntax:validate(NodeOrNodes, ExpectedRole).
-astranaut_syntax:validate(NodeOrNodes, ExpectedRole, Opts).
-```
-
-Those compatibility functions should behave like recursive validation with a role validator.
+`validate_node/2` validates only the current node. `normalize/2` recursively
+normalizes and validates the returned subtree while rebuilding it in abstract
+format.
 
 `Opts` is the validation environment. It may include:
 
@@ -135,9 +132,9 @@ not mentioned by the nested traversal remain inherited while explicit root
 fields take precedence. Child `up_attr` propagation starts from this merged
 root Attr.
 
-## Local Validation
+## Current-Node Validation
 
-`validate_local/2` is current-node validation.
+`validate_node/2` is current-node validation.
 
 It must:
 
@@ -156,14 +153,16 @@ Some syntax nodes need slot-specific checks that cannot be derived from `subtree
 
 Malformed nodes with a valid-looking tag, such as an incomplete `map_field_exact` or `bin_element`, should fail as `invalid_node`.
 
-## Recursive Validation
+## Recursive Normalization
 
-`validate_recursive/2` repeats local validation through the entire returned node subtree:
+`normalize/2` repeats current-node validation through the entire returned node
+subtree and returns the rebuilt abstract-format tree:
 
 ```text
-validate_local(Node, Validator)
+validate_node(Node, Validator)
 for each child spec derived from Node:
-  validate_recursive(Child, ChildValidator)
+  normalize(Child, ChildValidator)
+rebuild and revert Node
 ```
 
 This is appropriate when a caller generates a whole new AST node and wants to ensure the generated subtree is structurally valid.

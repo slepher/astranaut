@@ -104,34 +104,36 @@ Traversal validation SHALL NOT run for an ancestor merely because a child change
 - **WHEN** the parent is rebuilt from changed child subtrees
 - **THEN** traversal does not automatically validate the rebuilt parent as a direct change
 
-### Requirement: Local Validation Checks Current Node
+### Requirement: Current-Node Validation Checks Current Node
 
-`validate_local/2` SHALL validate the current node against the supplied validator.
+`validate_node/2` SHALL validate the current node against the supplied validator.
 
-`validate_local/2` SHALL read current-node shape through `node_info/subtrees` and SHALL apply role and slot-specific structural constraints for the supplied validator.
+`validate_node/2` SHALL read current-node shape through `node_info/subtrees` and SHALL apply role and slot-specific structural constraints for the supplied validator.
 
-`validate_local/2` SHALL NOT recursively validate child nodes.
+`validate_node/2` SHALL NOT recursively validate child nodes.
 
 #### Scenario: Local validation checks slot-specific current-node constraints
 
 - **GIVEN** a try handler clause with OTP-version-specific catch syntax
-- **WHEN** `validate_local/2` is called
+- **WHEN** `validate_node/2` is called
 - **THEN** the handler clause is checked against the supplied handler slot validator
 
 #### Scenario: Local validation does not recurse into children
 
 - **GIVEN** a current node has child nodes
-- **WHEN** `validate_local/2` is called on the parent
+- **WHEN** `validate_node/2` is called on the parent
 - **THEN** child nodes are not validated by that call
 
-### Requirement: Recursive Validation Repeats Local Validation
+### Requirement: Normalization Repeats Current-Node Validation
 
-`validate_recursive/2` SHALL perform local validation for the current node and SHALL recursively validate all child nodes with their derived validators.
+`normalize/2` SHALL validate the current node, recursively normalize all child
+nodes with their derived validators, rebuild the node, and return the normalized
+abstract-format tree.
 
 #### Scenario: Recursive validation checks a generated subtree
 
 - **GIVEN** a caller generates a new AST node containing nested child nodes
-- **WHEN** `validate_recursive/2` is called on the generated node
+- **WHEN** `normalize/2` is called on the generated node
 - **THEN** the complete generated node subtree is structurally validated
 
 ### Requirement: Slot Validators Are More Specific Than Roles

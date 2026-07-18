@@ -329,6 +329,20 @@ astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
 It may contain internal validator data; user code should normally keep that data
 opaque.
 
+# astranaut_forms
+
+`astranaut_forms` owns form ordering, generated-form insertion, and
+`__original__` function merging:
+
+```erlang
+  astranaut_forms:reorder_updated_forms(Forms) -> Forms1.
+  astranaut_forms:sort_forms(Forms) -> Forms1.
+  astranaut_forms:insert_forms(NewForms, Forms) -> Forms1.
+```
+
+The corresponding functions in `astranaut_syntax` remain compatibility
+proxies. New code should call `astranaut_forms` directly.
+
 # astranaut_uniplate
 
 &emsp;&emsp;`astranaut_uniplate` is the internal uniplate/context implementation

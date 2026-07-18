@@ -3,7 +3,7 @@
 ## Specification
 
 - [x] Define validator data forms for role validators and slot validators.
-- [x] Document the distinction between `validate_local/2` and `validate_recursive/2`.
+- [x] Document the distinction between `validate_node/2` and `normalize/2`.
 - [x] Document `validate => false | true | input | output | both` traversal behavior and default-off semantics.
 - [x] Document macro error attribution for validation failures.
 - [x] Document validation environment separation from traversal attrs.
@@ -16,8 +16,8 @@
 - [x] Extend `child_spec` to include `validator`.
 - [x] Propagate `validator`, `parent_type`, and `parent_slot` through child attrs.
 - [x] Keep validator propagation active regardless of the selected `validate` mode.
-- [x] Add `astranaut_syntax:validate_local/2`.
-- [x] Add `astranaut_syntax:validate_recursive/2`.
+- [x] Add `astranaut_syntax:validate_node/2`.
+- [x] Add `astranaut_syntax:normalize/2`.
 - [x] Keep `astranaut_syntax:validate/2,3` as compatibility recursive role-validation entry points.
 - [x] Implement slot validators for match, clause, function, generator, binary generator, comprehensions, attribute, type, record, map, and binary node families.
 - [x] Add `validate => false | true | input | output | both` to traversal options with default `false`.
@@ -42,8 +42,8 @@
 
 - [x] Validator metadata is propagated when `validate` is omitted.
 - [x] Validator metadata is propagated when `validate => false`.
-- [x] `validate_local/2` checks current node and direct children only.
-- [x] `validate_recursive/2` checks the full returned node subtree.
+- [x] `validate_node/2` checks the current node only.
+- [x] `normalize/2` normalizes and checks the full returned node subtree.
 - [x] Parent slot validation distinguishes `generator` pattern and body slots.
 - [x] Parent slot validation distinguishes `binary_generator` pattern and body slots.
 - [x] Direct walker node replacement is validated when `validate => true`.

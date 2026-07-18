@@ -903,7 +903,7 @@ select_local_macro_forms(LocalMacroRelatedFunctions, Forms) ->
                                 [compile:option()]) ->
           astranaut_return:struct(term()).
 compile_local_macro_forms(LocalMacroFunctions, Forms, CompileOpts) ->
-    Forms1 = astranaut_syntax:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
+    Forms1 = astranaut_forms:sort_forms(Forms ++ local_macro_exports(LocalMacroFunctions)),
     Module = astranaut_lib:analyze_forms_module(Forms),
     safe_load_locked(Module, Forms1, [without_warnings | CompileOpts]).
 

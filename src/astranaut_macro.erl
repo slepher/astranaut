@@ -937,7 +937,7 @@ finalize_attribute_macro_pass(Module, File, GlobalMacroOpts, ScanEffectiveMacroM
                  Forms, Module, FinalMacroMap, FinalSkipIds, FinalLocalState,
                  GlobalMacroOpts),
            %% The attribute-pass output is sorted before the function pass sees it.
-           AttributeForms = astranaut_syntax:sort_forms(UnsortedAttributeForms),
+           AttributeForms = astranaut_forms:sort_forms(UnsortedAttributeForms),
            FunctionEnv = FunctionEnv0#{global_macro_opts => GlobalMacroOpts},
            astranaut_return:then(
              file_formatted_warnings(File, RetainWarnings),

@@ -357,7 +357,7 @@ map_m(F, [Node|_T] = Nodes, Opts) ->
     case erl_syntax:is_form(Node) of
         true ->
             astranaut_traverse:lift_m(
-              fun astranaut_syntax:reorder_updated_forms/1,
+              fun astranaut_forms:reorder_updated_forms/1,
               astranaut_traverse:map_m(
                 fun(Form) ->
                         astranaut_traverse:lift_m(

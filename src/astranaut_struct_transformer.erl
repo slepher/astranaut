@@ -375,7 +375,7 @@ ensure_import_macro(Forms) ->
             Forms;
         false ->
             Import = astranaut_lib:gen_attribute_node(import_macro, 0, astranaut_struct),
-            astranaut_syntax:insert_forms([Import], Forms)
+            astranaut_forms:insert_forms([Import], Forms)
     end.
 
 has_import_macro(Module, Forms) ->
