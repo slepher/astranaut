@@ -17,7 +17,7 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | 契约 | 实现位置 | 状态 |
 |---|---|---|
 | 外部与本地属性宏统一顺序扫描 | `scan_attribute_forms/5`, `scan_form/1` | 已实现 |
-| splice 结果在当前位置立即重扫 | `astranaut:map_forms_splice/3` | 已实现 |
+| splice 结果在当前位置立即重扫 | `astranaut_macro:map_forms_splice/3` | 已实现 |
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
 | attribute runtime 先解析、确保可调用，再统一构造与执行 | `astranaut_macro_expander:resolve_attribute_target/2`, `ensure_attribute_target_callable/2`, `expand_attribute_target/2` | 已实现 |
@@ -28,8 +28,13 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | compiler 只消费 canonical forms | `compile_boundary/3`, `canonical_expanded_forms` | 已实现 |
 | 跨来源宏映射按源码顺序冲突/覆盖 | `effective_macro_map`, `merge_macro_maps_pure/2` | 已实现 |
 | 生成 function/spec 仅最小整理 | `map_forms_splice_reorder/1`, `map_forms_splice_merge_specs/1` | 已实现 |
+| export 准备保持源码顺序且不重排 forms | `prepare_exports/1`, `exported_macros/2` | 已实现；统一排序延迟到 attribute pass 收尾 |
+| attribute pass 只在收尾执行一次主模块排序 | `finalize_attribute_macro_pass/7` | 已实现；唯一调用 `astranaut_forms:sort_forms/1` |
+| function expander 以目标任务表批量遍历 Forms | `expand_function_tasks/3`, `expand_function_task/4` | 已实现；所有最终目标共享一次保序 pass，非目标 function 不进入 clauses |
+| frozen/local/ordinary function 保持各自展开上下文 | `prepare_final_function_task/5,8`, `scoped_state_run/2` | 已实现；每个任务独立携带 rewritten form、macro map 与 whitelist control，在同一次 Forms 递归中隔离 depth/whitelist state |
+| local macro 临时模块编译前独立排序 | `compile_local_macro_forms/3` | 保持不变 |
 | 用户宏 traverse state 隔离 | `invoke_macro_function/1` + `scoped_state/2` | 已实现 |
-| FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/8` | 已实现 |
+| FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/7` | 已实现 |
 | FinalSkipIds 在 function pass 前剔除 | `remove_final_skip_forms/2` | 已实现 |
 | local 与普通 function 共用展开器 | `astranaut_macro_expander:expand_function/5`；`astranaut_macro:expand_function/5` 为兼容门面 | 已实现 |
 | whitelist control 显式区分 disabled/collect/verify | `local_macro_whitelist_control/0`, `whitelist_control/2` | 已实现 |
@@ -63,7 +68,7 @@ attribute 调用则始终使用调用点的 `effective_macro_map` 和 `passed_fo
 - `openspec validate macro-passes --strict`：通过。
 - `openspec validate local-macro --strict`：通过；本轮已将旧规格标题转换为标准 delta 结构。
 - `git diff --check`：通过。
-- `powershell -ExecutionPolicy Bypass -File scripts\rebar3_sandbox.ps1 ct`：314/314 通过。
+- `rebar3 ct`：359/359 通过。
 
 ## 2026-07-13 最终 MacroRuntimeContext 层级实现
 

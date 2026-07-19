@@ -3,6 +3,8 @@
 ## 0.11.0
 
 - **统一宏展开系统**：外部宏与本地宏使用统一管道展开，新增 `-import_macro` 跨模块导入，支持宏重名冲突检测、递归宏展开、宏返回值语法验证
+- **宏扫描职责收敛**：`map_forms_splice/3` 从通用 `astranaut` traversal 迁移到 `astranaut_macro`，由宏扫描器统一管理 Rest、attribute Buffer 与生成 function/spec 的局部合并
+- **Forms traversal 语义显式化**：`astranaut:map_m/3` 改为保留列表顺序；新增 `map_m_forms/3`，仅在明确需要时统一执行更新 form 的插入、重排及 `__original__` 合并；`prepare_exports` 不再隐式重排；function expander 以一次保序 Forms pass 展开全部目标，并为 frozen/local/ordinary function 分别应用其任务环境
 - **Struct 系统重构**：拆分为 `astranaut_struct`（宏 API）、`astranaut_struct_record`、`astranaut_struct_transformer`（parse_transform），新增 `from_other_record/4`，迁移至新宏流程
 - **AST 语法校验**：`astranaut_syntax` 新增 `validate_node/2,3`、`normalize/2,3`，引入 child_specs 角色校验体系
 - **遍历校验系统**：新增 traverse validator，检测无效 AST 变换及子节点

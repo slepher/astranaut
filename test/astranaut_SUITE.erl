@@ -128,7 +128,8 @@ all() ->
      test_uniplate_reduce, test_reduce, test_map_with_state_node, test_map_with_state, test_map_spec, test_map_type,
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_with_attribute, test_forms_with_attribute,
-     test_traverse_m_updated, test_map_forms, test_sequence_nodes,
+     test_traverse_m_updated, test_map_m_preserves_form_order,
+     test_map_forms, test_sequence_nodes,
      test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr
     ].
 
@@ -388,10 +389,22 @@ test_traverse_m_updated(Config) ->
           end, astranaut_traverse:listen_updated(TraverseM)),
     astranaut_traverse:eval(TraverseM1, astranaut, #{}, #{}).
 
+test_map_m_preserves_form_order(_Config) ->
+    Forms = [astranaut_lib:gen_function(test, ?Q(["fun() -> ok end"])),
+             {attribute, 1, custom, value}],
+    Identity = fun(Form) -> astranaut_traverse:return(Form) end,
+    Forms1 = astranaut_return:simplify(
+               astranaut_traverse:eval(
+                 astranaut:map_m(
+                   Identity, Forms, #{traverse => none}),
+                 astranaut, #{}, ok)),
+    ?assertEqual(Forms, Forms1),
+    ok.
+
 test_map_forms(Config) ->
     Forms = astranaut_test_lib:test_module_forms(sample_2, Config),
     Forms1M = 
-        astranaut:map_m(
+        astranaut:map_m_forms(
           fun({attribute, _Pos, mark, mark_01}) ->
                   astranaut_traverse:return(
                     astranaut_lib:gen_function(

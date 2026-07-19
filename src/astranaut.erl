@@ -14,8 +14,7 @@
 %% API
 -export([smap/3, sreduce/4, smap_with_state/4, smapfold/4, search/3]).
 -export([map/3, reduce/4, map_with_state/4, mapfold/4]).
--export([map_m/3]).
--export([map_forms_splice/3]).
+-export([map_m/3, map_m_forms/3, traverse_form/2]).
 -export([walk_return/1, traverse_return/1]).
 -export([uniplate/1]).
 -export([format_error/1]).
@@ -353,27 +352,32 @@ traverse_return(#{?STRUCT_KEY := ?TRAVERSE_M} = Traverse) ->
 traverse_return(Return) ->
     astranaut_traverse:astranaut_traverse(walk_return(Return)).
 
-map_m(F, [Node|_T] = Nodes, Opts) ->
-    case erl_syntax:is_form(Node) of
-        true ->
-            astranaut_traverse:lift_m(
-              fun astranaut_forms:reorder_updated_forms/1,
-              astranaut_traverse:map_m(
-                fun(Form) ->
-                        astranaut_traverse:lift_m(
-                          fun({Form1, true}) ->
-                                  {updated, Form, to_list(Form1)};
-                             ({_Form1, false}) ->
-                                  Form
-                          end, astranaut_traverse:listen_updated(
-                                 maybe_catch_map_form_error(
-                                   map_form(F, Form, Opts), Opts)))
-                end, Nodes));
-        false ->
-            map_m_1(F, Nodes, Opts)
-    end;
 map_m(F, Node, Opts) ->
-    map_m_1(F, Node, Opts).
+    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
+    Opts1 = maps:remove(uniplate, Opts),
+    with_root_traverse_attr(
+      Node, Opts,
+      astranaut_uniplate:map_m(
+        fun(Node1) ->
+                traverse_map_form(F, Node1)
+        end, Node, Uniplate, traverse, Opts1)).
+
+%% Map a module form list and perform the form-specific insertion, ordering and
+%% __original__ merge once after every source form has been visited.
+map_m_forms(F, Forms, Opts) ->
+    astranaut_traverse:lift_m(
+      fun astranaut_forms:reorder_updated_forms/1,
+      astranaut_traverse:map_m(
+        fun(Form) ->
+                astranaut_traverse:lift_m(
+                  fun({Form1, true}) ->
+                          {updated, Form, to_list(Form1)};
+                     ({_Form1, false}) ->
+                          Form
+                  end, astranaut_traverse:listen_updated(
+                         maybe_catch_map_form_error(
+                           map_form(F, Form, Opts), Opts)))
+        end, Forms)).
 
 maybe_catch_map_form_error(FormM, Opts) ->
     case maps:get(fail, maps:get(validate_opts, Opts, #{}), raise) of
@@ -385,192 +389,21 @@ maybe_catch_map_form_error(FormM, Opts) ->
               fun() -> astranaut_traverse:return({[], true}) end)
     end.
 
--spec map_forms_splice(fun((tree()) -> astranaut_traverse:struct(tree())),
-                       [tree()], traverse_opts()) -> astranaut_traverse:struct([tree()]).
-map_forms_splice(F, Forms, Opts) ->
-    map_forms_splice_loop(F, [{form, Form} || Form <- Forms], [], Opts).
-
-map_forms_splice_loop(F, [{Tag, Form} | Forms], Acc, Opts) ->
-    astranaut_traverse:bind(
-      map_forms_splice_note_queue(Opts, [Form | map_forms_splice_untag(Forms)]),
-      fun(_) ->
-              astranaut_traverse:bind(
-                astranaut_traverse:catch_on_error(
-                  traverse_map_form(F, Form),
-                  fun() -> astranaut_traverse:return({splice, []}) end),
-                fun
-                    ({splice, NewForms}) ->
-                        GeneratedForms = [map_forms_splice_tag_generated(NewForm) || NewForm <- NewForms],
-                        map_forms_splice_loop(F, GeneratedForms ++ Forms, Acc, Opts);
-                    (Form1) ->
-                        map_forms_splice_loop(F, Forms, [map_forms_splice_tag_result(Tag, Form1) | Acc], Opts)
-                end)
-      end);
-map_forms_splice_loop(_F, [], Acc, _Opts) ->
-    astranaut_traverse:return(map_forms_splice_reorder(lists:reverse(Acc))).
-
-%% A scanner can opt in to a materialised source view without changing the
-%% behaviour of existing splice clients.  The value contains the current form
-%% followed by the exact remaining queue, including generated forms.
-map_forms_splice_note_queue(#{queue_state := true}, Queue) ->
-    astranaut_traverse:modify(fun(State) -> State#{remaining_forms => Queue} end);
-map_forms_splice_note_queue(_Opts, _Queue) ->
-    astranaut_traverse:return(ok).
-
-map_forms_splice_tag_generated({function, _Pos, _Name, _Arity, _Clauses} = Form) ->
-    {generated_insert, Form};
-map_forms_splice_tag_generated({attribute, _Pos, spec, _Spec} = Form) ->
-    {generated_insert, Form};
-map_forms_splice_tag_generated(Form) ->
-    {form, Form}.
-
-map_forms_splice_tag_result(generated_insert, {function, _Pos, _Name, _Arity, _Clauses} = Form) ->
-    {generated_insert, Form};
-map_forms_splice_tag_result(generated_insert, {attribute, _Pos, spec, _Spec} = Form) ->
-    {generated_insert, Form};
-map_forms_splice_tag_result(_Tag, Form) ->
-    {form, Form}.
-
-map_forms_splice_reorder(TaggedForms) ->
-    TaggedForms1 = map_forms_splice_merge_specs(TaggedForms),
-    map_forms_splice_reorder(TaggedForms1, []).
-
-%% A generated spec explicitly describes the public wrapper.  When an
-%% __original__ merge happens, it replaces the original public spec; without
-%% a generated spec, the original spec remains attached to the wrapper name.
-%% The renamed implementation function intentionally receives no copied spec.
-map_forms_splice_merge_specs(TaggedForms) ->
-    MergeFAs = map_forms_splice_merge_fas(TaggedForms),
-    GeneratedSpecFAs = ordsets:from_list(
-                         [FA || {generated_insert, Form} <- TaggedForms,
-                                FA <- [map_forms_splice_spec_fa(Form)],
-                                FA =/= undefined,
-                                ordsets:is_element(FA, MergeFAs)]),
-    [Tagged || Tagged = {Tag, Form} <- TaggedForms,
-               not (Tag =:= form andalso
-                    ordsets:is_element(map_forms_splice_spec_fa(Form),
-                                       GeneratedSpecFAs))].
-
-map_forms_splice_merge_fas(TaggedForms) ->
-    Forms = map_forms_splice_untag(TaggedForms),
-    FunctionFAs = [{Name, Arity} || {function, _Pos, Name, Arity, _Clauses} <- Forms],
-    ordsets:from_list(
-      [{Name, Arity}
-       || {generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} <- TaggedForms,
-          map_forms_splice_is_renamed(Arity, Form),
-          length([ok || FA <- FunctionFAs, FA =:= {Name, Arity}]) > 1]).
-
-map_forms_splice_spec_fa({attribute, _Pos, spec, {{Name, Arity}, _Specs}}) ->
-    {Name, Arity};
-map_forms_splice_spec_fa(_Form) ->
-    undefined.
-
-map_forms_splice_reorder([{generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} | T], Acc) ->
-    case map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) of
-        true ->
-            Functions = map_forms_splice_forms_functions(lists:reverse(Acc) ++ [Form | map_forms_splice_untag(T)]),
-            NewName = map_forms_splice_new_function_name(Name, Arity, Functions),
-            Form1 = map_forms_splice_update_call_name('__original__', NewName, Arity, Form),
-            Acc1 = map_forms_splice_update_function_name(Name, Arity, NewName, Acc),
-            T1 = map_forms_splice_update_tagged_function_name(Name, Arity, NewName, T),
-            map_forms_splice_reorder(T1, [Form1 | Acc1]);
-        false ->
-            map_forms_splice_reorder(T, [Form | Acc])
-    end;
-map_forms_splice_reorder([{_Tag, Form} | T], Acc) ->
-    map_forms_splice_reorder(T, [Form | Acc]);
-map_forms_splice_reorder([], Acc) ->
-    lists:reverse(Acc).
-
-map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) ->
-    map_forms_splice_is_renamed(Arity, Form) andalso
-        ordsets:is_element({Name, Arity},
-                           map_forms_splice_forms_functions(
-                             lists:reverse(Acc) ++ map_forms_splice_untag(T))).
-
-map_forms_splice_untag(TaggedForms) ->
-    [Form || {_Tag, Form} <- TaggedForms].
-
-map_forms_splice_forms_functions(Forms) ->
-    lists:foldl(
-      fun({function, _Pos, Name, Arity, _Clauses}, Acc) ->
-              ordsets:add_element({Name, Arity}, Acc);
-         (_Form, Acc) ->
-              Acc
-      end, ordsets:new(), Forms).
-
-map_forms_splice_is_renamed(Arity, Form) ->
-    search(
-      fun({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
-              length(Arguments) =:= Arity;
-         (_Node) ->
-              false
-      end, Form, #{traverse => pre}).
-
-map_forms_splice_new_function_name(FName, Arity, Functions) ->
-    map_forms_splice_new_function_name(FName, Arity, Functions, 1).
-
-map_forms_splice_new_function_name(FName, Arity, Functions, Counter) ->
-    FName1 = list_to_atom(atom_to_list(FName) ++ "_" ++ integer_to_list(Counter)),
-    case ordsets:is_element({FName1, Arity}, Functions) of
-        true ->
-            map_forms_splice_new_function_name(FName, Arity, Functions, Counter + 1);
-        false ->
-            FName1
-    end.
-
-map_forms_splice_update_tagged_function_name(Name, Arity, NewName, TaggedForms) ->
-    [{Tag, map_forms_splice_update_function_name_1(Name, Arity, NewName, Form)}
-     || {Tag, Form} <- TaggedForms].
-
-map_forms_splice_update_function_name(Name, Arity, NewName, Forms) ->
-    [map_forms_splice_update_function_name_1(Name, Arity, NewName, Form) || Form <- Forms].
-
-map_forms_splice_update_function_name_1(Name, Arity, NewName,
-                                        {function, Pos, FName, FArity, Clauses})
-  when FName =:= Name, FArity =:= Arity ->
-    Clauses1 = map_forms_splice_update_call_name(Name, NewName, Arity, Clauses),
-    {function, Pos, NewName, Arity, Clauses1};
-map_forms_splice_update_function_name_1(_Name, _Arity, _NewName, Form) ->
-    Form.
-
-map_forms_splice_update_call_name(OriginalName, NewName, Arity, Function) ->
-    smap(
-      fun({call, Pos, {atom, Pos2, Name}, Arguments})
-            when Name =:= OriginalName, length(Arguments) =:= Arity ->
-              {call, Pos, {atom, Pos2, NewName}, Arguments};
-         (Node) ->
-              Node
-      end, Function, #{traverse => pre}).
-
 to_list(Form1) when is_list(Form1) ->
     Form1;
 to_list(Form1) ->
     [Form1].
 
 map_form(F, Form, #{traverse := none} = Opts) ->
-    map_form_none(F, Form, Opts);
-map_form(F, Form, Opts) ->
-    map_m_1(F, Form, Opts).
-
-map_form_none(F, Form, Opts) ->
     with_root_traverse_attr(
       Form, Opts,
       astranaut_traverse:bind(
         traverse_map_form(F, Form),
         fun(Form1) ->
                 astranaut_traverse:writer_updated({Form1, Form =/= Form1})
-        end)).
-
-map_m_1(F, Node, Opts) ->
-    Uniplate = maps:get(uniplate, Opts, fun uniplate/1),
-    Opts1 = maps:remove(uniplate, Opts),
-    with_root_traverse_attr(
-      Node, Opts,
-      astranaut_uniplate:map_m(
-        fun(Node1) ->
-                traverse_map_form(F, Node1)
-        end, Node, Uniplate, traverse, Opts1)).
+        end));
+map_form(F, Form, Opts) ->
+    map_m(F, Form, Opts).
 
 with_root_traverse_attr(Node, Opts, Monad) ->
     astranaut_traverse:local(
@@ -713,6 +546,11 @@ traverse_map_form(F, Node) ->
         _ ->
             traverse_map_node(F, Node)
     end.
+
+%% Queue ownership belongs to the caller; this helper preserves Astranaut's
+%% common file, position, error-marker and warning-marker form boundary.
+traverse_form(F, Form) ->
+    traverse_map_form(F, Form).
 
 traverse_map_node(F, Node) ->
     Pos = erl_syntax:get_pos(Node),

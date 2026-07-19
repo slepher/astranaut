@@ -34,6 +34,10 @@
 -type local_macro_whitelist_control() ::
         astranaut_macro_expander:local_macro_whitelist_control().
 -type function_expansion() :: astranaut_macro_expander:function_expansion().
+-type function_expansion_task() ::
+        astranaut_macro_expander:function_expansion_task().
+-type function_task_expansion() ::
+        astranaut_macro_expander:function_task_expansion().
 -type expansion_record() ::
         #{canonical_whitelist := disabled | ordsets:ordset(fa()),
           canonical_result := term(),
@@ -48,7 +52,11 @@
           expand_function :=
               fun((map(), [term()], [term()], fa(),
                    local_macro_whitelist_control()) ->
-                      astranaut_return:struct(function_expansion()))}.
+                      astranaut_return:struct(function_expansion())),
+          expand_function_tasks =>
+              fun(([term()], [term()],
+                   #{form_id() => function_expansion_task()}) ->
+                      astranaut_return:struct(function_task_expansion()))}.
 -type expansion_request() ::
         #{closure_ids := ordsets:ordset(form_id()),
           closure_fas := ordsets:ordset(fa()),
@@ -424,39 +432,59 @@ nonclosure_retain_roots(Roots, #{local_macros := Macros}) ->
                    end, ordsets:new(), Macros),
     ordsets:subtract(ordsets:from_list(Roots), ClosureFAs).
 
-%% Retain and ordinary Step-2 functions share this final-context path. Frozen
-%% functions verify their local expansion records; ordinary functions use the
-%% same expander with whitelist control disabled and do not touch those records.
+%% Retain and ordinary Step-2 functions share one source-ordered Forms pass.
+%% Every target carries its own frozen source, macro environment and whitelist
+%% control, so differing local environments do not require repeated scans.
 -spec expand_final_functions([term()], [fa()], macro_runtime_context(),
                              macro_ops(), state()) ->
           astranaut_return:struct({[term()], state()}).
-expand_final_functions(Forms, TargetFAs, RuntimeContext, MacroOps, State) ->
+expand_final_functions(
+  Forms, TargetFAs,
+  #{inject_forms := InjectForms} = RuntimeContext, MacroOps, State) ->
     OriginalMap = maps:merge(forms_id_map(Forms), maps:get(frozen_forms, State)),
-    astranaut_return:foldl_m(
-      fun(TargetFA, {FormsAcc, StateAcc}) ->
-              FormId = {function, element(1, TargetFA), element(2, TargetFA)},
-              case maps:find(FormId, OriginalMap) of
-                  error ->
-                      astranaut_return:return({FormsAcc, StateAcc});
-                  {ok, OriginalForm} ->
-                      do([ return ||
-                             {ExpandedForm, State1} <-
-                                 expand_final_function(
-                                   FormId, TargetFA, OriginalForm, Forms,
-                                   RuntimeContext, MacroOps, StateAcc),
-                             return({materialize_forms(
-                                       FormsAcc, #{FormId => ExpandedForm}),
-                                     State1})
-                         ])
-              end
-      end, {Forms, State}, TargetFAs).
+    {Tasks, CompiledForms, TaskMetadata} =
+        lists:foldl(
+          fun(TargetFA, Acc) ->
+                  prepare_final_function_task(
+                    TargetFA, OriginalMap, RuntimeContext, State, Acc)
+          end, {#{}, #{}, #{}}, TargetFAs),
+    case map_size(Tasks) of
+        0 ->
+            astranaut_return:return(
+              {materialize_forms(Forms, CompiledForms), State});
+        _ ->
+            ExpandTasks = maps:get(expand_function_tasks, MacroOps),
+            do([ return ||
+                   #{forms := ExpandedForms,
+                     task_results := TaskResults} <-
+                       ExpandTasks(InjectForms, Forms, Tasks),
+                   {CompiledForms1, State1} <-
+                       cache_final_function_tasks(
+                         TargetFAs, TaskResults, TaskMetadata,
+                         CompiledForms, State),
+                   return({materialize_forms(
+                             ExpandedForms, CompiledForms1),
+                           State1})
+               ])
+    end.
 
--spec expand_final_function(form_id(), fa(), term(), [term()],
-                            macro_runtime_context(), macro_ops(), state()) ->
-          astranaut_return:struct({term(), state()}).
-expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
-                      #{macro_map := MacroMap} = RuntimeContext,
-                      MacroOps, State) ->
+prepare_final_function_task(
+  {Name, Arity}, OriginalMap,
+  #{macro_map := MacroMap} = RuntimeContext, State,
+  {Tasks, CompiledForms, TaskMetadata} = Acc) ->
+    FormId = {function, Name, Arity},
+    case maps:find(FormId, OriginalMap) of
+        error ->
+            Acc;
+        {ok, OriginalForm} ->
+            prepare_final_function_task(
+              FormId, OriginalForm, MacroMap, RuntimeContext, State,
+              Tasks, CompiledForms, TaskMetadata)
+    end.
+
+prepare_final_function_task(
+  FormId, OriginalForm, MacroMap, RuntimeContext, State,
+  Tasks, CompiledForms, TaskMetadata) ->
     RuntimeInjectForms = maps:get(inject_forms, RuntimeContext),
     InternalBindings = internal_bindings_for_form(FormId, State),
     MacroMapWithoutInternal = maps:without(
@@ -479,26 +507,53 @@ expand_final_function(FormId, TargetFA, OriginalForm, SourceForms,
     case cached_final_expansion(
            FormId, Fingerprint, WhitelistControl, State) of
         {ok, ExpandedForm} ->
-            astranaut_return:return({ExpandedForm, State});
+            {Tasks, maps:put(FormId, ExpandedForm, CompiledForms),
+             TaskMetadata};
         error ->
-            Expand = maps:get(expand_function, MacroOps),
             RewrittenForm = rewrite_internal_macro_calls(
                               OriginalForm, InternalBindings),
-            ExpansionSource = materialize_forms(
-                                SourceForms, #{FormId => RewrittenForm}),
-            do([ return ||
-                   #{forms := ExpandedSource,
-                     local_macro_whitelist := Whitelist} <-
-                       Expand(EffectiveMacroMap, RuntimeInjectForms,
-                              ExpansionSource, TargetFA,
-                              WhitelistControl),
-                   ExpandedMap = forms_id_map(ExpandedSource),
-                   ExpandedForm = maps:get(FormId, ExpandedMap, RewrittenForm),
-                   cache_final_expansion(
-                     FormId, Fingerprint, Whitelist, ExpandedForm,
-                     WhitelistControl, State)
-               ])
+            Task = #{form => RewrittenForm,
+                     macro_map => EffectiveMacroMap,
+                     whitelist_control => WhitelistControl},
+            Metadata = #{fingerprint => Fingerprint,
+                         whitelist_control => WhitelistControl,
+                         fallback_form => RewrittenForm},
+            {maps:put(FormId, Task, Tasks), CompiledForms,
+             maps:put(FormId, Metadata, TaskMetadata)}
     end.
+
+cache_final_function_tasks(
+  TargetFAs, TaskResults, TaskMetadata, CompiledForms, State) ->
+    astranaut_return:foldl_m(
+      fun({Name, Arity}, {CompiledAcc, StateAcc}) ->
+              FormId = {function, Name, Arity},
+              case maps:find(FormId, TaskMetadata) of
+                  error ->
+                      astranaut_return:return({CompiledAcc, StateAcc});
+                  {ok, #{fingerprint := Fingerprint,
+                         whitelist_control := WhitelistControl,
+                         fallback_form := FallbackForm}} ->
+                      case maps:find(FormId, TaskResults) of
+                          error ->
+                              astranaut_return:return(
+                                {maps:put(FormId, FallbackForm, CompiledAcc),
+                                 StateAcc});
+                          {ok, #{forms := [ExpandedForm],
+                                 local_macro_whitelist := Whitelist}} ->
+                              do([ return ||
+                                     {CachedForm, State1} <-
+                                         cache_final_expansion(
+                                           FormId, Fingerprint, Whitelist,
+                                           ExpandedForm, WhitelistControl,
+                                           StateAcc),
+                                     return({maps:put(
+                                               FormId, CachedForm,
+                                               CompiledAcc),
+                                             State1})
+                                 ])
+                      end
+              end
+      end, {CompiledForms, State}, TargetFAs).
 
 internal_bindings_for_form(FormId, State) ->
     Macros = maps:get(local_macros, State),

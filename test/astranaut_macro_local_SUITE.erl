@@ -30,6 +30,8 @@ all() -> [register_freezes_static_closure,
           declaration_expansion_uses_reference_whitelist,
           final_local_macro_environment_uses_reference_whitelist,
           ordinary_final_function_sees_all_local_macros,
+          final_functions_with_distinct_contexts_expand_in_one_pass,
+          shared_expander_uses_each_task_environment_in_one_pass,
           shared_expander_collects_recursive_replacement_whitelist,
           shared_expander_rejects_unexpected_whitelist_immediately,
           shared_expander_batches_return_whitelist_conflicts,
@@ -167,7 +169,7 @@ execute_plan_rejects_conflicting_inject_snapshots(_Config) ->
            (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
                 expansion_return(Forms, Control)
         end,
-    MacroOps = MacroOps0#{expand_function => Expand},
+    MacroOps = macro_ops_with_expand(MacroOps0, Expand),
     Context = #{source_view => Source, compile_opts => []},
     Error = astranaut_return:run_error(
               astranaut_macro_local:execute_plan(
@@ -364,7 +366,7 @@ same_declaration_members_remain_direct_in_final_context(_Config) ->
                 ?assertNot(maps:is_key({b, 0}, MacroEnv)),
                 expansion_return(Forms, Control)
         end,
-    MacroOps = MacroOps0#{expand_function => Expand},
+    MacroOps = macro_ops_with_expand(MacroOps0, Expand),
     {just, {_Forms, _State1}} = astranaut_return:run(
                                  astranaut_macro_local:expand_final_functions(
                                    Source, [{b, 0}],
@@ -388,7 +390,7 @@ declaration_expansion_uses_reference_whitelist(_Config) ->
            (_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
                 expansion_return(Forms, Control)
         end,
-    MacroOps = (identity_macro_ops())#{expand_function => Expand},
+    MacroOps = macro_ops_with_expand(identity_macro_ops(), Expand),
     Context = #{source_view => Source, compile_opts => []},
     {just, _State1} = astranaut_return:run(
                         astranaut_macro_local:prepare_declaration(
@@ -417,7 +419,7 @@ final_local_macro_environment_uses_reference_whitelist(_Config) ->
                   erlang:get(local_whitelist_expand_count) + 1),
                 expansion_return(Forms, Control, [{a, 0}])
         end,
-    MacroOps = (identity_macro_ops())#{expand_function => Expand},
+    MacroOps = macro_ops_with_expand(identity_macro_ops(), Expand),
     FinalContext = runtime_context(
                      local_macro_map([{a, 0}, {b, 0}, {c, 0}]), []),
     {just, {_Forms, State1}} = astranaut_return:run(
@@ -449,7 +451,7 @@ ordinary_final_function_sees_all_local_macros(_Config) ->
                 ?assert(maps:is_key({b, 0}, MacroEnv)),
                 expansion_return(Forms, disabled)
         end,
-    MacroOps = (identity_macro_ops())#{expand_function => Expand},
+    MacroOps = macro_ops_with_expand(identity_macro_ops(), Expand),
     {just, {_Forms, State1}} = astranaut_return:run(
                                 astranaut_macro_local:expand_final_functions(
                                   Source, [{unused, 0}],
@@ -458,6 +460,89 @@ ordinary_final_function_sees_all_local_macros(_Config) ->
                                   MacroOps, State)),
     ?assertEqual(maps:get(expansion_records, State),
                  maps:get(expansion_records, State1)),
+    ok.
+
+final_functions_with_distinct_contexts_expand_in_one_pass(_Config) ->
+    Source = [a_form(), b_form_independent(), unused_form()],
+    {ok, FrozenState0} = register(
+                           [{a, 0}], #{}, Source, #{},
+                           astranaut_macro_local:new()),
+    {ok, FrozenState} = astranaut_macro_local:cache_expanded(
+                          {function, a, 0}, seeded, [], a_form(),
+                          FrozenState0),
+    erlang:erase(final_function_batches),
+    ExpandTasks =
+        fun(_InjectForms, Forms, Tasks) ->
+                erlang:put(final_function_batches,
+                           [Tasks |
+                            case erlang:get(final_function_batches) of
+                                undefined -> [];
+                                Batches -> Batches
+                            end]),
+                #{macro_map := FrozenEnv,
+                  whitelist_control := FrozenControl} =
+                    maps:get({function, a, 0}, Tasks),
+                #{macro_map := OrdinaryEnv,
+                  whitelist_control := disabled} =
+                    maps:get({function, unused, 0}, Tasks),
+                ?assertEqual(#{}, FrozenEnv),
+                ?assert(maps:is_key({a, 0}, OrdinaryEnv)),
+                ?assertMatch(#{mode := verify, expected := []},
+                             FrozenControl),
+                identity_task_expansion(Forms, Tasks)
+        end,
+    MacroOps = (identity_macro_ops())#{
+                 expand_function_tasks => ExpandTasks},
+    {just, {Source, _State}} =
+        astranaut_return:run(
+          astranaut_macro_local:expand_final_functions(
+            Source, [{a, 0}, {unused, 0}],
+            runtime_context(local_macro_map([{a, 0}]), []),
+            MacroOps, FrozenState)),
+    [Tasks] = lists:reverse(erlang:erase(final_function_batches)),
+    ?assertEqual(
+       ordsets:from_list([{function, a, 0}, {function, unused, 0}]),
+       ordsets:from_list(maps:keys(Tasks))),
+    ok.
+
+shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
+    FormA = task_macro_form(task_a, whitelist_chain_a),
+    FormB = task_macro_form(task_b, whitelist_chain_b),
+    MacroMap = whitelist_macro_map(),
+    Tasks =
+        #{{function, task_a, 0} =>
+              #{form => FormA,
+                macro_map => maps:with([{whitelist_chain_a, 0}], MacroMap),
+                whitelist_control =>
+                    #{mode => collect,
+                      form_id => {function, task_a, 0}}},
+          {function, task_b, 0} =>
+              #{form => FormB,
+                macro_map => maps:with([{whitelist_chain_b, 0}], MacroMap),
+                whitelist_control => disabled}},
+    reset_whitelist_macro_counts(),
+    {just, #{forms := ExpandedForms, task_results := Results}} =
+        astranaut_return:run(
+          astranaut_macro_expander:expand_function_tasks(
+            [], [FormA, FormB], Tasks)),
+    ?assertMatch(
+       [{function, _, task_a, 0,
+         [{clause, _, [], [],
+           [{call, _, {atom, _, whitelist_chain_b}, []}]}]},
+        {function, _, task_b, 0,
+         [{clause, _, [], [], [{atom, _, whitelist_done}]}]}],
+       ExpandedForms),
+    ?assertEqual(
+       ordsets:from_list([{function, task_a, 0}, {function, task_b, 0}]),
+       ordsets:from_list(maps:keys(Results))),
+    ?assertMatch(
+       #{local_macro_whitelist := [{whitelist_chain_a, 0}]},
+       maps:get({function, task_a, 0}, Results)),
+    ?assertMatch(
+       #{local_macro_whitelist := disabled},
+       maps:get({function, task_b, 0}, Results)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
 
 shared_expander_collects_recursive_replacement_whitelist(_Config) ->
@@ -720,16 +805,16 @@ final_retained_helper_comparison(_Config) ->
            #{{function, foo, 0} => Foo,
              {function, helper, 0} => Helper}, S01),
     {_Env, _Skip, S2} = astranaut_macro_local:finalize([{helper, 0}], S1),
-    HelperOps = (identity_macro_ops())#{
-                  expand_function =>
-                      fun(_MacroEnv, _InjectForms, Forms0, {helper, 0},
-                          #{mode := verify} = Control) ->
-                              expansion_return(
-                                astranaut_macro_local:materialize_forms(
-                                  Forms0,
-                                  #{{function, helper, 0} =>
-                                        helper_form(changed)}), Control)
-                      end},
+    HelperExpand =
+        fun(_MacroEnv, _InjectForms, Forms0, {helper, 0},
+            #{mode := verify} = Control) ->
+                expansion_return(
+                  astranaut_macro_local:materialize_forms(
+                    Forms0,
+                    #{{function, helper, 0} => helper_form(changed)}),
+                  Control)
+        end,
+    HelperOps = macro_ops_with_expand(identity_macro_ops(), HelperExpand),
     HelperError = astranaut_return:run_error(
                     astranaut_macro_local:expand_final_functions(
                       [Foo, Helper, Spec], [{helper, 0}],
@@ -739,16 +824,16 @@ final_retained_helper_comparison(_Config) ->
          {function, helper, 0}}],
        astranaut_error:errors(HelperError)),
     {_Env2, _Skip2, S3} = astranaut_macro_local:finalize([{foo, 0}], S1),
-    FooOps = (identity_macro_ops())#{
-               expand_function =>
-                   fun(_MacroEnv, _InjectForms, Forms0, {foo, 0},
-                       #{mode := verify} = Control) ->
-                           expansion_return(
-                             astranaut_macro_local:materialize_forms(
-                               Forms0,
-                               #{{function, foo, 0} => foo_form(changed)}),
-                             Control)
-                   end},
+    FooExpand =
+        fun(_MacroEnv, _InjectForms, Forms0, {foo, 0},
+            #{mode := verify} = Control) ->
+                expansion_return(
+                  astranaut_macro_local:materialize_forms(
+                    Forms0,
+                    #{{function, foo, 0} => foo_form(changed)}),
+                  Control)
+        end,
+    FooOps = macro_ops_with_expand(identity_macro_ops(), FooExpand),
     FooError = astranaut_return:run_error(
                  astranaut_macro_local:expand_final_functions(
                    [Foo, Helper, Spec], [{foo, 0}],
@@ -837,7 +922,63 @@ identity_macro_ops() ->
       expand_function =>
           fun(_MacroEnv, _InjectForms, Forms, _TargetFA, Control) ->
                   expansion_return(Forms, Control)
-          end}.
+          end,
+      expand_function_tasks => fun identity_task_expansion/3}.
+
+macro_ops_with_expand(MacroOps, Expand) ->
+    MacroOps#{expand_function => Expand,
+              expand_function_tasks =>
+                  fun(InjectForms, Forms, Tasks) ->
+                          expand_tasks_with(
+                            Expand, InjectForms, Forms, Tasks)
+                  end}.
+
+identity_task_expansion(Forms, Tasks) ->
+    identity_task_expansion([], Forms, Tasks).
+
+identity_task_expansion(InjectForms, Forms, Tasks) ->
+    Expand =
+        fun(_MacroEnv, _InjectForms, Forms0, _TargetFA, Control) ->
+                expansion_return(Forms0, Control)
+        end,
+    expand_tasks_with(Expand, InjectForms, Forms, Tasks).
+
+expand_tasks_with(Expand, InjectForms, Forms, Tasks) ->
+    astranaut_return:lift_m(
+      fun({Forms1, Results}) ->
+              #{forms => Forms1, task_results => Results}
+      end,
+      astranaut_return:foldl_m(
+        fun({{function, Name, Arity} = FormId,
+             #{form := TaskForm,
+               macro_map := MacroMap,
+               whitelist_control := Control}},
+            {FormsAcc, ResultsAcc}) ->
+                ExpansionSource =
+                    astranaut_macro_local:materialize_forms(
+                      FormsAcc, #{FormId => TaskForm}),
+                astranaut_return:bind(
+                  Expand(MacroMap, InjectForms, ExpansionSource,
+                         {Name, Arity}, Control),
+                  fun(#{forms := ExpandedSource} = Expansion) ->
+                          ExpandedForm = find_function_form(
+                                           FormId, ExpandedSource, TaskForm),
+                          astranaut_return:return(
+                            {astranaut_macro_local:materialize_forms(
+                               FormsAcc, #{FormId => ExpandedForm}),
+                             maps:put(
+                               FormId,
+                               Expansion#{forms => [ExpandedForm]},
+                               ResultsAcc)})
+                  end)
+        end, {Forms, #{}}, lists:sort(maps:to_list(Tasks)))).
+
+find_function_form({function, Name, Arity}, Forms, Default) ->
+    case [Form || {function, _Pos, Name0, Arity0, _Clauses} = Form <- Forms,
+                  Name0 =:= Name, Arity0 =:= Arity] of
+        [Form | _] -> Form;
+        [] -> Default
+    end.
 
 expansion_return(Forms, Control) ->
     Observed = case Control of
@@ -881,6 +1022,11 @@ whitelist_target_form() ->
     {function, 1, whitelist_target, 0,
      [{clause, 1, [], [],
        [{call, 1, {atom, 1, whitelist_chain_a}, []}]}]}.
+
+task_macro_form(Name, MacroName) ->
+    {function, 1, Name, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, MacroName}, []}]}]}.
 
 whitelist_immediate_target_form() ->
     {function, 1, whitelist_target, 0,

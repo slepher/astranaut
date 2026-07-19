@@ -240,6 +240,11 @@ astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
 `astranaut_syntax` 中的同名函数保留为兼容薄代理；新代码应直接调用
 `astranaut_forms`。
 
+`astranaut:map_m/3` 会保留输入列表的顺序。只有遍历明确需要插入或替换模块
+Forms，并在结束时统一执行一次 `reorder_updated_forms`（包括合并
+`__original__`）时，才使用
+`astranaut:map_m_forms/3`。
+
 # astranaut_uniplate
 
 &emsp;&emsp;`astranaut_uniplate` 是 traversal 内部使用的 uniplate/context 实现模块。大多数用户应通过 `astranaut`、`astranaut_traverse` 和 `astranaut_syntax` 使用 traversal 能力，不应依赖其内部 context 结构。

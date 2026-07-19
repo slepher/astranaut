@@ -35,6 +35,7 @@ init_per_suite(Config) ->
                    macro_uniform_import_force_override_test,
                    macro_uniform_external_after_local_force_test,
                    macro_pass_boot, macro_pass_generated, macro_pass_depth, macro_pass_test,
+                   macro_pass_attribute_buffer_test,
                    macro_pass_no_backscan_test, macro_pass_local_chain_test,
                    macro_pass_local_dependency_test,
                    macro_pass_local_replacement_whitelist_test,
@@ -199,6 +200,10 @@ all() ->
      test_macro_validator_pre_local_validation,
      test_uniform_macro_max_depth,
      test_macro_pass_generated_macro_options,
+     test_macro_pass_attribute_buffer,
+     test_macro_pass_attribute_buffer_cross_depth,
+     test_macro_pass_attribute_buffer_self_depth,
+     test_macro_pass_attribute_buffer_total_depth,
      test_macro_pass_export_helper_unlocked,
      test_macro_pass_internal_function_conflict,
      test_macro_pass_local_environment_mutation_errors,
@@ -903,6 +908,38 @@ test_macro_pass_generated_macro_options(Config) ->
     assert_macro_pass_error(
       macro_pass_generated_options_error_test, Config,
       fun({max_macro_expansion_depth_exceeded, {macro_pass_depth, chain_a}, []}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_attribute_buffer(_Config) ->
+    ?assertEqual({buffer_head, buffer_tail},
+                 macro_pass_attribute_buffer_test:value()),
+    ok.
+
+test_macro_pass_attribute_buffer_cross_depth(Config) ->
+    assert_macro_pass_error(
+      macro_pass_attribute_buffer_cross_depth_error_test, Config,
+      fun({max_macro_expansion_depth_exceeded,
+           {macro_pass_depth, buffer_chain}, [_]}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_attribute_buffer_self_depth(Config) ->
+    assert_macro_pass_error(
+      macro_pass_attribute_buffer_self_depth_error_test, Config,
+      fun({max_macro_expansion_depth_exceeded,
+           {macro_pass_depth, buffer_self}, [_]}) -> true;
+         (_) -> false
+      end),
+    ok.
+
+test_macro_pass_attribute_buffer_total_depth(Config) ->
+    assert_macro_pass_error(
+      macro_pass_attribute_buffer_total_depth_error_test, Config,
+      fun({max_macro_expansion_depth_exceeded,
+           {macro_pass_depth, buffer_siblings}, [_]}) -> true;
          (_) -> false
       end),
     ok.

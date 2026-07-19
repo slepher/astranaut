@@ -162,7 +162,7 @@ Expanded <- astranaut_traverse:scoped_state(
 
 ## 先写单元测试
 
-在确认 `map_forms_splice` 正确之前反复尝试集成整个 pass 导致了大量无效迭代。应首先对 `map_forms_splice/3` 写独立测试验证：
+在确认 `astranaut_macro:map_forms_splice/3` 正确之前反复尝试集成整个 pass 导致了大量无效迭代。应首先对该 macro 专属扫描循环写独立测试验证：
 - form 透传
 - splice-back
 - State 持久化
