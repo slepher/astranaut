@@ -24,7 +24,7 @@
 - [x] 实现 declaration 环境快照，且不受后续外部环境更新影响。
 - [x] 实现 `<Module>__local_macro` 的安全覆盖加载和模块级互斥。
 - [x] 实现 retain 根闭包展开、最终环境比对和 FinalSkipIds。
-- [x] 将 plan 执行留在 local-macro 工作流，并通过统一 MacroOps 解析引用和展开 function。
+- [x] 将 plan 执行留在 local-macro 工作流，并直接通过统一 expander 解析引用和批量展开 function。
 - [x] 实现 `EffectiveEnv = snapshot + referenced - internal - target`，不在通用展开器中加入 local 特判。
 
 ## 测试
@@ -58,8 +58,8 @@
 
 ### 实现
 
-- [x] 在 local macro 注册条目和 expansion request 中保存唯一的 `runtime_context_snapshot`，其 `inject_forms` 与 `closure_source_view` 分离。
-- [x] 使用 declaration-time `runtime_context_snapshot.inject_forms` 调用共享 function 展开器，并将该值纳入 `EnvFingerprint`。
+- [x] 在 local macro 注册条目和 expansion request 中保存唯一的 `macro_environment_snapshot`；其中 macro descriptors 已包含 declaration-time `attributes`。
+- [x] 使用 declaration-time resolved macro map 调用共享 function 展开器，并将其中的 `attributes` 纳入 `EnvFingerprint`。
 - [x] 保证 `LocalMacroWorkflowContext.source_view` 只服务累计模块物化、分析和加载，不覆盖 request 的 declaration-time MacroRuntimeContext。
 
 ### 测试
@@ -94,13 +94,13 @@
 
 ### 上下文接口收敛
 
-- [x] Entry 和 ExpansionRequest 只保存一份完整的 `runtime_context_snapshot`；删除 `declaration_groups`、`group_id` 和 `group_members` 双重状态。
+- [x] Entry 和 ExpansionRequest 只保存一份完整的 `macro_environment_snapshot`；删除 `declaration_groups`、`group_id` 和 `group_members` 双重状态。
 - [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options` 及重复 snapshot 字段，仅保留 6 个必需字段。
-- [x] 用命名 map type 约束 workflow context、MacroRuntimeContext、MacroOps、ExpansionRequest 和 CompilationBoundary。
+- [x] 用命名 map type 约束 workflow context、MacroEnvironment、ExpansionRequest 和 CompilationBoundary。
 
 ### 简洁性复核收口
 
-- [x] 删除 workflow context 中重复的 `local_macro_map` 和 MacroOps 中只做 map merge 的回调，注册时直接保存完整 RuntimeContext。
+- [x] 删除 workflow context 中重复的 `local_macro_map` 和全部 MacroOps 回调，注册时直接保存完整 MacroEnvironment。
 - [x] 用扫描得到的 `referenced_local_macros` 作为 declaration/final 共用白名单，删除按 order/self/direct-call 计算的 final 排除路径。
 - [x] 删除重复的 expanded-form cache、final boundary 标记、空 retained forms 返回值和仅供测试的 retained 校验旁路。
 - [x] 将扫描主流程改为直接呈现互斥 form 分支，并删除无语义 monadic bind。

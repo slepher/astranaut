@@ -183,7 +183,7 @@ all() ->
      test_macro_pass_scoped_attribute_state,
      test_macro_pass_scoped_function_state,
      test_macro_pass_local_compile_context,
-     test_macro_pass_local_runtime_context,
+     test_macro_pass_local_macro_environment,
      test_macro_local_declaration_single_diagnostic,
      test_macro_local_declaration_preserves_prior_registration,
      test_uniform_import_override_error, test_uniform_local_force_override,
@@ -551,7 +551,7 @@ test_macro_pass_local_compile_context(_Config) ->
                  macro_pass_local_compile_context_test:value()),
     ok.
 
-test_macro_pass_local_runtime_context(_Config) ->
+test_macro_pass_local_macro_environment(_Config) ->
     ?assertEqual({runtime_attrs, [call_site]},
                  macro_pass_local_runtime_context_test:value()),
     ok.

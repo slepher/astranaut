@@ -51,7 +51,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ### 规格
 
-- [x] 明确唯一的 `runtime_context_snapshot` 同时携带 macro map/options/inject forms，`closure_source_view` 仅是闭包结构输入而非宏上下文。
+- [x] 明确唯一的 `macro_environment_snapshot` 携带含已解析 `attributes` 的 macro map 与 options；`closure_source_view` 仅是闭包结构输入。
 - [x] 明确 local macro 唯一特殊规则是 function-form 编译上下文仅限 declaration 前 passed forms；attribute 运行期规则对 external/local 宏通用。
 - [x] 将 `Hierarchy_final.md` 识别的 P0–P3 差距转化为实现和测试任务。
 
@@ -117,9 +117,9 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 上下文接口收敛
 
 - [x] 通过 `local_macro_workflow_context/3` 统一构造 scheduler/compiler context，并删除未消费的 `external_macro_map`。
-- [x] 强制 declaration snapshot 使用唯一的 `MacroRuntimeContext` 形状，删除裸 MacroMap、`env_snapshot` 和独立 inject snapshot 兼容路径。
-- [x] 为 MacroRuntimeContext、workflow context、MacroOps、ExpansionRequest 和 CompilationBoundary 增加命名 map 类型。
-- [x] 将 `expand_final_functions/5` 参数调整为业务输入在前、`RuntimeContext, MacroOps, State` 固定收尾。
+- [x] 强制 declaration snapshot 使用唯一的已解析 `MacroEnvironment` 形状，删除裸 MacroMap、`env_snapshot` 和独立 inject snapshot 兼容路径。
+- [x] 为 MacroEnvironment、workflow context、ExpansionRequest 和 CompilationBoundary 增加命名 map 类型，并删除 MacroOps callback map。
+- [x] 将 `expand_final_functions/4` 参数调整为业务输入在前、`MacroEnvironment, State` 固定收尾。
 
 ## Local macro whitelist 合并任务
 
@@ -208,7 +208,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ## 最终审核落实
 
 - [x] 将 attribute/function 共用的宏目标解析、调用、返回 AST 规范化和递归展开拆到 `astranaut_macro_expander`。
-- [x] 保留 `astranaut_macro:expand_function/5` 兼容入口，并让内部 `MacroOps` 直接引用 expander。
+- [x] 删除 `astranaut_macro:expand_function/5` 兼容入口和内部 `MacroOps`，所有 local/final 目标统一调用 `astranaut_macro_expander:expand_functions/2`。
 - [x] 将 expander 加入 `erl_first_files`，确保 parse transform 使用前已经编译加载。
 - [x] 拆分 `export_macro` 与 `local_macro` validator，只让后者接受闭包构造 options。
 - [x] 明确 `macro_options` 同样拒绝 `extra_functions` 与 `internal_function`，并覆盖诊断测试。

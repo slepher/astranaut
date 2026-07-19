@@ -10,25 +10,17 @@
 -include("do.hrl").
 -include("stacktrace.hrl").
 
--export([expand_function/5,
-         expand_functions/5,
-         expand_function_tasks/3,
+-export([expand_functions/2,
          resolve_local_references/2,
          resolve_attribute_target/2,
-         expand_attribute_target/2,
+         expand_attribute_target/1,
          function_macro_callers/2,
          format_mfa/1]).
--export_type([local_macro_whitelist_control/0,
-              function_expansion/0,
-              function_expansion_task/0,
-              function_task_expansion/0]).
+-export_type([local_macro_whitelist_control/0]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function, atom(), non_neg_integer()}.
 -type macro_map() :: map().
--type macro_runtime_context() :: #{macro_map := macro_map(),
-                                   macro_options := map(),
-                                   inject_forms := [term()]}.
 -type local_macro_whitelist_control() ::
         disabled |
         #{mode := collect,
@@ -52,43 +44,21 @@
 %%% Public shared expansion operations
 %%%===================================================================
 
--spec expand_function(macro_map(), [term()], [term()], fa(),
-                      local_macro_whitelist_control()) ->
-          astranaut_return:struct(function_expansion()).
-expand_function(MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl) ->
-    expand_functions(
-      MacroEnv, InjectForms, Forms, [TargetFA], WhitelistControl).
-
--spec expand_functions(macro_map(), [term()], [term()], [fa()],
-                       local_macro_whitelist_control()) ->
-          astranaut_return:struct(function_expansion()).
-expand_functions(MacroEnv, InjectForms, Forms, TargetFAs,
-                 WhitelistControl) ->
-    ExecutionEnv = inject_macro_attributes(MacroEnv, InjectForms),
-    expand_target_functions(
-      ExecutionEnv, Forms, TargetFAs, WhitelistControl).
-
 %% Expand every target during one source-ordered Forms traversal.  Each task
 %% carries its own source form and execution environment; traversal state is
 %% scoped per function so whitelist and depth observations cannot leak between
 %% targets.
--spec expand_function_tasks(
-        [term()], [term()], #{form_id() => function_expansion_task()}) ->
+-spec expand_functions(
+        [term()], #{form_id() => function_expansion_task()}) ->
           astranaut_return:struct(function_task_expansion()).
-expand_function_tasks(InjectForms, Forms, Tasks) ->
-    ExecutionTasks =
-        maps:map(
-          fun(_FormId, #{macro_map := MacroMap} = Task) ->
-                  Task#{macro_map =>
-                            inject_macro_attributes(MacroMap, InjectForms)}
-          end, Tasks),
+expand_functions(Forms, Tasks) ->
     RecordForms = record_forms(Forms),
     FunctionClausesUniplate = function_clauses_uniplate(),
     Monad =
         astranaut:map_m(
           fun({function, _Pos, Name, Arity, _Clauses} = Function) ->
                   FormId = {function, Name, Arity},
-                  case maps:find(FormId, ExecutionTasks) of
+                  case maps:find(FormId, Tasks) of
                       error ->
                           astranaut_traverse:return(Function);
                       {ok, Task} ->
@@ -103,7 +73,9 @@ expand_function_tasks(InjectForms, Forms, Tasks) ->
       fun({Forms1, TaskResults}) ->
               #{forms => Forms1, task_results => TaskResults}
       end,
-      astranaut_traverse:run(Monad, astranaut_macro, #{}, #{})).
+      astranaut_traverse:run(
+        astranaut_traverse:fail_on_error(Monad),
+        astranaut_macro, #{}, #{})).
 
 -spec resolve_local_references([{fa(), macro_map()}], [term()]) ->
           ordsets:ordset(fa()).
@@ -114,41 +86,40 @@ resolve_local_references(TargetEnvs, Forms) ->
                 referenced_local_fas(TargetFA, CandidateEnv, Forms), Acc)
       end, ordsets:new(), TargetEnvs).
 
--spec resolve_attribute_target(term(), macro_runtime_context()) ->
+-spec resolve_attribute_target(term(), macro_map()) ->
           {ok, map()} | error | not_macro.
 resolve_attribute_target(
   {attribute, Pos, exec_macro, {Function, Arguments}},
-  #{macro_map := Macros}) ->
+  Macros) ->
     resolve_macro_target(
       Function, Arguments, Pos, Macros,
       {attribute, Pos, exec_macro, {Function, Arguments}});
 resolve_attribute_target(
   {attribute, Pos, exec_macro, {Module, Function, Arguments}},
-  #{macro_map := Macros}) ->
+  Macros) ->
     resolve_macro_target(
       {Module, Function}, Arguments, Pos, Macros,
       {attribute, Pos, exec_macro, {Module, Function, Arguments}});
 resolve_attribute_target(
   {attribute, Pos, Attribute, Arguments},
-  #{macro_map := Macros}) ->
+  Macros) ->
     AttributeMacros = attribute_macro_map(Macros),
     resolve_attribute_target_by_name(
       Attribute, Arguments, Pos, AttributeMacros,
       {attribute, Pos, Attribute, Arguments});
-resolve_attribute_target(_Node, _RuntimeContext) ->
+resolve_attribute_target(_Node, _MacroMap) ->
     not_macro.
 
--spec expand_attribute_target(map(), macro_runtime_context()) ->
+-spec expand_attribute_target(map()) ->
           astranaut_traverse:struct(term(), term()).
-expand_attribute_target(Target, RuntimeContext) ->
-    Invocation = build_attribute_macro_invocation(Target, RuntimeContext),
+expand_attribute_target(Target) ->
+    Invocation = build_attribute_macro_invocation(Target),
     expand_macro(Invocation, #{expected_role => form}).
 
 -spec function_macro_callers([term()], macro_map()) ->
           ordsets:ordset({function, atom(), non_neg_integer()}).
 function_macro_callers(Forms, MacroMap) ->
-    ExecutionEnv = inject_macro_attributes(MacroMap, Forms),
-    find_function_macro_callers(Forms, ExecutionEnv).
+    find_function_macro_callers(Forms, MacroMap).
 
 -spec format_mfa(map()) -> iolist().
 format_mfa(#{function := Function, arity := Arity, local := true}) ->
@@ -159,31 +130,6 @@ format_mfa(#{module := Module, function := Function, arity := Arity}) ->
 %%%===================================================================
 %%% Function expansion and whitelist observation
 %%%===================================================================
-
-expand_target_functions(MacroEnv, Forms, TargetFAs, WhitelistControl) ->
-    TargetIds = function_ids(TargetFAs),
-    TransformIds = find_target_macro_callers(
-                     Forms, MacroEnv, TargetIds),
-    transform_target_functions_if_needed(
-      uniform, MacroEnv, Forms, TransformIds, WhitelistControl).
-
-find_target_macro_callers(Forms, MacroMap, TargetIds) ->
-    case maps:size(MacroMap) of
-        0 ->
-            ordsets:new();
-        _ ->
-            lists:foldl(
-              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
-                      FunctionId = {function, Function, Arity},
-                      case ordsets:is_element(FunctionId, TargetIds) andalso
-                           has_macro_call(Clauses, MacroMap) of
-                          true -> ordsets:add_element(FunctionId, Acc);
-                          false -> Acc
-                      end;
-                 (_Form, Acc) ->
-                      Acc
-              end, ordsets:new(), Forms)
-    end.
 
 referenced_local_fas({Name, Arity}, CandidateEnv, Forms) ->
     case [Clauses || {function, _Pos, Name0, Arity0, Clauses} <- Forms,
@@ -204,12 +150,6 @@ referenced_local_fas({Name, Arity}, CandidateEnv, Forms) ->
         [] ->
             ordsets:new()
     end.
-
-function_ids(Functions) ->
-    lists:foldl(
-      fun({Function, Arity}, Acc) ->
-              ordsets:add_element({function, Function, Arity}, Acc)
-      end, ordsets:new(), Functions).
 
 expand_function_task(
   FormId,
@@ -263,53 +203,6 @@ function_clauses_uniplate() ->
        (Node) ->
             {[[]], fun(_) -> Node end}
     end.
-
-transform_target_functions_if_needed(
-  _Module, MacroMap, Forms, _TransformFunctions, WhitelistControl)
-  when map_size(MacroMap) =:= 0 ->
-    finish_function_expansion(
-      Forms, initial_expansion_state(WhitelistControl), WhitelistControl);
-transform_target_functions_if_needed(
-  _Module, _MacroMap, Forms, [], WhitelistControl) ->
-    finish_function_expansion(
-      Forms, initial_expansion_state(WhitelistControl), WhitelistControl);
-transform_target_functions_if_needed(
-  Module, MacroMap, Forms, TransformFunctions, WhitelistControl) ->
-    transform_target_functions(
-      Module, MacroMap, Forms, TransformFunctions, WhitelistControl).
-
-transform_target_functions(
-  Module, MacroMap, Forms, TransformFunctions, WhitelistControl) ->
-    RecordForms = record_forms(Forms),
-    FunctionClausesUniplate = function_clauses_uniplate(),
-    Monad =
-        astranaut:map_m(
-          fun({function, _Pos, Name, Arity, _Clauses} = Function) ->
-                  case ordsets:is_element(
-                         {function, Name, Arity}, TransformFunctions) of
-                      false ->
-                          astranaut_traverse:return(Function);
-                      true ->
-                          astranaut:map_m(
-                            fun(Clause) ->
-                                    transform_clause(
-                                      Module, MacroMap, Clause, RecordForms,
-                                      WhitelistControl)
-                            end, Function,
-                            #{traverse => subtree,
-                              uniplate => FunctionClausesUniplate})
-                  end;
-             (Form) ->
-                  astranaut_traverse:return(Form)
-          end, Forms, #{traverse => none}),
-    astranaut_return:bind(
-      astranaut_traverse:run(
-        Monad, astranaut_macro, #{},
-        initial_expansion_state(WhitelistControl)),
-      fun({Forms1, ExpansionState}) ->
-              finish_function_expansion(
-                Forms1, ExpansionState, WhitelistControl)
-      end).
 
 transform_clause(Module, MacroMap,
                  {clause, Pos, Patterns, Guards, Exprs},
@@ -809,13 +702,11 @@ resolve_macro_target(MacroName, Arguments, Pos, Macros, CallAst) ->
 
 build_attribute_macro_invocation(
   #{macro := Macro0, raw_arguments := RawArguments,
-    pos := Pos, call_ast := CallAst},
-  #{inject_forms := InjectForms}) ->
-    Macro1 = inject_attrs(Macro0, InjectForms),
-    Macro2 = Macro1#{pos => Pos, call_ast => CallAst},
-    GroupedArguments = group_arguments(RawArguments, Macro2),
-    Arguments = append_attrs(GroupedArguments, Macro2),
-    Macro2#{arguments => Arguments}.
+    pos := Pos, call_ast := CallAst}) ->
+    Macro = Macro0#{pos => Pos, call_ast => CallAst},
+    GroupedArguments = group_arguments(RawArguments, Macro),
+    Arguments = append_attrs(GroupedArguments, Macro),
+    Macro#{arguments => Arguments}.
 
 attribute_macro_map(MacroMap) ->
     AttributeMap =
@@ -861,39 +752,6 @@ find_macro(MacroName, Arity, Macros) ->
                     error
             end
     end.
-
-inject_macro_attributes(MacroMap, Forms) ->
-    maps:map(
-      fun(_MacroKey, Macro) -> inject_attrs(Macro, Forms) end,
-      MacroMap).
-
-inject_attrs(#{inject_attrs := true} = Options, Forms) ->
-    inject_attrs(Options#{inject_attrs => []}, Forms);
-inject_attrs(#{inject_attrs := Attr} = Options, Forms)
-  when is_atom(Attr) ->
-    inject_attrs(Options#{inject_attrs => [Attr]}, Forms);
-inject_attrs(
-  #{inject_attrs := Attrs, file := File, local_module := Module} = Options,
-  Forms)
-  when is_list(Attrs) ->
-    AttributesMap =
-        lists:foldl(
-          fun(module, Acc) ->
-                  Acc;
-             (file, Acc) ->
-                  Acc;
-             (pos, Acc) ->
-                  Acc;
-             (Attr, Acc) ->
-                  Attributes =
-                      astranaut_lib:analyze_forms_attributes(Attr, Forms),
-                  maps:put(Attr, Attributes, Acc)
-          end, maps:new(), Attrs),
-    Options#{attributes =>
-                 maps:merge(
-                   #{file => File, module => Module}, AttributesMap)};
-inject_attrs(#{} = Options, _Forms) ->
-    Options.
 
 group_arguments(Arguments, #{group_args := true}) ->
     [Arguments];

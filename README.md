@@ -762,7 +762,9 @@ Each option map may also be written as a proplist.
 see only attributes that have already passed the source-ordered attribute scan
 at their call site. Local macro closure forms use the attributes visible before
 their `-local_macro` declaration. Ordinary function macros are expanded after
-the attribute scan and use the final module forms.
+the attribute scan and use the final module attributes. At each of these
+boundaries the selector is resolved into the macro environment before recursive
+expansion starts.
 
 ```
 -module(a).

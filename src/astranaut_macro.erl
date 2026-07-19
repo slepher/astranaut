@@ -45,11 +45,12 @@
 %% macro reached from that root shares one total `max_depth' expansion count.
 %% Non-attribute forms still use the normal generated-form insertion path.
 %% Import, use and option forms, including generated ones, affect only later
-%% forms and already processed attributes are not rescanned. Attribute macro
-%% injection sees only forms already passed at the call site.</li>
+%% forms and already processed attributes are not rescanned. Attribute values
+%% requested by `inject_attrs' are resolved from the source-ordered attribute
+%% environment at the call site before the expander runs.</li>
 %% <li>Local macro declarations are registered with `astranaut_macro_local'
 %% using the materialised source view. Their closure forms are pre-expanded in
-%% the macro environment and injection view captured before the declaration;
+%% the resolved macro environment captured before the declaration;
 %% later forms participate only in closure discovery. Direct local calls are
 %% discovered statically; indirect references such as `fun helper/1' require
 %% `extra_functions'. A multi-function declaration shares this snapshot but is
@@ -77,37 +78,19 @@
 -include("do.hrl").
 
 %% API
--export([parse_transform/2, format_error/1, expand_function/5,
-         map_forms_splice/3]).
--export_type([local_macro_whitelist_control/0, function_expansion/0]).
+-export([parse_transform/2, format_error/1, map_forms_splice/3]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type macro_map() :: map().
--type macro_runtime_context() :: #{macro_map := macro_map(),
-                                   macro_options := map(),
-                                   inject_forms := [term()]}.
--type local_macro_whitelist_control() ::
-        astranaut_macro_expander:local_macro_whitelist_control().
--type function_expansion() ::
-        astranaut_macro_expander:function_expansion().
--type function_expansion_task() ::
-        astranaut_macro_expander:function_expansion_task().
--type function_task_expansion() ::
-        astranaut_macro_expander:function_task_expansion().
+-type attribute_env() ::
+        #{module := module(),
+          file := file:filename(),
+          values := #{atom() => [term()]}}.
+-type macro_environment() :: #{macro_map := macro_map(),
+                                macro_options := map()}.
 -type local_macro_workflow_context() ::
         #{source_view := [term()],
           compile_opts := [compile:option()]}.
--type macro_ops() ::
-        #{resolve_local_references :=
-              fun(([{fa(), macro_map()}], [term()]) -> ordsets:ordset(fa())),
-          expand_function :=
-              fun((macro_map(), [term()], [term()], fa(),
-                   local_macro_whitelist_control()) ->
-                      astranaut_return:struct(function_expansion())),
-          expand_function_tasks =>
-              fun(([term()], [term()],
-                   #{term() => function_expansion_task()}) ->
-                      astranaut_return:struct(function_task_expansion()))}.
 -type scanner_state() ::
         #{global_macro_opts := map(),
           module_macro_maps := map(),
@@ -119,6 +102,7 @@
           scan_local_declarations := #{term() => {term(), [fa()]}},
           macro_map := macro_map(),
           effective_macro_map := macro_map(),
+          attribute_env := attribute_env(),
           attribute_expansion =>
               #{count := non_neg_integer(),
                 max_depth := non_neg_integer(),
@@ -249,7 +233,8 @@ scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
                   local_macro_state => astranaut_macro_local:new(),
                   scan_local_declarations => #{},
                   macro_map => #{},
-                  effective_macro_map => #{}},
+                  effective_macro_map => #{},
+                  attribute_env => new_attribute_env(Module, File)},
     astranaut_traverse:run(
       map_forms_splice(fun scan_form/1, Forms,
                        #{traverse => none, queue_state => true}),
@@ -536,14 +521,13 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
     do([ traverse ||
            RegisteredLocalState <- register_local_declaration(
                                      FAs, Options, Pos, SourceView,
-                                     declaration_runtime_context(State),
-                                     local_macro_ops(), LocalState),
+                                     declaration_macro_environment(State),
+                                     LocalState),
            WorkflowContext = local_macro_workflow_context(
                                SourceView, maps:get(compile_opts, State)),
            LocalState1 <- astranaut:traverse_return(
                             astranaut_macro_local:prepare_declaration(
-                              FAs, WorkflowContext, local_macro_ops(),
-                              RegisteredLocalState)),
+                              FAs, WorkflowContext, RegisteredLocalState)),
            EffectiveMacroMap1 <- astranaut:traverse_return(
                                   add_local_macro(
                                     State, SourceView, ClauseMap,
@@ -570,20 +554,21 @@ add_local_macro(#{module := Module, file := File, global_macro_opts := GlobalOpt
     New = build_local_macro_map(Ctx, macro_options_by_fa(FAs, Options#{macro_source => local_macro})),
     merge_macro_maps(EffectiveMap, New).
 
-register_local_declaration(FAs, Options, Pos, SourceView, RuntimeContext,
-                           MacroOps, LocalState) ->
+register_local_declaration(FAs, Options, Pos, SourceView, MacroEnvironment,
+                           LocalState) ->
     case astranaut_macro_local:register(
-           FAs, Options, SourceView, RuntimeContext,
-           MacroOps, LocalState) of
+           FAs, Options, SourceView, MacroEnvironment, LocalState) of
         {ok, LocalState1} -> astranaut_traverse:return(LocalState1);
         {error, Error} ->
             astranaut_traverse:update_pos(
               Pos, ?MODULE, astranaut_traverse:fail(Error))
     end.
 
-declaration_runtime_context(#{effective_macro_map := MacroMap,
-                              global_macro_opts := GlobalOpts} = State) ->
-    macro_runtime_context(MacroMap, GlobalOpts, passed_forms(State)).
+declaration_macro_environment(#{effective_macro_map := MacroMap,
+                                global_macro_opts := GlobalOpts} = State) ->
+    macro_environment(
+      resolve_macro_environment(MacroMap, maps:get(attribute_env, State)),
+      GlobalOpts).
 
 scan_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
     #{global_macro_opts := GlobalMacroOpts} = State,
@@ -654,11 +639,11 @@ scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
            return(Form)
        ]).
 scan_attribute_runtime(Form, State) ->
-    RuntimeContext = attribute_call_runtime_context(State),
+    MacroEnvironment = attribute_call_macro_environment(State),
     case astranaut_macro_expander:resolve_attribute_target(
-           Form, RuntimeContext) of
+           Form, maps:get(macro_map, MacroEnvironment)) of
         {ok, Target} ->
-            run_attribute_macro(Target, RuntimeContext, State);
+            run_attribute_macro(Target, State);
         error ->
             %% `error' means this is syntactically a macro invocation (an
             %% exec_macro or a registered attribute macro) but no executable
@@ -673,16 +658,66 @@ scan_attribute_runtime(Form, State) ->
             keep_scanned_form(Form)
     end.
 
-attribute_call_runtime_context(#{effective_macro_map := MacroMap} = State) ->
-    macro_runtime_context(
-      MacroMap, maps:get(global_macro_opts, State), passed_forms(State)).
+attribute_call_macro_environment(#{effective_macro_map := MacroMap} = State) ->
+    macro_environment(
+      resolve_macro_environment(MacroMap, maps:get(attribute_env, State)),
+      maps:get(global_macro_opts, State)).
 
--spec macro_runtime_context(macro_map(), map(), [term()]) ->
-          macro_runtime_context().
-macro_runtime_context(MacroMap, MacroOptions, InjectForms) ->
+-spec macro_environment(macro_map(), map()) -> macro_environment().
+macro_environment(MacroMap, MacroOptions) ->
     #{macro_map => MacroMap,
-      macro_options => MacroOptions,
-      inject_forms => InjectForms}.
+      macro_options => MacroOptions}.
+
+new_attribute_env(Module, File) ->
+    #{module => Module, file => File, values => #{}}.
+
+attribute_env_from_forms(Module, File, Forms) ->
+    lists:foldl(
+      fun add_attribute_form/2,
+      new_attribute_env(Module, File), Forms).
+
+add_attribute_form(
+  {attribute, _Pos, Name, Value}, #{values := Values} = AttributeEnv)
+  when Name =/= module, Name =/= file, Name =/= pos ->
+    Values1 = maps:update_with(
+                Name, fun(Existing) -> [Value | Existing] end,
+                [Value], Values),
+    AttributeEnv#{values => Values1};
+add_attribute_form(_Form, AttributeEnv) ->
+    AttributeEnv.
+
+resolve_macro_environment(MacroMap, AttributeEnv) ->
+    maps:map(
+      fun(_MacroKey, Macro) ->
+              resolve_macro_attributes(Macro, AttributeEnv)
+      end, MacroMap).
+
+resolve_macro_attributes(#{inject_attrs := InjectAttrs} = Macro,
+                         AttributeEnv) ->
+    AttributeNames = normalize_inject_attrs(InjectAttrs),
+    Attributes = select_injected_attributes(AttributeNames, AttributeEnv),
+    maps:remove(inject_attrs, Macro#{attributes => Attributes});
+resolve_macro_attributes(Macro, _AttributeEnv) ->
+    Macro.
+
+normalize_inject_attrs(true) -> [];
+normalize_inject_attrs(Name) when is_atom(Name) -> [Name];
+normalize_inject_attrs(Names) when is_list(Names) -> Names.
+
+select_injected_attributes(
+  Names, #{module := Module, file := File, values := Values}) ->
+    Selected =
+        lists:foldl(
+          fun(module, Acc) -> Acc;
+             (file, Acc) -> Acc;
+             (pos, Acc) -> Acc;
+             (Name, Acc) ->
+                  maps:put(
+                    Name,
+                    lists:reverse(maps:get(Name, Values, [])),
+                    Acc)
+          end, #{}, Names),
+    maps:merge(#{module => Module, file => File}, Selected).
 
 -spec local_macro_workflow_context([term()], [compile:option()]) ->
           local_macro_workflow_context().
@@ -691,23 +726,23 @@ local_macro_workflow_context(SourceView, CompileOpts) ->
       compile_opts => CompileOpts}.
 
 %% All attribute macros return to this path after any local compilation
-%% prerequisite.  Argument grouping and inject_attrs therefore have exactly
-%% one call-site implementation for external and local macros.
--spec run_attribute_macro(map(), macro_runtime_context(), scanner_state()) ->
+%% prerequisite. Argument grouping has one call-site implementation for
+%% external and local macros; inject_attrs is already resolved in MacroEnv.
+-spec run_attribute_macro(map(), scanner_state()) ->
           astranaut_traverse:struct(
             scanner_state(),
             {splice, [term()]} |
             {buffer, [term()], non_neg_integer(), map()}).
-run_attribute_macro(Target, RuntimeContext, State) ->
+run_attribute_macro(Target, State) ->
     case maps:find(attribute_expansion, State) of
         error ->
-            run_root_attribute_macro(Target, RuntimeContext, State);
+            run_root_attribute_macro(Target, State);
         {ok, Expansion} ->
             run_buffered_attribute_macro(
-              Target, RuntimeContext, Expansion, State)
+              Target, Expansion, State)
     end.
 
-run_root_attribute_macro(Target, RuntimeContext, State) ->
+run_root_attribute_macro(Target, State) ->
     Macro = maps:get(macro, Target),
     MaxDepth = maps:get(max_depth, Macro, 100),
     case MaxDepth > 0 of
@@ -717,7 +752,7 @@ run_root_attribute_macro(Target, RuntimeContext, State) ->
             do([ traverse ||
                    State1 <- ensure_attribute_target_callable(Target, State),
                    Expanded <- astranaut_macro_expander:expand_attribute_target(
-                                 Target, RuntimeContext),
+                                 Target),
                    ExpandedForms = to_list(Expanded),
                    assert_scan_frozen_forms(
                      ExpandedForms, maps:get(local_macro_state, State1)),
@@ -726,18 +761,18 @@ run_root_attribute_macro(Target, RuntimeContext, State) ->
     end.
 
 run_buffered_attribute_macro(
-    _Target, _RuntimeContext,
+    _Target,
     #{count := Count, max_depth := MaxDepth} = Expansion,
     _State) when Count >= MaxDepth ->
     astranaut_traverse:fail(
       attribute_expansion_limit_error(maps:get(origin, Expansion)));
 run_buffered_attribute_macro(
-    Target, RuntimeContext,
+    Target,
     #{count := Count} = Expansion, State) ->
     do([ traverse ||
            State1 <- ensure_attribute_target_callable(Target, State),
            Expanded <- astranaut_macro_expander:expand_attribute_target(
-                         Target, RuntimeContext),
+                         Target),
            ExpandedForms = to_list(Expanded),
            assert_scan_frozen_forms(
              ExpandedForms, maps:get(local_macro_state, State1)),
@@ -769,7 +804,7 @@ ensure_attribute_target_callable(
                    LocalState1 <- astranaut:traverse_return(
                                     astranaut_macro_local:need_callable(
                                       {Function, Arity}, WorkflowContext,
-                                      local_macro_ops(), LocalState)),
+                                      LocalState)),
                    State1 = State#{local_macro_state => LocalState1},
                    astranaut_traverse:put(State1),
                    return(State1)
@@ -795,8 +830,11 @@ keep_scanned_form(Form) ->
            return(Form)
        ]).
 
-note_passed_form(Form, #{passed_forms := PassedForms} = State) ->
-    State#{passed_forms => [Form | PassedForms]}.
+note_passed_form(
+  Form,
+  #{passed_forms := PassedForms, attribute_env := AttributeEnv} = State) ->
+    State#{passed_forms => [Form | PassedForms],
+           attribute_env => add_attribute_form(Form, AttributeEnv)}.
 
 passed_forms(#{passed_forms := PassedForms}) ->
     lists:reverse(PassedForms).
@@ -1250,16 +1288,15 @@ finalize_attribute_macro_pass(Module, File, GlobalMacroOpts, ScanEffectiveMacroM
            RetainRoots = retain_roots(Forms),
            {FinalLocalEnv, FinalSkipIds, FinalLocalState} <-
                astranaut_macro_local:finalize(
-                 RetainRoots, WorkflowContext,
-                 local_macro_ops(), ScanLocalState),
+                 RetainRoots, WorkflowContext, ScanLocalState),
            RetainWarnings = local_macro_retain_warnings(
                               Forms, FinalLocalState),
            FinalMacroMap = compiled_effective_macro_map(
                              ScanEffectiveMacroMap, FinalLocalEnv),
            {UnsortedAttributeForms, FunctionEnv0} <-
                finalize_attribute_forms(
-                 Forms, Module, FinalMacroMap, FinalSkipIds, FinalLocalState,
-                 GlobalMacroOpts),
+                 Forms, Module, File, FinalMacroMap, FinalSkipIds,
+                 FinalLocalState, GlobalMacroOpts),
            %% The attribute-pass output is sorted before the function pass sees it.
            AttributeForms = astranaut_forms:sort_forms(UnsortedAttributeForms),
            FunctionEnv = FunctionEnv0#{global_macro_opts => GlobalMacroOpts},
@@ -1285,20 +1322,24 @@ compiled_effective_macro_map(EffectiveMacroMap, FinalLocalEnv) ->
               true
       end, EffectiveMacroMap).
 
--spec finalize_attribute_forms([term()], module(), macro_map(), [term()], map(),
-                               map()) ->
+-spec finalize_attribute_forms([term()], module(), file:filename(), macro_map(),
+                               [term()], map(), map()) ->
           astranaut_return:struct({[term()], map()}).
 finalize_attribute_forms(
-  Forms, Module, FinalMacroMap, FinalSkipIds,
+  Forms, Module, File, FinalMacroMap, FinalSkipIds,
   FinalLocalState, GlobalMacroOpts) ->
     do([ return ||
            %% Attribute macros are expanded exclusively by scan_attribute_forms/5.
            %% Re-running them here would let later declarations backscan forms
            %% that were already passed under an earlier environment.
            Forms2 = remove_final_skip_forms(Forms, FinalSkipIds),
+           ResolvedFinalMacroMap = resolve_macro_environment(
+                                     FinalMacroMap,
+                                     attribute_env_from_forms(
+                                       Module, File, Forms2)),
            DetectedMacroCallers =
                astranaut_macro_expander:function_macro_callers(
-                 Forms2, FinalMacroMap),
+                 Forms2, ResolvedFinalMacroMap),
            RetainedFunctionIds = ordsets:from_list(
                                    [Id || Id = {function, _, _} <-
                                       astranaut_macro_local:retained_form_ids(
@@ -1308,10 +1349,10 @@ finalize_attribute_forms(
            FinalSkipFunctionIds = ordsets:from_list([{function, Name, Arity}
                                                       || {function, Name, Arity} <- FinalSkipIds]),
            FunctionEnv = #{module => Module,
-                           macro_map => FinalMacroMap,
-                           runtime_context => final_function_runtime_context(
-                                                FinalMacroMap,
-                                                GlobalMacroOpts, Forms2),
+                           macro_map => ResolvedFinalMacroMap,
+                           macro_environment => final_function_macro_environment(
+                                                  ResolvedFinalMacroMap,
+                                                  GlobalMacroOpts),
                            local_macro_state => FinalLocalState,
                            callers => ordsets:subtract(FinalMacroCallers, FinalSkipFunctionIds)},
            return({Forms2, FunctionEnv})
@@ -1320,7 +1361,7 @@ finalize_attribute_forms(
 -spec run_function_macro_pass([term()], map()) ->
           astranaut_return:struct([term()]).
 run_function_macro_pass(
-  Forms, #{runtime_context := RuntimeContext,
+  Forms, #{macro_environment := MacroEnvironment,
            local_macro_state := LocalMacroState,
            callers := Callers}) ->
     do([ return ||
@@ -1328,8 +1369,7 @@ run_function_macro_pass(
                astranaut_macro_local:expand_final_functions(
                  Forms,
                  [{Name, Arity} || {function, Name, Arity} <- Callers],
-                 RuntimeContext,
-                 local_macro_ops(), LocalMacroState),
+                 MacroEnvironment, LocalMacroState),
            return(ExpandedForms)
        ]).
 
@@ -1397,27 +1437,6 @@ merge_macro_maps_pure_loop([], Acc) ->
 macro_override_fail(MacroKey, ExistingMacro, OverridingMacro) ->
     astranaut_return:error_fail({macro_override, MacroKey, ExistingMacro, OverridingMacro}).
 
-%%%===================================================================
-%%% ===== Expander facade and local-macro operations =====
-%%%===================================================================
-
--spec local_macro_ops() -> macro_ops().
-local_macro_ops() ->
-    #{resolve_local_references =>
-          fun astranaut_macro_expander:resolve_local_references/2,
-      expand_function => fun astranaut_macro_expander:expand_function/5,
-      expand_function_tasks =>
-          fun astranaut_macro_expander:expand_function_tasks/3}.
-
-%% Compatibility facade. Internal local-macro operations call the expander
-%% directly; callers of the historical public API keep the same contract.
--spec expand_function(macro_map(), [term()], [term()], fa(),
-                      local_macro_whitelist_control()) ->
-          astranaut_return:struct(function_expansion()).
-expand_function(MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl) ->
-    astranaut_macro_expander:expand_function(
-      MacroEnv, InjectForms, Forms, TargetFA, WhitelistControl).
-
 retain_roots(Forms) ->
     lists:foldl(
       fun({attribute, _Pos, local_macro_retain, Attr}, Acc) -> retain_fas(Attr, Acc);
@@ -1453,8 +1472,8 @@ retain_fas(FAs, Acc) when is_list(FAs) ->
 retain_fas({Name, Arity} = FA, Acc) when is_atom(Name), is_integer(Arity) -> [FA | Acc];
 retain_fas(_Other, Acc) -> Acc.
 
-final_function_runtime_context(MacroMap, MacroOptions, InjectForms) ->
-    macro_runtime_context(MacroMap, MacroOptions, InjectForms).
+final_function_macro_environment(MacroMap, MacroOptions) ->
+    macro_environment(MacroMap, MacroOptions).
 
 invalid_macro_return_mfa(#{macro := #{mfa := MFA}}) ->
     MFA;
