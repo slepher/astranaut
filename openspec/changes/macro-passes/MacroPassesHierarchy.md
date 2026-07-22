@@ -50,6 +50,8 @@ Module Forms
 ```text
 ScanContext = {
   external_env,       % 当前可见的外部宏及其 options
+  attribute_index,    % ordinary attribute name/arity 到宏 key 的直接索引
+  attribute_env,      % 当前扫描位置之前已累计的 attributes
   local_state,        % local-macro 工作流的不透明状态
   passed_forms,       % 已完成处理并保留的 forms，保持输出顺序
   queue,              % 当前 form 之后仍待处理的精确队列
@@ -57,9 +59,15 @@ ScanContext = {
 }
 ```
 
-`passed_forms` 与 `queue` 必须严格分离：前者是 attribute injection 的历史视图，后者只用于扫描调度和 remaining-source 观察。尚未真正处理的 splice 结果不能进入 injection 视图。
+`passed_forms` 与 `queue` 必须严格分离：前者决定哪些 attribute 已进入增量
+`attribute_env`，后者只用于扫描调度和 remaining-source 观察。尚未真正处理的 splice
+结果不能进入属性环境。
 
-注册 local declaration 时必须构造唯一形状的 declaration-time `MacroRuntimeContext`，其中 `inject_forms = passed_forms`。完整的 `passed_forms ++ queue` 只用于闭包发现；它不能替代 context 中的注入视图。注册后立即尝试以该 context 预展开，编译只在某次展开或调用真正产生 `NeedCallable` 时发生。
+注册 local declaration 时必须从当前位置的 `attribute_env` 构造唯一形状的
+declaration-time `MacroRuntimeContext`，并把每个 descriptor 的 `inject_attrs` 解析为
+`attributes` map。完整的 `passed_forms ++ queue` 只用于闭包发现，不能替代该环境快照。
+注册后立即尝试以该 context 预展开，编译只在某次展开或调用真正产生
+`NeedCallable` 时发生。
 
 ### 2.3 Local-Macro Gateway
 
@@ -102,7 +110,7 @@ expand_and_validate(MacroRuntimeContext, OriginalForms, TargetFAs,
 WhitelistControl = disabled | collect(FormId) | verify(FormId, Expected)
 ```
 
-共享核心从 original/frozen form 展开。local frozen function 首次使用 `collect`：原始 AST 在 `match_macro_call` 成功后观察真实 local FA；每个 macro 返回 AST 由 `process_macro_return` 在既有 traversal 中一次性收集 local FAs，并以 `{Node, ReturnObserved}` 交给调用方合并。后续 declaration/final context 使用 `verify`；普通 function 与 attribute 使用 `disabled`。
+共享核心从 original/frozen form 展开。local frozen function 首次使用 `collect`：原始 AST 在 `match_macro_call` 成功后观察真实 local FA；每个 macro 返回 AST 由 `process_macro_return` 在既有 traversal 中一次性收集 local FAs 与总体 macro presence，并以 `{Node, ReturnAnalysis}` 交给调用方。调用方合并 local FAs，只有含宏的 accepted replacement 才继续递归 traversal。后续 declaration/final context 使用 `verify`；普通 function 与 attribute 使用 `disabled`。
 
 相同 input fingerprint 复用缓存的 whitelist/result；不同 input 先验证 canonical whitelist，再比较 expanded AST。final local closure 按 canonical whitelist 过滤 local-macro 部分，不再维护 final 排除规则。`process_macro_return` 规范化 AST、位置和变量并收集当前 Return AST 的 local macro presence，但不校验或执行 replacement；不得增加第二次 return-tree scanner、whole-form rescan 或 AST diff。
 
@@ -151,7 +159,9 @@ Handle(Form)
 │  ├─ gateway.register_and_preexpand(...)
 │  └─ 按 local-macro 契约决定 declaration 的保留/物化，不在扫描器内猜测
 ├─ attribute-shaped form
-│  ├─ 用 ExternalEnv + CallableLocalEnv 按统一规则解析
+│  ├─ ordinary attribute 通过 AttributeMacroIndex 按 name/arity 直接定位
+│  ├─ exec_macro 通过 EffectiveMacroMap 按显式宏 key 定位
+│  ├─ 只为已选中的 descriptor 解析调用点 inject_attrs
 │  ├─ 已可调用宏 -> invoke -> validate -> splice(GeneratedForms)
 │  ├─ 已注册但未就绪 local 宏
 │  │  └─ gateway.need_callable -> invoke at same position -> splice
@@ -165,7 +175,8 @@ Handle(Form)
 
 ### 3.4 Attribute Injection
 
-调用属性宏时，注入输入只由当前 `passed_forms` 构造。不能读取：
+调用属性宏时，`inject_attrs` 只从当前增量 `attribute_env` 读取。该环境只包含当前
+扫描位置之前已经通过的 attributes，不能读取：
 
 - 当前 form；
 - 尚未处理的原队列；

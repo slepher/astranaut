@@ -11,9 +11,11 @@
 -include("stacktrace.hrl").
 
 -export([expand_functions/2,
-         resolve_local_references/2,
-         resolve_attribute_target/2,
+         function_call_analysis/2,
+         attribute_macro_index/1,
+         resolve_attribute_target/3,
          expand_attribute_target/1,
+         function_macro_callers/1,
          function_macro_callers/2,
          format_mfa/1]).
 -export_type([local_macro_whitelist_control/0]).
@@ -29,13 +31,19 @@
           form_id := {function, atom(), non_neg_integer()},
           expected := ordsets:ordset(fa())}.
 -type function_expansion() ::
-        #{forms := [term()],
+        #{form := term(),
           local_macro_whitelist := disabled | ordsets:ordset(fa()),
           needed_local_macros := ordsets:ordset(fa())}.
 -type function_expansion_task() ::
         #{form := term(),
           macro_map := macro_map(),
-          whitelist_control := local_macro_whitelist_control()}.
+          whitelist_control := local_macro_whitelist_control(),
+          has_macro_call => boolean()}.
+-type function_call_analysis() ::
+        #{form := term(),
+          local_calls := ordsets:ordset(fa()),
+          local_macro_calls := ordsets:ordset(fa()),
+          has_macro_call := boolean()}.
 -type function_task_expansion() ::
         #{forms := [term()],
           task_results := #{form_id() => function_expansion()}}.
@@ -77,37 +85,53 @@ expand_functions(Forms, Tasks) ->
         astranaut_traverse:fail_on_error(Monad),
         astranaut_macro, #{}, #{})).
 
--spec resolve_local_references([{fa(), macro_map()}], [term()]) ->
-          ordsets:ordset(fa()).
-resolve_local_references(TargetEnvs, Forms) ->
-    lists:foldl(
-      fun({TargetFA, CandidateEnv}, Acc) ->
-              ordsets:union(
-                referenced_local_fas(TargetFA, CandidateEnv, Forms), Acc)
-      end, ordsets:new(), TargetEnvs).
+-spec attribute_macro_index(macro_map()) -> map().
+attribute_macro_index(MacroMap) ->
+    maps:fold(
+      fun(_MacroKey, #{as_attr := Attribute,
+                       call_arity := Arity} = Macro, Acc) ->
+              AttributeMacros = maps:get(Attribute, Acc, #{}),
+              maps:put(
+                Attribute,
+                maps:put({Attribute, Arity}, Macro, AttributeMacros),
+                Acc);
+         (_MacroKey, _Macro, Acc) ->
+              Acc
+      end, #{}, MacroMap).
 
--spec resolve_attribute_target(term(), macro_map()) ->
+-spec function_call_analysis([term()], macro_map()) ->
+          #{form_id() => function_call_analysis()}.
+function_call_analysis(Forms, MacroMap) ->
+    lists:foldl(
+      fun({function, _Pos, Name, Arity, Clauses} = Form, Acc) ->
+              Analysis = analyze_function_calls(Clauses, MacroMap),
+              maps:put(
+                {function, Name, Arity}, Analysis#{form => Form}, Acc);
+         (_Form, Acc) ->
+              Acc
+      end, #{}, Forms).
+
+-spec resolve_attribute_target(term(), macro_map(), map()) ->
           {ok, map()} | error | not_macro.
 resolve_attribute_target(
   {attribute, Pos, exec_macro, {Function, Arguments}},
-  Macros) ->
+  Macros, _AttributeIndex) ->
     resolve_macro_target(
       Function, Arguments, Pos, Macros,
       {attribute, Pos, exec_macro, {Function, Arguments}});
 resolve_attribute_target(
   {attribute, Pos, exec_macro, {Module, Function, Arguments}},
-  Macros) ->
+  Macros, _AttributeIndex) ->
     resolve_macro_target(
       {Module, Function}, Arguments, Pos, Macros,
       {attribute, Pos, exec_macro, {Module, Function, Arguments}});
 resolve_attribute_target(
   {attribute, Pos, Attribute, Arguments},
-  Macros) ->
-    AttributeMacros = attribute_macro_map(Macros),
+  _Macros, AttributeIndex) ->
     resolve_attribute_target_by_name(
-      Attribute, Arguments, Pos, AttributeMacros,
+      Attribute, Arguments, Pos, AttributeIndex,
       {attribute, Pos, Attribute, Arguments});
-resolve_attribute_target(_Node, _MacroMap) ->
+resolve_attribute_target(_Node, _MacroMap, _AttributeIndex) ->
     not_macro.
 
 -spec expand_attribute_target(map()) ->
@@ -119,7 +143,17 @@ expand_attribute_target(Target) ->
 -spec function_macro_callers([term()], macro_map()) ->
           ordsets:ordset({function, atom(), non_neg_integer()}).
 function_macro_callers(Forms, MacroMap) ->
-    find_function_macro_callers(Forms, MacroMap).
+    function_macro_callers(function_call_analysis(Forms, MacroMap)).
+
+-spec function_macro_callers(#{form_id() => function_call_analysis()}) ->
+          ordsets:ordset({function, atom(), non_neg_integer()}).
+function_macro_callers(FunctionAnalysis) ->
+    maps:fold(
+      fun(FormId, #{has_macro_call := true}, Acc) ->
+              ordsets:add_element(FormId, Acc);
+         (_FormId, _Analysis, Acc) ->
+              Acc
+      end, ordsets:new(), FunctionAnalysis).
 
 -spec format_mfa(map()) -> iolist().
 format_mfa(#{function := Function, arity := Arity, local := true}) ->
@@ -131,31 +165,11 @@ format_mfa(#{module := Module, function := Function, arity := Arity}) ->
 %%% Function expansion and whitelist observation
 %%%===================================================================
 
-referenced_local_fas({Name, Arity}, CandidateEnv, Forms) ->
-    case [Clauses || {function, _Pos, Name0, Arity0, Clauses} <- Forms,
-                     Name0 =:= Name, Arity0 =:= Arity] of
-        [Clauses | _] ->
-            astranaut:sreduce(
-              fun(Node, Acc) ->
-                      case call_find_macro(uniform, Node, CandidateEnv) of
-                          {ok, #{macro_source := local_macro,
-                                 function := Function,
-                                 arity := MacroArity}} ->
-                              ordsets:add_element(
-                                {Function, MacroArity}, Acc);
-                          _ ->
-                              Acc
-                      end
-              end, ordsets:new(), Clauses, #{traverse => pre});
-        [] ->
-            ordsets:new()
-    end.
-
 expand_function_task(
   FormId,
   #{form := Function,
     macro_map := MacroMap,
-    whitelist_control := WhitelistControl},
+    whitelist_control := WhitelistControl} = Task,
   RecordForms, FunctionClausesUniplate) ->
     Expand =
         do([ traverse ||
@@ -164,11 +178,12 @@ expand_function_task(
                      initial_expansion_state(WhitelistControl),
                      transform_task_function_if_needed(
                        Function, MacroMap, RecordForms,
-                       WhitelistControl, FunctionClausesUniplate)),
-               #{forms := [Function2]} = Result <-
+                       WhitelistControl, FunctionClausesUniplate,
+                       maps:find(has_macro_call, Task))),
+               #{form := Function2} = Result <-
                    astranaut:traverse_return(
                      finish_function_expansion(
-                       [Function1], ExpansionState, WhitelistControl)),
+                       Function1, ExpansionState, WhitelistControl)),
                astranaut_traverse:modify(
                  fun(Results) -> maps:put(FormId, Result, Results) end),
                return(Function2)
@@ -178,9 +193,9 @@ expand_function_task(
 
 transform_task_function_if_needed(
   {function, _Pos, _Name, _Arity, Clauses} = Function,
-  MacroMap, RecordForms, WhitelistControl, FunctionClausesUniplate) ->
-    case map_size(MacroMap) =/= 0 andalso
-         has_macro_call(Clauses, MacroMap) of
+  MacroMap, RecordForms, WhitelistControl, FunctionClausesUniplate,
+  MacroCallHint) ->
+    case function_has_macro_call(Clauses, MacroMap, MacroCallHint) of
         false ->
             astranaut_traverse:return(Function);
         true ->
@@ -193,6 +208,14 @@ transform_task_function_if_needed(
               #{traverse => subtree,
                 uniplate => FunctionClausesUniplate})
     end.
+
+function_has_macro_call(_Clauses, MacroMap, _Hint)
+  when map_size(MacroMap) =:= 0 ->
+    false;
+function_has_macro_call(_Clauses, _MacroMap, {ok, HasMacroCall}) ->
+    HasMacroCall;
+function_has_macro_call(Clauses, MacroMap, error) ->
+    has_macro_call(Clauses, MacroMap).
 
 function_clauses_uniplate() ->
     fun({function, Pos, Name, Arity, Clauses}) ->
@@ -240,26 +263,26 @@ reset_macro_return_counter() ->
               State#{macro_return_counter => 1}
       end).
 
-finish_function_expansion(Forms, _State, disabled) ->
+finish_function_expansion(Form, _State, disabled) ->
     astranaut_return:return(
-      #{forms => Forms,
+      #{form => Form,
         local_macro_whitelist => disabled,
         needed_local_macros => ordsets:new()});
-finish_function_expansion(Forms, State, #{mode := collect}) ->
+finish_function_expansion(Form, State, #{mode := collect}) ->
     astranaut_return:return(
-      #{forms => Forms,
+      #{form => Form,
         local_macro_whitelist =>
             maps:get(observed_local_macro_whitelist, State),
         needed_local_macros => maps:get(needed_local_macros, State)});
 finish_function_expansion(
-  Forms, State,
+  Form, State,
   #{mode := verify, form_id := FormId, expected := Expected}) ->
     Observed = maps:get(observed_local_macro_whitelist, State),
     Needed = maps:get(needed_local_macros, State),
     case Needed of
         [_ | _] ->
             astranaut_return:return(
-              #{forms => Forms,
+              #{form => Form,
                 local_macro_whitelist => Observed,
                 needed_local_macros => Needed});
         [] ->
@@ -267,7 +290,7 @@ finish_function_expansion(
             case Missing of
                 [] ->
                     astranaut_return:return(
-                      #{forms => Forms,
+                      #{form => Form,
                         local_macro_whitelist => Observed,
                         needed_local_macros => Needed});
                 _ ->
@@ -519,13 +542,17 @@ expand_macro_with(
       do([ traverse ||
              Node <- astranaut_traverse:update_pos(
                        Pos, Formatter, invoke_macro_function(Macro)),
-             {Node1, ReturnObserved} <-
+             {Node1, ReturnAnalysis} <-
                  process_macro_return(Node, Macro, Opts),
-             Decision <- observe_macro_return(ReturnObserved, Opts),
+             Decision <- observe_macro_return(
+                           maps:get(local_macro_calls, ReturnAnalysis),
+                           Opts),
              format_node(Node1, Macro),
-             case Decision of
-                 expand -> Success(Node1);
-                 skip -> return(Node1)
+             case {Decision,
+                   maps:get(has_macro_call, ReturnAnalysis)} of
+                 {expand, true} -> Success(Node1);
+                 {expand, false} -> return(Node1);
+                 {skip, _HasMacroCall} -> return(Node1)
              end
          ])).
 
@@ -580,32 +607,50 @@ process_macro_return(Return, Macro, Opts) ->
                            Node1 = update_macro_return_node(
                                      Node, RenameContext,
                                      maps:get(pos, Macro)),
-                           collect_return_local_macro(
+                           collect_return_macro_calls(
                              Module, Node1, MacroMap, CollectLocalMacros)
                    end, Return,
                    #{traverse => post,
                      validate => input,
                      attr => Attr,
                      validate_opts => ValidateOpts})),
-           {Return1, ReturnObserved} <-
+           {Return1, ReturnAnalysis} <-
                astranaut_traverse:scoped_state_run(
-                 ordsets:new(),
+                 #{local_macro_calls => ordsets:new(),
+                   has_macro_call => false},
                  astranaut_traverse:fail_on_error(ProcessReturn)),
            commit_macro_return_counter(Opts),
-           return({Return1, ReturnObserved})
+           return({Return1, ReturnAnalysis})
        ]).
 
-collect_return_local_macro(_Module, Node, _MacroMap, false) ->
-    astranaut_traverse:return(Node);
-collect_return_local_macro(Module, Node, MacroMap, true) ->
+collect_return_macro_calls(Module, Node, MacroMap, CollectLocalMacros) ->
     case call_find_macro(Module, Node, MacroMap) of
         {ok, #{macro_source := local_macro,
                function := Function, arity := Arity}} ->
             do([ traverse ||
                    astranaut_traverse:modify(
                      fun(Observed) ->
-                             ordsets:add_element(
-                               {Function, Arity}, Observed)
+                             Observed1 = Observed#{has_macro_call := true},
+                             case CollectLocalMacros of
+                                 true ->
+                                     LocalMacros = ordsets:add_element(
+                                                     {Function, Arity},
+                                                     maps:get(
+                                                       local_macro_calls,
+                                                       Observed1)),
+                                     Observed1#{local_macro_calls :=
+                                                    LocalMacros};
+                                 false ->
+                                     Observed1
+                             end
+                     end),
+                   return(Node)
+               ]);
+        {ok, _Macro} ->
+            do([ traverse ||
+                   astranaut_traverse:modify(
+                     fun(Observed) ->
+                             Observed#{has_macro_call := true}
                      end),
                    return(Node)
                ]);
@@ -679,13 +724,37 @@ macro_exception(
 %%%===================================================================
 
 resolve_attribute_target_by_name(
-  Function, Arguments, Pos, AttributeMacroMap, CallAst) ->
-    case maps:find(Function, AttributeMacroMap) of
-        {ok, MacroMap} ->
-            resolve_macro_target(
-              Function, Arguments, Pos, MacroMap, CallAst);
+  Attribute, Arguments, Pos, AttributeIndex, CallAst) ->
+    case maps:find(Attribute, AttributeIndex) of
         error ->
-            not_macro
+            not_macro;
+        {ok, AttributeMacros} ->
+            RawArguments = to_list(Arguments),
+            case find_attribute_macro(
+                   Attribute, length(RawArguments), AttributeMacros) of
+                {ok, Macro} ->
+                    {ok, #{macro => Macro,
+                           raw_arguments => RawArguments,
+                           pos => Pos,
+                           call_ast => CallAst}};
+                error ->
+                    error
+            end
+    end.
+
+find_attribute_macro(Attribute, Arity, AttributeIndex) ->
+    case maps:find({Attribute, Arity}, AttributeIndex) of
+        {ok, Macro} ->
+            {ok, Macro};
+        error ->
+            case maps:find({Attribute, 1}, AttributeIndex) of
+                {ok, #{group_args := true} = Macro} ->
+                    {ok, Macro};
+                {ok, _Macro} ->
+                    error;
+                error ->
+                    error
+            end
     end.
 
 resolve_macro_target(MacroName, Arguments, Pos, Macros, CallAst) ->
@@ -707,22 +776,6 @@ build_attribute_macro_invocation(
     GroupedArguments = group_arguments(RawArguments, Macro),
     Arguments = append_attrs(GroupedArguments, Macro),
     Macro#{arguments => Arguments}.
-
-attribute_macro_map(MacroMap) ->
-    AttributeMap =
-        maps:fold(
-          fun({_Function, Arity}, #{as_attr := Attr} = Macro, Acc) ->
-                  maps:put({Attr, Arity}, Macro, Acc);
-             (_Key, _Macro, Acc) ->
-                  Acc
-          end, #{}, MacroMap),
-    maps:fold(
-      fun({Name, Arity}, Macro, Acc) ->
-              MacroNameMap = maps:get(Name, Acc, #{}),
-              MacroNameMap1 = maps:put(
-                                {Name, Arity}, Macro, MacroNameMap),
-              maps:put(Name, MacroNameMap1, Acc)
-      end, #{}, AttributeMap).
 
 find_macro_with_arguments(MacroName, Arguments, Pos, Macros, CallAst) ->
     Arguments1 = to_list(Arguments),
@@ -772,23 +825,43 @@ to_list(Arguments) ->
 %%% Caller detection and returned-node normalization
 %%%===================================================================
 
-find_function_macro_callers(Forms, MacroMap) ->
-    case maps:size(MacroMap) of
-        0 ->
-            ordsets:new();
-        _ ->
-            lists:foldl(
-              fun({function, _Pos, Function, Arity, Clauses}, Acc) ->
-                      case has_macro_call(Clauses, MacroMap) of
-                          true ->
+analyze_function_calls(Clauses, MacroMap) ->
+    astranaut:sreduce(
+      fun({call, _Pos, {atom, _FunctionPos, Function}, Arguments} = Node,
+          Analysis) ->
+              analyze_macro_call(
+                Node, MacroMap,
+                Analysis#{local_calls :=
                               ordsets:add_element(
-                                {function, Function, Arity}, Acc);
-                          false ->
-                              Acc
-                      end;
-                 (_Form, Acc) ->
-                      Acc
-              end, ordsets:new(), Forms)
+                                {Function, length(Arguments)},
+                                maps:get(local_calls, Analysis))});
+         ({call, _Pos,
+           {remote, _RemotePos,
+            {atom, _ModulePos, _Module},
+            {atom, _FunctionPos, _Function}}, _Arguments} = Node,
+          Analysis) ->
+              analyze_macro_call(Node, MacroMap, Analysis);
+         (_Node, Analysis) ->
+              Analysis
+      end,
+      #{local_calls => ordsets:new(),
+        local_macro_calls => ordsets:new(),
+        has_macro_call => false},
+      Clauses, #{traverse => pre}).
+
+analyze_macro_call(Node, MacroMap, Analysis) ->
+    case call_find_macro(uniform, Node, MacroMap) of
+        {ok, #{macro_source := local_macro,
+               function := Function, arity := Arity}} ->
+            Analysis#{local_macro_calls :=
+                          ordsets:add_element(
+                            {Function, Arity},
+                            maps:get(local_macro_calls, Analysis)),
+                      has_macro_call := true};
+        {ok, _Macro} ->
+            Analysis#{has_macro_call := true};
+        error ->
+            Analysis
     end.
 
 has_macro_call(Nodes, MacroMap) ->

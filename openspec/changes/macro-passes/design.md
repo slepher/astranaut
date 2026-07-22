@@ -30,6 +30,7 @@ ExpandFunctions(Forms, #{FormId => #{
 }})
   -> #{forms := ExpandedForms,
        task_results := #{FormId => #{
+         form := ExpandedTargetForm,
          local_macro_whitelist := disabled | ordsets:ordset(FA),
          needed_local_macros := ordsets:ordset(FA)
        }}}
@@ -48,6 +49,18 @@ attribute 与 function 路径不会各自维护一份 `find_macro` 或返回 AST
 只读取 descriptor 中的 `attributes`。expander 不拥有扫描队列、宏环境更新或 local
 generation 生命周期，也不存在单函数兼容门面。
 
+function 调用闭包构造与宏 caller 检测共享 `FunctionCallAnalysis`。closure walk 在首次
+访问某个可达 function 时，用对应 declaration MacroEnv 的同一次 AST traversal 同时
+收集普通本地调用边、匹配到的 local macro FAs 和任意宏 presence；同一 declaration
+的多个 roots 复用该结果。final caller 筛选必须查看全部 functions，因此使用 FinalMacroEnv
+生成一次完整 analysis。analysis 携带原始 form，只有 form 一致且分析环境是实际展开环境
+的相同或安全超集时，expansion task 才能把 presence 当作可信提示；否则回退到现场检查。
+
+普通 attribute 使用随 `EffectiveMacroMap` 增量重建的 `AttributeMacroIndex`，先按
+attribute name/arity 直接定位 descriptor，再只为该 descriptor 解析 `inject_attrs`。
+declaration 与 final function 是批量展开边界，可能命中 macro map 中的任意 descriptor，
+因此只在这两个边界统一解析完整 map；扫描普通 form 不遍历或解析 macro map。
+
 原始 function 的白名单观察位于统一发现—执行路径；macro 返回 AST 则复用 `process_macro_return` 已有的完整返回树 traversal，一次性收集后再交回调用方：
 
 ```text
@@ -59,16 +72,23 @@ Original function match
 process_macro_return(Return)
   -> normalize/update every returned node
   -> collect all local macro FAs in this Return AST
-  -> return {ProcessedNode, ReturnObserved}
+  -> record whether any macro call exists in this Return AST
+  -> return {ProcessedNode, ReturnAnalysis}
 
 expand_macro_with
   -> merge ReturnObserved into function-level Observed
   -> verify the completed ReturnObserved batch
   -> unexpected batch: emit one conflict and do not expand this replacement
-  -> accepted batch: continue through the existing replacement expansion path
+  -> accepted batch with macro presence: continue replacement expansion
+  -> accepted batch without macro presence: return the processed AST directly
 ```
 
-`process_macro_return` 只收集，不校验也不调用 replacement 中的宏。它以 `scoped_state_run` 使用局部 ordset state，并返回常规 `{Node, State}` 结果；调用方再把该 state 合并到 function-level accumulator 并执行批量校验。被接受的宏返回 AST 随后沿既有 pre/post 递归路径进入 `transform_exprs`。不得为 whitelist 增加第二次 return-tree scanner、whole-form rescan 或 expanded/original AST diff。宏私有 State 与返回树收集 State 均不得覆盖 function expansion 的外层 State。
+`process_macro_return` 只收集，不校验也不调用 replacement 中的宏。它以
+`scoped_state_run` 使用局部 analysis map state，同时携带 `local_macro_calls` 与
+`has_macro_call`；调用方合并 local FAs 并执行批量校验。只有被接受且确实含宏的返回
+AST 才沿既有 pre/post 路径进入 `transform_exprs`。不得增加第二次 return-tree scanner、
+whole-form rescan 或 expanded/original AST diff。宏私有 State 与返回树分析 State 均不得
+覆盖 function expansion 的外层 State。
 
 展开操作返回 `astranaut_return` 结果。whitelist/result 必须通过该单一返回形状交回调用方，不得使用 callback、process dictionary 或另一份隐式 traverse state。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
 

@@ -188,12 +188,12 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 ### 文档与契约
 
 - [x] 规定 `process_macro_return` 在既有规范化 traversal 中只收集当前 Return AST 的 local macro FAs，不校验、不展开。
-- [x] 规定返回形状为 `{ProcessedNode, ReturnObserved}`，其中 ReturnObserved 是 scoped traversal state。
+- [x] 规定返回形状为 `{ProcessedNode, ReturnAnalysis}`，其中 analysis map 是 scoped traversal state。
 - [x] 规定调用方合并并批量校验 ReturnObserved；missing 仍只在完整 function expansion 后检查。
 
 ### 实现
 
-- [x] 让 `process_macro_return` 通过 `scoped_state_run` 返回 `{Node, ReturnObserved}`。
+- [x] 让 `process_macro_return` 通过 `scoped_state_run` 返回 `{Node, ReturnAnalysis}`。
 - [x] 在 `expand_macro_with` 中合并 ReturnObserved，并对同一返回 AST 的 unexpected FAs 只生成一个错误。
 - [x] 冲突批次不得进入 replacement 递归展开；accepted replacement 继续使用原有 pre/post 展开路径。
 - [x] 修正逐个发现逻辑，使既已收集的 FA 不重复写入，并且 earlier unexpected 不会阻止 later expected macro。
@@ -204,6 +204,15 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] `process_macro_return` 收集阶段不调用任何 replacement macro。
 - [x] accepted replacement、动态 NeedCallable、missing 和 final whitelist 过滤场景继续通过。
 - [x] 完整 Common Test suite 与 OpenSpec strict validation 通过。
+
+## Function/Return 宏 presence 复用优化
+
+- [x] closure walk 的单次 per-function traversal 同时收集本地调用边、local macro FAs 与任意 macro presence。
+- [x] 同一 declaration 的多个 roots 复用已分析的 closure functions，不预扫完整 SourceView。
+- [x] final caller 筛选把同一次全量 analysis 传给 expansion task，消除可信场景下的重复 `has_macro_call` traversal。
+- [x] `process_macro_return` 在规范化 traversal 中同时记录 `has_macro_call`，无宏 replacement 不再进入递归 `transform_exprs`。
+- [x] form 或环境不能安全复用 analysis 时保留现场预检查回退。
+- [x] 增加静态 function analysis 与 external replacement 递归展开测试。
 
 ## 最终审核落实
 
@@ -216,3 +225,8 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 为 declaration、attribute call 与 final function context 使用阶段化构造函数命名。
 - [x] 用命名 map type 明确 attribute scanner state 的必需字段。
 - [x] 同步 retain 双重身份、间接闭包引用限制和无效 retain warning 的中英文文档与测试。
+- [x] 为 ordinary attribute 建立增量 name/arity 索引，只解析已选中宏的 `inject_attrs`。
+- [x] 将完整 macro map 解析限制在 declaration 与 final function 两个批量边界。
+- [x] 将单 function task 结果收紧为 `form`，删除 local 缓存前的完整 forms 回扫。
+- [x] 删除 final function environment 的重复字段和单行环境转发函数。
+- [x] 用真实 expander 覆盖 retained function 的最终环境结果冲突。

@@ -12,6 +12,7 @@ all() -> [register_freezes_static_closure,
           cache_rejects_conflicting_whitelists,
           cache_reuses_environment_after_intervening_context,
           cache_hits_same_fingerprint,
+          final_retained_function_rejects_changed_real_expansion,
           retain_controls_final_skip_ids,
           source_view_only_contains_materialised_forms,
           declaration_environment_snapshot_is_resolved,
@@ -24,7 +25,9 @@ all() -> [register_freezes_static_closure,
           minimal_cumulative_compile_boundaries,
           shared_declaration_stays_in_one_boundary,
           same_declaration_members_share_order_and_context,
+          function_call_analysis_combines_closure_and_macro_presence,
           shared_expander_uses_each_task_environment_in_one_pass,
+          shared_expander_follows_external_replacement_presence,
           shared_expander_collects_recursive_replacement_whitelist,
           shared_expander_rejects_unexpected_whitelist_immediately,
           shared_expander_batches_return_whitelist_conflicts,
@@ -106,6 +109,29 @@ cache_reuses_environment_after_intervening_context(_Config) ->
     ?assertEqual(Form, maps:get(canonical_result, Record)),
     ok.
 
+final_retained_function_rejects_changed_real_expansion(_Config) ->
+    SourceForm = task_macro_form(foo, retained_conflict_macro),
+    FormId = {function, foo, 0},
+    {ok, State0} = astranaut_macro_local:register(
+                     [{foo, 0}], #{}, [SourceForm],
+                     macro_environment(#{}),
+                     astranaut_macro_local:new()),
+    {ok, State1} = astranaut_macro_local:cache_expanded(
+                     FormId, declaration_environment, [],
+                     foo_form(declaration_value), State0),
+    {_LocalEnv, _SkipIds, State2} =
+        astranaut_macro_local:finalize([{foo, 0}], State1),
+    MacroMap = #{{retained_conflict_macro, 0} =>
+                     external_macro(retained_conflict_macro)},
+    Error = astranaut_return:run_error(
+              astranaut_macro_local:expand_final_functions(
+                [SourceForm], [{foo, 0}], macro_environment(MacroMap),
+                State2)),
+    ?assertEqual(
+       [{conflicting_local_macro_closure_environment, FormId}],
+       astranaut_error:errors(Error)),
+    ok.
+
 retain_controls_final_skip_ids(_Config) ->
     [Foo, Helper, Spec] = forms(),
     {ok, State0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{},
@@ -143,6 +169,7 @@ declaration_environment_snapshot_is_resolved(_Config) ->
     [Request] = maps:get(requests, Boundary),
     ?assertEqual(
        lists:sort([closure_ids, closure_fas, candidate_local_macros,
+                   function_call_analysis,
                    internal_macro_bindings, referenced_local_macros,
                    macro_environment_snapshot,
                    source_view, forms]),
@@ -195,6 +222,9 @@ declaration_snapshot_and_actual_local_references(_Config) ->
     ?assert(maps:is_key({unused, 0}, BMacroMap)),
     ?assertNot(maps:is_key({b, 0}, BMacroMap)),
     ?assertEqual([{a, 0}], maps:get(referenced_local_macros, B)),
+    ?assertEqual(
+       [{function, a, 0}, {function, b, 0}],
+       lists:sort(maps:keys(maps:get(function_call_analysis, B)))),
     ok.
 
 extra_functions_and_self_recursion(_Config) ->
@@ -274,6 +304,32 @@ same_declaration_members_share_order_and_context(_Config) ->
     ?assertEqual(2, length(maps:get(requests, Plan))),
     ok.
 
+function_call_analysis_combines_closure_and_macro_presence(_Config) ->
+    Form = function_call_analysis_form(),
+    MacroMap =
+        #{{whitelist_chain_a, 0} =>
+              whitelist_macro(whitelist_chain_a),
+          {{analysis_remote, whitelist_chain_b}, 0} =>
+              external_macro(whitelist_chain_b)},
+    Analysis = astranaut_macro_expander:function_call_analysis(
+                 [Form, helper_form(ok)], MacroMap),
+    FormId = {function, analysis_target, 0},
+    ?assertMatch(
+       #{form := Form,
+         local_calls := [{helper, 0}, {whitelist_chain_a, 0}],
+         local_macro_calls := [{whitelist_chain_a, 0}],
+         has_macro_call := true},
+       maps:get(FormId, Analysis)),
+    ?assertEqual([FormId],
+                 astranaut_macro_expander:function_macro_callers(
+                   Analysis)),
+    ?assertMatch(
+       #{local_calls := [],
+         local_macro_calls := [],
+         has_macro_call := false},
+       maps:get({function, helper, 0}, Analysis)),
+    ok.
+
 shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
     FormA = task_macro_form(task_a, whitelist_chain_a),
     FormB = task_macro_form(task_b, whitelist_chain_b),
@@ -310,6 +366,25 @@ shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
     ?assertMatch(
        #{local_macro_whitelist := disabled},
        maps:get({function, task_b, 0}, Results)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
+    ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
+    ok.
+
+shared_expander_follows_external_replacement_presence(_Config) ->
+    MacroMap = maps:map(
+                 fun(_Key, Macro) ->
+                         Macro#{macro_source => external_macro}
+                 end, whitelist_macro_map()),
+    reset_whitelist_macro_counts(),
+    {just, #{forms := Forms, local_macro_whitelist := disabled}} =
+        astranaut_return:run(
+          expand_single_function(
+            MacroMap, [whitelist_target_form()],
+            {whitelist_target, 0}, disabled)),
+    ?assertMatch(
+       [{function, _, whitelist_target, 0,
+         [{clause, _, [], [], [{atom, _, whitelist_done}]}]}],
+       Forms),
     ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
@@ -653,6 +728,12 @@ whitelist_macro(Function) ->
       file => [],
       local_module => ?MODULE}.
 
+external_macro(Function) ->
+    (whitelist_macro(Function))#{macro_source => external_macro}.
+
+retained_conflict_macro() ->
+    {atom, 1, final_value}.
+
 whitelist_target_form() ->
     {function, 1, whitelist_target, 0,
      [{clause, 1, [], [],
@@ -662,6 +743,16 @@ task_macro_form(Name, MacroName) ->
     {function, 1, Name, 0,
      [{clause, 1, [], [],
        [{call, 1, {atom, 1, MacroName}, []}]}]}.
+
+function_call_analysis_form() ->
+    {function, 1, analysis_target, 0,
+     [{clause, 1, [], [],
+       [{call, 1, {atom, 1, helper}, []},
+        {call, 2, {atom, 2, whitelist_chain_a}, []},
+        {call, 3,
+         {remote, 3,
+          {atom, 3, analysis_remote},
+          {atom, 3, whitelist_chain_b}}, []}]}]}.
 
 whitelist_immediate_target_form() ->
     {function, 1, whitelist_target, 0,

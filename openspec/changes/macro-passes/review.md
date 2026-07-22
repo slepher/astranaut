@@ -20,8 +20,8 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | splice 结果在当前位置立即重扫 | `astranaut_macro:map_forms_splice/3` | 已实现 |
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
-| attribute runtime 先解析、确保可调用，再统一构造与执行 | `astranaut_macro_expander:resolve_attribute_target/2`, `ensure_attribute_target_callable/2`, `expand_attribute_target/2` | 已实现 |
-| attribute injection 使用调用点 AttributeEnv | `attribute_call_macro_environment/1`, `resolve_macro_environment/2` | 已实现；expander 只接收已解析 attributes |
+| attribute runtime 定位、解析、确保可调用，再统一构造与执行 | `attribute_macro_index/1`, `resolve_attribute_target/3`, `ensure_attribute_target_callable/2`, `expand_attribute_target/1` | 已实现；ordinary attribute 不遍历完整 macro map |
+| attribute injection 使用调用点 AttributeEnv | `resolve_attribute_target_environment/2`, `resolve_macro_attributes/2` | 已实现；只解析已选中 descriptor，expander 只接收已解析 attributes |
 | local macro forms 使用 declaration-time environment | `macro_environment_snapshot`, `prepare_declaration/3`, `prepare_requests/3` | 已实现 |
 | declaration 预展开不强制编译 | `prepare_declaration/3`, `need_callable/3` | 已实现；仅真实 local 依赖产生中间代次 |
 | generation 按累计 members 去重 | `generation_boundary_key/1`, `committed_boundaries` | 已实现；未新增 local macro 不重新编译 |
@@ -59,6 +59,18 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 
 attribute 调用始终使用调用点的 `effective_macro_map` 和增量 `AttributeEnv`；final function 则从 attribute pass 的完整输出构造一次最终环境。控制流先完成环境解析和目标解析，只有选中且未就绪的 local 目标才执行 availability prerequisite；随后 external/local 都回到同一个 invocation 构造和执行路径。expander 不再接收 forms 或解释 `inject_attrs`。
 
+## 2026-07-20 最小实现复核与重构结果
+
+- `EffectiveMacroMap` 更新时同步建立 `AttributeMacroIndex`。ordinary attribute 按
+  name/arity 直接定位宏，只有选中后才从当前 `AttributeEnv` 解析它的 `inject_attrs`；
+  非 attribute form 不进入 attribute resolver。
+- 完整 macro map 解析只保留在 declaration 与 final function 两个批量边界。它们的
+  target 集合可能覆盖整个 map，统一解析一次比逐 function 重复解析更直接。
+- function task 的单目标结果收紧为 `form`，local declaration 缓存直接消费该结果，
+  不再把完整 expanded source 附回 task、重建 FormId map 并再次搜索目标 function。
+- final function environment 删除重复的 `module`、raw `macro_map` 字段及单行转发函数；
+  retained 环境冲突由真实 expander + canonical cache 路径覆盖。
+
 ## 对初次 review 的处理
 
 初次 review 中列出的 `FinalLocalEnv` 未接入、重复注册、忽略累计计划、未调用 retained 校验及缺少 function 延后测试，均已由后续 local-macro 重构和测试解决。历史问题不再作为当前待办保留。
@@ -68,7 +80,7 @@ attribute 调用始终使用调用点的 `effective_macro_map` 和增量 `Attrib
 - `openspec validate macro-passes --strict`：通过。
 - `openspec validate local-macro --strict`：通过；本轮已将旧规格标题转换为标准 delta 结构。
 - `git diff --check`：通过。
-- `rebar3 ct`：351/351 通过（2026-07-20 环境预解析与批量展开清理后）。
+- `rebar3 ct`：352/352 通过（2026-07-20 attribute 索引、环境解析与批量结果清理后）。
 
 ## 2026-07-13 最终 MacroEnvironment 层级实现
 

@@ -49,7 +49,7 @@ source-ordered scan、环境更新、splice、final context 及诊断入口；
 
 | 最终契约 | 当前实现证据 | 对比结论 |
 |---|---|---|
-| 统一 attribute runtime | `astranaut_macro_expander:resolve_attribute_target/2`、`need_callable/3`、`expand_attribute_target/1` | 已实现；local 只增加通用可调用性前置条件。 |
+| 统一 attribute runtime | `attribute_macro_index/1`、`resolve_attribute_target/3`、`need_callable/3`、`expand_attribute_target/1` | 已实现；ordinary attribute 直接索引目标，local 只增加通用可调用性前置条件。 |
 | local 调用白名单 | `astranaut_macro_expander:expand_functions/2`、`process_macro_return/3`、`canonical_whitelist` | 已实现；原始 AST 观察真实 match，返回 AST 一次性收集并批量 verify，final 按 canonical whitelist 过滤。 |
 | declaration 时尽可能预展开 | `prepare_declaration/3` | 已实现；无真实 local 依赖时只预展开、不编译。 |
 | 环境只控制展开与一致性 | `prepare_requests/3`、`expansion_records` | 已实现；环境 fingerprint 不参与 generation 身份。 |
@@ -71,6 +71,7 @@ Module Macro Pipeline
 │  │  ├─ LocalMacroState
 │  │  ├─ PassedForms
 │  │  ├─ AttributeEnv
+│  │  ├─ AttributeMacroIndex
 │  │  └─ Queue
 │  ├─ 1.2 Forward Scan
 │  │  ├─ import_macro / use_macro / macro_options
@@ -86,8 +87,8 @@ Module Macro Pipeline
 │  │  │     ├─ verify against canonical whitelist on later contexts
 │  │  │     └─ NeedCallable(dependency) when a matched local macro is unavailable
 │  │  ├─ generic attribute macro runtime (external / local)
-│  │  │  ├─ Resolve CallSiteMacroEnvironment from current AttributeEnv
-│  │  │  ├─ Resolve target
+│  │  │  ├─ Resolve target directly from AttributeMacroIndex / explicit key
+│  │  │  ├─ Resolve only the selected descriptor from current AttributeEnv
 │  │  │  ├─ NeedCallable(target) only when selected local target is unavailable
 │  │  │  ├─ Build invocation from the same call-site context
 │  │  │  └─ Invoke / validate / splice
@@ -103,8 +104,9 @@ Module Macro Pipeline
 │  ├─ ExpansionValidator
 │  │  ├─ Start every expansion from Original/FrozenForm
 │  │  ├─ Explicit WhitelistControl: disabled / collect / verify
+│  │  ├─ Reuse per-function call/presence analysis from closure or caller selection
 │  │  ├─ Observe original matches at match-before-invoke
-│  │  ├─ Collect each Return AST once in process_macro_return
+│  │  ├─ Collect local FAs + macro presence once in process_macro_return
 │  │  ├─ Merge and batch-verify ReturnObserved before replacement expansion
 │  │  ├─ Same InputFingerprint -> reuse whitelist + result
 │  │  ├─ Different InputFingerprint -> verify whitelist, then compare AST
@@ -124,14 +126,15 @@ Module Macro Pipeline
    ├─ Expand all targets in one Forms pass, each with its own environment/control
    ├─ Compare against its last local-macro expansion result when one exists
    ├─ Materialize the accepted canonical result
-   └─ Sort only at the established compiler boundary
+   └─ Preserve the order established by the attribute-pass boundary
 ```
 
 ## 4. 预解析 MacroEnvironment
 
-扫描器维护增量 `AttributeEnv`，并在 declaration、attribute 调用和 final function
-三个边界把宏定义中的原始 `inject_attrs` selector 解析为不可变的 `attributes` map。
-展开器只接收解析后的环境：
+扫描器维护增量 `AttributeEnv`。declaration 与 final function 是会批量使用任意宏的
+边界，因此各解析一次完整 macro map；ordinary attribute 先通过增量维护的
+`AttributeMacroIndex` 定位单个 descriptor，再只解析该 descriptor 的 `inject_attrs`。
+展开器只接收解析后的 descriptor/map：
 
 ```text
 MacroEnvironment = {
@@ -197,7 +200,7 @@ LocalMacroEntry = {
 DeclarationMacroEnv = PreDeclarationEffectiveMacroMap
 ```
 
-首次预展开把 declaration 前可匹配的 local entries 作为 `CandidateLocalEnv`，并传 `collect(FormId)`。原始 AST 在 `match_macro_call` 成功后观察实际 local FA；每个 macro 返回 AST 则由 `process_macro_return` 在既有规范化 traversal 中一次性收集 local macro presence，并以 `{ProcessedNode, ReturnObserved}` 返回。调用方把各批结果合并到 function-level accumulator。成功结果成为该 FormId 的 `canonical_whitelist`。因此 `bar/1` 中对 `foo/1` 的直接调用仍是普通 Erlang 本地调用和闭包边，因为 declaration 前 CandidateLocalEnv 尚不包含本次 members；反向同理。
+首次预展开把 declaration 前可匹配的 local entries 作为 `CandidateLocalEnv`，并传 `collect(FormId)`。原始 AST 在 `match_macro_call` 成功后观察实际 local FA；每个 macro 返回 AST 则由 `process_macro_return` 在既有规范化 traversal 中一次性收集 local macro FAs 与总体 macro presence，并以 `{ProcessedNode, ReturnAnalysis}` 返回。调用方把 `local_macro_calls` 批次合并到 function-level accumulator。成功结果成为该 FormId 的 `canonical_whitelist`。因此 `bar/1` 中对 `foo/1` 的直接调用仍是普通 Erlang 本地调用和闭包边，因为 declaration 前 CandidateLocalEnv 尚不包含本次 members；反向同理。
 
 后续 declaration environment 使用 `verify(Expected)` 和当前 CandidateLocalEnv。每个 Return AST 完成收集后，调用方批量拒绝名单外 presence；同一返回 AST 的所有 unexpected FAs 只产生一个汇总错误，并且该 replacement 不进入递归展开。完整 function expansion 结束后再检查缺失项。final retained local closure 先以 canonical whitelist 过滤 FinalLocalEnv，再传 `verify(Expected)`；名单外同声明或后声明调用不匹配为 local macro，保持普通调用。final 的 external macros、options 和已解析 attributes 取 FinalMacroEnvironment。
 
@@ -242,7 +245,9 @@ expand_and_validate(FormId, OriginalForm, MacroEnvironment, WhitelistControl):
 
 禁止在已经展开的 AST 上继续展开。local declaration、retain 和 Step 2 function 都必须从同一个 original/frozen form 开始。
 
-原始 AST 的白名单观察接在共享的 macro match-before-invoke 点。`process_macro_return` 在规范化返回树、位置和变量的同一次 traversal 中收集该 Return AST 的 local FAs，但不校验或展开，并通过 `scoped_state_run` 返回 `{Node, ReturnObserved}`。调用方合并与批量校验后，accepted replacement 才进入原有 pre/post 递归路径。不得增加第二次 return-tree scan 或 whole-form rescan。
+原始 function 的调用闭包分析在同一次 per-function traversal 中收集普通本地调用边、local macro FAs 和任意 macro presence；同一 declaration 的多个 roots 复用已访问 function 的结果。final caller 选择产生的完整 analysis 直接传给 expansion task，可信提示存在时不再执行独立 `has_macro_call` 预检查。
+
+原始 AST 的白名单观察接在共享的 macro match-before-invoke 点。`process_macro_return` 在规范化返回树、位置和变量的同一次 traversal 中收集该 Return AST 的 local FAs 与任意 macro presence，但不校验或展开，并通过 `scoped_state_run` 返回 `{Node, ReturnAnalysis}`。调用方合并与批量校验后，只有确实含宏的 accepted replacement 才进入原有 pre/post 递归路径；无宏 replacement 直接返回。不得增加第二次 return-tree scan 或 whole-form rescan。
 
 ### 6.3 预展开
 
@@ -426,7 +431,7 @@ Compile/load failure
 
 - 将 request-specific expansion 与 `compile_boundary` 分离，由 `execute_plan` 仅按“准备后编译”顺序协调。
 - 实现显式 `LocalMacroWhitelistControl`、带 whitelist/result 的 `ExpansionRecord` 和 `expand_and_validate`。
-- 原始 AST 在共享 macro 发现—执行点观察；`process_macro_return` 返回 `{Node, ReturnObserved}`，调用方批量合并/校验后再展开 accepted replacement。
+- 原始 AST 在共享 macro 发现—执行点观察；`process_macro_return` 返回 `{Node, ReturnAnalysis}`，调用方批量合并/校验 `local_macro_calls`，并只递归遍历 `has_macro_call` 为 true 的 accepted replacement。
 - GenerationCompiler 只消费 canonical expanded forms。
 
 状态：已实现。

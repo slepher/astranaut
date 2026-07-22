@@ -65,7 +65,7 @@
 
 ### Requirement: 宏返回 AST 在 process_macro_return 中批量收集
 
-启用白名单时，原始 function 的 local macro FA MUST 在 `match_macro_call` 成功后观察。每个 macro 返回 AST 的 local macro FAs MUST 由 `process_macro_return` 在既有规范化 traversal 中一次性收集；该函数 MUST 返回 `{ProcessedNode, ReturnObserved}`，且收集过程中 MUST NOT 校验 whitelist 或执行 replacement 中的 macro。调用方 MUST 在函数返回后合并并校验该批结果。系统 MUST NOT 为白名单增加第二次 return-tree traversal、完整 function 重扫或 expanded/original AST diff。
+启用白名单时，原始 function 的 local macro FA MUST 在 `match_macro_call` 成功后观察。每个 macro 返回 AST 的 local macro FAs 与任意 macro presence MUST 由 `process_macro_return` 在既有规范化 traversal 中一次性收集；该函数 MUST 返回 `{ProcessedNode, ReturnAnalysis}`，且收集过程中 MUST NOT 校验 whitelist 或执行 replacement 中的 macro。调用方 MUST 在函数返回后合并并校验 local FA 批次；accepted replacement 只有在 `has_macro_call` 为 true 时才进入递归 macro traversal。系统 MUST NOT 为白名单或 presence 增加第二次 return-tree traversal、完整 function 重扫或 expanded/original AST diff。
 
 #### Scenario: 宏返回值生成新的 local macro 调用
 
@@ -76,6 +76,13 @@
 - **并且** `process_macro_return` 返回后，调用方将该批结果合并到当前 FormId 的 observed whitelist
 - **并且** 批量校验通过后 B 才由原有递归路径展开
 - **并且** original function 的其他节点和已处理 siblings 不被重扫
+
+#### Scenario: 无宏 replacement 跳过递归预检查
+
+- **给定** macro A 的 replacement AST 不包含当前 MacroEnv 可匹配的宏调用
+- **当** `process_macro_return` 完成规范化与 presence 收集
+- **那么** `has_macro_call` 为 false
+- **并且** accepted replacement 直接返回，不再执行一次 `transform_exprs` 预检查 traversal
 
 #### Scenario: 多层 replacement 继承同一控制参数
 
@@ -93,6 +100,24 @@
 - **那么** 展开器返回 B 的 callable 调度请求且不调用 B
 - **并且** local-macro workflow 通过 `need_callable` 编译所需 boundary
 - **并且** 系统从 frozen form 重试并在成功后才提交 whitelist 与 expanded form
+
+### Requirement: function 闭包分析复用宏 presence
+
+系统 MUST 在构造 function 调用闭包的同一次 per-function traversal 中，同时收集普通本地调用边、local macro FAs 与任意 macro presence。同一 declaration 的多个 closure roots MUST 复用已分析 function 的结果。final function caller 筛选 MUST 将同一次全量 analysis 结果传入 expansion task，且可信 presence 存在时 MUST NOT 再调用独立的 `has_macro_call` 预检查。宏 presence MUST 按对应的有效 MacroEnv 判断；form 或环境不满足安全复用条件时 MUST 回退到现场检查。
+
+#### Scenario: closure walk 同时分析 function calls
+
+- **给定** 两个 local macro roots 的调用闭包共享 helper function H
+- **当** declaration 使用对应 MacroEnv 构造两个 closures
+- **那么** H 的 AST 只分析一次
+- **并且** 该结果同时提供本地调用边、local macro FAs 与 `has_macro_call`
+
+#### Scenario: final caller analysis 直接供 expansion task 使用
+
+- **给定** final function caller 筛选已用 FinalMacroEnv 分析全部 functions
+- **当** 系统为未变化的原始 function 建立 expansion task
+- **那么** task 复用该 function 的 `has_macro_call`
+- **并且** expander 不再运行独立的 `has_macro_call` traversal
 
 ### Requirement: 白名单不匹配必须独立报告
 

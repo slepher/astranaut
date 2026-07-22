@@ -102,6 +102,7 @@
           scan_local_declarations := #{term() => {term(), [fa()]}},
           macro_map := macro_map(),
           effective_macro_map := macro_map(),
+          attribute_macro_index := map(),
           attribute_env := attribute_env(),
           attribute_expansion =>
               #{count := non_neg_integer(),
@@ -234,6 +235,7 @@ scan_attribute_forms(Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
                   scan_local_declarations => #{},
                   macro_map => #{},
                   effective_macro_map => #{},
+                  attribute_macro_index => #{},
                   attribute_env => new_attribute_env(Module, File)},
     astranaut_traverse:run(
       map_forms_splice(fun scan_form/1, Forms,
@@ -538,9 +540,13 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
            %% helpers intentionally remain subject to Erlang unused warnings.
            astranaut_traverse:put(
              note_passed_form(
-               Form, State#{local_macro_state => LocalState1,
-                            effective_macro_map => EffectiveMacroMap1,
-                            scan_local_declarations => maps:put(Form, {Pos, FAs}, ScanLocalDeclarations)})),
+               Form,
+               set_effective_macro_map(
+                 EffectiveMacroMap1,
+                 State#{local_macro_state => LocalState1,
+                        scan_local_declarations =>
+                            maps:put(Form, {Pos, FAs},
+                                     ScanLocalDeclarations)}))),
            return(Form)
        ]).
 
@@ -584,9 +590,11 @@ scan_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
                 {{ok, Merged}, {ok, EffectiveMerged}} ->
                     ModuleMacroMaps = maps:merge(maps:get(module_macro_maps, State, #{}), Effective),
                     do([ traverse ||
-                           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps,
-                                                         macro_map => Merged,
-                                                         effective_macro_map => EffectiveMerged}),
+                           astranaut_traverse:put(
+                             set_effective_macro_map(
+                               EffectiveMerged,
+                               State#{module_macro_maps => ModuleMacroMaps,
+                                      macro_map => Merged})),
                            return({splice, []})
                        ]);
                 {{error, Reason}, _} ->
@@ -624,9 +632,11 @@ scan_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
                                         M1 = maps:get(M, Acc, #{}),
                                         maps:put(M, maps:merge(M1, Macros), Acc)
                                 end, ModuleMacroMaps0, UsedMacros),
-           astranaut_traverse:put(State#{module_macro_maps => ModuleMacroMaps1,
-                                         macro_map => Merged,
-                                         effective_macro_map => EffectiveMerged}),
+           astranaut_traverse:put(
+             set_effective_macro_map(
+               EffectiveMerged,
+               State#{module_macro_maps => ModuleMacroMaps1,
+                      macro_map => Merged})),
            return({splice, []})
        ]);
 scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
@@ -638,11 +648,16 @@ scan_env_form({attribute, _Pos, macro_options, Attr} = Form, State) ->
                                     Form, State#{global_macro_opts => maps:merge(GlobalMacroOpts, MacroOpts)})),
            return(Form)
        ]).
-scan_attribute_runtime(Form, State) ->
-    MacroEnvironment = attribute_call_macro_environment(State),
+scan_attribute_runtime(
+  {attribute, _Pos, _Name, _Value} = Form,
+  #{effective_macro_map := MacroMap,
+    attribute_macro_index := AttributeIndex,
+    attribute_env := AttributeEnv} = State) ->
     case astranaut_macro_expander:resolve_attribute_target(
-           Form, maps:get(macro_map, MacroEnvironment)) of
-        {ok, Target} ->
+           Form, MacroMap, AttributeIndex) of
+        {ok, Target0} ->
+            Target = resolve_attribute_target_environment(
+                       Target0, AttributeEnv),
             run_attribute_macro(Target, State);
         error ->
             %% `error' means this is syntactically a macro invocation (an
@@ -656,12 +671,18 @@ scan_attribute_runtime(Form, State) ->
                ]);
         not_macro ->
             keep_scanned_form(Form)
-    end.
+    end;
+scan_attribute_runtime(Form, _State) ->
+    keep_scanned_form(Form).
 
-attribute_call_macro_environment(#{effective_macro_map := MacroMap} = State) ->
-    macro_environment(
-      resolve_macro_environment(MacroMap, maps:get(attribute_env, State)),
-      maps:get(global_macro_opts, State)).
+resolve_attribute_target_environment(
+  #{macro := Macro} = Target, AttributeEnv) ->
+    Target#{macro => resolve_macro_attributes(Macro, AttributeEnv)}.
+
+set_effective_macro_map(MacroMap, State) ->
+    State#{effective_macro_map => MacroMap,
+           attribute_macro_index =>
+               astranaut_macro_expander:attribute_macro_index(MacroMap)}.
 
 -spec macro_environment(macro_map(), map()) -> macro_environment().
 macro_environment(MacroMap, MacroOptions) ->
@@ -1337,9 +1358,12 @@ finalize_attribute_forms(
                                      FinalMacroMap,
                                      attribute_env_from_forms(
                                        Module, File, Forms2)),
+           FunctionCallAnalysis =
+               astranaut_macro_expander:function_call_analysis(
+                 Forms2, ResolvedFinalMacroMap),
            DetectedMacroCallers =
                astranaut_macro_expander:function_macro_callers(
-                 Forms2, ResolvedFinalMacroMap),
+                 FunctionCallAnalysis),
            RetainedFunctionIds = ordsets:from_list(
                                    [Id || Id = {function, _, _} <-
                                       astranaut_macro_local:retained_form_ids(
@@ -1348,12 +1372,12 @@ finalize_attribute_forms(
                                  DetectedMacroCallers, RetainedFunctionIds),
            FinalSkipFunctionIds = ordsets:from_list([{function, Name, Arity}
                                                       || {function, Name, Arity} <- FinalSkipIds]),
-           FunctionEnv = #{module => Module,
-                           macro_map => ResolvedFinalMacroMap,
-                           macro_environment => final_function_macro_environment(
-                                                  ResolvedFinalMacroMap,
-                                                  GlobalMacroOpts),
+           FunctionEnv = #{macro_environment =>
+                               macro_environment(
+                                 ResolvedFinalMacroMap,
+                                 GlobalMacroOpts),
                            local_macro_state => FinalLocalState,
+                           function_call_analysis => FunctionCallAnalysis,
                            callers => ordsets:subtract(FinalMacroCallers, FinalSkipFunctionIds)},
            return({Forms2, FunctionEnv})
        ]).
@@ -1363,13 +1387,16 @@ finalize_attribute_forms(
 run_function_macro_pass(
   Forms, #{macro_environment := MacroEnvironment,
            local_macro_state := LocalMacroState,
+           function_call_analysis := FunctionCallAnalysis,
            callers := Callers}) ->
     do([ return ||
            {ExpandedForms, _FinalState} <-
                astranaut_macro_local:expand_final_functions(
                  Forms,
                  [{Name, Arity} || {function, Name, Arity} <- Callers],
-                 MacroEnvironment, LocalMacroState),
+                 MacroEnvironment#{function_call_analysis =>
+                                       FunctionCallAnalysis},
+                 LocalMacroState),
            return(ExpandedForms)
        ]).
 
@@ -1471,9 +1498,6 @@ retain_fas(FAs, Acc) when is_list(FAs) ->
     [FA || FA = {Name, Arity} <- FAs, is_atom(Name), is_integer(Arity)] ++ Acc;
 retain_fas({Name, Arity} = FA, Acc) when is_atom(Name), is_integer(Arity) -> [FA | Acc];
 retain_fas(_Other, Acc) -> Acc.
-
-final_function_macro_environment(MacroMap, MacroOptions) ->
-    macro_environment(MacroMap, MacroOptions).
 
 invalid_macro_return_mfa(#{macro := #{mfa := MFA}}) ->
     MFA;
