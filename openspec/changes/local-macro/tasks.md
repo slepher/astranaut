@@ -95,7 +95,7 @@
 ### 上下文接口收敛
 
 - [x] Entry 和 ExpansionRequest 只保存一份完整的 `macro_environment_snapshot`；删除 `declaration_groups`、`group_id` 和 `group_members` 双重状态。
-- [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options` 及重复 snapshot 字段，仅保留 6 个必需字段。
+- [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options` 及重复 snapshot 字段，仅保留 closure、analysis、environment、source 和 frozen forms 所需的 9 个字段。
 - [x] 用命名 map type 约束 workflow context、MacroEnvironment、ExpansionRequest 和 CompilationBoundary。
 
 ### 简洁性复核收口
@@ -113,3 +113,19 @@
 - [x] 对不存在及存在但未命中冻结闭包的显式 `local_macro_retain` 分别发出带位置 warning。
 - [x] 保留 retained frozen function 的 FinalMacroRuntimeContext 重新展开与 canonical 结果比对。
 - [x] 明确多 FA declaration 只共享注册时快照，扫描后不保留 group identity。
+
+## 两批热路径优化
+
+### 第一批：机械降本
+
+- [x] 删除 import/use/local macro map 构造中未消费的 passed/source forms 参数传递。
+- [x] 编译 boundary 只检查一次 `format_error/1`，复用于 local 与 related function 集合。
+- [x] internal binding 为空时直接返回原 form，不启动 AST traversal。
+- [x] final caller 筛选使用 presence-only function analysis，不构造未消费的调用边集合。
+
+### 第二批：共享上下文与索引
+
+- [x] 每个 ExpansionRequest 只提取一次 record forms；每个 task 仅遍历目标 frozen function 与这些 records，同时保持逐 FormId 和 `NeedCallable` 重试顺序。
+- [x] 编译计划一次建立 FA entry/order/prefix 索引，并 memoize 递归依赖边界；同 order declaration members 仍进入同一累计 prefix。
+- [x] final function 准备一次建立 FormId 到 internal bindings 的反向索引，保留 root policy 优先和共享 helper 首个兼容 policy 语义。
+- [x] 用专项与全量 Common Test、OpenSpec strict validation 验证行为不变。

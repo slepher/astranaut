@@ -49,11 +49,13 @@ retain 或 declaration order。
 实际 local 引用同样由 `astranaut_macro_expander` 的统一调用匹配能力识别：
 
 ```text
-ResolveLocalReferences(CandidateLocalEnv, Forms, ClosureFAs) -> ReferencedFAs
+FunctionCallAnalysis(CandidateLocalEnv, Forms)
+  -> #{FormId => #{local_calls, local_macro_calls, has_macro_call}}
 ```
 
-`astranaut_macro_local` 提供候选环境和闭包，保存返回的 `ReferencedFAs` 并据此
-规划累计边界；它不以“静态闭包中包含某 FA”替代真实的宏调用匹配。
+`astranaut_macro_local` 提供候选环境；closure walk 在首次访问 function 时同时保存
+本地调用边、真实匹配的 local macro FAs 和宏 presence，同一 declaration 的多个 roots
+复用该结果，并据此规划累计边界。它不以“静态闭包中包含某 FA”替代真实的宏调用匹配。
 
 ## 显式数据接口
 
@@ -73,7 +75,10 @@ LocalMacroWorkflowContext = #{
 ExpansionRequest = #{
   closure_ids,
   closure_fas,
+  candidate_local_macros,
+  function_call_analysis,
   referenced_local_macros,
+  internal_macro_bindings,
   macro_environment_snapshot,
   source_view,
   forms
@@ -89,6 +94,11 @@ context；注册时必须保存完整的 `macro_environment_snapshot`，不得�
 
 `ExpansionRequest` 是 ExpansionValidator 与 planner 之间的显式接口。未被准备、依赖
 分析或 compiler 消费的字段不得进入 request。
+
+同一 request 准备多个 FormId 时，只从 `source_view` 提取一次 record forms。单个
+function task 仅遍历自己的 original/frozen form 与该组 record forms；request 内仍按
+FormId 顺序执行，并在 `NeedCallable` 后从 frozen form 重试，因此不会改变宏调用、错误
+或部分结果提交顺序。
 
 ## 状态
 
@@ -313,6 +323,10 @@ function form 的 ID 是 `{function, Name, Arity}`，spec form 的 ID 是 `{spec
 3. 以 declaration 顺序形成必要的累计边界；只有“下一个闭包预展开需要当前模块中已可调用宏”时才插入中间编译。
 4. 每个边界都构造“此前已提交 forms + 本边界新增 forms”的完整模块。
 
+planner 为一次计划建立 FA 到 entry/order/prefix 的索引，并对递归依赖边界 memoize；
+共享依赖只展开一次。相同 declaration 的多个 members 共享 order，prefix 必须包含该
+order 的全部 members，不能退化为遇到目标 FA 即停止的列表前缀。
+
 因此，A 在 B 前但 B 不引用 A 时，A 与 B 可以一起编译；若 B 预展开调用 A，则必须先加载 A，再预展开并加载 A+B。闭包成员关系、普通 Erlang 调用和被 internalize 后不再作为宏匹配的调用均不单独产生该累计边界。
 
 boundary identity 只取按 declaration 顺序排列的累计 local macro members。没有新增
@@ -395,6 +409,10 @@ FinalSkipIds = local_macro_expanded_ids - retained_form_ids
 ```
 
 所有 retained functions（包括 local macro 宏头）都参与第 5 步。属于 local 闭包的目标先按 `referenced_local_macros` 白名单过滤 FinalLocalEnv，并重放与 declaration 相同的 internal key 移除及 alias-to-remote 改写；不属于任何 local 闭包的普通 Step 2 function 使用完整 FinalLocalEnv。internal bindings 进入 input fingerprint，避免不同 alias 来源错误复用缓存。若所得 final fingerprint 与最后一次 local 展开环境相同则复用；否则从原始 form 展开，并与最后一次已接受 local result 比较。
+
+final 准备阶段从 local macro entries 一次构造 `FormId => InternalBindings` 反向索引；root
+function/spec 的自身 declaration policy 覆盖共享 helper 的首个兼容 policy。不得为每个
+final target 再线性扫描全部 local macro entries。
 
 `FinalSkipIds` 的计算不删除原始 forms；它是交给最终函数体遍历器的过滤条件。这样同一 forms 列表可继续用于 record、attribute injection 和诊断，而 local macro 已预展开且未 retain 的 functions 不会被再次递归展开。
 

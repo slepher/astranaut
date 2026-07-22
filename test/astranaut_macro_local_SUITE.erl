@@ -328,6 +328,16 @@ function_call_analysis_combines_closure_and_macro_presence(_Config) ->
          local_macro_calls := [],
          has_macro_call := false},
        maps:get({function, helper, 0}, Analysis)),
+    PresenceAnalysis =
+        astranaut_macro_expander:function_call_analysis(
+          [Form, helper_form(ok)], MacroMap, presence),
+    ?assertEqual(
+       #{form => Form, has_macro_call => true},
+       maps:get(FormId, PresenceAnalysis)),
+    ?assertEqual(
+       [FormId],
+       astranaut_macro_expander:function_macro_callers(
+         PresenceAnalysis)),
     ok.
 
 shared_expander_uses_each_task_environment_in_one_pass(_Config) ->

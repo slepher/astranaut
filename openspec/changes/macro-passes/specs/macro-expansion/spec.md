@@ -103,7 +103,7 @@
 
 ### Requirement: function 闭包分析复用宏 presence
 
-系统 MUST 在构造 function 调用闭包的同一次 per-function traversal 中，同时收集普通本地调用边、local macro FAs 与任意 macro presence。同一 declaration 的多个 closure roots MUST 复用已分析 function 的结果。final function caller 筛选 MUST 将同一次全量 analysis 结果传入 expansion task，且可信 presence 存在时 MUST NOT 再调用独立的 `has_macro_call` 预检查。宏 presence MUST 按对应的有效 MacroEnv 判断；form 或环境不满足安全复用条件时 MUST 回退到现场检查。
+系统 MUST 在构造 function 调用闭包的同一次 per-function traversal 中，同时收集普通本地调用边、local macro FAs 与任意 macro presence。同一 declaration 的多个 closure roots MUST 复用已分析 function 的结果。final function caller 筛选 MUST 使用不构造调用边集合的 presence-only analysis，并将该结果传入 expansion task；可信 presence 存在时 MUST NOT 再调用独立的 `has_macro_call` 预检查。宏 presence MUST 按对应的有效 MacroEnv 判断；form 或环境不满足安全复用条件时 MUST 回退到现场检查。
 
 #### Scenario: closure walk 同时分析 function calls
 
@@ -117,6 +117,7 @@
 - **给定** final function caller 筛选已用 FinalMacroEnv 分析全部 functions
 - **当** 系统为未变化的原始 function 建立 expansion task
 - **那么** task 复用该 function 的 `has_macro_call`
+- **并且** final analysis 不构造 `local_calls` 或 `local_macro_calls`
 - **并且** expander 不再运行独立的 `has_macro_call` traversal
 
 ### Requirement: 白名单不匹配必须独立报告

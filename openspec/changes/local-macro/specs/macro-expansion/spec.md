@@ -141,6 +141,20 @@ ExpansionValidator MUST 按环境 fingerprint 复用展开结果；同一 FormId
 - **并且** 不接收 declaration MacroRuntimeContext
 - **并且** 不遍历 request 重新执行 function expansion
 
+### Requirement: request 内共享 record 上下文
+
+ExpansionValidator MUST 为一个 ExpansionRequest 只提取一次 declaration source view 中的
+record forms。每个 function task MUST 从自己的 original/frozen form 展开，并且 MUST 保持
+逐 FormId 执行、`NeedCallable` 重试、错误与原子提交顺序。
+
+#### Scenario: 一个 request 包含多个 closure functions
+
+- **给定** 一个 local macro closure 包含 root 与多个 helpers，并引用 module record
+- **当** ExpansionValidator 准备该 request
+- **那么** record forms 只从 request source view 提取一次
+- **并且** 每个 task 仍可正确展开 record AST
+- **并且** task 不遍历无关的 module functions
+
 ### Requirement: 按声明顺序最小累计编译
 
 DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖生成最小累计 boundary；GenerationCompiler MUST 只消费 canonical expanded forms。
@@ -156,6 +170,13 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 - **给定** A 在 B 前声明，且 B 的闭包不使用 A 作为宏
 - **当** 首次需要调用 B 时
 - **那么** 直接编译 `{A,B}`
+
+#### Scenario: 同一 declaration 的 members 保持同一 prefix
+
+- **给定** A 与 B 来自同一个 local_macro declaration 并共享 declaration order
+- **当** DependencyScheduler 为其中任一 member 构造累计 prefix
+- **那么** prefix 同时包含 A 与 B
+- **并且** 索引或 memo 优化不得把 prefix 截断到目标 member
 
 #### Scenario: 独立声明本身不产生中间编译
 

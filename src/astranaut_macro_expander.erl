@@ -12,6 +12,7 @@
 
 -export([expand_functions/2,
          function_call_analysis/2,
+         function_call_analysis/3,
          attribute_macro_index/1,
          resolve_attribute_target/3,
          expand_attribute_target/1,
@@ -41,9 +42,9 @@
           has_macro_call => boolean()}.
 -type function_call_analysis() ::
         #{form := term(),
-          local_calls := ordsets:ordset(fa()),
-          local_macro_calls := ordsets:ordset(fa()),
-          has_macro_call := boolean()}.
+          has_macro_call := boolean(),
+          local_calls => ordsets:ordset(fa()),
+          local_macro_calls => ordsets:ordset(fa())}.
 -type function_task_expansion() ::
         #{forms := [term()],
           task_results := #{form_id() => function_expansion()}}.
@@ -102,9 +103,15 @@ attribute_macro_index(MacroMap) ->
 -spec function_call_analysis([term()], macro_map()) ->
           #{form_id() => function_call_analysis()}.
 function_call_analysis(Forms, MacroMap) ->
+    function_call_analysis(Forms, MacroMap, closure).
+
+-spec function_call_analysis([term()], macro_map(), closure | presence) ->
+          #{form_id() => function_call_analysis()}.
+function_call_analysis(Forms, MacroMap, Mode) ->
     lists:foldl(
       fun({function, _Pos, Name, Arity, Clauses} = Form, Acc) ->
-              Analysis = analyze_function_calls(Clauses, MacroMap),
+              Analysis = analyze_function_calls(
+                           Clauses, MacroMap, Mode),
               maps:put(
                 {function, Name, Arity}, Analysis#{form => Form}, Acc);
          (_Form, Acc) ->
@@ -825,7 +832,9 @@ to_list(Arguments) ->
 %%% Caller detection and returned-node normalization
 %%%===================================================================
 
-analyze_function_calls(Clauses, MacroMap) ->
+analyze_function_calls(Clauses, MacroMap, presence) ->
+    #{has_macro_call => has_macro_call(Clauses, MacroMap)};
+analyze_function_calls(Clauses, MacroMap, closure) ->
     astranaut:sreduce(
       fun({call, _Pos, {atom, _FunctionPos, Function}, Arguments} = Node,
           Analysis) ->

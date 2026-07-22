@@ -428,11 +428,15 @@ nonclosure_retain_roots(Roots, #{local_macros := Macros}) ->
 expand_final_functions(
   Forms, TargetFAs, MacroEnvironment, State) ->
     OriginalMap = maps:merge(forms_id_map(Forms), maps:get(frozen_forms, State)),
+    PreparationContext =
+        #{original_forms => OriginalMap,
+          macro_environment => MacroEnvironment,
+          internal_bindings => internal_bindings_index(State)},
     {Tasks, CompiledForms, TaskMetadata} =
         lists:foldl(
           fun(TargetFA, Acc) ->
                   prepare_final_function_task(
-                    TargetFA, OriginalMap, MacroEnvironment, State, Acc)
+                    TargetFA, PreparationContext, State, Acc)
           end, {#{}, #{}, #{}}, TargetFAs),
     case map_size(Tasks) of
         0 ->
@@ -455,23 +459,27 @@ expand_final_functions(
     end.
 
 prepare_final_function_task(
-  {Name, Arity}, OriginalMap,
-  #{macro_map := MacroMap} = MacroEnvironment, State,
-  {Tasks, CompiledForms, TaskMetadata} = Acc) ->
+  {Name, Arity},
+  #{original_forms := OriginalMap,
+    macro_environment :=
+        #{macro_map := MacroMap} = MacroEnvironment,
+    internal_bindings := InternalBindingsIndex},
+  State, Acc) ->
     FormId = {function, Name, Arity},
     case maps:find(FormId, OriginalMap) of
         error ->
             Acc;
         {ok, OriginalForm} ->
             prepare_final_function_task(
-              FormId, OriginalForm, MacroMap, MacroEnvironment, State,
-              Tasks, CompiledForms, TaskMetadata)
+              FormId, OriginalForm,
+              maps:get(FormId, InternalBindingsIndex, #{}),
+              MacroMap, MacroEnvironment, State, Acc)
     end.
 
 prepare_final_function_task(
-  FormId, OriginalForm, MacroMap, MacroEnvironment, State,
-  Tasks, CompiledForms, TaskMetadata) ->
-    InternalBindings = internal_bindings_for_form(FormId, State),
+  FormId, OriginalForm, InternalBindings,
+  MacroMap, MacroEnvironment, State,
+  {Tasks, CompiledForms, TaskMetadata}) ->
     MacroMapWithoutInternal = maps:without(
                                 maps:keys(InternalBindings), MacroMap),
     WhitelistControl = final_whitelist_control(FormId, State),
@@ -545,20 +553,30 @@ cache_final_function_tasks(
               end
       end, {CompiledForms, State}, TargetFAs).
 
-internal_bindings_for_form(FormId, State) ->
-    Macros = maps:get(local_macros, State),
-    case maps:find(form_fa(FormId), Macros) of
-        {ok, RootEntry} ->
-            maps:get(internal_macro_bindings, RootEntry, #{});
-        error ->
-            case [maps:get(internal_macro_bindings, Entry, #{})
-                  || {_FA, Entry} <- maps:to_list(Macros),
-                     ordsets:is_element(
-                       FormId, maps:get(closure_ids, Entry))] of
-                [Bindings | _] -> Bindings;
-                [] -> #{}
-            end
-    end.
+internal_bindings_index(#{local_macros := Macros}) ->
+    Entries = maps:to_list(Macros),
+    ClosureIndex =
+        lists:foldl(
+          fun({_FA, Entry}, Acc) ->
+                  Bindings = maps:get(
+                               internal_macro_bindings, Entry, #{}),
+                  lists:foldl(
+                    fun(FormId, FormAcc) ->
+                            case maps:is_key(FormId, FormAcc) of
+                                true -> FormAcc;
+                                false -> maps:put(
+                                           FormId, Bindings, FormAcc)
+                            end
+                    end, Acc, maps:get(closure_ids, Entry))
+          end, #{}, Entries),
+    lists:foldl(
+      fun({{Name, Arity}, Entry}, Acc) ->
+              Bindings = maps:get(
+                           internal_macro_bindings, Entry, #{}),
+              maps:put(
+                {spec, Name, Arity}, Bindings,
+                maps:put({function, Name, Arity}, Bindings, Acc))
+      end, ClosureIndex, Entries).
 
 final_whitelist_control(FormId, State) ->
     case maps:is_key(FormId, maps:get(frozen_forms, State)) of
@@ -682,14 +700,18 @@ compile_boundary(#{members := Members, requests := Requests} = Boundary,
                       CompiledForms = maps:merge(
                                         maps:get(compiled_forms, State),
                                         BoundaryForms),
+                      HasFormatter = has_function(
+                                       format_error, 1, SourceView),
                       LocalFunctions = maybe_add_formatter(
-                                         ordsets:from_list(Members), SourceView),
+                                         ordsets:from_list(Members),
+                                         HasFormatter),
                       Related0 = lists:foldl(
                                    fun(Request, Acc) ->
                                            ordsets:union(
                                              maps:get(closure_fas, Request), Acc)
                                    end, ordsets:new(), Requests),
-                      Related = maybe_add_formatter(Related0, SourceView),
+                      Related = maybe_add_formatter(
+                                  Related0, HasFormatter),
                       do([ return ||
                              load_local_macro_forms(
                                LocalFunctions, Related, CompiledForms,
@@ -732,21 +754,23 @@ prepare_requests(Requests, WorkflowContext, State) ->
 -spec prepare_request(expansion_request(), workflow_context(), state()) ->
           astranaut_return:struct(state()).
 prepare_request(#{forms := FrozenForms} = Request, WorkflowContext, State) ->
+    RecordForms = record_forms(maps:get(source_view, Request)),
     astranaut_return:foldl_m(
       fun(FormId, StateAcc) ->
               do([ return ||
                      {_ExpandedForm, State1} <-
                          prepare_request_form(
-                           FormId, Request, WorkflowContext, StateAcc),
+                           FormId, RecordForms, Request,
+                           WorkflowContext, StateAcc),
                      return(State1)
                  ])
       end, State, maps:keys(FrozenForms)).
 
--spec prepare_request_form(form_id(), expansion_request(), workflow_context(),
-                           state()) ->
+-spec prepare_request_form(form_id(), [term()], expansion_request(),
+                           workflow_context(), state()) ->
           astranaut_return:struct({term(), state()}).
 prepare_request_form(
-  FormId,
+  FormId, RecordForms,
   #{candidate_local_macros := Candidates,
     internal_macro_bindings := InternalBindings,
     macro_environment_snapshot :=
@@ -773,7 +797,7 @@ prepare_request_form(
         error ->
             expand_and_cache_form(
               FormId, EffectiveMacroMap, Fingerprint,
-              WhitelistControl, Request, WorkflowContext,
+              WhitelistControl, RecordForms, Request, WorkflowContext,
               State)
     end.
 
@@ -792,12 +816,12 @@ whitelist_control(FormId, State) ->
 
 -spec expand_and_cache_form(form_id(), map(), binary(),
                              local_macro_whitelist_control(),
-                             expansion_request(), workflow_context(),
+                             [term()], expansion_request(), workflow_context(),
                              state()) ->
           astranaut_return:struct({term(), state()}).
 expand_and_cache_form(FormId, EffectiveMacroMap, Fingerprint,
-                      WhitelistControl,
-                      #{forms := FrozenForms, source_view := SourceView,
+                      WhitelistControl, RecordForms,
+                      #{forms := FrozenForms,
                         function_call_analysis := FunctionCallAnalysis,
                         internal_macro_bindings := InternalBindings} = Request,
                       WorkflowContext, State) ->
@@ -809,9 +833,6 @@ expand_and_cache_form(FormId, EffectiveMacroMap, Fingerprint,
             cache_form_result(
               FormId, Fingerprint, disabled, OriginalForm, State);
         {function, _Name, _Arity} ->
-            SnapshotForms0 = materialize_forms(SourceView, FrozenForms),
-            SnapshotForms = materialize_forms(
-                              SnapshotForms0, #{FormId => OriginalForm}),
             Task0 = #{form => OriginalForm,
                       macro_map => EffectiveMacroMap,
                       whitelist_control => WhitelistControl},
@@ -822,10 +843,10 @@ expand_and_cache_form(FormId, EffectiveMacroMap, Fingerprint,
             do([ return ||
                    #{task_results := #{FormId := TaskResult}} <-
                        astranaut_macro_expander:expand_functions(
-                         SnapshotForms, Tasks),
+                         [OriginalForm | RecordForms], Tasks),
                    finish_or_schedule_expansion(
                      TaskResult, FormId, Fingerprint,
-                     Request, WorkflowContext, State)
+                     RecordForms, Request, WorkflowContext, State)
                 ])
     end.
 
@@ -841,6 +862,9 @@ add_macro_call_hint(FormId, OriginalForm, FunctionCallAnalysis, Task) ->
 fingerprint_options(MacroOptions, InternalBindings) ->
     {MacroOptions, maps:to_list(InternalBindings)}.
 
+rewrite_internal_macro_calls(Form, InternalBindings)
+  when map_size(InternalBindings) =:= 0 ->
+    Form;
 rewrite_internal_macro_calls(Form, InternalBindings) ->
     astranaut:smap(
       fun({call, CallPos, {atom, FunctionPos, Function}, Args} = Node) ->
@@ -861,7 +885,7 @@ rewrite_internal_macro_calls(Form, InternalBindings) ->
 
 finish_or_schedule_expansion(
   #{needed_local_macros := [_ | _] = Needed}, FormId,
-  _Fingerprint, Request, WorkflowContext, State) ->
+  _Fingerprint, RecordForms, Request, WorkflowContext, State) ->
     do([ return ||
            State1 <- astranaut_return:foldl_m(
                        fun(Dependency, StateAcc) ->
@@ -870,14 +894,17 @@ finish_or_schedule_expansion(
                                  StateAcc)
                        end, State, Needed),
            prepare_request_form(
-             FormId, Request, WorkflowContext, State1)
+             FormId, RecordForms, Request, WorkflowContext, State1)
        ]);
 finish_or_schedule_expansion(
   #{form := ExpandedForm,
     local_macro_whitelist := Whitelist}, FormId,
-  Fingerprint, _Request, _WorkflowContext, State) ->
+  Fingerprint, _RecordForms, _Request, _WorkflowContext, State) ->
     cache_form_result(
       FormId, Fingerprint, Whitelist, ExpandedForm, State).
+
+record_forms(Forms) ->
+    [Form || {attribute, _Pos, record, {_Name, _Fields}} = Form <- Forms].
 
 mark_local_macro_callable(MacroMap, State) ->
     Macros = maps:get(local_macros, State),
@@ -902,18 +929,21 @@ cache_form_result(FormId, Fingerprint, Whitelist, Form, State) ->
         {error, Error} -> astranaut_return:error_fail(Error)
     end.
 
--spec form_fa(form_id()) -> fa().
-form_fa({function, Name, Arity}) -> {Name, Arity};
-form_fa({spec, Name, Arity}) -> {Name, Arity}.
-
--spec maybe_add_formatter(ordsets:ordset(fa()), [term()]) ->
+-spec maybe_add_formatter(ordsets:ordset(fa()), boolean()) ->
           ordsets:ordset(fa()).
-maybe_add_formatter([], _Forms) -> [];
-maybe_add_formatter(Functions, Forms) ->
-    case maps:is_key({function, format_error, 1}, forms_id_map(Forms)) of
-        true -> ordsets:add_element({format_error, 1}, Functions);
-        false -> Functions
-    end.
+maybe_add_formatter([], _HasFormatter) -> [];
+maybe_add_formatter(Functions, true) ->
+    ordsets:add_element({format_error, 1}, Functions);
+maybe_add_formatter(Functions, false) ->
+    Functions.
+
+has_function(Name, Arity, Forms) ->
+    lists:any(
+      fun({function, _Pos, Name0, Arity0, _Clauses}) ->
+              Name0 =:= Name andalso Arity0 =:= Arity;
+         (_Form) ->
+              false
+      end, Forms).
 
 -spec materialize_forms([term()], #{form_id() => term()}) -> [term()].
 materialize_forms(Forms, CompiledForms) ->
@@ -1158,44 +1188,73 @@ needed_entries(FA, Macros) ->
 -spec compilation_boundaries(fa() | all, [{non_neg_integer(), fa(), map()}],
                              #{form_id() => term()}) ->
           [compilation_boundary()].
-compilation_boundaries(all, Ordered, Frozen) ->
-    Prefix = [FA || {_Order, FA, _Entry} <- Ordered],
-    Dependencies = lists:append(
-                     [dependency_boundaries(FA, Ordered) || FA <- Prefix]),
-    Boundaries = ordsets:to_list(ordsets:from_list(Dependencies ++ [Prefix])),
-    Sorted = lists:sort(
-               fun(A, B) -> boundary_order(A, Ordered) =< boundary_order(B, Ordered) end,
-               Boundaries),
-    [plan_boundary(Members, Ordered, Frozen) || Members <- Sorted];
 compilation_boundaries(Needed, Ordered, Frozen) ->
+    Index = compilation_plan_index(Ordered),
     Prefix = [FA || {_Order, FA, _Entry} <- Ordered],
-    Dependencies = dependency_boundaries(Needed, Ordered),
+    DependencyRoots = case Needed of
+                          all -> Prefix;
+                          FA -> [FA]
+                      end,
+    {Dependencies, _Memo} = dependency_boundaries_for_fas(
+                              DependencyRoots, Index, #{}),
     Boundaries = ordsets:to_list(ordsets:from_list(Dependencies ++ [Prefix])),
     %% ordsets sorts lists lexically, not declaration order; restore the plan
     %% order by the final member's declaration index.
-    Sorted = lists:sort(fun(A, B) -> boundary_order(A, Ordered) =< boundary_order(B, Ordered) end, Boundaries),
-    [plan_boundary(Members, Ordered, Frozen) || Members <- Sorted].
+    Sorted = lists:sort(
+               fun(A, B) ->
+                       boundary_order(A, Index) =< boundary_order(B, Index)
+               end,
+               Boundaries),
+    [plan_boundary(Members, Index, Frozen) || Members <- Sorted].
 
-dependency_boundaries(FA, Ordered) ->
-    Entry = entry_for(FA, Ordered),
-    lists:append([dependency_boundaries(Dep, Ordered) ++ [prefix_to(Dep, Ordered)]
-                  || Dep <- maps:get(referenced_local_macros, Entry, [])]).
+compilation_plan_index(Ordered) ->
+    #{entries => maps:from_list(
+                    [{FA, Entry} || {_Order, FA, Entry} <- Ordered]),
+      orders => maps:from_list(
+                  [{FA, Order} || {Order, FA, _Entry} <- Ordered]),
+      prefixes => maps:from_list(
+                    [{FA, [PrefixFA
+                           || {PrefixOrder, PrefixFA, _PrefixEntry} <- Ordered,
+                              PrefixOrder =< Order]}
+                     || {Order, FA, _OuterEntry} <- Ordered])}.
 
-entry_for(FA, [{_Order, FA, Entry} | _]) -> Entry;
-entry_for(FA, [_ | T]) -> entry_for(FA, T).
+dependency_boundaries_for_fas(FAs, Index, Memo) ->
+    {Reversed, Memo1} =
+        lists:foldl(
+          fun(FA, {BoundariesAcc, MemoAcc}) ->
+                  {Boundaries, MemoNext} = dependency_boundaries(
+                                               FA, Index, MemoAcc),
+                  {[Boundaries | BoundariesAcc], MemoNext}
+          end, {[], Memo}, FAs),
+    {lists:append(lists:reverse(Reversed)), Memo1}.
 
-prefix_to(FA, Ordered) ->
-    DependencyOrder = element(1, lists:keyfind(FA, 2, Ordered)),
-    [F || {Order, F, _Entry} <- Ordered, Order =< DependencyOrder].
+dependency_boundaries(FA, #{entries := Entries,
+                            prefixes := Prefixes} = Index, Memo) ->
+    case maps:find(FA, Memo) of
+        {ok, Boundaries} ->
+            {Boundaries, Memo};
+        error ->
+            Entry = maps:get(FA, Entries),
+            Dependencies = maps:get(referenced_local_macros, Entry, []),
+            {ReversedChunks, Memo1} =
+                lists:foldl(
+                  fun(Dep, {ChunksAcc, MemoAcc}) ->
+                          {Nested, MemoNext} = dependency_boundaries(
+                                                   Dep, Index, MemoAcc),
+                          Chunk = Nested ++ [maps:get(Dep, Prefixes)],
+                          {[Chunk | ChunksAcc], MemoNext}
+                  end, {[], Memo}, Dependencies),
+            Boundaries = lists:append(lists:reverse(ReversedChunks)),
+            {Boundaries, maps:put(FA, Boundaries, Memo1)}
+    end.
 
-boundary_order(Members, Ordered) ->
-    FA = lists:last(Members),
-    element(1, lists:keyfind(FA, 2, Ordered)).
+boundary_order(Members, #{orders := Orders}) ->
+    maps:get(lists:last(Members), Orders).
 
--spec plan_boundary([fa()], [{non_neg_integer(), fa(), map()}],
+-spec plan_boundary([fa()], map(),
                     #{form_id() => term()}) -> compilation_boundary().
-plan_boundary(Members, Ordered, Frozen) ->
-    Entries = [{FA, entry_for(FA, Ordered)} || FA <- Members],
+plan_boundary(Members, #{entries := EntryIndex}, Frozen) ->
+    Entries = [{FA, maps:get(FA, EntryIndex)} || FA <- Members],
     #{members => Members,
       requests => [request_for_entry(Entry, Frozen)
                    || {_FA, Entry} <- Entries]}.

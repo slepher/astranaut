@@ -245,13 +245,18 @@ expand_and_validate(FormId, OriginalForm, MacroEnvironment, WhitelistControl):
 
 禁止在已经展开的 AST 上继续展开。local declaration、retain 和 Step 2 function 都必须从同一个 original/frozen form 开始。
 
-原始 function 的调用闭包分析在同一次 per-function traversal 中收集普通本地调用边、local macro FAs 和任意 macro presence；同一 declaration 的多个 roots 复用已访问 function 的结果。final caller 选择产生的完整 analysis 直接传给 expansion task，可信提示存在时不再执行独立 `has_macro_call` 预检查。
+原始 function 的调用闭包分析在同一次 per-function traversal 中收集普通本地调用边、local macro FAs 和任意 macro presence；同一 declaration 的多个 roots 复用已访问 function 的结果。final caller 选择使用只生成 form 与 `has_macro_call` 的 presence-only mode，并把该 analysis 直接传给 expansion task；可信提示存在时不再执行独立 `has_macro_call` 预检查。
 
 原始 AST 的白名单观察接在共享的 macro match-before-invoke 点。`process_macro_return` 在规范化返回树、位置和变量的同一次 traversal 中收集该 Return AST 的 local FAs 与任意 macro presence，但不校验或展开，并通过 `scoped_state_run` 返回 `{Node, ReturnAnalysis}`。调用方合并与批量校验后，只有确实含宏的 accepted replacement 才进入原有 pre/post 递归路径；无宏 replacement 直接返回。不得增加第二次 return-tree scan 或 whole-form rescan。
 
 ### 6.3 预展开
 
 扫描到 local declaration 后立即注册依赖并尝试以 `collect` 或已有 canonical 时的 `verify` 预展开，但“声明出现”本身不要求编译这些 FA。预展开若只使用 external 或已可调用 local macros，完整 whitelist/result 直接进入 expansion record。
+
+一个 ExpansionRequest 内的多个 frozen FormIds 仍按顺序准备，但 request 只从 declaration
+`source_view` 提取一次 record forms。每个 function expansion task 只遍历目标 original/frozen
+form 与这组 records；`NeedCallable` 后沿用同一上下文从 frozen form 重试，不并发执行宏，
+因此 invocation、错误和提交顺序保持不变。
 
 若原始或 replacement AST 的统一匹配点真正发现一个尚不可调用的 candidate local macro，则 expansion 返回 `needed_local_macros`。scheduler 可以当场通过 `NeedCallable(FA)` 编译最小必要依赖边界，随后从 frozen form 重试；部分 whitelist/result 不提交。这不是 declaration 编译策略或 whitelist 冲突，而是通用的依赖可调用性规则。
 
@@ -271,6 +276,9 @@ NeedCallable(FA)
 编译 boundary 的身份只有按声明顺序排列的累计 local macro members。没有引入新的
 `local_macro`，就没有新的 boundary，也不得重新编译。MacroEnvironment、展开触发点、
 `inject_attrs` 输入和宏环境变化只触发展开缓存命中或结果一致性比较，不进入编译身份。
+
+一次 compile plan 构造 FA entry/order/prefix 索引，并 memoize 递归依赖边界。共享依赖不
+重复遍历；相同 declaration order 的所有 members 必须共同出现在 prefix 中。
 
 例如：
 

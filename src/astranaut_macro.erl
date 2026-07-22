@@ -532,8 +532,7 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
                               FAs, WorkflowContext, RegisteredLocalState)),
            EffectiveMacroMap1 <- astranaut:traverse_return(
                                   add_local_macro(
-                                    State, SourceView, ClauseMap,
-                                    FAs, Options)),
+                                    State, ClauseMap, FAs, Options)),
            %% Registration and map construction happen exactly here.  The
            %% later cleanup only removes this already-scanned declaration; it
            %% never validates or registers a local macro again.  Retained local
@@ -550,13 +549,13 @@ scan_valid_local_macro(Form, Pos, FAs, Options, ClauseMap, SourceView,
            return(Form)
        ]).
 
-add_local_macro(#{module := Module, file := File, global_macro_opts := GlobalOpts,
-                                 macro_map := ExternalMap,
-                                 effective_macro_map := EffectiveMap}, SourceView, ClauseMap,
+add_local_macro(#{module := Module, file := File,
+                  global_macro_opts := GlobalOpts,
+                  effective_macro_map := EffectiveMap}, ClauseMap,
                                  FAs, Options) ->
-    Ctx = #{module => Module, file => File, forms => SourceView,
-            global_macro_opts => local_macro_global_opts(Module, ClauseMap, GlobalOpts),
-            external_macro_map => ExternalMap, clause_map => ClauseMap},
+    Ctx = #{module => Module, file => File,
+            global_macro_opts =>
+                local_macro_global_opts(Module, ClauseMap, GlobalOpts)},
     New = build_local_macro_map(Ctx, macro_options_by_fa(FAs, Options#{macro_source => local_macro})),
     merge_macro_maps(EffectiveMap, New).
 
@@ -582,8 +581,8 @@ scan_env_form({attribute, _Pos, import_macro, _Attr} = Form, State) ->
         {ok, ModuleMacroMap} ->
             #{module := Module, file := File, macro_map := MacroMap,
               effective_macro_map := EffectiveMacroMap} = State,
-            PassedForms = passed_forms(State),
-            Effective = effective_module_macro_maps(File, Module, PassedForms, ModuleMacroMap),
+            Effective = effective_module_macro_maps(
+                          File, Module, ModuleMacroMap),
             NewMap = uniform_imported_macro_map(Effective),
             case {merge_macro_maps_pure(MacroMap, NewMap),
                   merge_macro_maps_pure(EffectiveMacroMap, NewMap)} of
@@ -609,10 +608,10 @@ scan_env_form({attribute, _Pos, use_macro, _Attr} = Form, State) ->
     #{module := Module, file := File, macro_map := MacroMap,
       effective_macro_map := EffectiveMacroMap} = State,
     ImportedMacros = module_macro_maps_from_uniform(MacroMap),
-    PassedForms = passed_forms(State),
     do([ traverse ||
            UsedMacros <- astranaut:traverse_return(
-                           used_macros(File, Module, ImportedMacros, [Form], PassedForms)),
+                           used_macros(
+                             File, Module, ImportedMacros, [Form])),
            NewMap = uniform_imported_macro_map(UsedMacros),
            Merged <- case merge_macro_maps_pure(MacroMap, NewMap) of
                          {ok, MergedMap} ->
@@ -1005,14 +1004,13 @@ validate_extra_functions_defined(Options, ClauseMap) ->
 
 build_local_macro_map(#{file := File,
                         module := Module,
-                        forms := Forms,
                         global_macro_opts := GlobalMacroOpts}, ModuleMacros) ->
     LocalModuleMacros =
         maps:map(
           fun({Function, Arity}, MacroOptions) ->
                   local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions)
           end, ModuleMacros),
-    update_module_macros(File, Module, Forms, LocalModuleMacros).
+    update_module_macros(File, Module, LocalModuleMacros).
 
 macro_options_by_fa(FAs, Options) ->
     lists:foldl(fun(FA, Acc) -> maps:put(FA, Options, Acc) end, #{}, FAs).
@@ -1033,7 +1031,7 @@ local_macro_options(Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
                    function => Function,
                    arity => Arity}.
 
-update_module_macros(File, Module, _Forms, ModuleMacros) ->
+update_module_macros(File, Module, ModuleMacros) ->
     maps:fold(
       fun(_MFA, MacroOptions, Acc) ->
               MacroOptions1 = MacroOptions#{file => File, local_module => Module},
@@ -1042,8 +1040,9 @@ update_module_macros(File, Module, _Forms, ModuleMacros) ->
               maps:put({Macro, CallArity}, MacroOptions3, Acc)
       end, #{}, ModuleMacros).
 
-used_macros(File, Module, ImportedMacros, Forms, MacroForms) ->
-    ImportedMacroMap = effective_module_macro_maps(File, Module, MacroForms, ImportedMacros),
+used_macros(File, Module, ImportedMacros, Forms) ->
+    ImportedMacroMap = effective_module_macro_maps(
+                         File, Module, ImportedMacros),
     astranaut_lib:with_attribute(
       fun(Attr, UsedMacroMapAcc) ->
               do([ return ||
@@ -1055,7 +1054,8 @@ used_macros(File, Module, ImportedMacros, Forms, MacroForms) ->
                              case maps:is_key(ImportedModule, UsedMacroMapAcc) of
                                  true ->
                                      update_used_macro_maps(
-                                       File, Module, MacroForms, ImportedModule, FAs, Options,
+                                       File, Module, ImportedModule,
+                                       FAs, Options,
                                        UsedMacroMapAcc,
                                        fun({Function, Arity}) ->
                                                {unexported_macro, ImportedModule, Function, Arity}
@@ -1065,7 +1065,7 @@ used_macros(File, Module, ImportedMacros, Forms, MacroForms) ->
                              end;
                          FAs ->
                              update_used_macro_maps(
-                               File, Module, MacroForms, Module, FAs, Options,
+                               File, Module, Module, FAs, Options,
                                UsedMacroMapAcc,
                                fun({Function, Arity}) ->
                                        {undefined_macro, Function, Arity}
@@ -1074,13 +1074,15 @@ used_macros(File, Module, ImportedMacros, Forms, MacroForms) ->
                  ])
       end, ImportedMacroMap, Forms, use_macro, #{formatter => ?MODULE}).
 
-effective_module_macro_maps(File, Module, Forms, ModuleMacros) ->
+effective_module_macro_maps(File, Module, ModuleMacros) ->
     maps:map(
       fun(_MacroModule, Macros) ->
-              update_module_macros(File, Module, Forms, Macros)
+              update_module_macros(File, Module, Macros)
       end, ModuleMacros).
 
-update_used_macro_maps(File, Module, Forms, MacroModule, FAs, UsedMacroOptions, UsedMacroMapAcc, MissingFun) ->
+update_used_macro_maps(
+  File, Module, MacroModule, FAs, UsedMacroOptions,
+  UsedMacroMapAcc, MissingFun) ->
     astranaut_return:foldl_m(
       fun(FA, Acc) ->
               ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
@@ -1088,7 +1090,9 @@ update_used_macro_maps(File, Module, Forms, MacroModule, FAs, UsedMacroOptions, 
                   {ok, MacroKey, MacroOptions} ->
                       MacroOptions1 = maps:merge(MacroOptions, UsedMacroOptions),
                       MacroOptions2 = update_alias(MacroOptions1),
-                      CurrentMacroMap = update_module_macros(File, Module, Forms, #{FA => MacroOptions2}),
+                      CurrentMacroMap = update_module_macros(
+                                          File, Module,
+                                          #{FA => MacroOptions2}),
                       ModuleMacroMapWithoutCurrent = maps:remove(MacroKey, ModuleMacroMap),
                       ExistingUsedMacroMap = maps:put(MacroModule, ModuleMacroMapWithoutCurrent, Acc),
                       ExistingMacroMap = uniform_imported_macro_map(ExistingUsedMacroMap),
@@ -1360,7 +1364,7 @@ finalize_attribute_forms(
                                        Module, File, Forms2)),
            FunctionCallAnalysis =
                astranaut_macro_expander:function_call_analysis(
-                 Forms2, ResolvedFinalMacroMap),
+                 Forms2, ResolvedFinalMacroMap, presence),
            DetectedMacroCallers =
                astranaut_macro_expander:function_macro_callers(
                  FunctionCallAnalysis),

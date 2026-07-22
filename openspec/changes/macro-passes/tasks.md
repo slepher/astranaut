@@ -187,7 +187,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 
 ### 文档与契约
 
-- [x] 规定 `process_macro_return` 在既有规范化 traversal 中只收集当前 Return AST 的 local macro FAs，不校验、不展开。
+- [x] 规定 `process_macro_return` 在既有规范化 traversal 中同时收集当前 Return AST 的 local macro FAs 与总体 macro presence，不校验、不展开。
 - [x] 规定返回形状为 `{ProcessedNode, ReturnAnalysis}`，其中 analysis map 是 scoped traversal state。
 - [x] 规定调用方合并并批量校验 ReturnObserved；missing 仍只在完整 function expansion 后检查。
 
@@ -213,6 +213,14 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] `process_macro_return` 在规范化 traversal 中同时记录 `has_macro_call`，无宏 replacement 不再进入递归 `transform_exprs`。
 - [x] form 或环境不能安全复用 analysis 时保留现场预检查回退。
 - [x] 增加静态 function analysis 与 external replacement 递归展开测试。
+
+## Local workflow 两批热路径优化
+
+- [x] 第一批删除未消费的 Forms 参数传递、空 internal-binding traversal，并复用单次 formatter presence 检查。
+- [x] final caller selection 使用 presence-only analysis，保留可信提示与现场回退规则。
+- [x] 第二批让一个 ExpansionRequest 共用一次 record context，每个 task 只遍历目标 frozen function 与 records，保持串行宏执行和 `NeedCallable` 原子重试。
+- [x] compile plan 建立 FA entry/order/prefix 索引并 memoize 依赖边界，保持相同 declaration order members 的累计语义。
+- [x] final preparation 建立 FormId 到 internal bindings 的反向索引，消除逐 target 的全表扫描。
 
 ## 最终审核落实
 

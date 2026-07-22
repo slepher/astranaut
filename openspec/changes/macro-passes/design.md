@@ -52,9 +52,10 @@ generation 生命周期，也不存在单函数兼容门面。
 function 调用闭包构造与宏 caller 检测共享 `FunctionCallAnalysis`。closure walk 在首次
 访问某个可达 function 时，用对应 declaration MacroEnv 的同一次 AST traversal 同时
 收集普通本地调用边、匹配到的 local macro FAs 和任意宏 presence；同一 declaration
-的多个 roots 复用该结果。final caller 筛选必须查看全部 functions，因此使用 FinalMacroEnv
-生成一次完整 analysis。analysis 携带原始 form，只有 form 一致且分析环境是实际展开环境
-的相同或安全超集时，expansion task 才能把 presence 当作可信提示；否则回退到现场检查。
+的多个 roots 复用该结果。final caller 筛选只消费宏 presence，因此使用 FinalMacroEnv
+生成一次 presence-only analysis，不构造未消费的本地调用集合。两种 mode 都携带原始
+form；只有 form 一致且分析环境是实际展开环境的相同或安全超集时，expansion task 才能
+把 presence 当作可信提示，否则回退到现场检查。
 
 普通 attribute 使用随 `EffectiveMacroMap` 增量重建的 `AttributeMacroIndex`，先按
 attribute name/arity 直接定位 descriptor，再只为该 descriptor 解析 `inject_attrs`。
