@@ -238,3 +238,12 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 将单 function task 结果收紧为 `form`，删除 local 缓存前的完整 forms 回扫。
 - [x] 删除 final function environment 的重复字段和单行环境转发函数。
 - [x] 用真实 expander 覆盖 retained function 的最终环境结果冲突。
+
+## Parse-transform 职责拆分
+
+- [x] 提取 `astranaut_macro_registry`，统一拥有宏声明、checked override、`AttributeEnv` 与阶段化 `MacroEnvironment`。
+- [x] 提取 `astranaut_macro_scan`，统一拥有 source-ordered queue、attribute buffer、scan traverse state 与 `map_forms_splice/3`。
+- [x] 收缩 `astranaut_macro`，只保留 parse-transform 门面、两阶段编排、最终 forms 物化、retain 诊断与 `format_error/1`。
+- [x] 保持 `astranaut_macro_expander` 与 `astranaut_macro_local` 的既有职责和接口，不增加 pipeline 转发层。
+- [x] 更新 `erl_first_files`、专项测试入口及中英文架构文档。
+- [x] `rebar3 compile` 无 warning，`rebar3 xref` 通过；scanner/macro/local 专项 132 项测试及完整 354 项 Common Test 全部通过。

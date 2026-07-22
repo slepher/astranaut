@@ -11,7 +11,9 @@
 ## 统一 function 展开能力
 
 `astranaut_macro_expander` 只维护一套 function-body 宏匹配和递归展开实现；
-`astranaut_macro` 只负责 scan/pass 编排、环境更新和阶段化 macro environment 解析。
+`astranaut_macro` 负责 attribute/function pass 编排，`astranaut_macro_scan` 负责
+source-ordered scan-and-splice 与扫描期 traverse state，`astranaut_macro_registry`
+负责环境更新和阶段化 macro environment 解析。
 白名单是 local frozen function expansion 的可选观察/校验策略；调用方必须显式传入
 控制值，展开器不得根据 MacroEnv、FormId 或阶段隐式推断：
 

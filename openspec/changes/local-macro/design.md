@@ -8,8 +8,9 @@
 
 `astranaut_macro_local` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
-local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责统一的
-`MacroEnvironment` 预解析与 pass 编排；`astranaut_macro_expander` 负责宏引用匹配、
+local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责 pass 编排，
+`astranaut_macro_registry` 负责统一的 `MacroEnvironment` 预解析，
+`astranaut_macro_scan` 负责统一扫描；`astranaut_macro_expander` 负责宏引用匹配、
 调用、返回 AST 规范化、递归 function 展开，以及显式 whitelist control 的观察结果。
 local declaration 预展开、retain 及 Step 2 普通 function 展开共享该 expander；
 generation compiler 不调用展开器，只消费已经通过多环境一致性校验的 canonical forms。
@@ -18,8 +19,11 @@ generation compiler 不调用展开器，只消费已经通过多环境一致性
 
 ```text
 astranaut_macro
-  ├─ 统一 scan、环境更新、attribute splice
-  ├─ 从 AttributeEnv 解析阶段化 MacroEnvironment
+  ├─ 编排 attribute 与 function pass
+  ├─ 调用 astranaut_macro_scan
+  │    └─ 统一 scan、attribute splice 与扫描期 state
+  ├─ 调用 astranaut_macro_registry
+  │    └─ 宏声明、环境更新与阶段化 MacroEnvironment
   ├─ 调用 astranaut_macro_expander
   │    └─ 通用目标解析、宏调用、function 递归展开与展开期 monad state
   └─ 调用 astranaut_macro_local

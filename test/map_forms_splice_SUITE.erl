@@ -203,6 +203,6 @@ spec_form(Pos, Name) ->
 run_splice(Handler, Forms, InitState) ->
     astranaut_return:run(
       astranaut_traverse:run(
-        astranaut_macro:map_forms_splice(
+        astranaut_macro_scan:map_forms_splice(
           Handler, Forms, #{traverse => none}),
         ?MODULE, #{}, InitState)).

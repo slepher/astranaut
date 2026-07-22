@@ -333,7 +333,9 @@ unquote_splicing = Asts
 
 `macro.hrl` 启用 `astranaut_macro` parse transform。
 
-实现上，`astranaut_macro` 负责源码有序的 pass 与宏环境，
+实现上，`astranaut_macro` 负责 attribute/function 两阶段编排，
+`astranaut_macro_scan` 负责源码有序的 scan-and-splice 状态，
+`astranaut_macro_registry` 负责宏声明与各源码时点的宏环境，
 `astranaut_macro_expander` 负责 attribute/function 共用的宏匹配、调用和递归展开，
 `astranaut_macro_local` 负责本地闭包及 generation 生命周期。所有展开路径共用同一个
 expander。

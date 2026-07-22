@@ -588,8 +588,10 @@ quote(fun(unquote = Var) -> unquote(Var) end).
 
 macro.hrl enables the astranaut macro parse transform.
 
-Internally, `astranaut_macro` owns the source-ordered passes and macro
-environment, `astranaut_macro_expander` owns shared attribute/function macro
+Internally, `astranaut_macro` orchestrates the attribute and function passes,
+`astranaut_macro_scan` owns the source-ordered scan-and-splice state,
+`astranaut_macro_registry` owns macro declarations and point-in-time macro
+environments, `astranaut_macro_expander` owns shared attribute/function macro
 matching and recursive expansion, and `astranaut_macro_local` owns local
 closure and generation lifecycle. All expansion paths use the same expander.
 

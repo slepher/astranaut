@@ -6,8 +6,9 @@
 
 `-local_macro(...)` 的逐 FA 声明注册、闭包快照、预展开/一致性记录、依赖驱动累计编译、retain 与最终跳过集合属于独立的 [local-macro](../local-macro/proposal.md) 变更。本变更定义统一扫描如何调用该流程，以及 retain/普通 function 如何共享最终 `MacroRuntimeContext`。
 
-`astranaut_macro_expander` 提供唯一的 function 宏发现—执行实现，
-`astranaut_macro` 负责 pass 编排。local-macro 工作流直接向 expander
+`astranaut_macro` 负责 pass 编排，`astranaut_macro_scan` 负责 source-ordered
+scan-and-splice，`astranaut_macro_registry` 负责宏声明与阶段化环境，
+`astranaut_macro_expander` 提供唯一的 function 宏发现—执行实现。local-macro 工作流直接向 expander
 传入声明位点候选环境，以及显式的 `disabled`、`collect` 或
 `verify(Expected)` 白名单控制；普通 function 始终传 `disabled`。白名单记录 frozen
 function 自身展开的真实 match，并由 `process_macro_return` 在既有返回树 traversal 中

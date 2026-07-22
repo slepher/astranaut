@@ -4,7 +4,7 @@
 
 ### Requirement: local 与普通 function 使用同构展开
 
-`astranaut_macro` MUST 以同一 `MacroRuntimeContext` 构造和展开验证实现处理 local declaration 预展开、retain 与最终普通 function pass。
+`astranaut_macro` MUST 编排 `astranaut_macro_registry` 构造的同一 `MacroRuntimeContext`，并以统一展开验证实现处理 local declaration 预展开、retain 与最终普通 function pass。
 
 #### Scenario: 展开器不解释 local 专属策略
 

@@ -34,8 +34,9 @@ GenerationCompiler
 
 四者使用相同的环境构造、宏匹配、调用参数、`inject_attrs` 和结果验证逻辑。local frozen function 通过显式 whitelist control 启用真实匹配观察；普通 function/attribute 传 `disabled`。local macro 的特殊性只剩 declaration-time 快照、canonical whitelist、同声明成员的普通调用语义、闭包/依赖及 callable generation 生命周期。
 
-实现模块按此边界拆分：`astranaut_macro` 是 parse-transform 门面和 pass 编排器，拥有
-source-ordered scan、环境更新、splice、final context 及诊断入口；
+实现模块按此边界拆分：`astranaut_macro` 是 parse-transform 门面和 pass 编排器；
+`astranaut_macro_scan` 拥有 source-ordered scan、splice 与扫描期 traverse state；
+`astranaut_macro_registry` 拥有宏声明、环境更新和阶段化 context 解析；
 `astranaut_macro_expander` 拥有 attribute/function 共用的目标解析、宏调用、返回 AST
 规范化、递归展开和展开期 traversal state；`astranaut_macro_local` 拥有声明、闭包、
 一致性记录、调度及 generation 生命周期。expander 不反向调用扫描器或 local-macro

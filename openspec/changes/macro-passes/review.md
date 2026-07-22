@@ -17,7 +17,7 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | 契约 | 实现位置 | 状态 |
 |---|---|---|
 | 外部与本地属性宏统一顺序扫描 | `scan_attribute_forms/5`, `scan_form/1` | 已实现 |
-| splice 结果在当前位置立即重扫 | `astranaut_macro:map_forms_splice/3` | 已实现 |
+| splice 结果在当前位置立即重扫 | `astranaut_macro_scan:map_forms_splice/3` | 已实现 |
 | import/use/options 前向更新且不回扫 | `scan_env_form/2` | 已实现 |
 | passed forms 与 remaining queue 分离 | `note_passed_form/2`, `queue_state => true` | 已实现 |
 | attribute runtime 定位、解析、确保可调用，再统一构造与执行 | `attribute_macro_index/1`, `resolve_attribute_target/3`, `ensure_attribute_target_callable/2`, `expand_attribute_target/1` | 已实现；ordinary attribute 不遍历完整 macro map |
