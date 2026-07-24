@@ -62,6 +62,7 @@ init_per_suite(Config) ->
                    macro_pass_local_runtime_context_test,
                    macro_node_role_test,
                    macro_validator_slots,
+                   macro_guard_macros, macro_guard_test,
                    macro_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 %%--------------------------------------------------------------------
@@ -208,7 +209,10 @@ all() ->
      test_macro_pass_internal_function_conflict,
      test_macro_pass_local_environment_mutation_errors,
      test_macro_pass_locked_snapshot_mutation_error,
-     test_macro_node_roles].
+     test_macro_node_roles,
+     test_macro_simple_guard,
+     test_macro_complex_guard,
+     test_macro_guard_call].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -227,6 +231,20 @@ all() ->
 %%--------------------------------------------------------------------
 test_ok_case(_Config) ->
     ?assertEqual(ok, macro_test:test_ok()).
+
+test_macro_simple_guard(_Config) ->
+    ?assertEqual(integer, macro_guard_test:simple(1)),
+    ?assertEqual(other, macro_guard_test:simple(not_an_integer)).
+
+test_macro_complex_guard(_Config) ->
+    ?assertEqual(in_range, macro_guard_test:complex(12)),
+    ?assertEqual(in_range, macro_guard_test:complex(12.5)),
+    ?assertEqual(out_of_range, macro_guard_test:complex(9)),
+    ?assertEqual(out_of_range, macro_guard_test:complex(not_a_number)).
+
+test_macro_guard_call(_Config) ->
+    ?assertEqual(even, macro_guard_test:macro_guard(4)),
+    ?assertEqual(odd, macro_guard_test:macro_guard(5)).
 
 test_function_case(_Config) ->
     ?assertEqual(ok, macro_test:test_function(world)),

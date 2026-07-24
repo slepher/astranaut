@@ -239,7 +239,7 @@ transform_clause(Module, MacroMap,
                  RecordForms, WhitelistControl) ->
     do([ traverse ||
            reset_macro_return_counter(),
-           Guards1 <- transform_exprs(
+           Guards1 <- transform_guard_sequences(
                         Module, MacroMap, Guards,
                         #{depth => 0,
                           expected_role => guard,
@@ -253,6 +253,16 @@ transform_clause(Module, MacroMap,
                          local_macro_whitelist => WhitelistControl}),
            return({clause, Pos, Patterns, Guards1, Exprs1})
        ]).
+
+transform_guard_sequences(Module, MacroMap, Guards, DepthOpts) ->
+    %% Erlang clauses store guards as a list of guard sequences.  Transform
+    %% each sequence independently so conjunctions and disjunctions retain
+    %% their original nesting and every element is visited as an AST node.
+    astranaut_traverse:map_m(
+      fun(GuardSequence) ->
+              transform_exprs(
+                Module, MacroMap, GuardSequence, DepthOpts)
+      end, Guards).
 
 initial_expansion_state(disabled) ->
     0;

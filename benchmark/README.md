@@ -37,3 +37,24 @@ escript benchmark/macro_compile_bench.escript 30
 The runner compiles and loads the external macro provider before timing. It
 reports both the isolated `astranaut_macro` parse-transform time and the full
 `compile:file/2` time. Each metric has three unreported warm-up runs.
+
+## Desensitized Erlando do workload
+
+`real_benchmark.erl` is a compile-only extraction of the 13 Erlando-style
+`do([error_m || ...])` expressions in the historical `order_handler.erl`
+workload. Business-specific records, constants, module names, metadata, and
+literal values have been replaced with a neutral benchmark domain. A generated
+neutral workload restores the source to approximately 5,000 lines and keeps
+the ordinary-function scale close to the original module.
+
+Its complete local include dependency is `include/realbench_min.hrl`. The
+header contains only the macro registration, nine constants, and ten record
+definitions referenced by the extracted workload. `do_macro.erl` is the
+minimal provider adapted from `../erlando/src/do_macro.erl`; the monad
+implementation itself remains an external runtime concern and is not copied.
+
+Regenerate the neutral workload deterministically:
+
+```shell
+escript benchmark/generate_real_benchmark.escript
+```
