@@ -2,18 +2,30 @@
 
 ## 0.11.0
 
-- **统一宏展开系统**：外部宏与本地宏使用统一管道展开，新增 `-import_macro` 跨模块导入，支持宏重名冲突检测、递归宏展开、宏返回值语法验证
-- **宏扫描职责收敛**：`map_forms_splice/3` 从通用 `astranaut` traversal 迁移到专用 `astranaut_macro_scan`，由宏扫描器统一管理 Rest、attribute Buffer 与生成 function/spec 的局部合并
-- **Forms traversal 语义显式化**：`astranaut:map_m/3` 改为保留列表顺序；新增 `map_m_forms/3`，仅在明确需要时统一执行更新 form 的插入、重排及 `__original__` 合并；`prepare_exports` 不再隐式重排；function expander 以一次保序 Forms pass 展开全部目标，并为 frozen/local/ordinary function 分别应用其任务环境
-- **Struct 系统重构**：拆分为 `astranaut_struct`（宏 API）、`astranaut_struct_record`、`astranaut_struct_transformer`（parse_transform），新增 `from_other_record/4`，迁移至新宏流程
-- **AST 语法校验**：`astranaut_syntax` 新增 `validate_node/2,3`、`normalize/2,3`，引入 child_specs 角色校验体系
-- **遍历校验系统**：新增 traverse validator，检测无效 AST 变换及子节点
-- **Uniplate API 调整**：`map/4`、`reduce/5`、`mapfold/5` 从 `astranaut_uniplate` 移至 `astranaut` 模块，移除 static uniplate 和 keep 概念，新增 `astranaut:search/3`
-- **新增 OTP 类型支持**：`map_generator`、`strict_generator`、`strict_binary_generator`、`strict_map_generator`、`maybe_expr`、`maybe_match_expr` 支持（主要在 rebinding 中）
-- **Monad 重命名**：`maybe` monad 更名为 `monad_maybe`（避免 OTP-25 `maybe` 关键字冲突）
-- **错误处理增强**：`fail_on_error/1` / `catch_on_error/2` 替代 `listen_has_error`，有错误时遍历即失败不再继续
-- **`astranaut_lib` 共享工具层整理**：移除无关 converter/wrapper 导出，公开选项校验类型，并集中提供模块锁、二进制安全重载和 `reload_forms/2`
-- **新增 `astranaut_compile_meta_transformer`**：编译期元编程变换器
-- 新增 `astranaut:map_with_state/4`、`astranaut:smap_with_state/4`
-- 兼容 Erlang/OTP 19 ~ 29
-- **CI 与脚本**：新增本地 CI 容器方案（`ci_scripts`）、覆盖率报告脚本（`cover_report.escript`）、抽象语法文档抓取脚本（`fetch_absforms`）
+### 宏系统
+
+- **统一外部宏与本地宏的展开流程**：attribute 宏与 function-body 宏共用递归 expander，并由独立的 registry、源码扫描器和本地宏生命周期组件管理；修复 guard 上下文中的宏展开。
+- **本地宏采用声明作用域语义**：`-local_macro` 会冻结声明函数及静态发现的 helper 闭包，并使用声明位置可见的宏环境和 attributes；后续声明不再反向影响已经冻结的闭包。
+- **新增本地宏闭包控制**：支持 `-local_macro_retain`、`extra_functions` 和 `internal_function`，可显式保留闭包、加入无法静态发现的 helper，或把声明位置可见的指定宏调用固定为普通函数调用。
+- **明确宏的源码顺序**：attribute pass 按源码顺序执行 scan-and-splice，宏生成的 forms 会在当前位置继续扫描；随后 function-body pass 使用完整的最终宏环境。生成的 `-import_macro`、`-use_macro`、`-macro_options` 和 `-local_macro` 只影响其后的 forms。
+- **增强宏安全性与诊断**：支持递归宏展开及 `max_depth` 限制；检测宏名或 alias 冲突、重复本地宏声明和不兼容的闭包环境；按 expression、pattern、guard、form、type 等 AST role 校验宏返回值，并隔离同级宏展开错误。
+- **优化大型宏模块的编译性能**：预解析 attribute 环境并复用宏调用分析，减少重复扫描；新增深层递归和接近真实代码规模的宏编译 benchmark。
+
+### Traversal 与 AST
+
+- **新增 AST role 校验与规范化**：`astranaut_syntax` 新增 `validate_node/2,3`、`normalize/2,3`、`child_specs/3` 和 `node_roles/1`，可根据父节点 slot、OTP 版本和 record 定义校验或规范化 syntax tree。
+- **遍历结果默认校验**：traverse validator 会检测无效的 AST 变换及子节点；遍历遇到错误后通过 `fail_on_error/1`、`catch_on_error/2` 停止后续步骤，不再使用旧的 `listen_has_error` 流程。
+- **调整 Uniplate API**：移除 `astranaut_uniplate:map/4`、`reduce/5`、`mapfold/5`、static uniplate 和 `keep` 语义；使用 `astranaut:map/3`、`reduce/4`、`mapfold/4`，并新增 `search/3`、`map_with_state/4` 和 `smap_with_state/4`。
+- **区分普通列表遍历与 module forms 处理**：`astranaut:map_m/3` 保留输入列表顺序；新增 `map_m_forms/3`，仅在处理 module forms 时执行生成 form 的插入、function/spec 合并和规范重排。
+- **Monad API 更新**：`maybe` monad/type 更名为 `monad_maybe`，避免与 OTP 25 的 `maybe` 关键字冲突；updated writer/listener API 统一为 `writer_updated`、`listen_updated` 命名。
+
+### Struct 与编译期工具
+
+- **重构 Struct 系统**：拆分为宏 API `astranaut_struct`、record 数据处理模块 `astranaut_struct_record` 和 parse transform `astranaut_struct_transformer`，迁移至新的宏流程，并新增 `from_other_record/4`。
+- **新增 `astranaut_compile_meta_transformer`**：收集 parse transform 后的 forms、编译错误和 warning，供编译期元编程与诊断使用。
+- **整理 `astranaut_lib` 共享 API**：公开选项校验相关类型，集中提供模块锁、二进制安全重载和 `reload_forms/2`，并移除仅供旧 converter/wrapper 使用的导出。
+
+### OTP 兼容性与开发工具
+
+- 新增 `map_generator`、`strict_generator`、`strict_binary_generator`、`strict_map_generator`、`maybe_expr` 和 `maybe_match_expr` 等 AST 类型支持，主要用于 rebinding；兼容 Erlang/OTP 19～29。
+- 新增中文 README、OTP 19～29 abstract forms 参考文档及抓取脚本、本地容器 CI、覆盖率报告脚本，以及宏编译 benchmark。
