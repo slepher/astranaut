@@ -2,7 +2,9 @@
 %%% @author Chen Slepher <slepheric@gmail.com>
 %%% @copyright (C) 2017, Chen Slepher
 %%% @doc
-%%% Support library for traverse abstract Erlang syntax trees.
+%%% Shared convenience functions for users and Astranaut's own modules,
+%%% including building, inspecting, compiling, and loading abstract Erlang
+%%% syntax trees and module forms.
 %%% @end
 %%% Created : 17 Oct 2017 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
@@ -12,25 +14,36 @@
 -include("stacktrace.hrl").
 
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
-         original_forms/2, parse_file/2, load_forms/2, compile_forms/2,
+         original_forms/2, parse_file/2, load_forms/2, reload_forms/2, compile_forms/2,
+         with_module_lock/2, reload_binary/2,
          analyze_module_attributes/2, analyze_forms_attributes/1, analyze_forms_attributes/2, analyze_forms_file/1,
          analyze_forms_module/1, analyze_transform_file_pos/2,
          ast_safe_to_string/1, ast_to_string/1, relative_path/1,
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
-         concerete/2, try_concerete/2,
          with_attribute/5, forms_with_attribute/5,
-         option_map/1, validate/2, validate_attribute_option/4,
-         nested_withs/3]).
+         option_map/1, validate/2, validate_attribute_option/4]).
 
 -type options() :: option() | [option()] | option_map().
 -type option() :: atom() | {atom(), term()}.
 -type option_map() :: #{atom() => term()}.
 -type validators() :: validator() | [validator()].
 -type validator() :: internal_validator() | validator_fun().
--type validator_fun() :: fun((term()) -> validator_fun_return()) | fun((term(), Attrs::#{key := term(), data := term(), is_key := term()}) -> validator_fun_return()) |
-                         fun((term(), Attrs::#{key := term(), data := term(), is_key := term()}, IsEmpty::boolean()) -> validator_fun_return()).
+-type validator_attrs() :: #{key := atom(), data := option_map(),
+                             validated_data := option_map(), is_key := boolean()}.
+-type validator_fun() :: fun((term()) -> validator_fun_return()) |
+                         fun((term(), validator_attrs()) -> validator_fun_return()) |
+                         fun((term(), IsEmpty::boolean(), validator_attrs()) -> validator_fun_return()).
 -type validator_fun_return() :: {ok, Value::term()} | {error, Reason::term()} | true | false | {warning, Reason::term()} | {warning, Value::term(), Reason::term()} | astranaut_return:struct(Value::term()).
--type internal_validator() :: boolean | atom | integer | number | binary | {list_of, [validator()]} | {one_of, [term()]} | required | {default, Default::term()} | paired | {paired, PairedKey::atom()} | any.
+-type internal_validator() :: boolean | atom | integer | uinteger | number | binary |
+                              {'or', [validator()]} | {list_of, validator()} |
+                              {one_of, [term()]} | required |
+                              {default, Default::term()} |
+                              {default_key, DefaultKey::atom()} |
+                              paired | {paired, PairedKey::atom()} | any.
+
+-export_type([options/0, option/0, option_map/0, validators/0,
+              validator/0, validator_attrs/0, validator_fun/0,
+              validator_fun_return/0, internal_validator/0]).
 
 -spec replace_pos(astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
 %% @doc replace pos attribute of subtrees to Pos.
@@ -82,13 +95,15 @@ abstract_form(Term) ->
 abstract_form(Term, Pos) ->
     replace_pos(abstract_form(Term), Pos).
 
--spec original_forms(astranaut:forms(), [compile:option()]) -> astranaut:forms().
+-spec original_forms(astranaut:forms(), [compile:option()]) ->
+          astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
 %% @doc get original froms before all parse transform compile flags removed by read file attribute in forms and re-parse it.
 original_forms(Forms, Opts) ->
     File = analyze_forms_file(Forms),
     parse_file(File, Opts).
 
--spec parse_file(file:filename(), [compile:option()]) -> astranaut:forms().
+-spec parse_file(file:filename(), [compile:option()]) ->
+          astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
 %% @doc get forms from file with compile opts.
 parse_file(File, Opts) ->
     Dir = filename:dirname(File),
@@ -151,8 +166,11 @@ find_invalid_unicode([H|T], File0) ->
     end;
 find_invalid_unicode([], _) -> none.    
 
--spec compile_forms(astranaut:forms(), [compile:option()|without_warnings]) -> astranaut_return:struct(module()).
-%% @doc compile and load forms from file with compile opts, an extra option is without_warnings, while provided, no warnings return or reported, it's useful while temperary compile part of forms on compile time and use it later.
+-spec compile_forms(astranaut:forms(), [compile:option()|without_warnings]) ->
+          astranaut_return:struct({module(), binary()}).
+%% @doc compile forms with compile opts. The extra option `without_warnings'
+%% suppresses returned and reported warnings, which is useful for temporarily
+%% compiling generated forms at compile time.
 compile_forms(Forms, Opts) ->
     Opts1 =
         case proplists:get_bool(without_warnings, Opts) of
@@ -174,7 +192,7 @@ compile_forms(Forms, Opts) ->
 %% @doc load forms as compiled module.
 load_forms(Forms, Opts) ->
     astranaut_return:bind(
-      compile_forms(Forms, Opts),
+      compile_forms(Forms, ensure_compile_option(binary, Opts)),
       fun({Mod, Binary}) ->
               case code:load_binary(Mod, [], Binary) of
                   {module, Mod} ->
@@ -183,6 +201,72 @@ load_forms(Forms, Opts) ->
                       astranaut_return:error_fail(What)
               end
       end).
+
+-spec reload_forms(astranaut:forms(), [compile:option()]) ->
+          astranaut_return:struct({module(), binary()}).
+%% @doc Compile forms and safely replace the loaded module. The replacement
+%% uses a per-module lock and `code:soft_purge/1'; it fails with
+%% `{module_in_use, Module}' while old code is still executing.
+reload_forms(Forms, Opts) ->
+    case analyze_forms_module(Forms) of
+        undefined ->
+            astranaut_return:error_fail(module_attribute_not_found);
+        Module ->
+            with_module_lock(
+              Module,
+              fun() ->
+                      astranaut_return:bind(
+                        compile_forms(
+                          Forms, ensure_compile_option(binary, Opts)),
+                        fun({CompiledModule, Binary})
+                              when CompiledModule =:= Module ->
+                                loader_return(
+                                  reload_binary(Module, Binary));
+                           ({CompiledModule, _Binary}) ->
+                                astranaut_return:error_fail(
+                                  {unexpected_compiled_module,
+                                   Module, CompiledModule})
+                        end)
+              end)
+    end.
+
+ensure_compile_option(Option, Opts) ->
+    case lists:member(Option, Opts) of
+        true -> Opts;
+        false -> [Option | Opts]
+    end.
+
+loader_return({ok, Result}) ->
+    astranaut_return:return(Result);
+loader_return({error, Reason}) ->
+    astranaut_return:error_fail(Reason).
+
+-spec with_module_lock(module(), fun(() -> Result)) -> Result.
+%% @doc Serialize work associated with a generated or reloadable module.
+with_module_lock(Module, Fun)
+  when is_atom(Module), is_function(Fun, 0) ->
+    global:trans({?MODULE, Module}, Fun).
+
+-spec reload_binary(module(), binary()) ->
+          {ok, {module(), binary()}} | {error, term()}.
+%% @doc Safely replace a compiled module binary without force-purging code.
+%% The caller should use `with_module_lock/2' when replacement can race.
+reload_binary(Module, Binary) ->
+    case code:is_loaded(Module) of
+        false ->
+            load_binary(Module, Binary);
+        {file, _} ->
+            case code:soft_purge(Module) of
+                true -> load_binary(Module, Binary);
+                false -> {error, {module_in_use, Module}}
+            end
+    end.
+
+load_binary(Module, Binary) ->
+    case code:load_binary(Module, [], Binary) of
+        {module, Module} -> {ok, {Module, Binary}};
+        {error, Reason} -> {error, Reason}
+    end.
 
 inc_paths(Opts) ->
     [ P || {i,P} <- Opts, is_list(P) ].
@@ -265,7 +349,8 @@ analyze_forms_module(Forms) ->
     Analyzed = erl_syntax_lib:analyze_forms(Forms),
     proplists:get_value(module, Analyzed).
 
--spec analyze_transform_file_pos(module(), astranaut:forms()) -> {file:filename(), erl_anno:location()}.
+-spec analyze_transform_file_pos(module(), astranaut:forms()) ->
+          {file:filename() | undefined, erl_anno:location()}.
 %% @doc transformer and it's pos number of Analyzed Forms.
 analyze_transform_file_pos(Transformer, Forms) ->
     analyze_transform_file_pos(Transformer, Forms, undefined).
@@ -311,21 +396,26 @@ ast_to_string(Form) ->
 relative_path(Path) ->
     case file:get_cwd() of
         {ok, BasePath} ->
-            replace_path(Path, BasePath ++ "/");
+            relative_path(Path, BasePath);
         {error, _Reason} ->
             Path
     end.
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_21).
-replace_path(Path, BasePath) ->
-    string:replace(Path, BasePath, "").
--else.
-%% string:replace is not avaliable before otp-20
-replace_path([H|T1], [H|T2]) ->
-    replace_path(T1, T2);
-replace_path(Str, _T) ->
-    Str.
--endif.
+relative_path(Path, BasePath) ->
+    PathParts = filename:split(filename:absname(Path)),
+    BaseParts = filename:split(filename:absname(BasePath)),
+    case remove_path_prefix(BaseParts, PathParts) of
+        {ok, []} -> ".";
+        {ok, RelativeParts} -> filename:join(RelativeParts);
+        error -> Path
+    end.
+
+remove_path_prefix([Part | BaseParts], [Part | PathParts]) ->
+    remove_path_prefix(BaseParts, PathParts);
+remove_path_prefix([], PathParts) ->
+    {ok, PathParts};
+remove_path_prefix(_BaseParts, _PathParts) ->
+    error.
 
 %% =====================================================================
 -spec gen_attribute_node(atom(), erl_anno:location(), term()) -> erl_parse:abstract_form().
@@ -397,28 +487,6 @@ merge_clauses([{'fun', Pos, {clauses, _}}|_T] = Nodes) ->
 %% @doc generate {attribute, Pos, export, Exports} node.
 gen_exports(Exports, Pos) when is_list(Exports) ->
     gen_attribute_node(export, Pos, Exports).
-
--spec concerete(A, [fun((A) -> {ok, B} | error)]) -> B | no_return().
-%% @doc works like {@link try_concerete/2}, returns B or throw exception.
-concerete(A, Concereters) ->
-    case try_concerete(A, Concereters) of
-        {ok, B} ->
-            B;
-        error ->
-            exit({incompatable_value, A})
-    end.
-
--spec try_concerete(A, Concereters::[fun((A) -> {ok, B} | error)]) -> {ok, B} | error.
-%% @doc try Concereters, while Concereter(A) returns {ok, B}, returns {ok, B}, while it returns error, try next concereter, if all concereter failed, return error.
-try_concerete(A, [Concereter|T]) ->
-    case Concereter(A) of
-        {ok, B} ->
-            {ok, B};
-        error ->
-            try_concerete(A, T)
-    end;
-try_concerete(_A, []) ->
-    error.
 
 -spec with_attribute(fun((term(), State) -> astranaut_return:struct(State) | State),
                      State, astranaut:forms(), atom(), #{simplify_return := false, formatter => module()}) ->
@@ -695,11 +763,16 @@ follow_deps(Key, RestDeps, Acc, TotalAcc) ->
 validate_map_value(Validator, Key, Value, ToValidate, ValidatedData, IsKey) ->
     Attrs = #{key => Key, is_key => IsKey, data => ToValidate, validated_data => ValidatedData},
     Return = validate_value(Validator, Value, Attrs),
+    FormatReason =
+        fun(Reason) ->
+                {validate_key_failure, Reason, Key, Value}
+        end,
     Return1 =
-        nested_withs(
-          fun(Reason) -> 
-                  {validate_key_failure, Reason, Key, Value} 
-          end, [fun astranaut_error:with_failure/2, fun astranaut_return:with_error/2], Return),
+        astranaut_return:with_error(
+          fun(ErrorState) ->
+                  astranaut_error:with_failure(
+                    FormatReason, ErrorState)
+          end, Return),
     case astranaut_return:has_error(Return1) of
         true ->
             astranaut_return:lift_m(fun(_) -> ValidatedData end, Return1);
@@ -899,11 +972,3 @@ required(Value, _Args, false, #{}) ->
     end;
 'or'(_Value, [], _IsKey, _Attr, Validators) ->
     {error, {all_validator_failed, Validators}}.
-
-nested_withs(Fun, Withs, Data) ->
-    FinalWith = 
-        lists:foldl(
-            fun(With, FunAcc) ->
-                fun(Data1) -> With(FunAcc, Data1) end
-            end, Fun, Withs),
-    FinalWith(Data).

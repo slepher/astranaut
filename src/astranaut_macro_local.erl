@@ -649,7 +649,7 @@ load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions,
 
 -spec with_generation_lock(module(), fun(() -> Result)) -> Result.
 with_generation_lock(Module, Fun) ->
-    global:trans({?MODULE, module_name(Module)}, Fun).
+    astranaut_lib:with_module_lock(module_name(Module), Fun).
 
 %% Execute pure plan data in two explicit stages. ExpansionValidator prepares
 %% canonical forms first; GenerationCompiler then consumes only those forms.
@@ -1001,27 +1001,23 @@ append_if(false, _Form, Forms) -> Forms.
 %% old code is in use.
 -spec safe_load(module(), [term()], [compile:option()]) -> astranaut_return:struct({module(), binary()}).
 safe_load(Module, Forms, CompileOpts) ->
-    global:trans({?MODULE, Module}, fun() -> safe_load_locked(Module, Forms, CompileOpts) end).
+    astranaut_lib:with_module_lock(
+      Module, fun() -> safe_load_locked(Module, Forms, CompileOpts) end).
 
 safe_load_locked(Module, Forms, CompileOpts) ->
     astranaut_return:bind(
       astranaut_lib:compile_forms(Forms, CompileOpts),
       fun({CompiledModule, Binary}) when CompiledModule =:= Module ->
-              case code:is_loaded(CompiledModule) of
-                  false -> load_binary(Module, Binary);
-                  {file, _} ->
-                      case code:soft_purge(CompiledModule) of
-                          true -> load_binary(Module, Binary);
-                          false -> astranaut_return:error_fail(local_macro_module_in_use)
-                      end
+              case astranaut_lib:reload_binary(Module, Binary) of
+                  {ok, Result} ->
+                      astranaut_return:return(Result);
+                  {error, {module_in_use, Module}} ->
+                      astranaut_return:error_fail(
+                        local_macro_module_in_use);
+                  {error, Reason} ->
+                      astranaut_return:error_fail(Reason)
               end
       end).
-
-load_binary(Module, Binary) ->
-    case code:load_binary(Module, [], Binary) of
-        {module, Module} -> astranaut_return:return({Module, Binary});
-        {error, Reason} -> astranaut_return:error_fail(Reason)
-    end.
 
 duplicate_or_existing(FAs, Macros) ->
     case [FA || FA <- FAs, maps:is_key(FA, Macros)] ++ duplicate_fas(FAs) of

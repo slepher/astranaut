@@ -230,7 +230,8 @@ with_formatted(Fun, {Pos, Formatter, Error}) ->
     {Pos, Formatter, Fun(Error)}.
 
 with_formatted_base(Fun, FormattedErrors) ->
-    astranaut_lib:nested_withs(Fun, [fun with_formatted/2, fun endo_map/2], FormattedErrors).
+    nested_withs(
+      Fun, [fun with_formatted/2, fun endo_map/2], FormattedErrors).
 
 with_file_errors(Fun, Struct) ->
     with_key(Fun, file_errors, fun with_file/2, Struct).
@@ -263,10 +264,12 @@ with_file(Fun, FileErrors) ->
     maps:from_list(lists:map(Fun, maps:to_list(FileErrors))).
 
 with_file_formatted(Fun, FileErrors) ->
-    astranaut_lib:nested_withs(Fun, [fun endo_map/2, fun with_map_value/2], FileErrors).
+    nested_withs(
+      Fun, [fun endo_map/2, fun with_map_value/2], FileErrors).
 
 with_file_base(Fun, FileErrors) ->
-    astranaut_lib:nested_withs(Fun, [fun with_formatted/2, fun with_file_formatted/2], FileErrors).
+    nested_withs(
+      Fun, [fun with_formatted/2, fun with_file_formatted/2], FileErrors).
 
 with_all_error(Fun, Struct) ->
     sequence_withs(Fun, [fun with_error/2, fun with_formatted_base_error/2, fun with_file_base_error/2], Struct).
@@ -519,3 +522,11 @@ endo_do_append(#{list := EndoList1}, #{list := EndoList2}) ->
 
 sequence_withs(Fun, Withs, Data) ->
     lists:foldl(fun(With, DataAcc) -> With(Fun, DataAcc) end, Data, Withs).
+
+nested_withs(Fun, Withs, Data) ->
+    FinalWith =
+        lists:foldl(
+          fun(With, FunAcc) ->
+                  fun(Data1) -> With(FunAcc, Data1) end
+          end, Fun, Withs),
+    FinalWith(Data).

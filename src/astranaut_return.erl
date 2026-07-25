@@ -118,7 +118,7 @@ foldl_m(_F, Acc, []) ->
     return(Acc).
 
 from_compiler(CompilerReturn) ->
-    astranaut_lib:concerete(CompilerReturn, [fun from_compiler_1/1]).
+    concrete(CompilerReturn, [fun from_compiler_1/1]).
 
 from_compiler_1(Forms) when is_list(Forms) ->
     {ok, ok(Forms)};
@@ -154,7 +154,23 @@ from_walk_return(_) ->
     error.
 
 to_monad(A) ->
-    astranaut_lib:concerete(A, [fun from_return/1, fun from_walk_return/1, fun from_compiler_1/1]).
+    concrete(
+      A, [fun from_return/1, fun from_walk_return/1,
+          fun from_compiler_1/1]).
+
+concrete(A, Converters) ->
+    case try_concrete(A, Converters) of
+        {ok, B} -> B;
+        error -> exit({incompatable_value, A})
+    end.
+
+try_concrete(A, [Converter | Converters]) ->
+    case Converter(A) of
+        {ok, B} -> {ok, B};
+        error -> try_concrete(A, Converters)
+    end;
+try_concrete(_A, []) ->
+    error.
 
 -spec to_compiler(struct([erl_syntax:syntaxTree()])) ->
                          [erl_syntax:syntaxTree()] | {warning, [erl_syntax:syntaxTree()], astranaut_error:compiler_error()} |

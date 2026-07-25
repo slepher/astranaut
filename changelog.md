@@ -12,6 +12,7 @@
 - **新增 OTP 类型支持**：`map_generator`、`strict_generator`、`strict_binary_generator`、`strict_map_generator`、`maybe_expr`、`maybe_match_expr` 支持（主要在 rebinding 中）
 - **Monad 重命名**：`maybe` monad 更名为 `monad_maybe`（避免 OTP-25 `maybe` 关键字冲突）
 - **错误处理增强**：`fail_on_error/1` / `catch_on_error/2` 替代 `listen_has_error`，有错误时遍历即失败不再继续
+- **`astranaut_lib` 共享工具层整理**：移除无关 converter/wrapper 导出，公开选项校验类型，并集中提供模块锁、二进制安全重载和 `reload_forms/2`
 - **新增 `astranaut_compile_meta_transformer`**：编译期元编程变换器
 - 新增 `astranaut:map_with_state/4`、`astranaut:smap_with_state/4`
 - 兼容 Erlang/OTP 19 ~ 29

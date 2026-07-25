@@ -348,6 +348,30 @@ proxies. New code should call `astranaut_forms` directly.
 module forms and requires one final `reorder_updated_forms` pass, including
 `__original__` merging.
 
+# astranaut_lib
+
+`astranaut_lib` is the shared toolkit used both by callers and Astranaut's own
+modules for common AST and parse-transform workflows:
+
+```erlang
+  astranaut_lib:abstract_form(Term) -> Ast.
+  astranaut_lib:replace_pos(Ast, Pos) -> Ast1.
+  astranaut_lib:gen_function(Name, Body) -> FunctionForm.
+  astranaut_lib:analyze_forms_module(Forms) -> Module.
+  astranaut_lib:validate(Validator, Options) -> Return.
+  astranaut_lib:compile_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:load_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:reload_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:with_module_lock(Module, Fun) -> Result.
+  astranaut_lib:reload_binary(Module, Binary) -> Result.
+```
+
+`reload_forms/2` serializes replacements per module and uses
+`code:soft_purge/1`. It returns an Astranaut error containing
+`{module_in_use, Module}` rather than purging code that is still executing.
+`with_module_lock/2` and `reload_binary/2` expose the same lower-level
+operations for internal code and callers that already have a compiled binary.
+
 # astranaut_uniplate
 
 &emsp;&emsp;`astranaut_uniplate` is the internal uniplate/context implementation
@@ -415,7 +439,7 @@ used by traversal. Most users should use `astranaut`, `astranaut_traverse`, and
         ok
       end, 10). 
     =>
-    astranaut:replace_pos_zero(quote(fun(_) -> ok end), 10).
+    astranaut_lib:replace_pos_zero(quote(fun(_) -> ok end), 10).
     =>
     {'fun', 10, {clauses, [{clause, 10, [{var, 10, '_'}], [], [{atom, 10, ok}]}]}}.
 ```
@@ -957,7 +981,7 @@ macro_1(Ast) ->
 -exec_macro({macro_2, [hello]}).
 
 macro_2(Name) ->
-  astranaut:function(
+  astranaut_lib:gen_function(
     Name,
     quote(
       fun() ->
@@ -984,7 +1008,7 @@ hello() ->
   hello.
 
 macro_2(Name) ->
-  astranaut:function(
+  astranaut_lib:gen_function(
     Name,
     quote(
       fun() ->

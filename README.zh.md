@@ -245,6 +245,30 @@ Forms，并在结束时统一执行一次 `reorder_updated_forms`（包括合并
 `__original__`）时，才使用
 `astranaut:map_m_forms/3`。
 
+# astranaut_lib
+
+`astranaut_lib` 是用户代码与 Astranaut 内部模块共同使用的 AST 和 parse
+transform 工具箱：
+
+```erlang
+  astranaut_lib:abstract_form(Term) -> Ast.
+  astranaut_lib:replace_pos(Ast, Pos) -> Ast1.
+  astranaut_lib:gen_function(Name, Body) -> FunctionForm.
+  astranaut_lib:analyze_forms_module(Forms) -> Module.
+  astranaut_lib:validate(Validator, Options) -> Return.
+  astranaut_lib:compile_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:load_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:reload_forms(Forms, CompileOpts) -> Return.
+  astranaut_lib:with_module_lock(Module, Fun) -> Result.
+  astranaut_lib:reload_binary(Module, Binary) -> Result.
+```
+
+`reload_forms/2` 按模块串行执行替换，并使用 `code:soft_purge/1`。如果旧代码
+仍在执行，它返回包含 `{module_in_use, Module}` 的 Astranaut error，不会强制
+清除正在使用的代码。
+对于已经取得编译后二进制的内部代码或用户，`with_module_lock/2` 和
+`reload_binary/2` 提供相同的底层操作。
+
 # astranaut_uniplate
 
 &emsp;&emsp;`astranaut_uniplate` 是 traversal 内部使用的 uniplate/context 实现模块。大多数用户应通过 `astranaut`、`astranaut_traverse` 和 `astranaut_syntax` 使用 traversal 能力，不应依赖其内部 context 结构。

@@ -30,6 +30,10 @@ groups() ->
 
 all() ->
     [walk_return_contracts,
+     lib_public_api_contracts,
+     lib_form_source_contracts,
+     lib_reload_forms_contract,
+     lib_reload_forms_in_use_contract,
      do_parse_transform_contracts,
      do_error_contracts,
      return_error_contracts,
@@ -40,6 +44,122 @@ all() ->
      compile_meta_warning_contract,
      compile_meta_error_contract,
      compile_meta_invalid_and_undefined_contracts].
+
+lib_public_api_contracts(_Config) ->
+    {module, astranaut_lib} = code:ensure_loaded(astranaut_lib),
+    Expected =
+        ordsets:from_list(
+          [{replace_pos, 2}, {replace_pos_zero, 2},
+           {abstract_form, 1}, {abstract_form, 2},
+           {original_forms, 2}, {parse_file, 2},
+           {load_forms, 2}, {reload_forms, 2}, {compile_forms, 2},
+           {with_module_lock, 2}, {reload_binary, 2},
+           {analyze_module_attributes, 2},
+           {analyze_forms_attributes, 1},
+           {analyze_forms_attributes, 2},
+           {analyze_forms_file, 1}, {analyze_forms_module, 1},
+           {analyze_transform_file_pos, 2},
+           {ast_safe_to_string, 1}, {ast_to_string, 1},
+           {relative_path, 1},
+           {gen_attribute_node, 3}, {gen_exports, 2},
+           {gen_exported_function, 2}, {gen_function, 2},
+           {merge_clauses, 1},
+           {with_attribute, 5}, {forms_with_attribute, 5},
+           {option_map, 1}, {validate, 2},
+           {validate_attribute_option, 4}]),
+    Actual =
+        ordsets:from_list(
+          [{Name, Arity}
+           || {Name, Arity} <- astranaut_lib:module_info(exports),
+              Name =/= module_info]),
+    ?assertEqual(Expected, Actual).
+
+lib_form_source_contracts(Config) ->
+    PrivDir = ?config(priv_dir, Config),
+    File = filename:join(PrivDir, "astranaut_lib_source_contract.erl"),
+    Source =
+        ["-module(astranaut_lib_source_contract).\n",
+         "-compile({parse_transform, astranaut_lib_source_transformer}).\n",
+         "-export([value/0]).\n",
+         "value() -> ok.\n"],
+    ok = file:write_file(File, Source),
+    try
+        ParseOpts = [{error_location, line}],
+        Forms = astranaut_lib:parse_file(File, ParseOpts),
+        ?assertEqual(
+           astranaut_lib_source_contract,
+           astranaut_lib:analyze_forms_module(Forms)),
+        ?assertEqual(File, astranaut_lib:analyze_forms_file(Forms)),
+        OriginalForms = astranaut_lib:original_forms(Forms, ParseOpts),
+        ?assertEqual(
+           astranaut_lib_source_contract,
+           astranaut_lib:analyze_forms_module(OriginalForms)),
+        ?assertEqual(
+           {File, 2},
+           astranaut_lib:analyze_transform_file_pos(
+             astranaut_lib_source_transformer, Forms)),
+        {ok, Cwd} = file:get_cwd(),
+        Absolute = filename:join([Cwd, "test", "sample.erl"]),
+        ?assertEqual(
+           filename:join("test", "sample.erl"),
+           astranaut_lib:relative_path(Absolute))
+    after
+        file:delete(File)
+    end.
+
+lib_reload_forms_contract(_Config) ->
+    Module = astranaut_lib_reload_contract,
+    cleanup_module(Module),
+    try
+        MissingModule =
+            astranaut_lib:reload_forms([{eof, 1}], [without_warnings]),
+        ?assertEqual(
+           [module_attribute_not_found],
+           astranaut_error:errors(
+             astranaut_return:run_error(MissingModule))),
+        {just, {Module, _}} =
+            astranaut_return:run(
+              astranaut_lib:reload_forms(
+                value_module_forms(Module, first), [without_warnings])),
+        ?assertEqual(first, Module:value()),
+        {just, {Module, _}} =
+            astranaut_return:run(
+              astranaut_lib:reload_forms(
+                value_module_forms(Module, second), [without_warnings])),
+        ?assertEqual(second, Module:value())
+    after
+        cleanup_module(Module)
+    end.
+
+lib_reload_forms_in_use_contract(_Config) ->
+    Module = astranaut_lib_reload_busy_contract,
+    cleanup_module(Module),
+    try
+        {just, {Module, _}} =
+            astranaut_return:run(
+              astranaut_lib:reload_forms(
+                busy_module_forms(Module, first), [without_warnings])),
+        Pid = spawn(Module, hold, []),
+        try
+            timer:sleep(10),
+            {just, {Module, _}} =
+                astranaut_return:run(
+                  astranaut_lib:reload_forms(
+                    busy_module_forms(Module, second),
+                    [without_warnings])),
+            Failed =
+                astranaut_lib:reload_forms(
+                  busy_module_forms(Module, third), [without_warnings]),
+            ?assertEqual(
+               [{module_in_use, Module}],
+               astranaut_error:errors(
+                 astranaut_return:run_error(Failed)))
+        after
+            stop_process(Pid)
+        end
+    after
+        cleanup_module(Module)
+    end.
 
 do_parse_transform_contracts(_Config) ->
     Forms =
@@ -120,6 +240,9 @@ return_error_contracts(_Config) ->
                  astranaut_error:formatted_errors(astranaut_return:run_error(Formatted))),
 
     ?assertEqual(true, astranaut_return:has_error(ErrorFail)),
+    ?assertException(
+       exit, {incompatable_value, {invalid_return_shape}},
+       astranaut_return:to_monad({invalid_return_shape})),
     ?assertException(exit, #{errors := [fail_reason]}, astranaut_return:simplify(ErrorFail)).
 
 error_state_contracts(_Config) ->
@@ -250,3 +373,33 @@ compile_and_load(Module, Forms) ->
     code:delete(Module),
     {ok, Module, Binary, _Warnings} = compile:forms(Forms, [binary, return_errors, return_warnings]),
     code:load_binary(Module, atom_to_list(Module) ++ ".erl", Binary).
+
+value_module_forms(Module, Value) ->
+    [{attribute, 1, module, Module},
+     {attribute, 1, export, [{value, 0}]},
+     {function, 1, value, 0,
+      [{clause, 1, [], [], [{atom, 1, Value}]}]}].
+
+busy_module_forms(Module, Value) ->
+    [{attribute, 1, module, Module},
+     {attribute, 1, export, [{hold, 0}, {value, 0}]},
+     {function, 1, hold, 0,
+      [{clause, 1, [], [],
+        [{'receive', 1,
+          [{clause, 1, [{atom, 1, stop}], [], [{atom, 1, ok}]}]}]}]},
+     {function, 1, value, 0,
+      [{clause, 1, [], [], [{atom, 1, Value}]}]}].
+
+stop_process(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    Pid ! stop,
+    receive
+        {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 1000 ->
+        erlang:error({process_did_not_stop, Pid})
+    end.
+
+cleanup_module(Module) ->
+    code:purge(Module),
+    code:delete(Module),
+    ok.
