@@ -122,6 +122,7 @@ all() ->
      test_type, test_type_atom, test_type_map, test_type_tuple, test_exp_type, test_remote_type,
      test_record, test_spec, test_callback, test_opaque,
      test_empty_quote_code, test_empty_quote_type_code,
+     test_quote_code_options_must_be_last, test_invalid_binding_values,
      test_binding_warning_format,
      test_quoted_invalid_unquote_splicing_warning,
      test_quoted_invalid_unquote_splicing_binding_warning,
@@ -404,10 +405,33 @@ test_opaque(_Config) ->
     ok.
 
 test_empty_quote_code(_Config) ->
-    assert_invalid_empty_quote("quote_code", quote_code).
+    assert_invalid_quote("quote_code()", quote_code).
 
 test_empty_quote_type_code(_Config) ->
-    assert_invalid_empty_quote("quote_type_code", quote_type_code).
+    assert_invalid_quote("quote_type_code()", quote_type_code).
+
+test_quote_code_options_must_be_last(_Config) ->
+    assert_invalid_quote(
+      "quote_code(#{code_pos => true}, \"ok\")", quote_code),
+    assert_invalid_quote(
+      "quote_code(\"first\", #{code_pos => true}, \"last\")", quote_code).
+
+test_invalid_binding_values(_Config) ->
+    Cases =
+        [{integer, not_integer},
+         {float, not_float},
+         {string, [not_a_character]},
+         {string, <<255>>},
+         {atom, <<255>>},
+         {var, <<255>>},
+         {atom_value, <<255>>}],
+    lists:foreach(
+      fun({Type, Value}) ->
+              Opts = #{type => Type, pos => 0, name => 'Value'},
+              ?assertError(
+                 {unexpected_type_of_var, 'Value', Type, Value},
+                 astranaut_quote:bind_var(Value, Opts))
+      end, Cases).
 
 test_binding_warning_format(_Config) ->
     Forms = merl:quote(
@@ -529,17 +553,17 @@ test_quoted_literal_name_binding_warning(_Config) ->
     astranaut_test_lib:assert_formatted_messages([Warning]),
     ok.
 
-assert_invalid_empty_quote(FunctionCode, Function) ->
+assert_invalid_quote(CallCode, Function) ->
     Forms = merl:quote(
               ["-file(\"empty_quote_test.erl\", 1).",
                "-module(empty_quote_test).",
                "-export([run/0]).",
-               "run() -> " ++ FunctionCode ++ "()."])
+               "run() -> " ++ CallCode ++ "."])
         ++ [{eof, 5}],
     ?assertMatch(
        {error,
-        [{_, [{_, astranaut_quote,
-               {invalid_quote, {call, _, {atom, _, Function}, []}}}]}],
+         [{_, [{_, astranaut_quote,
+               {invalid_quote, {call, _, {atom, _, Function}, _}}}]}],
         []},
        astranaut_quote:parse_transform(Forms, [])),
     ok.

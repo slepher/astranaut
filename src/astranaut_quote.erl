@@ -59,29 +59,46 @@ var_value(Var, #{type := float}) when is_float(Var) ->
     Var;
 var_value(Var, #{type := float}) when is_integer(Var) ->
     float(Var);
-var_value(Var, #{type := string, name := Name}) when is_list(Var) ->
+var_value(Var, #{type := string} = Opts) when is_list(Var) ->
     case lists:all(fun is_integer/1, Var) of
         true ->
             Var;
         false ->
-            exit({unexpected_type_of_var, Name, string, Var})
+            unexpected_type_of_var(Var, Opts)
     end;
-var_value(Var, #{type := string}) when is_binary(Var) ->
-    unicode:characters_to_list(Var);
+var_value(Var, #{type := string} = Opts) when is_binary(Var) ->
+    case unicode:characters_to_list(Var) of
+        String when is_list(String) ->
+            String;
+        _ ->
+            unexpected_type_of_var(Var, Opts)
+    end;
 var_value(Var, #{type := atom} = Opts) ->
     atom_value(Var, Opts);
 var_value(Var, #{type := var} = Opts) ->
     atom_value(Var, Opts);
 var_value(Var, #{type := atom_value} = Opts) ->
-    atom_value(Var, Opts).
+    atom_value(Var, Opts);
+var_value(Var, Opts) ->
+    unexpected_type_of_var(Var, Opts).
 
 atom_value(Var, #{}) when is_atom(Var) ->
     Var;
-atom_value(Var, #{}) when is_list(Var) ->
-    list_to_atom(Var);
-atom_value(Var, #{}) when is_binary(Var) ->
-    binary_to_atom(Var, utf8);
-atom_value(Var, #{type := Type, name := Name}) ->
+atom_value(Var, Opts) when is_list(Var) ->
+    try list_to_atom(Var)
+    catch
+        error:badarg -> unexpected_type_of_var(Var, Opts)
+    end;
+atom_value(Var, Opts) when is_binary(Var) ->
+    try binary_to_atom(Var, utf8)
+    catch
+        error:badarg -> unexpected_type_of_var(Var, Opts)
+    end;
+atom_value(Var, Opts) ->
+    unexpected_type_of_var(Var, Opts).
+
+unexpected_type_of_var(Var, #{type := Type} = Opts) ->
+    Name = maps:get(name, Opts, undefined),
     erlang:error({unexpected_type_of_var, Name, Type, Var}).
 %%%===================================================================
 %%% API for quote fix_user_type/1
@@ -269,28 +286,16 @@ validate_options(Options, Pos) ->
 
 %% check ast in quote_code valid.
 split_codes(Codes, NodeType) ->
-    case lists:partition(
-           fun({string, _, _}) ->
-                   true;
-              (_) ->
-                   false
-           end, Codes) of
-        {[], _NonCodes} ->
-            {error, invalid_quote_code};
-        {NCodes, [Pos]} ->
-            case NodeType of
-                expression ->
-                    NCodes1 = lists:map(fun({string, _, StringCode}) -> StringCode end, NCodes),
-                    {ok, NCodes1, Pos};
-                _ ->
-                    {error, invalid_quote_code}
-            end;
-        {NCodes, []} ->
-            NCodes1 = lists:map(fun({string, _, StringCode}) -> StringCode end, NCodes),
-            {ok, NCodes1, {nil, 0}};
-        {_NCodes, _NonCodes} ->
-            {error, invalid_quote_code}
-    end.
+    split_codes(Codes, NodeType, []).
+
+split_codes([{string, _, Code}|Rest], NodeType, Codes) ->
+    split_codes(Rest, NodeType, [Code|Codes]);
+split_codes([], _NodeType, [_|_] = Codes) ->
+    {ok, lists:reverse(Codes), {nil, 0}};
+split_codes([Options], expression, [_|_] = Codes) ->
+    {ok, lists:reverse(Codes), Options};
+split_codes(_Codes, _NodeType, _Acc) ->
+    {error, invalid_quote_code}.
 
 quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Debug}) ->
     QuotePos = erl_syntax:get_pos(Node),

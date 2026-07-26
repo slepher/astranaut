@@ -515,7 +515,7 @@ root_role_type(Type) ->
 traverse_map_form(F, Node) ->
     Type = erl_syntax:type(Node),
     case Type of
-	attribute ->
+	    attribute ->
             Name = erl_syntax:concrete(erl_syntax:attribute_name(Node)),
             case Name of
                 file ->
@@ -531,7 +531,7 @@ traverse_map_form(F, Node) ->
         function ->
             Pos = erl_syntax:get_pos(Node),
             astranaut_traverse:update_pos(Pos, F(Node));
-	eof_marker ->
+	    eof_marker ->
             astranaut_traverse:then(
               astranaut_traverse:eof(),
               astranaut_traverse:return(Node));
