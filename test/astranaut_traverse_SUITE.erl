@@ -111,7 +111,7 @@ groups() ->
 all() -> 
     [test_return, test_bind, test_error_0, test_with_all_error, test_state,
      test_pos, test_pos_2, test_file_pos, test_fail,
-     test_map_m_root_attr,
+     test_map_m_root_attr, test_map_m_explicit_role_overrides_attr,
      test_scoped_state, test_scoped_state_fail, test_scoped_state_run].
 
 %%--------------------------------------------------------------------
@@ -326,6 +326,32 @@ test_map_m_root_attr(_Config) ->
           Monad, undefined,
           #{outer => inherited, explicit => old_value}, initial_state),
     ExpectedAttr = #{outer => inherited, explicit => new_value},
+    ?assertEqual({Node, ExpectedAttr}, Return),
+    ?assert(astranaut_error:is_empty_error(Error)),
+    ok.
+
+test_map_m_explicit_role_overrides_attr(_Config) ->
+    Node = {atom, 1, ok},
+    Monad =
+        astranaut:map_m(
+          fun(CurrentNode) ->
+                  astranaut_traverse:bind(
+                    astranaut_traverse:ask(),
+                    fun(Attr) ->
+                            astranaut_traverse:then(
+                              astranaut_traverse:put(Attr),
+                              astranaut_traverse:return(CurrentNode))
+                    end)
+          end, Node,
+          #{traverse => none,
+            role => expression,
+            attr => #{node => pattern, custom => preserved}}),
+    #{return := Return, error := Error} =
+        astranaut_traverse:run(Monad, undefined, #{}, initial_state),
+    ExpectedAttr =
+        #{node => expression,
+          validator => {role, expression},
+          custom => preserved},
     ?assertEqual({Node, ExpectedAttr}, Return),
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.

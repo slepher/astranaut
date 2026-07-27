@@ -19,6 +19,8 @@
 -export([uniplate/1]).
 -export([format_error/1]).
 
+-export_type([walk_return/2]).
+
 -type tree()   :: erl_syntax:syntaxTree().
 -type trees()  :: tree() | [erl_syntax:syntaxTree()].
 -type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())].
@@ -54,7 +56,7 @@
 -type reduce_walk_2(State) :: fun((tree(), State) -> reduce_walk_return(State)).
 -type reduce_walk_3(State) :: fun((tree(), State, traverse_attr()) -> reduce_walk_return(State)).
 
--type mapfold_walk_return(State) :: common_walk_return(State, rtrees()) | {rtrees() | State}.
+-type mapfold_walk_return(State) :: common_walk_return(State, rtrees()) | {rtrees(), State}.
 -type mapfold_walk(State) :: mapfold_walk_2(State) | mapfold_walk_3(State).
 -type mapfold_walk_2(State) :: fun((tree(), State) -> mapfold_walk_return(State)).
 -type mapfold_walk_3(State) :: fun((tree(), State, traverse_attr()) -> mapfold_walk_return(State)).
@@ -89,14 +91,14 @@
 %%% API
 %%%===================================================================
 %% @doc
-%% works same as map/3 and returns trees(), not astranant_return:struct(trees()).
+%% works same as map/3 and returns trees(), not astranaut_return:struct(trees()).
 -spec smap(fun((tree()) -> rtrees()) | fun((tree(), #{}) -> rtrees()), trees(), straverse_opts()) -> trees().
 smap(F, Node, Opts) ->
     F1 = fun(N, A) -> apply_fun(F, [N, A]) end,
     map_m_with_attr(F1, Node, identity, Opts, is_function(F, 2)).
 
 %% @doc
-%% works same as reduce/4 and returns S, not astranant_return:struct(S).
+%% works same as reduce/4 and returns S, not astranaut_return:struct(S).
 -spec sreduce(fun((tree(), S) -> S) | fun((tree(), S, #{}) -> S), S, trees(), straverse_opts()) -> S.
 sreduce(F, Init, Node, Opts) ->
     F1 = fun(N, A) -> fun(S) -> {N, apply_fun(F, [N, S, A])} end end,
@@ -106,7 +108,7 @@ sreduce(F, Init, Node, Opts) ->
     Acc.
 
 %% @doc
-%% works same as map_with_state/4 and returns trees(), not astranant_return:struct(trees()).
+%% works same as map_with_state/4 and returns trees(), not astranaut_return:struct(trees()).
 -spec smap_with_state(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}),
                S, trees(), straverse_opts()) -> trees().
 smap_with_state(F, Init, Node, Opts) ->
@@ -114,7 +116,7 @@ smap_with_state(F, Init, Node, Opts) ->
     Node1.
 
 %% @doc
-%% works same as mapfold/4 and returns {trees(), S}, not astranant_return:struct({trees(), S}).
+%% works same as mapfold/4 and returns {trees(), S}, not astranaut_return:struct({trees(), S}).
 -spec smapfold(fun((tree(), S) -> {rtrees(), S}) | fun((tree(), S, #{}) -> {rtrees(), S}),
                S, trees(), straverse_opts()) -> {trees(), S}.
 smapfold(F, Init, Node, Opts) ->
@@ -186,7 +188,7 @@ map_m_with_attr(F, Node, Uniplate, Monad, Opts, true) ->
     ReaderT = astranaut_uniplate:map_m(F1, Node, Uniplate, {reader, Monad}, Opts1),
     ReaderT(Attr).
 
--spec map(map_walk(), rtrees(), traverse_opts()) -> astranant_return:struct(trees()).
+-spec map(map_walk(), rtrees(), traverse_opts()) -> astranaut_return:struct(trees()).
 %% @doc
 %% Takes a function from AstNodeA, {@link traverse_attr()} to AstNodeB, and a TopNodeA and produces a TopNodeB by applying the function to every subtree in the AST. This function is used to obtain the return values.
 %% @see mapfold/4
@@ -196,7 +198,7 @@ map(F, TopNode, Opts) ->
     Return = mapfold_1(F1, undefined, TopNode, Opts, WithReturn),
     astranaut_return:lift_m(fun({TopNode1, _State}) -> TopNode1 end, Return).
 
--spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(S).
+-spec reduce(reduce_walk(S), S, trees(), traverse_opts()) -> astranaut_return:struct(S).
 %% @doc Calls F(AstNode, AccIn, Attr) on successive subtree AstNode of TopNode, starting with AccIn =:= Acc0. F/3 must return a new accumulator, which is passed to the next call. The function returns the final value of the accumulator. Acc0 is returned if the TopNode is empty.
 %% @see mapfold/4
 reduce(F, Init, TopNode, Opts) ->
@@ -205,14 +207,14 @@ reduce(F, Init, TopNode, Opts) ->
     Return = mapfold_1(F1, Init, TopNode, Opts#{static => true, normalize => false}, WithReturn),
     astranaut_return:lift_m(fun({_TopNode1, State}) -> State end, Return).
 
--spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct(trees()).
-%% @doc like mapfold/4, return astranant_return:struct(trees()) instead of astranant_return:struct({trees(), S}), just ignore state.
+-spec map_with_state(mapfold_walk(S), S, trees(), traverse_opts()) -> astranaut_return:struct(trees()).
+%% @doc like mapfold/4, return astranaut_return:struct(trees()) instead of astranaut_return:struct({trees(), S}), just ignore state.
 %% @see mapfold/4
 map_with_state(F, Init, TopNode, Opts) ->
     Return = mapfold(F, Init, TopNode, Opts),
     astranaut_return:lift_m(fun({TopNode1, _State}) -> TopNode1 end, Return).
 
--spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranant_return:struct({trees(), S}).
+-spec mapfold(mapfold_walk(S), S, trees(), traverse_opts()) -> astranaut_return:struct({trees(), S}).
 %% @doc Combines the operations of map/3 and reduce/4 into one pass.
 mapfold(F, Init, TopNode, Opts) ->
     WithReturn =
@@ -428,14 +430,14 @@ validation_attr_needed(_Node, _Opts) ->
 
 root_traverse_attr(Node, Opts, Attr) ->
     Attr1 = maps:merge(Attr, maps:get(attr, Opts, #{})),
-    case maps:is_key(node, Attr1) orelse maps:is_key(validator, Attr1) of
-        true ->
-            Attr1;
-        false ->
-            case explicit_root_validator(Opts) of
-                {ok, Role, Validator} ->
-                    explicit_validator_attr(Role, Validator, Attr1);
-                error ->
+    case explicit_root_validator(Opts) of
+        {ok, Role, Validator} ->
+            explicit_validator_attr(Role, Validator, Attr1);
+        error ->
+            case maps:is_key(node, Attr1) orelse maps:is_key(validator, Attr1) of
+                true ->
+                    Attr1;
+                false ->
                     case validation_enabled(Opts) of
                         true ->
                             case root_role(Node) of
@@ -576,7 +578,7 @@ format_error({validate_key_failure, {invalid_validator_arg, Validator}, Key, _Va
     io_lib:format("argument of validator ~p for option key ~p is empty", [Validator, Key]);
 format_error({validate_key_failure, {invalid_value, Validator}, Key, Value}) ->
     io_lib:format("validator ~p for option key ~p's value ~p failed", [Validator, Key, Value]);
-format_error({validate_key_failuer, {invalid_validator_return, Validator, Return}, Key, _Value}) ->
+format_error({validate_key_failure, {invalid_validator_return, Validator, Return}, Key, _Value}) ->
     io_lib:format("validator ~p for option key ~p returns a invalid_value ~p", [Validator, Key, Return]);
 format_error({invalid_option_value, Value}) ->
     io_lib:format("~p is not a valid option value", [Value]);

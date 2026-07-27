@@ -127,7 +127,8 @@ all() ->
     [test_simple_map, test_traverse_m_error,
      test_uniplate_reduce, test_reduce, test_map_with_state_node, test_map_with_state, test_map_spec, test_map_type,
      test_reduce_attr, test_with_formatter, 
-     test_options, test_validator, test_with_attribute, test_forms_with_attribute,
+     test_options, test_validator, test_invalid_validator_return_format,
+     test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
      test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr
@@ -342,6 +343,17 @@ test_validator(_Config) ->
     ?assertMatch(Warnings, astranaut_error:warnings(astranaut_return:run_error(Validated))),
     ?assertMatch([], astranaut_error:errors(astranaut_return:run_error(Validated))),
     ?assertMatch({just, Return}, astranaut_return:run(Validated)),
+    ok.
+
+test_invalid_validator_return_format(_Config) ->
+    Message =
+        astranaut:format_error(
+          {validate_key_failure,
+           {invalid_validator_return, my_validator, bad_return},
+           my_key, my_value}),
+    ?assertEqual(
+       "validator my_validator for option key my_key returns a invalid_value bad_return",
+       lists:flatten(Message)),
     ok.
 
 

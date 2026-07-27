@@ -37,7 +37,7 @@
           error => astranaut_error:struct()}.
 
 -type formatter() :: module().
--type convertable(S, A) :: astranaut:walk_return(S, A) | astranaut_return:struct(A) | state_struct(S, A).
+-type convertable(S, A) :: astranaut:walk_return(S, A) | astranaut_return:struct(A) | struct(S, A).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -139,7 +139,7 @@ exec(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
 lift_m(F, X) ->
     bind(X, fun(A) -> return(F(A)) end).
 
--spec map_m(fun((A) -> struct(S, B)), [struct(S, A)]) -> struct(S, B).
+-spec map_m(fun((A) -> struct(S, B)), [A]) -> struct(S, [B]).
 map_m(F, [X|Xs]) ->
     bind(F(X),
          fun(A) ->
