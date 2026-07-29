@@ -1,40 +1,103 @@
 # Changelog
 
-## 0.11.1
-
-### 兼容性与发布元数据
-
-- 使用 OTP 19 已支持的 `maps` API 替换 `maps:merge_with/3`，恢复 OTP 19～23 兼容性。
-- 兼容 OTP 19～23 对 compile attribute 分析结果的额外包装，避免 parse transform 的有效行号被报告为 `0`。
-- 将 `syntax_tools` 声明为正式 OTP 应用依赖；移除生产代码对 `eunit_lib` 的调用，并把使用 EUnit 的测试辅助模块移出生产编译顺序。
-- 删除已经失效的兼容头文件，并让本地容器 CI 正确传播测试失败状态。
+[中文](changelog.zh.md)
 
 ## 0.11.0
 
-### 宏系统
+### Macro system
 
-- **统一外部宏与本地宏的展开流程**：attribute 宏与 function-body 宏共用递归 expander，并由独立的 registry、源码扫描器和本地宏生命周期组件管理；修复 guard 上下文中的宏展开。
-- **本地宏采用声明作用域语义**：`-local_macro` 会冻结声明函数及静态发现的 helper 闭包，并使用声明位置可见的宏环境和 attributes；后续声明不再反向影响已经冻结的闭包。
-- **新增本地宏闭包控制**：支持 `-local_macro_retain`、`extra_functions` 和 `internal_function`，可显式保留闭包、加入无法静态发现的 helper，或把声明位置可见的指定宏调用固定为普通函数调用。
-- **明确宏的源码顺序**：attribute pass 按源码顺序执行 scan-and-splice，宏生成的 forms 会在当前位置继续扫描；随后 function-body pass 使用完整的最终宏环境。生成的 `-import_macro`、`-use_macro`、`-macro_options` 和 `-local_macro` 只影响其后的 forms。
-- **增强宏安全性与诊断**：支持递归宏展开及 `max_depth` 限制；检测宏名或 alias 冲突、重复本地宏声明和不兼容的闭包环境；按 expression、pattern、guard、form、type 等 AST role 校验宏返回值，并隔离同级宏展开错误。
-- **优化大型宏模块的编译性能**：预解析 attribute 环境并复用宏调用分析，减少重复扫描；新增深层递归和接近真实代码规模的宏编译 benchmark。
+- **Unified external and local macro expansion**: attribute macros and
+  function-body macros now share one recursive expander backed by dedicated
+  registry, source scanner, and local-macro lifecycle components. Macro
+  expansion in guard contexts is also fixed.
+- **Declaration-scoped local macros**: `-local_macro` freezes its declared
+  functions and statically discovered helper closure, together with the macro
+  environment and attributes visible at the declaration. Later declarations
+  no longer affect an already frozen closure.
+- **Explicit local-macro closure control**: added `-local_macro_retain`,
+  `extra_functions`, and `internal_function` for retaining closure members,
+  including helpers that cannot be found statically, and fixing selected macro
+  calls visible at declaration time as ordinary function calls.
+- **Source-ordered macro processing**: the attribute pass now performs
+  scan-and-splice in source order and continues scanning generated forms at
+  their insertion point. The function-body pass then uses the complete final
+  macro environment. Generated `-import_macro`, `-use_macro`,
+  `-macro_options`, and `-local_macro` declarations affect only subsequent
+  forms.
+- **Safer expansion and clearer diagnostics**: added recursive expansion with
+  `max_depth`, macro-name and alias conflict detection, duplicate local-macro
+  declaration checks, incompatible closure-environment checks, AST-role
+  validation for macro results, and isolation of sibling expansion errors.
+- **Faster compilation for large macro modules**: attribute environments and
+  macro-call analysis are reused instead of repeatedly rescanning forms.
+  Benchmarks now cover deep recursion and macro modules closer to production
+  size.
 
-### Traversal 与 AST
+### Traversal, quoting, and AST
 
-- **新增 AST role 校验与规范化**：`astranaut_syntax` 新增 `validate_node/2,3`、`normalize/2,3`、`child_specs/3` 和 `node_roles/1`，可根据父节点 slot、OTP 版本和 record 定义校验或规范化 syntax tree。
-- **遍历结果默认校验**：traverse validator 会检测无效的 AST 变换及子节点；遍历遇到错误后通过 `fail_on_error/1`、`catch_on_error/2` 停止后续步骤，不再使用旧的 `listen_has_error` 流程。
-- **调整 Uniplate API**：移除 `astranaut_uniplate:map/4`、`reduce/5`、`mapfold/5`、static uniplate 和 `keep` 语义；使用 `astranaut:map/3`、`reduce/4`、`mapfold/4`，并新增 `search/3`、`map_with_state/4` 和 `smap_with_state/4`。
-- **区分普通列表遍历与 module forms 处理**：`astranaut:map_m/3` 保留输入列表顺序；新增 `map_m_forms/3`，仅在处理 module forms 时执行生成 form 的插入、function/spec 合并和规范重排。
-- **Monad API 更新**：`maybe` monad/type 更名为 `monad_maybe`，避免与 OTP 25 的 `maybe` 关键字冲突；updated writer/listener API 统一为 `writer_updated`、`listen_updated` 命名。
+- **AST role validation and normalization**: `astranaut_syntax` adds
+  `validate_node/2,3`, `normalize/2,3`, `child_specs/3`, and `node_roles/1`
+  for validating or normalizing syntax trees from their parent slot, OTP
+  version, and record definitions.
+- **Validation-aware traversal results**: traverse validators detect invalid
+  AST transformations and child nodes. `fail_on_error/1` and
+  `catch_on_error/2` stop later steps after traversal errors, replacing the
+  old `listen_has_error` flow.
+- **Revised Uniplate API**: removed `astranaut_uniplate:map/4`, `reduce/5`,
+  `mapfold/5`, static uniplate, and `keep` semantics. Use
+  `astranaut:map/3`, `reduce/4`, and `mapfold/4`; new helpers include
+  `search/3`, `map_with_state/4`, and `smap_with_state/4`.
+- **Separate list traversal from module-form processing**:
+  `astranaut:map_m/3` preserves ordinary list order, while the new
+  `map_m_forms/3` handles generated-form insertion, function/spec merging, and
+  canonical reordering for module forms.
+- **Monad API cleanup**: the `maybe` monad/type is renamed to `monad_maybe` to
+  avoid the OTP 25 `maybe` keyword. Writer/listener APIs consistently use the
+  `writer_updated` and `listen_updated` names.
+- **Stricter quote validation**: quote bindings now reject invalid strings,
+  atom names, and values with consistent errors; `quote_code` validates code
+  and option placement; AST-valued `pos` options are normalized correctly.
+- **Correct traversal contracts and diagnostics**: fixed `mapfold` and related
+  public type contracts, made explicit root validators take precedence, and
+  preserved the correct node position and formatter when validation reports
+  diagnostics.
+- **More accurate `disable_tco` transformation**: tail calls inside `case`,
+  `if`, `receive`, `try`, blocks, boolean operators, and `maybe` expressions
+  are handled recursively. Direct recursion, named-fun recursion, and mutually
+  recursive local functions retain tail-call optimization.
 
-### Struct 与编译期工具
+### Structs and compile-time tooling
 
-- **重构 Struct 系统**：拆分为宏 API `astranaut_struct`、record 数据处理模块 `astranaut_struct_record` 和 parse transform `astranaut_struct_transformer`，迁移至新的宏流程，并新增 `from_other_record/4`。
-- **新增 `astranaut_compile_meta_transformer`**：收集 parse transform 后的 forms、编译错误和 warning，供编译期元编程与诊断使用。
-- **整理 `astranaut_lib` 共享 API**：公开选项校验相关类型，集中提供模块锁、二进制安全重载和 `reload_forms/2`，并移除仅供旧 converter/wrapper 使用的导出。
+- **Refactored the Struct system** into the `astranaut_struct` macro API,
+  `astranaut_struct_record` data layer, and
+  `astranaut_struct_transformer` parse transform. It now uses the new macro
+  pipeline and adds `from_other_record/4`.
+- **Added `astranaut_compile_meta_transformer`** to collect post-transform
+  forms, compiler errors, and warnings for compile-time metaprogramming and
+  diagnostics.
+- **Consolidated the shared `astranaut_lib` API**: option-validation types are
+  public, module locking and safe binary reload helpers are centralized, and
+  exports used only by obsolete converters/wrappers are removed.
+- **Repaired public type contracts** across traversal, forms, quote, macro,
+  return, rebinding, and struct modules, including exporting the public
+  `astranaut:walk_return/2` type.
 
-### OTP 兼容性与开发工具
+### OTP compatibility and development
 
-- 新增 `map_generator`、`strict_generator`、`strict_binary_generator`、`strict_map_generator`、`maybe_expr` 和 `maybe_match_expr` 等 AST 类型支持，主要用于 rebinding；兼容 Erlang/OTP 19～29。
-- 新增中文 README、OTP 19～29 abstract forms 参考文档及抓取脚本、本地容器 CI、覆盖率报告脚本，以及宏编译 benchmark。
+- Added AST support for `map_generator`, `strict_generator`,
+  `strict_binary_generator`, `strict_map_generator`, `maybe_expr`, and
+  `maybe_match_expr`, primarily for rebinding, with Erlang/OTP 19–29
+  compatibility.
+- Replaced `maps:merge_with/3` with APIs available since OTP 19 and accepted
+  the extra wrapping used by OTP 19–23 compile-attribute analysis, preserving
+  valid parse-transform source positions.
+- Declared `syntax_tools` as an OTP application dependency, removed production
+  use of `eunit_lib`, and moved EUnit-dependent test helpers out of the
+  production compilation order.
+- Removed obsolete compatibility headers and fixed the local container CI
+  scripts so suite/case selection and test failure statuses propagate
+  correctly.
+- Split the macro Common Test coverage into focused core, uniform-expansion,
+  pass, diagnostic, local-state, and scan-and-splice suites.
+- Added a Chinese README, OTP 19–29 abstract-form references and fetch scripts,
+  local container CI, coverage tooling, and macro compilation benchmarks.
