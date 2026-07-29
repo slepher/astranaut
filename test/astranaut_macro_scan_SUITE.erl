@@ -1,4 +1,7 @@
--module(map_forms_splice_SUITE).
+%%%-------------------------------------------------------------------
+%%% Source-ordered scan-and-splice primitives.
+%%%-------------------------------------------------------------------
+-module(astranaut_macro_scan_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 

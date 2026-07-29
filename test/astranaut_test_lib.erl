@@ -11,7 +11,9 @@
 -include("compile_opts.hrl").
 -include_lib("eunit/include/eunit.hrl").
 %% API
--export([get_baseline/2, realize_with_baseline/2, test_module_forms/2, compile_test_module/2, compile_test_forms/1, load_data_modules/2]).
+-export([get_baseline/2, realize_with_baseline/2, test_module_forms/2,
+         compile_test_module/2, compile_test_forms/1, load_data_modules/2,
+         with_suite_data_dir/2]).
 -export([assert_formatted_messages/1]).
 
 %%%===================================================================
@@ -48,7 +50,7 @@ realize_with_baseline(Baseline, ErrorStruct) ->
     astranaut_error:realize(ErrorStruct1).
 
 compile_test_module(Module, Config) ->
-    DataDir = proplists:get_value(data_dir, Config),
+    DataDir = configured_data_dir(Config),
     Forms = test_module_forms(Module, DataDir, Config),
     Opts = compile_opts(),
     Outfile = filename:join(filename:dirname(filename:absname(DataDir)), atom_to_list(Module) ++ ".beam"),
@@ -67,7 +69,7 @@ compile_test_forms(Forms) ->
     astranaut_lib:load_forms(Forms, Opts1).
 
 test_module_forms(Module, Config) ->
-    DataDir = proplists:get_value(data_dir, Config),
+    DataDir = configured_data_dir(Config),
     test_module_forms(Module, DataDir, Config).
 
 test_module_forms(Module, DataDir, _Config) ->
@@ -97,6 +99,18 @@ load_data_modules(Config, TestModules) ->
                 end, Return)
       end, TestModules),
     Config.
+
+with_suite_data_dir(Config, Suite) ->
+    CurrentDataDir = proplists:get_value(data_dir, Config),
+    SuiteDataDir =
+        filename:join(
+          filename:dirname(filename:absname(CurrentDataDir)),
+          atom_to_list(Suite) ++ "_data"),
+    [{fixture_data_dir, SuiteDataDir} | Config].
+
+configured_data_dir(Config) ->
+    proplists:get_value(
+      fixture_data_dir, Config, proplists:get_value(data_dir, Config)).
 
 assert_formatted_messages(Messages) ->
     lists:foreach(fun assert_formatted_message/1, Messages).
