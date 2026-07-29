@@ -123,6 +123,7 @@ all() ->
      test_record, test_spec, test_callback, test_opaque,
      test_empty_quote_code, test_empty_quote_type_code,
      test_quote_code_options_must_be_last, test_invalid_binding_values,
+     test_quote_public_helpers, test_quote_code_options_last,
      test_binding_warning_format,
      test_quoted_invalid_unquote_splicing_warning,
      test_quoted_invalid_unquote_splicing_binding_warning,
@@ -432,6 +433,84 @@ test_invalid_binding_values(_Config) ->
                  {unexpected_type_of_var, 'Value', Type, Value},
                  astranaut_quote:bind_var(Value, Opts))
       end, Cases).
+
+test_quote_public_helpers(_Config) ->
+    A = {atom, 10, a},
+    B = {atom, 11, b},
+    C = {atom, 12, c},
+    Cons = {cons, 20, A, {cons, 21, B, {nil, 22}}},
+    ?assertEqual([A, B], astranaut_quote:flattencons(Cons)),
+    ?assertEqual([A, B], astranaut_quote:flattencons([A, B])),
+    ?assertEqual([A, B], astranaut_quote:flattencons(Cons, [])),
+    ?assertEqual([A, B, C], astranaut_quote:flattencons(Cons, [C])),
+    ?assertEqual(
+       {cons, 0, A, {cons, 0, B, {cons, 30, C, {nil, 31}}}},
+       astranaut_quote:mergecons([A, B], {cons, 30, C, {nil, 31}})),
+    ?assertEqual(
+       {cons, 20, A, {cons, 21, B, {cons, 30, C, {nil, 31}}}},
+       astranaut_quote:mergecons(Cons, {cons, 30, C, {nil, 31}})),
+
+    ?assertEqual(value, astranaut_quote:bind_var(value, #{type => value})),
+    ?assertEqual({float, 40, 3.0},
+                 astranaut_quote:bind_var(3, #{type => float, pos => 40})),
+    ?assertEqual({float, 40, 3.5},
+                 astranaut_quote:bind_var(3.5, #{type => float, pos => 40})),
+    ?assertEqual({string, 41, "hello"},
+                 astranaut_quote:bind_var(<<"hello">>, #{type => string, pos => 41})),
+    ?assertEqual({atom, 42, hello},
+                 astranaut_quote:bind_var("hello", #{type => atom, pos => 42})),
+    ?assertEqual({atom, 42, hello},
+                 astranaut_quote:bind_var(<<"hello">>, #{type => atom, pos => 42})),
+    ?assertError(
+       {unexpected_type_of_var, atom_name, atom, 10},
+       astranaut_quote:bind_var(
+         10, #{type => atom, pos => 42, name => atom_name})),
+
+    Quoted = {atom, 50, ok},
+    ?assertEqual(Quoted, astranaut_quote:validate_pos(Quoted, 50)),
+    ?assertEqual(Quoted, astranaut_quote:validate_pos(Quoted, {50, 3})),
+    ?assertError({invalid_pos_value, invalid},
+                 astranaut_quote:validate_pos(Quoted, invalid)),
+
+    {attribute, 0, type, {dummy, ExpectedType, []}} =
+        merl:quote(0, "-type dummy() :: #{atom() => integer()}."),
+    ?assertEqual(
+       ExpectedType,
+       astranaut_quote:quote_type_code("#{atom() => integer()}")),
+    {value, QuotedValue, _Bindings} =
+        erl_eval:expr(
+          astranaut_quote:quoted(Quoted, 77), erl_eval:new_bindings()),
+    ?assertEqual({atom, 77, ok}, QuotedValue),
+    ok.
+
+test_quote_code_options_last(_Config) ->
+    Forms =
+        merl:quote(
+          ["-file(\"quote_options_last_test.erl\", 1).",
+           "-module(quote_options_last_test).",
+           "-export([static/0, dynamic/1]).",
+           "static() -> quote_code(\"ok\", #{pos => 77}).",
+           "dynamic(Pos) -> quote_code(\"ok\", #{pos => Pos})."])
+        ++ [{eof, 6}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, static, 0,
+     [{clause, _, [], [], [StaticExpression]}]} =
+        lists:keyfind(static, 3, Transformed),
+    {value, StaticValue, _StaticBindings} =
+        erl_eval:expr(
+          StaticExpression, erl_eval:new_bindings()),
+    ?assertEqual({atom, 77, ok}, StaticValue),
+    {function, _, dynamic, 1,
+     [{clause, _, [{var, _, 'Pos'}], [],
+       [DynamicExpression]}]} =
+        lists:keyfind(dynamic, 3, Transformed),
+    DynamicBindings =
+        erl_eval:add_binding(
+          'Pos', 88, erl_eval:new_bindings()),
+    {value, DynamicValue, _DynamicBindings} =
+        erl_eval:expr(DynamicExpression, DynamicBindings),
+    ?assertEqual({atom, 88, ok}, DynamicValue),
+    ok.
 
 test_binding_warning_format(_Config) ->
     Forms = merl:quote(

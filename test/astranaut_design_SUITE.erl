@@ -36,7 +36,10 @@ all() ->
      lib_reload_forms_contract,
      lib_reload_forms_in_use_contract,
      do_parse_transform_contracts,
+     do_sequence_and_fail_contracts,
      do_error_contracts,
+     monad_transformer_stack_contract,
+     return_and_traverse_helper_edges_contract,
      return_error_contracts,
      error_state_contracts,
      struct_negative_contracts,
@@ -44,7 +47,8 @@ all() ->
      compile_meta_success_contract,
      compile_meta_warning_contract,
      compile_meta_error_contract,
-     compile_meta_invalid_and_undefined_contracts].
+     compile_meta_invalid_and_undefined_contracts,
+     compile_meta_option_and_compile_contracts].
 
 lib_public_api_contracts(_Config) ->
     {module, astranaut_lib} = code:ensure_loaded(astranaut_lib),
@@ -225,6 +229,30 @@ do_parse_transform_contracts(_Config) ->
     ?assertEqual({just, 2}, do_contract_mod:value()),
     ?assertEqual({just, 5}, do_contract_mod:pattern_value()).
 
+do_sequence_and_fail_contracts(_Config) ->
+    Forms =
+        [{attribute, 1, file, {"do_sequence_contract_mod.erl", 1}},
+         {attribute, 1, module, do_sequence_contract_mod},
+         {attribute, 2, export, [{sequence_value, 0}, {fail_value, 0}]},
+         {function, 3, sequence_value, 0,
+          [{clause, 3, [], [],
+            [{call, 3, {atom, 3, do},
+              [lc(3, {atom, 3, monad_maybe},
+                  [{tuple, 4, [{atom, 4, just}, {atom, 4, ignored}]},
+                   return_call(5, {atom, 5, sequenced})])]}]}]},
+         {function, 7, fail_value, 0,
+          [{clause, 7, [], [],
+            [{call, 7, {atom, 7, do},
+              [lc(7, {atom, 7, monad_maybe},
+                  [{call, 8, {atom, 8, fail}, [{atom, 8, failed}]},
+                   return_call(9, {atom, 9, unreachable})])]}]}]},
+         {eof, 10}],
+    OutputForms = astranaut_do:parse_transform(Forms, []),
+    {module, do_sequence_contract_mod} =
+        compile_and_load(do_sequence_contract_mod, OutputForms),
+    ?assertEqual({just, sequenced}, do_sequence_contract_mod:sequence_value()),
+    ?assertException(error, undef, do_sequence_contract_mod:fail_value()).
+
 do_error_contracts(_Config) ->
     ?assertEqual({error, expected_list_comprehension},
                  astranaut_do:do({atom, 1, not_lc}, #{})),
@@ -242,6 +270,198 @@ do_error_contracts(_Config) ->
     ?assert(io_lib:deep_char_list(astranaut_do:format_error(non_empty_do))),
     ?assert(io_lib:deep_char_list(astranaut_do:format_error(last_generate_expression))),
     ?assert(io_lib:deep_char_list(astranaut_do:format_error({invalid_option_value, bad}))).
+
+monad_transformer_stack_contract(_Config) ->
+    ?assertEqual(
+       {just, 2},
+       astranaut_monad:lift_m(fun(X) -> X + 1 end, {just, 1}, monad_maybe)),
+    ?assertEqual(
+       {just, [2, 4]},
+       astranaut_monad:map_m(fun(X) -> {just, X * 2} end, [1, 2], monad_maybe)),
+    ?assertEqual(
+       nothing,
+       astranaut_monad:map_m(fun(0) -> nothing; (X) -> {just, X} end,
+                             [1, 0, 2], monad_maybe)),
+    ?assertEqual(
+       {just, [1, 2]},
+       astranaut_monad:sequence_m([{just, 1}, {just, 2}], monad_maybe)),
+    MaybeBind = astranaut_monad:monad_bind(monad_maybe),
+    MaybeReturn = astranaut_monad:monad_return(monad_maybe),
+    ?assertEqual(
+       {just, [a, b]},
+       astranaut_monad:sequence_m(
+         [{just, a}, {just, b}], MaybeBind, MaybeReturn)),
+
+    ReaderLift = astranaut_monad:monad_lift({reader, identity}),
+    ReaderLocal = astranaut_monad:monad_local(reader),
+    ?assertEqual(lifted, (ReaderLift(lifted))(environment)),
+    ?assertEqual(
+       3,
+       (ReaderLocal(fun(X) -> X + 1 end, fun(X) -> X end))(2)),
+    ?assertEqual(undefined, astranaut_monad:monad_state(reader)),
+    ?assertEqual(undefined, astranaut_monad:monad_state(monad_maybe)),
+    ?assertEqual(undefined, astranaut_monad:monad_ask(monad_maybe)),
+    ?assertEqual(undefined, astranaut_monad:monad_ask(return)),
+    ?assertEqual(undefined, astranaut_monad:monad_local(monad_maybe)),
+    ?assertEqual(undefined, astranaut_monad:monad_local(return)),
+
+    StateMaybe = {state, monad_maybe},
+    StateReturn = astranaut_monad:monad_return(StateMaybe),
+    StateBind = astranaut_monad:monad_bind(StateMaybe),
+    StateLift = astranaut_monad:monad_lift(StateMaybe),
+    StateAction = astranaut_monad:monad_state(StateMaybe),
+    ?assertEqual({just, {value, state}}, (StateReturn(value))(state)),
+    ?assertEqual(
+       {just, {2, state}},
+       (StateBind(StateReturn(1),
+                  fun(X) -> StateReturn(X + 1) end))(state)),
+    ?assertEqual({just, {lifted, state}}, (StateLift({just, lifted}))(state)),
+    ?assertEqual(nothing, (StateLift(nothing))(state)),
+    ?assertEqual(
+       {just, {initial, updated}},
+       (StateAction(fun(_State) -> {initial, updated} end))(state)),
+    ?assertEqual(undefined, astranaut_monad:monad_ask(StateMaybe)),
+    ?assertEqual(undefined, astranaut_monad:monad_local(StateMaybe)),
+
+    StateReader = {state, reader},
+    StateAsk = astranaut_monad:monad_ask(StateReader),
+    StateLocal = astranaut_monad:monad_local(StateReader),
+    ?assertEqual({environment, state}, ((StateAsk)(state))(environment)),
+    StateReaderValue =
+        (astranaut_monad:monad_return(StateReader))(value),
+    ?assertEqual(
+       {value, state},
+       ((StateLocal(fun(_) -> local_environment end,
+                    StateReaderValue))(state))(outer_environment)).
+
+return_and_traverse_helper_edges_contract(_Config) ->
+    WarningsOk = astranaut_return:warnings_ok([warning_1, warning_2], value),
+    ?assertEqual({just, value}, astranaut_return:run(WarningsOk)),
+    ?assertEqual(
+       [warning_1, warning_2],
+       astranaut_error:warnings(astranaut_return:run_error(WarningsOk))),
+    ErrorsFail = astranaut_return:errors_fail([error_1, error_2]),
+    ?assertEqual(nothing, astranaut_return:run(ErrorsFail)),
+    ?assertEqual(
+       [error_1, error_2],
+       astranaut_error:errors(astranaut_return:run_error(ErrorsFail))),
+    WalkReturn =
+        astranaut:walk_return(
+          #{return => value, warnings => [walk_warning],
+            errors => [walk_error]}),
+    ConvertedWalkReturn = astranaut_return:to_monad(WalkReturn),
+    ?assertEqual({just, value}, astranaut_return:run(ConvertedWalkReturn)),
+    ?assertEqual(
+       {[walk_error], [walk_warning]},
+       {astranaut_error:errors(astranaut_return:run_error(ConvertedWalkReturn)),
+        astranaut_error:warnings(astranaut_return:run_error(ConvertedWalkReturn))}),
+    ?assertException(
+       exit, #{errors := [simplify_error]},
+       astranaut_return:simplify(
+         astranaut_return:error_ok(simplify_error, value))),
+    ?assertEqual(
+       {just, bound},
+       astranaut_return:run(
+         astranaut_return:bind(ok,
+                               fun(ok) -> astranaut_return:return(bound) end))),
+    UpdatedFail =
+        astranaut_return:with_error(
+          fun(Error) -> astranaut_error:append_warning(fail_warning, Error) end,
+          astranaut_return:fail()),
+    ?assertEqual(
+       [fail_warning],
+       astranaut_error:warnings(astranaut_return:run_error(UpdatedFail))),
+    FormattedError =
+        astranaut_return:formatted_error({10, ?MODULE, formatted_error}),
+    ?assertEqual(
+       [{10, ?MODULE, formatted_error}],
+       astranaut_error:formatted_errors(
+         astranaut_return:run_error(FormattedError))),
+    FormattedWarning =
+        astranaut_return:formatted_warning(11, ?MODULE, formatted_warning),
+    ?assertEqual(
+       [{11, ?MODULE, formatted_warning}],
+       astranaut_error:formatted_warnings(
+         astranaut_return:run_error(FormattedWarning))),
+    FormattedWarnings =
+        astranaut_return:formatted_warnings(
+          [{12, ?MODULE, formatted_warning_1},
+           {13, ?MODULE, formatted_warning_2}]),
+    ?assertEqual(
+       [{12, ?MODULE, formatted_warning_1},
+        {13, ?MODULE, formatted_warning_2}],
+       astranaut_error:formatted_warnings(
+         astranaut_return:run_error(FormattedWarnings))),
+
+    Traverse = astranaut_traverse:return(value),
+    ?assertEqual(Traverse, astranaut_traverse:astranaut_traverse(Traverse)),
+    ?assert(astranaut_traverse:convertable_struct(Traverse)),
+    ?assert(
+       astranaut_traverse:convertable_struct(
+         astranaut_return:return(value))),
+    ?assert(
+       astranaut_traverse:convertable_struct(
+         astranaut_return:fail())),
+    ?assert(astranaut_traverse:convertable_struct(WalkReturn)),
+    ?assertNot(astranaut_traverse:convertable_struct(#{})),
+    ?assertEqual(
+       {just, bound},
+       astranaut_return:run(
+         astranaut_traverse:eval(
+           astranaut_traverse:bind(
+             ok, fun(ok) -> astranaut_traverse:return(bound) end),
+           ?MODULE, #{}, state))),
+    ?assertEqual(
+       nothing,
+       astranaut_return:run(
+         astranaut_traverse:eval(
+           astranaut_traverse:fail(failed, astranaut_traverse),
+           ?MODULE, #{}, state))),
+
+    Listened =
+        astranaut_traverse:listen_error(
+          astranaut_traverse:warning(listen_warning)),
+    {just, {ok, ListenedError}} =
+        astranaut_return:run(
+          astranaut_traverse:eval(Listened, ?MODULE, #{}, state)),
+    ?assertEqual([listen_warning], astranaut_error:warnings(ListenedError)),
+    CatchSuccess =
+        astranaut_traverse:catch_fail(
+          fun() -> astranaut_traverse:return(unexpected) end,
+          astranaut_traverse:return(value)),
+    ?assertEqual(
+       {just, value},
+       astranaut_return:run(
+         astranaut_traverse:eval(CatchSuccess, ?MODULE, #{}, state))),
+    CatchFailure =
+        astranaut_traverse:catch_fail(
+          fun() -> astranaut_traverse:return(recovered) end,
+          astranaut_traverse:fail(caught_error)),
+    ?assertEqual(
+       {just, recovered},
+       astranaut_return:run(
+         astranaut_traverse:eval(CatchFailure, ?MODULE, #{}, state))),
+    ?assertEqual(
+       [caught_error],
+       astranaut_error:errors(
+         astranaut_return:run_error(
+           astranaut_traverse:eval(
+             CatchFailure, ?MODULE, #{}, state)))),
+    ?assertEqual(
+       nothing,
+       astranaut_return:run(
+         astranaut_traverse:eval(
+           astranaut_traverse:set_fail(astranaut_traverse:return(value)),
+           ?MODULE, #{}, state))),
+    TraverseFormattedWarnings =
+        astranaut_traverse:formatted_warnings(
+          [{14, ?MODULE, traverse_warning}]),
+    ?assertEqual(
+       [{14, ?MODULE, traverse_warning}],
+       astranaut_error:formatted_warnings(
+         astranaut_return:run_error(
+           astranaut_traverse:eval(
+             TraverseFormattedWarnings, ?MODULE, #{}, state)))).
 
 walk_return_contracts(_Config) ->
     Node = {atom, 10, original},
@@ -416,6 +636,75 @@ compile_meta_invalid_and_undefined_contracts(_Config) ->
     {module, compile_meta_crash_mod} = compile_and_load(compile_meta_crash_mod, CrashOutput),
     [{_File2, [{none, compile, {parse_transform, compile_meta_crash_transformer, {error, injected_crash, _}}}]}] =
         compile_meta_crash_mod:errors().
+
+compile_meta_option_and_compile_contracts(_Config) ->
+    ?assert(
+       io_lib:deep_char_list(
+         astranaut_compile_meta_transformer:format_error(
+           {undefined_transformer, missing_transformer}))),
+    ?assert(
+       io_lib:deep_char_list(
+         astranaut_compile_meta_transformer:format_error(
+           {invalid_transformer_return, transformer, invalid}))),
+
+    OptionForms =
+        meta_forms(
+          compile_meta_option_mod,
+          [compile_meta_identity_transformer],
+          [{silent_warning, true},
+           invalid_option,
+           {transformers,
+            [compile_meta_identity_transformer,
+             compile_meta_identity_transformer]},
+           {forms_export, 0},
+           {errors_export, 0},
+           {warnings_export, 0},
+           123]),
+    OptionOutput =
+        astranaut_compile_meta_transformer:parse_transform(OptionForms, []),
+    {module, compile_meta_option_mod} =
+        compile_and_load(compile_meta_option_mod, OptionOutput),
+    ?assertEqual(ok, compile_meta_option_mod:value()),
+    ?assertNot(erlang:function_exported(compile_meta_option_mod, forms, 0)),
+    ?assertNot(erlang:function_exported(compile_meta_option_mod, errors, 0)),
+    ?assertNot(erlang:function_exported(compile_meta_option_mod, warnings, 0)),
+
+    WarningForms =
+        [{attribute, 1, file, {"compile_meta_compile_warning_mod.erl", 1}},
+         {attribute, 1, module, compile_meta_compile_warning_mod},
+         {attribute, 2, compile,
+          {parse_transform, astranaut_compile_meta_transformer}},
+         {attribute, 3, export, [{value, 0}]},
+         {function, 4, value, 0,
+          [{clause, 4, [], [],
+            [{match, 4, {var, 4, 'Unused'}, {atom, 4, unused}},
+             {atom, 5, ok}]}]},
+         {eof, 6}],
+    {warning, WarningOutput, ReportedWarnings} =
+        astranaut_compile_meta_transformer:parse_transform(
+          WarningForms, [warn_unused_vars]),
+    ?assert(ReportedWarnings =/= []),
+    {module, compile_meta_compile_warning_mod} =
+        compile_and_load(compile_meta_compile_warning_mod, WarningOutput),
+    ?assertEqual(ReportedWarnings,
+                 compile_meta_compile_warning_mod:warnings()),
+
+    ErrorForms =
+        [{attribute, 1, file, {"compile_meta_compile_error_mod.erl", 1}},
+         {attribute, 1, module, compile_meta_compile_error_mod},
+         {attribute, 2, compile,
+          {parse_transform, astranaut_compile_meta_transformer}},
+         {attribute, 3, astranaut_compile_meta, silent_error},
+         {attribute, 4, export, [{value, 0}]},
+         {function, 5, value, 0,
+          [{clause, 5, [], [], [{var, 5, 'Unbound'}]}]}],
+    ErrorOutput =
+        astranaut_compile_meta_transformer:parse_transform(ErrorForms, []),
+    {module, compile_meta_compile_error_mod} =
+        compile_and_load(compile_meta_compile_error_mod, ErrorOutput),
+    ?assert(compile_meta_compile_error_mod:errors() =/= []),
+    ?assertEqual([], compile_meta_compile_error_mod:warnings()),
+    ?assertException(error, undef, compile_meta_compile_error_mod:value()).
 
 base_forms(Module) ->
     [{attribute, 1, file, {atom_to_list(Module) ++ ".erl", 1}},

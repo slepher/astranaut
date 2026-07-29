@@ -278,11 +278,35 @@ ast_to_options(AstOptions) ->
 validate_options(Pos, _QuotePos) when is_integer(Pos) ->
     astranaut_return:return(#{pos => Pos});
 validate_options(Options, Pos) ->
-    Return = astranaut_lib:validate(#{debug => boolean, code_pos => boolean, pos => any}, Options),
+    Return0 =
+        astranaut_lib:validate(
+          #{debug => boolean, code_pos => boolean, pos => any},
+          Options),
+    Return =
+        astranaut_return:lift_m(
+          fun(ValidatedOptions) ->
+                  normalize_pos_option(ValidatedOptions, Pos)
+          end, Return0),
     astranaut_return:with_error(
         fun(ErrorStruct) ->
             astranaut_error:update_pos(Pos, ?MODULE, ErrorStruct)
         end, Return).
+
+normalize_pos_option(#{pos := Pos} = Options, DefaultPos) ->
+    Options#{pos => option_pos_ast(Pos, DefaultPos)};
+normalize_pos_option(Options, _DefaultPos) ->
+    Options.
+
+option_pos_ast(Pos, DefaultPos) ->
+    try
+        _ = erl_syntax:type(Pos),
+        Pos
+    catch
+        error:badarg ->
+            astranaut_lib:abstract_form(Pos, DefaultPos);
+        error:{badarg, _Value} ->
+            astranaut_lib:abstract_form(Pos, DefaultPos)
+    end.
 
 %% check ast in quote_code valid.
 split_codes(Codes, NodeType) ->

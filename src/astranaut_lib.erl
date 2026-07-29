@@ -983,10 +983,11 @@ required(Value, _Args, false, #{}) ->
     'or'(Value, Validators, IsKey, Attr, Validators).
 
 'or'(Value, [Validator|T], IsKey, Attr, Validators) ->
-    case validate_value(Validator, Value, Attr) of
-        #{?STRUCT_KEY := ?RETURN_OK} = ReturnOk ->
-            ReturnOk;
-        #{?STRUCT_KEY := ?RETURN_FAIL} ->
+    Return = validate_value(Validator, Value, Attr),
+    case astranaut_return:has_error(Return) of
+        false ->
+            Return;
+        true ->
             'or'(Value, T, IsKey, Attr, Validators)
     end;
 'or'(_Value, [], _IsKey, _Attr, Validators) ->

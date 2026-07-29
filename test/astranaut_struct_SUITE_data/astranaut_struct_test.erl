@@ -14,6 +14,7 @@
 -export([new/0]).
 -export([update_name/2]).
 -export([test/1]).
+-export([record_index/0, access_name/1, access_value/1]).
 -export([from_record/1, to_record/1, from_map/1, update/1]).
 -export([to_test3/1, to_test1/1]).
 
@@ -42,6 +43,15 @@ test(#test2{'name' = A}) ->
     A;
 test(#test3{'name' = A}) ->
     A.
+
+record_index() ->
+    #test.value.
+
+access_name(Test) ->
+    Test#test.name.
+
+access_value(Test) ->
+    Test#test.value.
 
 -spec from_record(astranaut_struct:record(#test{})) -> #test{}.
 from_record(Record) ->

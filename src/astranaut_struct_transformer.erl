@@ -57,7 +57,8 @@ format_error(Message) ->
 %% Record abstract format is transformed to Map abstract format when
 %% RecordName is mentioned in -astranaut_struct([RecordName...]).
 walk({call, _Line1,
-      {remote, _Line2, {atom, _Line2a, astranaut_struct}, {atom, _Line3, record}, [Node]}},
+      {remote, _Line2, {atom, _Line2a, astranaut_struct}, {atom, _Line3, record}},
+      [Node]},
      _StructInitMap, #{}) ->
     astranaut:walk_return(#{return => Node, continue => true});
 

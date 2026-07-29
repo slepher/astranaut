@@ -129,7 +129,8 @@ all() ->
      test_state_mapping_wrappers, test_mapfold_invalid_return,
      test_map_with_state, test_map_spec, test_map_type,
      test_reduce_attr, test_with_formatter, 
-     test_options, test_validator, test_invalid_validator_return_format,
+     test_options, test_validator, test_validator_failure_contracts,
+     test_invalid_validator_return_format,
      test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
@@ -374,6 +375,104 @@ test_validator(_Config) ->
     ?assertMatch(Warnings, astranaut_error:warnings(astranaut_return:run_error(Validated))),
     ?assertMatch([], astranaut_error:errors(astranaut_return:run_error(Validated))),
     ?assertMatch({just, Return}, astranaut_return:run(Validated)),
+    ok.
+
+test_validator_failure_contracts(_Config) ->
+    InvalidReturnValidator = fun(_Value) -> bad_return end,
+    FailureCases =
+        [
+         {unknown_validator, ok,
+          {invalid_validator, unknown_validator}},
+         {InvalidReturnValidator, ok,
+          {invalid_validator_return, InvalidReturnValidator, bad_return}},
+         {uinteger, -1,
+          {invalid_value, uinteger}},
+         {{one_of, [one, two]}, three,
+          {invalid_value, {one_of, [one, two]}}},
+         {{one_of, not_a_list}, one,
+          {invalid_validator_arg, {one_of, not_a_list}}},
+         {{list_of, atom}, [one, 2],
+          {invalid_value, atom}},
+         {{list_of, atom}, not_a_list,
+          {invalid_value, {list_of, atom}}},
+         {paired, not_boolean,
+          {invalid_value, paired}},
+         {{paired, 42}, true,
+          {invalid_validator_arg, {paired, 42}}},
+         {{'or', [integer, boolean]}, atom_value,
+          {all_validator_failed, [integer, boolean]}}
+        ],
+    lists:foreach(
+      fun({Validator, Value, ExpectedReason}) ->
+              Return = astranaut_lib:validate(#{value => Validator},
+                                              [{value, Value}]),
+              ?assertEqual({just, #{}},
+                           astranaut_return:run(Return)),
+              ?assertEqual(
+                 [{validate_key_failure, ExpectedReason, value, Value}],
+                 astranaut_error:errors(
+                   astranaut_return:run_error(Return)))
+      end, FailureCases),
+
+    Required = astranaut_lib:validate(#{value => required}, []),
+    ?assertEqual(
+       [{validate_key_failure, required, value, undefined}],
+       astranaut_error:errors(astranaut_return:run_error(Required))),
+
+    InvalidReverse =
+        astranaut_lib:validate(#{value => paired},
+                               [{no_value, not_boolean}]),
+    ?assertEqual(
+       [{validate_key_failure, {invalid_value, paired}, value, undefined}],
+       astranaut_error:errors(
+         astranaut_return:run_error(InvalidReverse))),
+    ?assertEqual(
+       {just, #{value => false}},
+       astranaut_return:run(
+         astranaut_lib:validate(#{value => paired}, [no_value]))),
+    ?assertEqual(
+       {just, #{value => true}},
+       astranaut_return:run(
+         astranaut_lib:validate(
+           #{value => {'or', [integer, boolean]}},
+           [{value, true}]))),
+
+    KeepWarning = fun(_Value) -> {warning, kept_value_warning} end,
+    ChangeWarning =
+        fun(_Value) ->
+                {warning, normalized, normalized_value_warning}
+        end,
+    KeepWarned =
+        astranaut_lib:validate(
+          #{keep => KeepWarning}, [{keep, original}]),
+    ?assertEqual(
+       {just, #{keep => original}},
+       astranaut_return:run(KeepWarned)),
+    ?assertEqual(
+       [{validate_key_failure, kept_value_warning, keep, original}],
+       astranaut_error:warnings(
+         astranaut_return:run_error(KeepWarned))),
+    ChangeWarned =
+        astranaut_lib:validate(
+          #{change => ChangeWarning}, [{change, original}]),
+    ?assertEqual(
+       {just, #{change => normalized}},
+       astranaut_return:run(ChangeWarned)),
+    ?assertEqual(
+       [{validate_key_failure, normalized_value_warning,
+         change, original}],
+       astranaut_error:warnings(
+         astranaut_return:run_error(ChangeWarned))),
+
+    ?assertException(
+       exit, {deps_key_not_exists, missing},
+       astranaut_lib:validate(
+         #{value => {default_key, missing}}, [])),
+    ?assertException(
+       exit, {cycle_deps_detected, _},
+       astranaut_lib:validate(
+         #{first => {default_key, second},
+           second => {default_key, first}}, [])),
     ok.
 
 test_invalid_validator_return_format(_Config) ->

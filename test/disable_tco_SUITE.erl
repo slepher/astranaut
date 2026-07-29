@@ -148,15 +148,113 @@ disable_tco_transform_contract(_Config) ->
     RemoteFunction =
         {function, 3, remote_call, 0,
          [{clause, 3, [], [], [RemoteCall]}]},
-    [SelfFunction, TransformedRemoteFunction] =
+    LocalCall = {call, 4, {atom, 4, helper}, []},
+    LocalFunction =
+        {function, 4, local_call, 0,
+         [{clause, 4, [], [], [LocalCall]}]},
+    PlainExpression = {atom, 5, plain},
+    PlainFunction =
+        {function, 5, plain_expression, 0,
+         [{clause, 5, [], [], [PlainExpression]}]},
+    MultiHead = {integer, 6, 1},
+    MultiTail = {call, 6, {atom, 6, helper}, []},
+    MultiFunction =
+        {function, 6, multiple_expressions, 0,
+         [{clause, 6, [], [], [MultiHead, MultiTail]}]},
+    CollisionCall =
+        {call, 7,
+         {remote, 7, {atom, 7, erlang}, {atom, 7, error}},
+         [{atom, 7, collision}]},
+    CollisionFunction =
+        {function, 7, variable_collision, 3,
+         [{clause, 7,
+           [{var, 7, 'Class0'},
+            {var, 7, 'Exception0'},
+            {var, 7, 'StackTrace0'}],
+           [], [CollisionCall]}]},
+    AnonymousCall = {call, 8, {atom, 8, helper}, []},
+    AnonymousFun =
+        {'fun', 8,
+         {clauses, [{clause, 8, [], [], [AnonymousCall]}]}},
+    AnonymousFunction =
+        {function, 8, anonymous_fun, 0,
+         [{clause, 8, [], [], [AnonymousFun]}]},
+    NamedCall = {call, 9, {atom, 9, helper}, []},
+    NamedFun =
+        {named_fun, 9, 'Loop',
+         [{clause, 9, [], [], [NamedCall]}]},
+    NamedFunction =
+        {function, 9, named_fun, 0,
+         [{clause, 9, [], [], [NamedFun]}]},
+    [SelfFunction,
+     TransformedRemoteFunction,
+     TransformedLocalFunction,
+     PlainFunction,
+     TransformedMultiFunction,
+     TransformedCollisionFunction,
+     TransformedAnonymousFunction,
+     TransformedNamedFunction] =
         astranaut_disable_tco:parse_transform(
-          [SelfFunction, RemoteFunction], []),
+          [SelfFunction,
+           RemoteFunction,
+           LocalFunction,
+           PlainFunction,
+           MultiFunction,
+           CollisionFunction,
+           AnonymousFunction,
+           NamedFunction], []),
     {function, 3, remote_call, 0,
      [{clause, 3, [], [], [TransformedRemoteCall]}]} =
         TransformedRemoteFunction,
     ?assertMatch(
        {'try', _, _, _, _, _},
        TransformedRemoteCall),
+    {function, 4, local_call, 0,
+     [{clause, 4, [], [], [TransformedLocalCall]}]} =
+        TransformedLocalFunction,
+    ?assertMatch(
+       {'try', _, _, _, _, _},
+       TransformedLocalCall),
+    {function, 6, multiple_expressions, 0,
+     [{clause, 6, [], [], [MultiHead, TransformedMultiTail]}]} =
+        TransformedMultiFunction,
+    ?assertMatch(
+       {'try', _, _, _, _, _},
+       TransformedMultiTail),
+    {function, 7, variable_collision, 3,
+     [{clause, 7, _, [], [TransformedCollisionCall]}]} =
+        TransformedCollisionFunction,
+    CollisionVariables = variable_names(TransformedCollisionCall),
+    ?assert(
+       lists:any(
+         fun(Name) -> variable_has_prefix("Class", Name) end,
+         CollisionVariables)),
+    ?assert(
+       lists:any(
+         fun(Name) -> variable_has_prefix("Exception", Name) end,
+         CollisionVariables)),
+    ?assertEqual(
+       [],
+       [Name ||
+           Name <- ['Class0', 'Exception0', 'StackTrace0'],
+           lists:member(Name, CollisionVariables)]),
+    {function, 8, anonymous_fun, 0,
+     [{clause, 8, [], [],
+       [{'fun', 8,
+         {clauses,
+          [{clause, 8, [], [], [TransformedAnonymousCall]}]}}]}]} =
+        TransformedAnonymousFunction,
+    ?assertMatch(
+       {'try', _, _, _, _, _},
+       TransformedAnonymousCall),
+    {function, 9, named_fun, 0,
+     [{clause, 9, [], [],
+       [{named_fun, 9, 'Loop',
+         [{clause, 9, [], [], [TransformedNamedCall]}]}]}]} =
+        TransformedNamedFunction,
+    ?assertMatch(
+       {'try', _, _, _, _, _},
+       TransformedNamedCall),
     ok.
 
 disable_tco_format_error_contract(_Config) ->
@@ -177,4 +275,16 @@ extract_stacktrace(StackTrace) ->
            (_, Acc) ->
                 Acc
         end, [], StackTrace)).
+
+variable_names({var, _Pos, Name}) ->
+    [Name];
+variable_names(Tuple) when is_tuple(Tuple) ->
+    variable_names(tuple_to_list(Tuple));
+variable_names([Head|Tail]) ->
+    variable_names(Head) ++ variable_names(Tail);
+variable_names(_) ->
+    [].
+
+variable_has_prefix(Prefix, Name) ->
+    lists:prefix(Prefix, atom_to_list(Name)).
     
