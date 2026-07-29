@@ -3,7 +3,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_forms).
 
--type form() :: erl_parse:abstract_form().
+-type form() :: astranaut:form().
 -type updated_form() :: form() | {updated, form(), [form()]}.
 -type function_id() :: {atom(), non_neg_integer()}.
 
@@ -32,7 +32,7 @@ reorder_updated_forms([Form|Tails], Functions, Groups) ->
 reorder_updated_forms([], _Functions, Groups) ->
     groups_to_forms(Groups).
 
--spec function_ids([form()]) -> ordsets:ordset(function_id()).
+-spec function_ids([updated_form()]) -> ordsets:ordset(function_id()).
 function_ids(Forms) ->
     function_ids(Forms, ordsets:new()).
 

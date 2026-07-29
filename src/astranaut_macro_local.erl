@@ -28,8 +28,8 @@
 -type internal_macro_binding() :: local | {remote, module(), atom()}.
 -type internal_macro_bindings() :: #{macro_key() => internal_macro_binding()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
--type macro_environment() :: #{macro_map := map(),
-                                macro_options := map()}.
+-type macro_environment() ::
+        astranaut_macro_registry:macro_environment().
 -type local_macro_whitelist_control() ::
         astranaut_macro_expander:local_macro_whitelist_control().
 -type expansion_record() ::
@@ -275,7 +275,8 @@ compile_plan(Needed, #{local_macros := Macros} = State) ->
 
 %% The final generation is intentionally rebuilt from every declaration, not
 %% merely pending ones.  Cached expansion results let the caller avoid work.
--spec finalize_plan(state()) -> {ok, [compilation_boundary()]}.
+-spec finalize_plan(state()) ->
+          {ok, [compilation_boundary()]} | {error, term()}.
 finalize_plan(State) -> compile_plan(all, State).
 
 -spec cache_expanded(form_id(), term(), disabled | ordsets:ordset(fa()),
@@ -1051,15 +1052,13 @@ closures(FAs, Options, FormMap, MacroMap) ->
 
 closures_1([FA | T], Extra, FormMap, MacroMap,
            FunctionCallAnalysis, Acc) ->
-    case closure(
-           ordsets:from_list([FA | Extra]), FormMap,
-           MacroMap, FunctionCallAnalysis, ordsets:new()) of
-        {ok, Closure, FunctionCallAnalysis1} ->
-            closures_1(
-              T, Extra, FormMap, MacroMap, FunctionCallAnalysis1,
-              maps:put(FA, Closure, Acc));
-        Error -> Error
-    end;
+    {ok, Closure, FunctionCallAnalysis1} =
+        closure(
+          ordsets:from_list([FA | Extra]), FormMap,
+          MacroMap, FunctionCallAnalysis, ordsets:new()),
+    closures_1(
+      T, Extra, FormMap, MacroMap, FunctionCallAnalysis1,
+      maps:put(FA, Closure, Acc));
 closures_1([], _Extra, _FormMap, _MacroMap,
            FunctionCallAnalysis, Acc) ->
     {ok, Acc, FunctionCallAnalysis}.

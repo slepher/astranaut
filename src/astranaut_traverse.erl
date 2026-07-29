@@ -24,7 +24,9 @@
 
 -type struct(S, A) :: #{?STRUCT_KEY => ?TRAVERSE_M, inner => inner_type(S, A)}.
 
--type inner_type(S, A) :: fun((module(), S, #{}, astranaut_error:struct()) -> state_struct(S, A)).
+-type inner_type(S, A) ::
+        fun((module(), S, map(), astranaut_error:struct()) ->
+                    state_struct(S, A)).
 
 -type state_struct(S, A) :: 
         #{?STRUCT_KEY => ?STATE_OK,
@@ -118,7 +120,8 @@ state_ok(#{return := _Return, state := _State, error := _Error} = Map) ->
 state_fail(#{state := _State, error := _Error} = Map) ->
     Map#{?STRUCT_KEY => ?STATE_FAIL}.
 
--spec run(struct(S, A), formatter(), #{}, S) -> astranaut_return:struct({A, S}).
+-spec run(struct(S, A), formatter(), map(), S) ->
+          astranaut_return:struct({A, S}).
 run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
     case run_0(MA, Formatter, undefined, Attr, State) of
         #{?STRUCT_KEY := ?STATE_OK, return := Return, state := State1, error := Error} ->
@@ -127,11 +130,13 @@ run(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
             astranaut_return:fail(Error)
     end.
 
--spec eval(struct(S, A), formatter(), #{}, S) -> astranaut_return:struct(A).
+-spec eval(struct(S, A), formatter(), map(), S) ->
+          astranaut_return:struct(A).
 eval(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
     astranaut_return:lift_m(fun({A, _State}) -> A end, run(MA, Formatter, Attr, State)).
 
--spec exec(struct(S, _A), formatter(), #{}, S) -> astranaut_return:struct(S).
+-spec exec(struct(S, _A), formatter(), map(), S) ->
+          astranaut_return:struct(S).
 exec(#{?STRUCT_KEY := ?TRAVERSE_M} = MA, Formatter, Attr, State) ->
     astranaut_return:lift_m(fun({_A, State1}) -> State1 end, run(MA, Formatter, Attr, State)).
 

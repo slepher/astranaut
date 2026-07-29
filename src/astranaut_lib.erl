@@ -508,10 +508,14 @@ gen_exports(Exports, Pos) when is_list(Exports) ->
     gen_attribute_node(export, Pos, Exports).
 
 -spec with_attribute(fun((term(), State) -> astranaut_return:struct(State) | State),
-                     State, astranaut:forms(), atom(), #{simplify_return := false, formatter => module()}) ->
+                     State, astranaut:forms(), atom(),
+                     #{simplify_return := false, formatter => module(),
+                       term() => term()}) ->
                             astranaut_return:struct(State);
                     (fun((term(), State) -> astranaut_return:struct(State) | State),
-                     State, astranaut:forms(), atom(), #{simplify_return => true, formatter => module()}) ->
+                     State, astranaut:forms(), atom(),
+                     #{simplify_return => true, formatter => module(),
+                       term() => term()}) ->
                             State | no_return().
 %% @doc visit every attribute which names Attr and accum result to Init<br/>
 %% returns astranaut_return:struct(State) if simplify_return is false<br/>
@@ -532,7 +536,8 @@ with_attribute(F, Init, Forms, Attr, Opts) ->
                                                                  astranaut_return:struct(FormsState) | FormsState),
                                            FormsState :: {Forms, State},
                                            Forms :: astranaut:forms(),
-                                           Opts :: #{formatter => module()}.
+                                           Opts :: #{formatter => module(),
+                                                     term() => term()}.
 %% @doc visit every attribute which names Attr and accum result to Init, append forms generated Attribute.
 forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     F1 = fun(Value, {NodesAcc, StateAcc}, Attr1) ->

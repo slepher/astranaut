@@ -214,12 +214,12 @@ record_field_types(RecordName, Line, Fields, StructDef) ->
                    struct_field_type(AssocType, FieldLine, FieldName, FieldType)
            end, RecordName, Fields, StructDefFields) of
         {ok, FieldTypeNodes, FieldNames} ->
-            case append_init_types(FieldNames, StructDef, Line) of
-                {ok, InitTypeNodes} ->
-                    {ok, [{type, Line, map_field_exact, struct_name_field(RecordName, Line)}|FieldTypeNodes] ++ InitTypeNodes};
-                {error, Reason} ->
-                    {error, Reason}
-            end;
+            {ok, InitTypeNodes} =
+                append_init_types(FieldNames, StructDef, Line),
+            {ok,
+             [{type, Line, map_field_exact,
+               struct_name_field(RecordName, Line)}|FieldTypeNodes] ++
+                 InitTypeNodes};
         {error, Reason} ->
             {error, Reason}
     end.

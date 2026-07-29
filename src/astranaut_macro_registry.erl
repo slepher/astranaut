@@ -33,7 +33,8 @@
           values := #{atom() => [term()]}}.
 -type macro_environment() ::
         #{macro_map := macro_map(),
-          macro_options := map()}.
+          macro_options := map(),
+          function_call_analysis => map()}.
 -type state() ::
         #{module := module(),
           file := file:filename(),

@@ -172,9 +172,8 @@ try_concrete(A, [Converter | Converters]) ->
 try_concrete(_A, []) ->
     error.
 
--spec to_compiler(struct([erl_syntax:syntaxTree()])) ->
-                         [erl_syntax:syntaxTree()] | {warning, [erl_syntax:syntaxTree()], astranaut_error:compiler_error()} |
-                         {error, astranaut_error:compiler_error(), astranaut_error:compiler_error()}.
+-spec to_compiler(struct(astranaut:forms())) ->
+                         astranaut:parse_transform_return().
 to_compiler(#{?STRUCT_KEY := ?RETURN_OK, return := Forms, error := Error}) ->
     case astranaut_error:realize(Error) of
         {[], []} ->

@@ -19,10 +19,23 @@
 -export([uniplate/1]).
 -export([format_error/1]).
 
--export_type([walk_return/2]).
+-export_type([tree/0, trees/0, form/0, forms/0,
+              traverse_opts/0, straverse_opts/0, traverse_attr/0,
+              traverse_style/0, traverse_step/0, walk_return/2,
+              parse_transform_return/0]).
 
--type tree()   :: erl_syntax:syntaxTree().
--type trees()  :: tree() | [erl_syntax:syntaxTree()].
+-type tree()   :: tuple().
+-type trees()  :: tree() | [tree()].
+-type form()   :: erl_parse:abstract_form() |
+                  {eof, erl_anno:location()} |
+                  {error, erl_parse:error_info()} |
+                  {warning, erl_parse:error_info()}.
+-type forms()  :: [form()].
+-type parse_transform_return() ::
+        forms() |
+        {warning, forms(), astranaut_error:compiler_error()} |
+        {error, astranaut_error:compiler_error(),
+         astranaut_error:compiler_error()}.
 -type rtrees() :: astranaut_uniplate:node_context(tree()) | [astranaut_uniplate:node_context(tree())].
 
 -type traverse_opts() :: #{traverse => traverse_style(),
@@ -30,14 +43,23 @@
                            attr => traverse_attr(),
                            validate => false | true | input | output | both,
                            validate_opts => map(),
-                           uniplate => astranaut_uniplate:uniplate(tree())
+                           uniplate => astranaut_uniplate:uniplate(tree()),
+                           normalize => boolean(),
+                           role => astranaut_syntax:node_role(),
+                           validator => astranaut_syntax:validator(),
+                           term() => term()
                           }.
 
 -type straverse_opts() :: #{traverse => traverse_style(),
+                            formatter => module(),
                             attr => traverse_attr(),
                             validate => false | true | input | output | both,
                             validate_opts => map(),
-                            uniplate => astranaut_uniplate:uniplate(tree())
+                            uniplate => astranaut_uniplate:uniplate(tree()),
+                            normalize => boolean(),
+                            role => astranaut_syntax:node_role(),
+                            validator => astranaut_syntax:validator(),
+                            term() => term()
                            }.
 
 -type traverse_attr() :: map().
@@ -510,7 +532,6 @@ root_role_type(Type) ->
     case astranaut_syntax:node_roles(Type) of
         [type] -> type;
         [Role] -> Role;
-        [] -> unknown;
         _Roles -> ambiguous
     end.
 

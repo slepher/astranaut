@@ -129,7 +129,8 @@ validate_pos(Quoted, Pos) ->
 %%% API quote_type_code/2
 %%%===================================================================
 quote_type_code(Code) ->
-    {attribute, 0, type, {dummy, Type, []}} = merl:quote(0, "-type dummy() :: " ++ Code ++ "."),
+    {attribute, _GeneratedPos, type, {dummy, Type, []}} =
+        merl:quote(0, "-type dummy() :: " ++ Code ++ "."),
     Type.
 
 %%%===================================================================

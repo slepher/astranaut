@@ -21,7 +21,7 @@
 %%% Parse transform and diagnostics
 %%%===================================================================
 
--spec parse_transform(astranaut:forms(), compile:option()) ->
+-spec parse_transform(astranaut:forms(), [compile:option()]) ->
           astranaut:parse_transform_return().
 parse_transform(Forms, Options) ->
     astranaut_return:to_compiler(

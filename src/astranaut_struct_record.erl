@@ -17,9 +17,9 @@
 -export([mandatory_field/2, auto_fill/1, set_auto_fill/2]).
 -export([filled_init_values/1, update_init_values/1, update_enforce_keys/2]).
 
--record(record_def, {name :: atom(), 
-                     module :: module(), 
-                     line :: integer(),
+-record(record_def, {name :: atom(),
+                     module :: module(),
+                     line :: erl_anno:location(),
                      fields = [] :: fields(),
                      init_values = maps:new() :: init_values(),
                      types = maps:new() :: types(),
@@ -31,13 +31,14 @@
 -type init_values() :: #{atom() => term()}.
 -type types() :: #{atom() => term()}.
 -type enforce_keys() :: [atom()].
--type warning() :: {module(), integer(), term()}.
+-type warning() :: term().
 -type warnings() :: [warning()].
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec record_def(module(), {atom(), [term()]}, integer()) -> #record_def{}.
+-spec record_def(module(), {atom(), [term()]}, erl_anno:location()) ->
+          #record_def{}.
 record_def(Module, {RecordName, Fields}, Line) ->
     RecordDef = #record_def{module = Module, line = Line, name = RecordName},
     add_fields(Fields, RecordDef).

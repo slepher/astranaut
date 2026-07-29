@@ -17,7 +17,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec parse_transform([erl_parse:abstract_form()], compile:option()) -> [erl_parse:abstract_form()].
+-spec parse_transform(astranaut:forms(), [compile:option()]) ->
+          astranaut:forms().
 parse_transform(Forms, _Options) ->
     Return =
         do([ return ||

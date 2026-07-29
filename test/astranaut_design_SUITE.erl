@@ -30,6 +30,7 @@ groups() ->
 
 all() ->
     [walk_return_contracts,
+     public_type_exports_contract,
      lib_public_api_contracts,
      lib_form_source_contracts,
      lib_transform_file_pos_compat_contracts,
@@ -49,6 +50,37 @@ all() ->
      compile_meta_error_contract,
      compile_meta_invalid_and_undefined_contracts,
      compile_meta_option_and_compile_contracts].
+
+public_type_exports_contract(_Config) ->
+    {module, astranaut} = code:ensure_loaded(astranaut),
+    BeamFile =
+        filename:join(
+          [code:lib_dir(astranaut), "ebin",
+           atom_to_list(astranaut) ++ code:objfile_extension()]),
+    {ok, {astranaut, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
+        beam_lib:chunks(BeamFile, [abstract_code]),
+    ExportedTypes =
+        ordsets:from_list(
+          lists:append(
+            [Types || {attribute, _, export_type, Types} <- Forms])),
+    ExpectedTypes =
+        ordsets:from_list(
+          [{tree, 0}, {trees, 0}, {form, 0}, {forms, 0},
+           {traverse_opts, 0}, {straverse_opts, 0},
+           {traverse_attr, 0}, {traverse_style, 0},
+           {traverse_step, 0}, {walk_return, 2},
+           {parse_transform_return, 0}]),
+    ?assertEqual(
+       [],
+       ordsets:subtract(ExpectedTypes, ExportedTypes)),
+    DefinedTypes =
+        ordsets:from_list(
+          [{Name, length(Parameters)}
+           || {attribute, _, TypeKind, {Name, _Definition, Parameters}} <- Forms,
+              TypeKind =:= type orelse TypeKind =:= opaque]),
+    ?assertEqual(
+       [],
+       ordsets:subtract(ExportedTypes, DefinedTypes)).
 
 lib_public_api_contracts(_Config) ->
     {module, astranaut_lib} = code:ensure_loaded(astranaut_lib),

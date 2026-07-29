@@ -17,8 +17,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec do(erl_syntax:abstract(), #{monad := module(), monad_fail := module()}) ->
-                astranaut_traverse:return(erl_syntax:abstract()).
+-spec do(astranaut:tree(), #{monad := module(), monad_fail := module()}) ->
+                astranaut_return:struct(astranaut:trees()).
 do({lc, Pos, Monad, Comprehensions}, Opts) ->
     astranaut_return:lift_m(
       fun(Expressions) ->
