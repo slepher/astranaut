@@ -32,6 +32,7 @@ all() ->
     [walk_return_contracts,
      lib_public_api_contracts,
      lib_form_source_contracts,
+     lib_transform_file_pos_compat_contracts,
      lib_reload_forms_contract,
      lib_reload_forms_in_use_contract,
      do_parse_transform_contracts,
@@ -114,6 +115,36 @@ lib_form_source_contracts(Config) ->
     after
         file:delete(File)
     end.
+
+lib_transform_file_pos_compat_contracts(_Config) ->
+    Transformer = astranaut_lib_source_transformer,
+    File = "transform_source.erl",
+    FileForm = {attribute, 1, file, {File, 1}},
+    CompileOptions =
+        [{2, {parse_transform, Transformer}},
+         {3, {compile, {parse_transform, Transformer}}},
+         {4, [debug_info, {parse_transform, Transformer}]}],
+    lists:foreach(
+      fun({Pos, CompileOption}) ->
+              Forms =
+                  [FileForm,
+                   {attribute, Pos, compile, CompileOption}],
+              ?assertEqual(
+                 {File, Pos},
+                 astranaut_lib:analyze_transform_file_pos(
+                   Transformer, Forms))
+      end, CompileOptions),
+    MissingForms =
+        [FileForm,
+         {attribute, 5, compile,
+          [debug_info, {parse_transform, other_transformer}]}],
+    ?assertEqual(
+       {File, 0},
+       astranaut_lib:analyze_transform_file_pos(
+         Transformer, MissingForms)),
+    ?assertEqual(
+       {undefined, 0},
+       astranaut_lib:analyze_transform_file_pos(Transformer, [])).
 
 lib_reload_forms_contract(_Config) ->
     Module = astranaut_lib_reload_contract,
