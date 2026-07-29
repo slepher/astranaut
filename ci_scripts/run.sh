@@ -55,7 +55,7 @@ if [ "$LANG_KEY" == "cn" ]; then
     MSG_LIST="待测试版本: "
     MSG_PREP="准备数据卷..."
     MSG_RUN=">>> [%s] 正在运行测试..."
-    MSG_PASS="版本 %s: 测试通过 (或部分通过)。"
+    MSG_PASS="版本 %s: 测试通过。"
     MSG_FAIL="版本 %s: 测试失败，请查看日志。"
     MSG_FINISH="=== 所有测试已结束 ==="
     MSG_VIEW="正在调用日志查看器..."
@@ -64,7 +64,7 @@ else
     MSG_LIST="Versions to test: "
     MSG_PREP="Preparing Volume..."
     MSG_RUN=">>> [%s] Running Tests..."
-    MSG_PASS="Version %s: Tests Passed (or partial pass)."
+    MSG_PASS="Version %s: Tests Passed."
     MSG_FAIL="Version %s: Tests Failed. Check logs."
     MSG_FINISH="=== All Tests Finished ==="
     MSG_VIEW="Invoking Log Viewer..."
@@ -81,6 +81,7 @@ if ! docker volume ls -q -f name="$GLOBAL_VOLUME" | grep -q "$GLOBAL_VOLUME"; th
     docker volume create "$GLOBAL_VOLUME" > /dev/null
 fi
 
+ANY_TEST_FAILED=0
 for VER in "${TARGET_VERSIONS[@]}"; do
     VER=$(echo "$VER" | xargs)
     if [ -z "$VER" ]; then continue; fi
@@ -105,6 +106,7 @@ for VER in "${TARGET_VERSIONS[@]}"; do
     if [ $EXIT_CODE -eq 0 ]; then
         printf "${GREEN}$MSG_PASS${NC}\n" "$VER"
     else
+        ANY_TEST_FAILED=1
         printf "${YELLOW}$MSG_FAIL${NC}\n" "$VER"
     fi
 done
@@ -115,3 +117,5 @@ if [ $NO_VIEW -eq 0 ]; then
     echo -e "${GRAY}$MSG_VIEW${NC}"
     "$SCRIPT_DIR/view_logs.sh"
 fi
+
+exit $ANY_TEST_FAILED

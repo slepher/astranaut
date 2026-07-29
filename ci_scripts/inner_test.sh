@@ -123,7 +123,13 @@ fi
 
 echo "CMD: $CT_CMD"
 # 执行测试，允许失败以便导出日志
-$CT_CMD || echo "$MSG_TEST_FAIL"
+set +e
+$CT_CMD
+TEST_EXIT_CODE=$?
+set -e
+if [ $TEST_EXIT_CODE -ne 0 ]; then
+    echo "$MSG_TEST_FAIL"
+fi
 
 # 6. 导出结果
 log_step "$MSG_STEP_EXPORT"
@@ -146,3 +152,5 @@ else
     echo "$MSG_ERR_LOGS"
     exit 1
 fi
+
+exit $TEST_EXIT_CODE

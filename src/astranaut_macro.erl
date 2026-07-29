@@ -13,6 +13,7 @@
 -module(astranaut_macro).
 
 -include("do.hrl").
+-include("otp_vsn.hrl").
 
 -export([parse_transform/2, format_error/1]).
 
@@ -92,7 +93,7 @@ format_error({macro_exception, MFA, Arguments, Exception}) ->
       "apply macro ~s ~p failed:~n~s",
       [astranaut_macro_expander:format_mfa(MFA),
        Arguments,
-       eunit_lib:format_exception(Exception)]);
+       format_exception(Exception)]);
 format_error({invalid_macro_return, Detail}) ->
     io_lib:format(
       "macro ~s returned invalid AST: ~p",
@@ -145,6 +146,15 @@ format_error({illegal_local_macro_definition_mutation, Form}) ->
       [Form]);
 format_error(Error) ->
     astranaut:format_error(Error).
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_24).
+format_exception({Class, Reason, StackTrace}) ->
+    erl_error:format_exception(Class, Reason, StackTrace).
+-else.
+format_exception({Class, Reason, StackTrace}) ->
+    io_lib:format(
+      "~p: ~p~nstacktrace:~n~p", [Class, Reason, StackTrace]).
+-endif.
 
 format_macro_ref(
   #{macro_module := Module, function := Function, arity := Arity}) ->

@@ -1144,11 +1144,25 @@ validate_internal_policies(Closures, InternalBindings, Existing) ->
                                                Entry, #{}),
                                       Acc)
                             end, #{}, Existing),
-    case [{FA, Ps} || {FA, Ps} <- maps:to_list(maps:merge_with(fun(_K, A, B) -> ordsets:union(A, B) end, OldPolicies, NewPolicies)),
+    case [{FA, Ps} || {FA, Ps} <- maps:to_list(
+                                      merge_policy_maps(
+                                        OldPolicies, NewPolicies)),
                       length(Ps) > 1] of
         [] -> ok;
         [{FA, Ps} | _] -> {error, {conflicting_internal_function_policy, FA, Ps}}
     end.
+
+merge_policy_maps(OldPolicies, NewPolicies) ->
+    maps:fold(
+      fun(FA, NewPolicy, Acc) ->
+              case maps:find(FA, Acc) of
+                  {ok, OldPolicy} ->
+                      maps:put(
+                        FA, ordsets:union(OldPolicy, NewPolicy), Acc);
+                  error ->
+                      maps:put(FA, NewPolicy, Acc)
+              end
+      end, OldPolicies, NewPolicies).
 
 policy_map([{Root, Closure} | T], InternalBindings, Acc) ->
     Policy = maps:to_list(InternalBindings),

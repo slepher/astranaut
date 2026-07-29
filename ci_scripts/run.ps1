@@ -17,7 +17,7 @@ $LangDict = @{
         "TARGET_LIST"   = "Versions to test: {0}"
         "PREP_ENV"      = "Preparing Volume..."
         "START_TEST"    = ">>> [{0}] Running Tests..."
-        "TEST_PASS"     = "Version {0}: Tests Passed (or partial pass)."
+        "TEST_PASS"     = "Version {0}: Tests Passed."
         "TEST_FAIL"     = "Version {0}: Tests Failed. Check logs."
         "ALL_FINISH"    = "=== All Tests Finished ==="
         "CALL_VIEWER"   = "Opening Log Viewer..."
@@ -27,7 +27,7 @@ $LangDict = @{
         "TARGET_LIST"   = "待测试版本: {0}"
         "PREP_ENV"      = "准备数据卷..."
         "START_TEST"    = ">>> [{0}] 正在运行测试..."
-        "TEST_PASS"     = "版本 {0}: 测试通过 (或部分通过)。"
+        "TEST_PASS"     = "版本 {0}: 测试通过。"
         "TEST_FAIL"     = "版本 {0}: 测试失败，请查看日志。"
         "ALL_FINISH"    = "=== 所有测试已结束 ==="
         "CALL_VIEWER"   = "正在打开日志查看器..."
@@ -71,6 +71,7 @@ try {
     }
 
     # 4. 循环运行
+    $AnyTestFailed = $false
     foreach ($Ver in $VerList) {
         Write-Host "`n$($Msg.START_TEST -f $Ver)" -ForegroundColor Cyan
         
@@ -89,6 +90,7 @@ try {
         if ($LASTEXITCODE -eq 0) {
             Write-Host ($Msg.TEST_PASS -f $Ver) -ForegroundColor Green
         } else {
+            $AnyTestFailed = $true
             Write-Warning ($Msg.TEST_FAIL -f $Ver)
         }
     }
@@ -99,6 +101,10 @@ try {
     if (-not $NoView) {
         Write-Host $Msg.CALL_VIEWER -ForegroundColor Gray
         & "$ScriptDir\view_logs.ps1"
+    }
+
+    if ($AnyTestFailed) {
+        exit 1
     }
 
 } catch {
