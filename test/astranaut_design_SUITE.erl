@@ -98,6 +98,14 @@ lib_form_source_contracts(Config) ->
            {File, 2},
            astranaut_lib:analyze_transform_file_pos(
              astranaut_lib_source_transformer, Forms)),
+        LegacyForms =
+            [{attribute, 1, file, {"legacy_source.erl", 1}},
+             {attribute, 2, compile,
+              {parse_transform, astranaut_lib_source_transformer}}],
+        ?assertEqual(
+           {"legacy_source.erl", 2},
+           astranaut_lib:analyze_transform_file_pos(
+             astranaut_lib_source_transformer, LegacyForms)),
         {ok, Cwd} = file:get_cwd(),
         Absolute = filename:join([Cwd, "test", "sample.erl"]),
         ?assertEqual(

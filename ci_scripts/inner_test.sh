@@ -81,6 +81,7 @@ echo "----------------------------------------"
 echo "$MSG_ENV_INFO"
 echo "Target Version: $ERLANG_VER"
 echo "Target Suite:   ${TEST_SUITE:-ALL}"
+echo "Target Case:    ${TEST_CASE:-ALL}"
 echo "----------------------------------------"
 
 # 1. 准备目录
@@ -114,8 +115,13 @@ log_step "$MSG_STEP_TEST"
 cd "$WORK_DIR"
 
 if [ -n "$TEST_SUITE" ]; then
-    echo "$MSG_MODE_SINGLE ($TEST_SUITE)"
-    CT_CMD="rebar3 ct --suite $TEST_SUITE"
+    if [ -n "$TEST_CASE" ]; then
+        echo "$MSG_MODE_SINGLE ($TEST_SUITE:$TEST_CASE)"
+        CT_CMD="rebar3 ct --suite $TEST_SUITE --case $TEST_CASE"
+    else
+        echo "$MSG_MODE_SINGLE ($TEST_SUITE)"
+        CT_CMD="rebar3 ct --suite $TEST_SUITE"
+    fi
 else
     echo "$MSG_MODE_ALL"
     CT_CMD="rebar3 ct"

@@ -361,9 +361,15 @@ analyze_transform_file_pos(Transformer, [Form|Forms], Filename) ->
             case erl_syntax_lib:analyze_attribute(Form) of
                 {file, {Filename1, _Pos}} ->
                     analyze_transform_file_pos(Transformer, Forms, Filename1);
-                {compile, {parse_transform, Transformer}} ->
-                    Pos = astranaut_syntax:get_pos(Form),
-                    {Filename, Pos};
+                {compile, CompileOptions} ->
+                    case has_parse_transform(Transformer, CompileOptions) of
+                        true ->
+                            Pos = astranaut_syntax:get_pos(Form),
+                            {Filename, Pos};
+                        false ->
+                            analyze_transform_file_pos(
+                              Transformer, Forms, Filename)
+                    end;
                 _ ->
                     analyze_transform_file_pos(Transformer, Forms, Filename)
             end;
@@ -372,6 +378,19 @@ analyze_transform_file_pos(Transformer, [Form|Forms], Filename) ->
     end;
 analyze_transform_file_pos(_Transformer, [], Filename) ->
     {Filename, 0}.
+
+has_parse_transform(Transformer, {parse_transform, Transformer}) ->
+    true;
+has_parse_transform(Transformer, {compile, CompileOptions}) ->
+    has_parse_transform(Transformer, CompileOptions);
+has_parse_transform(Transformer, CompileOptions)
+  when is_list(CompileOptions) ->
+    lists:any(
+      fun(CompileOption) ->
+              has_parse_transform(Transformer, CompileOption)
+      end, CompileOptions);
+has_parse_transform(_Transformer, _CompileOptions) ->
+    false.
 
 -spec ast_safe_to_string([erl_syntax:syntaxTree()] | erl_syntax:syntaxTree()) -> string().
 %% @doc convert ast to printable string, does not raise exception when ast is invalid.

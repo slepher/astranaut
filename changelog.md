@@ -5,6 +5,7 @@
 ### 兼容性与发布元数据
 
 - 使用 OTP 19 已支持的 `maps` API 替换 `maps:merge_with/3`，恢复 OTP 19～23 兼容性。
+- 兼容 OTP 19～23 对 compile attribute 分析结果的额外包装，避免 parse transform 的有效行号被报告为 `0`。
 - 将 `syntax_tools` 声明为正式 OTP 应用依赖；移除生产代码对 `eunit_lib` 的调用，并把使用 EUnit 的测试辅助模块移出生产编译顺序。
 - 删除已经失效的兼容头文件，并让本地容器 CI 正确传播测试失败状态。
 
