@@ -245,11 +245,40 @@ do_error_contracts(_Config) ->
 
 walk_return_contracts(_Config) ->
     Node = {atom, 10, original},
-    ?assertEqual(#{'__struct__' => astranaut_walk_return,
-                   return => replacement,
-                   errors => [],
-                   warnings => [warn]},
-                 astranaut:walk_return({warning, replacement, warn})),
+    Existing =
+        #{'__struct__' => astranaut_walk_return,
+          return => replacement,
+          errors => [],
+          warnings => [warn]},
+    ?assertEqual(
+       Existing,
+       astranaut:walk_return(Existing)),
+    ?assertEqual(
+       Existing,
+       astranaut:walk_return({warning, replacement, warn})),
+    VariantCases =
+        [{{warning, warn}, #{warnings => [warn]}},
+         {{warnings, [warn_1, warn_2]},
+          #{warnings => [warn_1, warn_2]}},
+         {{warnings, replacement, [warn_1, warn_2]},
+          #{return => replacement, warnings => [warn_1, warn_2]}},
+         {{error, error_1}, #{errors => [error_1]}},
+         {{errors, [error_1, error_2]},
+          #{errors => [error_1, error_2]}},
+         {{error, replacement, error_1},
+          #{return => replacement, errors => [error_1]}},
+         {{errors, replacement, [error_1, error_2]},
+          #{return => replacement, errors => [error_1, error_2]}}],
+    lists:foreach(
+      fun({Input, Expected}) ->
+              Actual = astranaut:walk_return(Input),
+              ?assertEqual(
+                 astranaut_walk_return,
+                 maps:get('__struct__', Actual)),
+              ?assertEqual(
+                 Expected,
+                 maps:with(maps:keys(Expected), Actual))
+      end, VariantCases),
     ?assertEqual(#{'__struct__' => astranaut_walk_return,
                    return => Node,
                    errors => [],
@@ -260,7 +289,16 @@ walk_return_contracts(_Config) ->
     ?assertException(exit, {warnings_should_be_list, not_a_list},
                      astranaut:walk_return(#{warnings => not_a_list})),
     #{return := SkipNode} = astranaut:walk_return(#{continue => true, return => Node}),
-    ?assertMatch({uniplate_node_context, Node, _, _, true, _, _, _}, SkipNode).
+    ?assertMatch({uniplate_node_context, Node, _, _, true, _, _, _}, SkipNode),
+    #{return := SkipReplacement} =
+        astranaut:walk_return({continue, replacement}),
+    ?assertMatch(
+       {uniplate_node_context, replacement, _, _, true, _, _, _},
+       SkipReplacement),
+    #{return := SkipUndefined} = astranaut:walk_return(continue),
+    ?assertMatch(
+       {uniplate_node_context, undefined, _, _, true, _, _, _},
+       SkipUndefined).
 
 return_error_contracts(_Config) ->
     WarningOk = astranaut_return:warning_ok(warn, value),

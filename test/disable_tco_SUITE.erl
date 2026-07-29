@@ -107,7 +107,9 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() -> 
-    [disable_tco].
+    [disable_tco,
+     disable_tco_transform_contract,
+     disable_tco_format_error_contract].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -133,6 +135,39 @@ disable_tco(_Config) ->
         _:_?CAPTURE_STACKTRACE ->
             ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(?GET_STACKTRACE))
     end.
+
+disable_tco_transform_contract(_Config) ->
+    SelfCall = {call, 2, {atom, 2, self_call}, []},
+    SelfFunction =
+        {function, 2, self_call, 0,
+         [{clause, 2, [], [], [SelfCall]}]},
+    RemoteCall =
+        {call, 3,
+         {remote, 3, {atom, 3, erlang}, {atom, 3, error}},
+         [{atom, 3, expected}]},
+    RemoteFunction =
+        {function, 3, remote_call, 0,
+         [{clause, 3, [], [], [RemoteCall]}]},
+    [SelfFunction, TransformedRemoteFunction] =
+        astranaut_disable_tco:parse_transform(
+          [SelfFunction, RemoteFunction], []),
+    {function, 3, remote_call, 0,
+     [{clause, 3, [], [], [TransformedRemoteCall]}]} =
+        TransformedRemoteFunction,
+    ?assertMatch(
+       {'try', _, _, _, _, _},
+       TransformedRemoteCall),
+    ok.
+
+disable_tco_format_error_contract(_Config) ->
+    ?assertEqual(
+       "already formatted",
+       astranaut_disable_tco:format_error("already formatted")),
+    ?assertEqual(
+       "not_formatted",
+       lists:flatten(
+         astranaut_disable_tco:format_error(not_formatted))),
+    ok.
 
 extract_stacktrace(StackTrace) ->
     lists:reverse(

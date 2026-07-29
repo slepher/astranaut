@@ -57,6 +57,14 @@ No need to rebuild image after changing source code.
 * **Windows:** `.\ci_scripts\run.ps1`
 * **Linux:** `./ci_scripts/run.sh`
 
+两种脚本都支持指定 OTP 版本、Common Test suite/case，以及关闭日志查看器。例如：
+
+Both runners support selecting an OTP version, Common Test suite/case, and
+disabling the log viewer. For example:
+
+* **Windows:** `.\ci_scripts\run.ps1 -TargetVer 23 -TestSuite astranaut_design_SUITE -TestCase lib_form_source_contracts -NoView`
+* **Linux:** `./ci_scripts/run.sh 23 --suite astranaut_design_SUITE --case lib_form_source_contracts --noview`
+
 脚本运行结束后，会自动启动一个 Web 服务器展示所有版本的测试日志和覆盖率报告。
 
 ### 4. 查看日志 / View Logs

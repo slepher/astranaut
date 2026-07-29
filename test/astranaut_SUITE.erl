@@ -125,7 +125,9 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [test_simple_map, test_traverse_m_error,
-     test_uniplate_reduce, test_reduce, test_map_with_state_node, test_map_with_state, test_map_spec, test_map_type,
+     test_uniplate_reduce, test_reduce, test_map_with_state_node,
+     test_state_mapping_wrappers, test_mapfold_invalid_return,
+     test_map_with_state, test_map_spec, test_map_type,
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_invalid_validator_return_format,
      test_with_attribute, test_forms_with_attribute,
@@ -233,6 +235,35 @@ test_map_with_state_node(_Config) ->
                   {Node, Acc}
           end, 0, NodeA, #{role => expression}),
     ?assertEqual({match, 10, {var, 10, 'B'}, {atom, 10, a}}, Return),
+    ok.
+
+test_state_mapping_wrappers(_Config) ->
+    Node0 = {atom, 10, old_value},
+    Node1 = {atom, 10, new_value},
+    Mapper =
+        fun({atom, Pos, old_value}, State) ->
+                {{atom, Pos, new_value}, State + 1};
+           (Node, State) ->
+                {Node, State}
+        end,
+    Opts = #{traverse => pre, role => expression},
+    ?assertEqual(
+       Node1,
+       astranaut:smap_with_state(Mapper, 0, Node0, Opts)),
+    ?assertEqual(
+       {just, Node1},
+       astranaut_return:run(
+         astranaut:map_with_state(Mapper, 0, Node0, Opts))),
+    ok.
+
+test_mapfold_invalid_return(_Config) ->
+    Node = {atom, 10, value},
+    ?assertError(
+       {invalid_mapfold_return, invalid, Node},
+       astranaut:mapfold(
+         fun(_Node, _State) ->
+                 invalid
+         end, 0, Node, #{traverse => pre, role => expression})),
     ok.
 
 test_map_with_state(Config) ->

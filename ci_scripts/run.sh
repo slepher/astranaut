@@ -6,27 +6,91 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$SCRIPT_DIR/ci-env.conf"
 
-if [ ! -f "$CONFIG_FILE" ]; then echo "Error: ci-env.conf not found."; exit 1; fi
-
 # === 1. 配置读取 ===
 read_conf() {
     grep "^$1=" "$CONFIG_FILE" | cut -d'=' -f2- | tr -d '\r' | xargs || true
 }
 
-ERL_VSNS_RAW=$(read_conf "ERLANG_VSNS")
-TEST_SUITE=$(read_conf "TEST_SUITE")
-USER_LANG=$(read_conf "OUTPUT_LANG")
-
 # === 2. 参数解析 ===
 TARGET_VER=""
+TEST_SUITE=""
+TEST_CASE=""
 NO_VIEW=0
 
-for arg in "$@"; do
-    case $arg in
-        --noview) NO_VIEW=1 ;;
-        *) TARGET_VER="$arg" ;; # 假设非 flag 参数为版本号
+usage() {
+    cat <<'EOF'
+Usage:
+  ./ci_scripts/run.sh [version] [options]
+
+Options:
+  --suite <suite>   Run one Common Test suite.
+  --case <case>     Run one case from --suite.
+  --noview          Do not open the log viewer.
+  --help, -h        Show this help.
+
+Example:
+  ./ci_scripts/run.sh 23 --suite astranaut_design_SUITE \
+    --case lib_form_source_contracts --noview
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --suite)
+            if [ $# -lt 2 ]; then
+                echo "Error: --suite requires a value."
+                exit 1
+            fi
+            TEST_SUITE="$2"
+            shift 2
+            ;;
+        --case)
+            if [ $# -lt 2 ]; then
+                echo "Error: --case requires a value."
+                exit 1
+            fi
+            TEST_CASE="$2"
+            shift 2
+            ;;
+        --noview)
+            NO_VIEW=1
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "Error: unknown option $1"
+            exit 1
+            ;;
+        *)
+            if [ -n "$TARGET_VER" ]; then
+                echo "Error: only one Erlang/OTP version may be specified."
+                exit 1
+            fi
+            TARGET_VER="$1"
+            shift
+            ;;
     esac
 done
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: ci-env.conf not found."
+    exit 1
+fi
+
+ERL_VSNS_RAW=$(read_conf "ERLANG_VSNS")
+CONFIG_TEST_SUITE=$(read_conf "TEST_SUITE")
+USER_LANG=$(read_conf "OUTPUT_LANG")
+if [ -z "$TEST_SUITE" ]; then
+    TEST_SUITE="$CONFIG_TEST_SUITE"
+fi
+
+if [ -n "$TEST_CASE" ] && [ -z "$TEST_SUITE" ]; then
+    echo "Error: --case requires --suite."
+    exit 1
+fi
 
 if [ -n "$TARGET_VER" ]; then
     TARGET_VERSIONS=("$TARGET_VER")
@@ -93,6 +157,7 @@ for VER in "${TARGET_VERSIONS[@]}"; do
     docker run --rm \
         -e "ERLANG_VER=$VER" \
         -e "TEST_SUITE=$TEST_SUITE" \
+        -e "TEST_CASE=$TEST_CASE" \
         -e "OUTPUT_LANG=$LANG_KEY" \
         -v "$PROJECT_ROOT:/mnt/source" \
         -v "$SCRIPT_DIR:/mnt/scripts" \
