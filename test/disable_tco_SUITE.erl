@@ -108,7 +108,9 @@ groups() ->
 %%--------------------------------------------------------------------
 all() -> 
     [disable_tco,
+     disable_tco_nested_control_flow,
      disable_tco_transform_contract,
+     disable_tco_nested_control_flow_transform_contract,
      disable_tco_format_error_contract].
 
 %%--------------------------------------------------------------------
@@ -134,6 +136,18 @@ disable_tco(_Config) ->
     catch
         _:_?CAPTURE_STACKTRACE ->
             ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(?GET_STACKTRACE))
+    end.
+
+disable_tco_nested_control_flow(_Config) ->
+    try
+        disable_tco_example:nested_control_flow(1)
+    catch
+        _:_?CAPTURE_STACKTRACE ->
+            ?assertEqual(
+               [{s, [1]},
+                {nested_helper, 1},
+                {nested_control_flow, 1}],
+               extract_stacktrace(?GET_STACKTRACE))
     end.
 
 disable_tco_transform_contract(_Config) ->
@@ -257,6 +271,87 @@ disable_tco_transform_contract(_Config) ->
        TransformedNamedCall),
     ok.
 
+disable_tco_nested_control_flow_transform_contract(_Config) ->
+    NestedFunction =
+        parse_form(
+          "nested(X) -> "
+          "case X of "
+          "first -> before(), if true -> begin target() end end; "
+          "self -> nested(X) "
+          "end."),
+    MutualA =
+        parse_form(
+          "mutual_a(X) -> "
+          "case X of stop -> ok; _ -> mutual_b(X) end."),
+    MutualB =
+        parse_form(
+          "mutual_b(X) -> "
+          "if X =:= stop -> ok; true -> mutual_a(X) end."),
+    ReceiveFunction =
+        parse_form(
+          "receive_control() -> "
+          "receive go -> target() after 0 -> timeout() end."),
+    BooleanFunction =
+        parse_form(
+          "boolean_control(X) -> X andalso target()."),
+    TryFunction =
+        parse_form(
+          "try_control() -> "
+          "try source() of "
+          "X -> target(X) "
+          "catch _:_ -> recover() "
+          "end."),
+    [TransformedNested,
+     TransformedMutualA,
+     TransformedMutualB,
+     TransformedReceive,
+     TransformedBoolean,
+     TransformedTry] =
+        astranaut_disable_tco:parse_transform(
+          [NestedFunction,
+           MutualA,
+           MutualB,
+           ReceiveFunction,
+           BooleanFunction,
+           TryFunction], []),
+    {function, _, nested, 1,
+     [{clause, _, _, _,
+       [{'case', _, _,
+         [{clause, _, [{atom, _, first}], _,
+           [BeforeCall,
+            {'if', _,
+             [{clause, _, _, _, [{block, _, [NestedTailCall]}]}]}]},
+          {clause, _, [{atom, _, self}], _, [SelfCall]}]}]}]} =
+        TransformedNested,
+    ?assertMatch({call, _, {atom, _, before}, []}, BeforeCall),
+    ?assertMatch({'try', _, _, _, _, _}, NestedTailCall),
+    ?assertMatch({call, _, {atom, _, nested}, [_]}, SelfCall),
+    ?assertEqual(MutualA, TransformedMutualA),
+    ?assertEqual(MutualB, TransformedMutualB),
+    {function, _, receive_control, 0,
+     [{clause, _, _, _,
+       [{'receive', _,
+         [{clause, _, _, _, [ReceiveTailCall]}],
+         _, [TimeoutTailCall]}]}]} =
+        TransformedReceive,
+    ?assertMatch({'try', _, _, _, _, _}, ReceiveTailCall),
+    ?assertMatch({'try', _, _, _, _, _}, TimeoutTailCall),
+    {function, _, boolean_control, 1,
+     [{clause, _, _, _,
+       [{op, _, 'andalso', _, BooleanTailCall}]}]} =
+        TransformedBoolean,
+    ?assertMatch({'try', _, _, _, _, _}, BooleanTailCall),
+    {function, _, try_control, 0,
+     [{clause, _, _, _,
+       [{'try', _, [ProtectedCall],
+         [{clause, _, _, _, [TryTailCall]}],
+         [{clause, _, _, _, [CatchTailCall]}], []}]}]} =
+        TransformedTry,
+    ?assertMatch({call, _, {atom, _, source}, []}, ProtectedCall),
+    ?assertMatch({'try', _, _, _, _, _}, TryTailCall),
+    ?assertMatch({'try', _, _, _, _, _}, CatchTailCall),
+    ok.
+
 disable_tco_format_error_contract(_Config) ->
     ?assertEqual(
        "already formatted",
@@ -287,4 +382,9 @@ variable_names(_) ->
 
 variable_has_prefix(Prefix, Name) ->
     lists:prefix(Prefix, atom_to_list(Name)).
+
+parse_form(Source) ->
+    {ok, Tokens, _EndLocation} = erl_scan:string(Source),
+    {ok, Form} = erl_parse:parse_form(Tokens),
+    Form.
     

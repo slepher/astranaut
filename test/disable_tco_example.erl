@@ -1,6 +1,6 @@
 -module(disable_tco_example).
 -compile({parse_transform, astranaut_disable_tco}).
--export([f/1,a/1]).
+-export([f/1,a/1,nested_control_flow/1]).
 
 % Auxilary function to print stack trace (by throwing an exception).
 
@@ -40,3 +40,17 @@ g(X,Y) ->
 a(X) -> b(X + 1).
 b(X) -> c(X + 2).
 c(X) -> s(X + 3).
+
+nested_control_flow(X) ->
+    case X of
+        X when X > 0 ->
+            if
+                X =:= 1 ->
+                    begin
+                        nested_helper(X)
+                    end
+            end
+    end.
+
+nested_helper(X) ->
+    s(X).
