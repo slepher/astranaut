@@ -11,7 +11,7 @@
 - **给定** local-macro 工作流已经构造最终 MacroEnv
 - **当** 调用统一 function 展开操作
 - **那么** 展开器只按 MacroEnv 匹配和递归展开宏调用
-- **并且** 不读取 internal_function、generation、retain 或 declaration order
+- **并且** 不读取 generation、retain 或 declaration order
 
 #### Scenario: local 引用复用统一调用匹配
 
@@ -279,12 +279,13 @@
 ### Requirement: 导出与本地声明使用分层 option validator
 
 系统 MUST 让 `export_macro` 与 `local_macro` 共享通用宏定义 options，但 MUST 只允许
-`local_macro` 使用 `extra_functions` 闭包构造 option 和 `internal_function` 宏环境 option；
-`macro_options` 和 `export_macro` 均 MUST 拒绝这两个 key。
+`local_macro` 使用 `closure_roots` 闭包构造 option；`macro_options` 和
+`export_macro` 均 MUST 拒绝该 key。`internal_function` MUST NOT 是任何 options
+validator 接受的 key。
 
 #### Scenario: macro_options 不接受本地闭包 options
 
-- **给定** `macro_options` 包含 `extra_functions` 或 `internal_function`
+- **给定** `macro_options` 包含 `closure_roots`
 - **当** 校验模块级 options
 - **那么** 这些 key 作为 unexpected options 报告并忽略
 - **并且** 不把它们保存到后续 declaration 的全局 MacroRuntimeContext options
@@ -319,26 +320,22 @@ NOT 成为宏函数调用实参。
 
 #### Scenario: export_macro 不接受本地闭包 options
 
-- **给定** 单独的 `export_macro` 声明包含 `extra_functions` 或 `internal_function`
+- **给定** 单独的 `export_macro` 声明包含 `closure_roots`
 - **当** 校验该声明 options
 - **那么** 这些 key 作为 unexpected options 报告并忽略
 - **并且** 不执行 extra helper 校验或本地 internal policy 构造
 
 #### Scenario: local_macro 接受本地闭包 options
 
-- **给定** `local_macro` 声明包含 `extra_functions` 或 `internal_function`
+- **给定** `local_macro` 声明包含 `closure_roots`
 - **当** 校验并注册该声明
-- **那么** `extra_functions` 进入 local closure 构造
-- **并且** `internal_function` 在 declaration MacroEnv 上解析和校验
+- **那么** `closure_roots` 进入 local closure 构造
 
-#### Scenario: internal_function 解析 alias 来源
+#### Scenario: local_macro 拒绝 internal_function
 
-- **给定** 现有 `use_macro` `alias` 将 imported `M:F/A` 映射为 `Alias/A`
-- **并且** 后续 `local_macro` 的 `internal_function` 选择 `Alias/A`
-- **当** 构造 declaration 有效环境与原始 frozen form
-- **那么** alias key 和原始远程 key 都不进入通用展开器 MacroEnv
-- **并且** frozen form 的 `Alias(Args)` 改写为普通 `M:F(Args)`
-- **并且** 该绑定进入 input fingerprint
+- **给定** `local_macro` declaration options 包含 `internal_function`
+- **当** 校验该声明
+- **那么** 该 key 作为 unexpected option 报告并忽略
 
 ### Requirement: attribute injection 使用扫描位置视图
 
@@ -432,7 +429,10 @@ local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declar
 
 ### Requirement: 最终 function 使用统一 FinalMacroRuntimeContext
 
-retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个 `FinalMacroRuntimeContext` 和同一个 ExpansionValidator。local closure target 的 LocalEnv MUST 由首次完整递归展开收集的 canonical whitelist 过滤，并 MUST 重放 declaration 的 internal macro key 移除及 alias-to-remote 改写；非 local-closure ordinary target MUST 保留完整 FinalLocalEnv，并以 `disabled` 展开。
+retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个
+`FinalMacroRuntimeContext` 和同一个 ExpansionValidator。local closure target 的
+LocalEnv MUST 由首次完整递归展开收集的 canonical whitelist 过滤；非 local-closure
+ordinary target MUST 保留完整 FinalLocalEnv，并以 `disabled` 展开。
 
 #### Scenario: 最终展开跳过工作流指定的 forms
 
@@ -453,8 +453,8 @@ retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同�
 - **给定** function form 曾在 declaration MacroRuntimeContext 下作为 local closure 展开
 - **并且** 该 form 被 retain 或被 Step 2 caller detection 选中
 - **当** FinalMacroRuntimeContext fingerprint 与最后一次 local expansion 不同
-- **那么** 从原始 form 应用 declaration internal bindings 后，在 FinalMacroRuntimeContext 下重新展开
-- **并且** internal bindings 属于该次 input fingerprint
+- **那么** 从原始 form 在 FinalMacroRuntimeContext 下重新展开
+- **并且** 过滤后的 MacroEnv 与 macro options 属于该次 input fingerprint
 - **并且** 与最后一次已接受的 local expansion result 比较
 - **并且** 结果不同时报告 `conflicting_local_macro_closure_environment`
 

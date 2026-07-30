@@ -43,9 +43,9 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 增加测试：attribute/function 宏的 traverse state 与框架 state 隔离。
 - [x] 重新运行现有 uniform macro 与 macro validation 测试套件。
 - [x] 增加测试：local macro function 与普通 function 复用同一展开语义。
-- [x] 增加测试：目标 FA 自身移除和 internal_function 不在通用展开器中实现。
-- [x] internal_function 解析 declaration MacroEnv，校验本地/远程宏 key，并让 alias 调用在 local frozen form 中恢复为原始远程函数调用。
-- [x] retain 最终重展开重放同一 internal bindings，并把 bindings 纳入 input fingerprint。
+- [x] 增加测试：目标 FA 自身移除；通用展开器只按 MacroEnv 匹配调用。
+- [x] 删除 declaration 级函数调用排除策略；普通函数调用使用 helper 或 Erlang 间接调用。
+- [x] retain 最终重展开复用同一宏调用匹配规则和 input fingerprint。
 
 ## Hierarchy_final 任务（新增，保留既有任务状态）
 
@@ -220,7 +220,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] final caller selection 使用 presence-only analysis，保留可信提示与现场回退规则。
 - [x] 第二批让一个 ExpansionRequest 共用一次 record context，每个 task 只遍历目标 frozen function 与 records，保持串行宏执行和 `NeedCallable` 原子重试。
 - [x] compile plan 建立 FA entry/order/prefix 索引并 memoize 依赖边界，保持相同 declaration order members 的累计语义。
-- [x] final preparation 建立 FormId 到 internal bindings 的反向索引，消除逐 target 的全表扫描。
+- [x] final preparation 直接按 FormId 的 closure whitelist 构造有效环境。
 
 ## 最终审核落实
 
@@ -228,7 +228,8 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 删除 `astranaut_macro:expand_function/5` 兼容入口和内部 `MacroOps`，所有 local/final 目标统一调用 `astranaut_macro_expander:expand_functions/2`。
 - [x] 将 expander 加入 `erl_first_files`，确保 parse transform 使用前已经编译加载。
 - [x] 拆分 `export_macro` 与 `local_macro` validator，只让后者接受闭包构造 options。
-- [x] 明确 `macro_options` 同样拒绝 `extra_functions` 与 `internal_function`，并覆盖诊断测试。
+- [x] 明确只有 `local_macro` 接受 `closure_roots`，且所有 validator 均拒绝
+  `internal_function`，并覆盖诊断测试。
 - [x] 记录 `macro_options` 的逐宏 defaults、源码顺序、覆盖优先级及 module-only debug 选项。
 - [x] 为 declaration、attribute call 与 final function context 使用阶段化构造函数命名。
 - [x] 用命名 map type 明确 attribute scanner state 的必需字段。

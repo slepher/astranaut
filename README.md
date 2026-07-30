@@ -658,7 +658,7 @@ environment.
 Static closure discovery follows direct local call expressions such as
 `helper(Arg)`. It does not infer indirect references such as `fun helper/1`,
 dynamically selected functions, or `apply/3`; add those helpers explicitly with
-`extra_functions`.
+`closure_roots`.
 
 *local_macro_retain*
 
@@ -757,9 +757,7 @@ local_macro_opts() ::
     group_args => GroupArgs,
     force_override => ForceOverride,
     max_depth => MaxDepth,
-    extra_functions => [Function/Arity],
-    internal_function => boolean() |
-                         [Function/Arity | {Module, Function, Arity}]}.
+    closure_roots => [Function/Arity]}.
 
 use_macro_opts() ::
   #{debug => boolean(),
@@ -837,7 +835,7 @@ conflicting macro names fail with `macro_override`.
 &emsp;&emsp; maximum nested macro expansion chain depth. The default module-level
 value is 100.
 
-*ExtraFunctions*
+*ClosureRoots*
 
 &emsp;&emsp; explicitly add local functions to a local macro's statically
 discovered closure. Use this when a helper cannot be discovered from ordinary
@@ -845,39 +843,14 @@ local calls in the macro function. Each entry must be `Function/Arity` and must
 exist in the module.
 
 ```erlang
--local_macro({macro/1, [{extra_functions, [helper/1]}]}).
+-local_macro({macro/1, [{closure_roots, [helper/1]}]}).
 ```
 
-*InternalFunction*
-
-&emsp;&emsp; make selected macros visible immediately before a `local_macro`
-declaration behave as ordinary Erlang function calls inside that macro's
-frozen closure. `false` selects none, `true` selects all macros visible at that
-point, and a list selects exact local call keys as `Function/Arity` or remote
-call keys as `{Module, Function, Arity}`. The tuple is the attribute-term
-representation of `Module:Function/Arity`.
-
-Every listed key must resolve to a macro at the declaration point; an ordinary
-module function is not sufficient. A local macro key remains a local function
-call. If `Function/Arity` resolves through an existing `use_macro` `alias`, the
-frozen call is rewritten to the imported macro's original
-`Module:Function(...)` call and both the alias and original remote macro keys
-are removed from the expansion environment. Thus the imported macro function
-is called normally instead of being expanded as a macro. The same filtering
-and rewrite are applied when a retained function is re-expanded with the final
-function context.
-
-```erlang
--import_macro(macro_uniform_a).
--use_macro({macro_uniform_a, to_a/1, [{alias, direct_to_a}]}).
--local_macro({outer/1, [{internal_function, [direct_to_a/1]}]}).
-
-outer(Ast) ->
-    direct_to_a(Ast). % frozen as macro_uniform_a:to_a(Ast)
-```
-
-Declarations whose closures overlap must use a compatible internal macro
-policy for each shared helper form.
+When a macro implementation needs to invoke a function that is also exported
+as a macro, call it through a distinct helper that is not registered in the
+macro environment, or use ordinary Erlang indirect invocation such as
+`erlang:apply/3` or a function value. Direct calls matching the macro
+environment are always macro calls.
 
 *Option Scope*
 
@@ -892,14 +865,12 @@ policy for each shared helper form.
 | `group_args` | — | definition | definition | — | pass source arguments as one list |
 | `force_override` | — | definition | definition | per-use | permit this incoming macro mapping to replace a conflicting key |
 | `alias` | — | — | — | use only | rename the selected macro at its use site |
-| `extra_functions` | — | — | local definition only | — | add statically undiscovered helpers to a local closure |
-| `internal_function` | — | — | local definition only | — | treat declaration-visible macro calls as ordinary functions |
+| `closure_roots` | — | — | local definition only | — | add statically undiscovered roots to local closure discovery |
 
-`extra_functions` and `internal_function` describe local macro closure
-construction and its frozen macro environment. They are relevant when the definition is declared with
-`-local_macro`; an `-export_macro` declaration alone only publishes the macro
-for importing modules. Neither option is a module-level `-macro_options`
-setting. Supplying either closure option to `-macro_options` or
+`closure_roots` describes local macro closure construction. It is relevant
+only when the definition is declared with `-local_macro`; an `-export_macro`
+declaration alone only publishes the macro for importing modules. It is not a
+module-level `-macro_options` setting. Supplying it to `-macro_options` or
 `-export_macro` reports it as an unexpected option and ignores it.
 
 *Expansion Phases and Source Order*
@@ -938,10 +909,8 @@ or `outer` controls nested expansion at an individual macro call.
 | `invalid_macro_return` | macro returned AST that does not fit the current traversal position |
 | `invalid_import_macro_attr` | invalid `-import_macro` attribute |
 | `import_macro_failed` | imported macro module could not be loaded |
-| `invalid_extra_functions` | `extra_functions` names functions that are not defined in the module |
-| `undefined_internal_functions` | `internal_function` names macro keys not visible at the local declaration point |
+| `invalid_closure_roots` | `closure_roots` names functions that are not defined in the module |
 | `duplicate_local_macro_declaration` | a local macro FA was declared more than once, including duplicates in one declaration |
-| `conflicting_internal_function_policy` | overlapping local macro closures assign incompatible internal macro environments to a shared helper |
 | `conflicting_local_macro_closure_environment` | a retained or reused local macro closure expands differently under another required environment |
 | `conflicting_local_macro_whitelist` | repeated expansion of a frozen closure observes a different set of local macro dependencies |
 | `illegal_locked_form_mutation` | attribute expansion attempted to replace a frozen local macro closure form |

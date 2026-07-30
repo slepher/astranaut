@@ -1,11 +1,11 @@
--module(macro_pass_extra_missing_error_test).
+-module(macro_pass_closure_roots_missing_error_test).
 
 -include("quote.hrl").
 -include("macro.hrl").
 
 -baseline(yep).
 -local_macro({[entry/1], [{as_attr, entry},
-                          {extra_functions, [{missing_helper, 1}]}]}).
+                          {closure_roots, [{missing_helper, 1}]}]}).
 
 -entry(ok).
 

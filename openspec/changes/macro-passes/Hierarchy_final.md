@@ -223,7 +223,12 @@ ExpansionRecord = {
 }
 ```
 
-InputFingerprint 覆盖展开前可知的全部可观察输入：已经包含解析后 `attributes` 的 macro map、候选 local descriptors/versions、macro options 与 internal macro bindings。白名单是展开输出，不能作为首次 lookup 的唯一 key。internal bindings 既决定 MacroEnv 移除项，也决定 alias 本地调用改写到哪个原始远程函数，因此即使过滤后的 MacroEnv 相同也必须进入 key。final retained 使用 canonical whitelist 裁剪后的有效 MacroEnv 与 declaration internal bindings 计算 fingerprint，因此名单外 local descriptor/generation 不进入该 form 的 final input key。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把共享的 declaration 快照切成不同环境。
+InputFingerprint 覆盖展开前可知的全部可观察输入：已经包含解析后 `attributes` 的 macro
+map、候选 local descriptors/versions 与 macro options。白名单是展开输出，不能作为
+首次 lookup 的唯一 key。final retained 使用 canonical whitelist 裁剪后的有效
+MacroEnv 计算 fingerprint，因此名单外 local descriptor/generation 不进入该 form 的
+final input key。FormId 已在外层 cache key 中，不得再用单个 TargetFA 把共享的
+declaration 快照切成不同环境。
 
 ### 6.2 统一操作
 
@@ -363,7 +368,10 @@ attribute scan 结束后：
 7. local frozen target 以 canonical whitelist 过滤有效 LocalEnv 并传 `verify`；普通 target 使用完整 FinalLocalEnv 并传 `disabled`，二者调用同一个 `expand_and_validate`。
 8. 物化结果并在既定边界排序。
 
-retain 与普通 function 的差异只有选择、生命周期与显式 whitelist control：属于 local frozen closure 的 retained target 使用 `verify`，并在 FinalMacroEnvironment 上重放 declaration 的 internal macro key 过滤与 alias-to-remote 改写；非 local-closure ordinary target 使用 `disabled`。两者共享展开实现和 FinalMacroEnvironment 构造规则。
+retain 与普通 function 的差异只有选择、生命周期与显式 whitelist control：属于 local
+frozen closure 的 retained target 使用 `verify` 并按 canonical whitelist 过滤
+FinalMacroEnvironment；非 local-closure ordinary target 使用 `disabled`。两者共享展开
+实现和 FinalMacroEnvironment 构造规则。
 
 如果某个 retained 或普通 function 曾作为 local macro closure form 展开：
 

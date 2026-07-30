@@ -100,13 +100,9 @@ format_error({invalid_macro_return, Detail}) ->
       [astranaut_macro_expander:format_mfa(
          invalid_macro_return_mfa(Detail)),
        Detail]);
-format_error({invalid_extra_functions, Functions}) ->
+format_error({invalid_closure_roots, Functions}) ->
     io_lib:format(
-      "extra_functions contains undefined functions: ~p", [Functions]);
-format_error({undefined_internal_functions, Functions}) ->
-    io_lib:format(
-      "internal_function contains macros not visible at the declaration point: ~p",
-      [Functions]);
+      "closure_roots contains undefined functions: ~p", [Functions]);
 format_error({undefined_local_macro_retain, Functions}) ->
     io_lib:format(
       "local_macro_retain contains undefined functions: ~p", [Functions]);
@@ -117,11 +113,6 @@ format_error({ineffective_local_macro_retain, Functions}) ->
 format_error({duplicate_local_macro_declaration, Function}) ->
     io_lib:format(
       "duplicate local macro declaration for ~p", [Function]);
-format_error(
-  {conflicting_internal_function_policy, Function, Policies}) ->
-    io_lib:format(
-      "conflicting internal_function policy for ~p: ~p",
-      [Function, Policies]);
 format_error({conflicting_local_macro_closure_environment, FormId}) ->
     io_lib:format(
       "local macro closure has conflicting expansion environments for ~p",

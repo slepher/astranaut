@@ -11,13 +11,13 @@
 - [x] 记录 scan 收尾重新构造全部 local macro 的最终累计模块。
 - [x] 记录同模块安全覆盖加载。
 - [x] 记录 retain 根、闭包 retain 与最终跳过集合。
-- [x] 记录 `extra_functions`、`internal_function` 和 local macro 自身递归的闭包规则。
+- [x] 记录 `closure_roots` 和 local macro 自身递归的闭包规则。
 - [x] 记录同构 function 展开接口、统一 local 引用解析及逐目标 EffectiveEnv。
 
 ## 实现
 
 - [x] 新增 `astranaut_macro_local.erl`，实现按 FA 的注册表和状态转换。
-- [x] 实现闭包计算、`extra_functions`、`internal_function` 策略和重复声明检查。
+- [x] 实现闭包计算、`closure_roots` 和重复声明检查。
 - [x] 实现冻结 form 改写保护及按环境展开缓存。
 - [x] 实现多环境结果比较和 `conflicting_local_macro_closure_environment`。
 - [x] 实现最小累计编译计划与最终全量累计编译。
@@ -37,17 +37,16 @@
 - [x] B 依赖 A 时按 `{A}`、`{A,B}` 编译；无依赖时仅 `{A,B}`。
 - [x] scan 收尾重新编译全部 local macro，并复用既有展开缓存。
 - [x] 相同 form/environment 命中缓存，不重复展开。
-- [x] extra_functions 成功补充 helper；不存在的 helper 报 `invalid_extra_functions`。
-- [x] 共享闭包函数的 internal_function 策略冲突报错。
+- [x] closure_roots 成功补充闭包根；不存在的根报 `invalid_closure_roots`。
 - [x] `local_macro_retain`、`export`、`export_macro` 保留完整闭包及 spec forms。
 - [x] retain helper 的最终环境比对不一致报错；retain 宏头跳过该比对。
 - [x] 已展开未 retain forms 进入 FinalSkipIds；retain 闭包参与最终展开。
 - [x] old code 仍被引用时安全加载以 `local_macro_module_in_use` 失败。
 - [x] local 引用识别与普通 function 展开使用相同调用匹配语义。
-- [x] internal_function 在 local 模块裁剪环境；通用展开器不解释该 option。
-- [x] internal_function 在 declaration 位点校验宏 key，支持 `{M,F,A}` 远程表示。
+- [x] 删除 declaration 级函数调用排除策略，普通函数调用通过 helper 或 Erlang
+  间接调用表达。
 - [x] 复用现有 `use_macro` `alias` 来源，将 internal alias 调用还原为普通 `M:F(...)`，并同时屏蔽 alias/remote 宏 key。
-- [x] declaration 与 FinalFunctionContext 重展开共用 internal bindings，且 bindings 进入 fingerprint。
+- [x] declaration 与 FinalFunctionContext 重展开共用同一宏调用匹配规则。
 - [x] B 可展开 A，而展开共享 A form 时 A 不进入自身宏环境。
 
 ## 声明位点注入快照任务（新增，保留既有任务状态）
@@ -109,7 +108,7 @@
 
 ## 最终审核落实
 
-- [x] 文档明确闭包扫描只跟随直接本地 call，间接引用使用 `extra_functions`。
+- [x] 文档明确闭包扫描只跟随直接本地 call，间接引用使用 `closure_roots`。
 - [x] 对不存在及存在但未命中冻结闭包的显式 `local_macro_retain` 分别发出带位置 warning。
 - [x] 保留 retained frozen function 的 FinalMacroRuntimeContext 重新展开与 canonical 结果比对。
 - [x] 明确多 FA declaration 只共享注册时快照，扫描后不保留 group identity。
@@ -127,5 +126,5 @@
 
 - [x] 每个 ExpansionRequest 只提取一次 record forms；每个 task 仅遍历目标 frozen function 与这些 records，同时保持逐 FormId 和 `NeedCallable` 重试顺序。
 - [x] 编译计划一次建立 FA entry/order/prefix 索引，并 memoize 递归依赖边界；同 order declaration members 仍进入同一累计 prefix。
-- [x] final function 准备一次建立 FormId 到 internal bindings 的反向索引，保留 root policy 优先和共享 helper 首个兼容 policy 语义。
+- [x] final function 准备直接复用 closure whitelist，不维护调用改写反向索引。
 - [x] 用专项与全量 Common Test、OpenSpec strict validation 验证行为不变。

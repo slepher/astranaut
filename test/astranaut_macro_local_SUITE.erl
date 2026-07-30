@@ -20,8 +20,7 @@ all() -> [register_freezes_static_closure,
           frozen_splice_is_rejected,
           later_declaration_remains_helper_in_earlier_closure,
           declaration_snapshot_and_actual_local_references,
-          extra_functions_and_self_recursion,
-          internal_function_conflict,
+          closure_roots_and_self_recursion,
           minimal_cumulative_compile_boundaries,
           shared_declaration_stays_in_one_boundary,
           same_declaration_members_share_order_and_context,
@@ -169,9 +168,9 @@ declaration_environment_snapshot_is_resolved(_Config) ->
     [Request] = maps:get(requests, Boundary),
     ?assertEqual(
        lists:sort([closure_ids, closure_fas, candidate_local_macros,
-                   function_call_analysis,
-                   internal_macro_bindings, referenced_local_macros,
-                   macro_environment_snapshot,
+                    function_call_analysis,
+                    referenced_local_macros,
+                    macro_environment_snapshot,
                    source_view, forms]),
        lists:sort(maps:keys(Request))),
     ?assertEqual(Snapshot, maps:get(macro_environment_snapshot, Request)),
@@ -227,25 +226,16 @@ declaration_snapshot_and_actual_local_references(_Config) ->
        lists:sort(maps:keys(maps:get(function_call_analysis, B)))),
     ok.
 
-extra_functions_and_self_recursion(_Config) ->
+closure_roots_and_self_recursion(_Config) ->
     Source = [recursive_form(), helper_form(ok)],
-    {ok, State} = register([{recursive, 0}], #{extra_functions => [{helper, 0}]}, Source, #{},
+    {ok, State} = register([{recursive, 0}], #{closure_roots => [{helper, 0}]}, Source, #{},
                                                   astranaut_macro_local:new()),
     #{ {recursive, 0} := Entry } = astranaut_macro_local:local_macros(State),
     ?assertEqual([], maps:get(referenced_local_macros, Entry)),
     ?assert(lists:member({function, helper, 0}, maps:get(closure_ids, Entry))),
-    ?assertEqual({error, {invalid_extra_functions, [{missing, 0}]}},
-                 register([{recursive, 0}], #{extra_functions => [{missing, 0}]}, Source, #{},
+    ?assertEqual({error, {invalid_closure_roots, [{missing, 0}]}},
+                 register([{recursive, 0}], #{closure_roots => [{missing, 0}]}, Source, #{},
                                                   astranaut_macro_local:new())),
-    ok.
-
-internal_function_conflict(_Config) ->
-    Source = [first_form(), second_form(), helper_form(ok)],
-    MacroMap = local_macro_map([{helper, 0}]),
-    {ok, State} = register([{first, 0}], #{internal_function => [{helper, 0}]}, Source, MacroMap,
-                                                  astranaut_macro_local:new()),
-    ?assertMatch({error, {conflicting_internal_function_policy, {helper, 0}, _}},
-                 register([{second, 0}], #{}, Source, MacroMap, State)),
     ok.
 
 minimal_cumulative_compile_boundaries(_Config) ->
@@ -712,12 +702,6 @@ expand_single_function(MacroMap, Forms, {Name, Arity}, Control) ->
       astranaut_macro_expander:expand_functions(
         Forms, #{FormId => Task})).
 
-local_macro_map(FAs) ->
-    maps:from_list(
-      [{FA, #{macro_source => local_macro,
-              function => element(1, FA), arity => element(2, FA)}}
-       || FA <- FAs]).
-
 whitelist_macro_map() ->
     maps:from_list(
       [{{Function, 0}, whitelist_macro(Function)}
@@ -821,8 +805,6 @@ helper_form(Value) ->
     {function, 1, helper, 0, [{clause, 1, [], [], [{atom, 1, Value}]}]}.
 
 recursive_form() -> {function, 1, recursive, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, recursive}, []}]}]}.
-first_form() -> {function, 1, first, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, helper}, []}]}]}.
-second_form() -> {function, 1, second, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, helper}, []}]}]}.
 a_form() -> {function, 1, a, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
 macro_a_form() ->
     {function, 1, a, 0,

@@ -1,18 +1,18 @@
 %%%-------------------------------------------------------------------
-%%% A remote imported macro can be retained as its ordinary function call.
+%%% A helper name outside the macro environment keeps function-call intent
+%%% distinct from direct macro invocation syntax.
 %%%-------------------------------------------------------------------
--module(macro_pass_internal_remote_test).
+-module(macro_pass_function_helper_test).
 
 -include("macro.hrl").
 
 -export([value/0]).
 
 -import_macro(macro_uniform_a).
--local_macro({outer/1,
-              [{internal_function, [{macro_uniform_a, to_a, 1}]}]}).
+-local_macro([outer/1]).
 
 value() ->
     outer(ok).
 
 outer(Ast) ->
-    macro_uniform_a:to_a(Ast).
+    macro_function_helper:to_a(Ast).

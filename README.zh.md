@@ -395,7 +395,7 @@ attributes 展开。源码后方的函数仍可被发现为闭包 helper，但�
 options 和 attributes 不会反向改变该声明位点环境。
 
 静态闭包发现只跟随 `helper(Arg)` 这类直接本地调用，不会推断 `fun helper/1`、动态
-选择的函数或 `apply/3` 等间接引用；这些 helper 必须通过 `extra_functions` 显式加入。
+选择的函数或 `apply/3` 等间接引用；这些闭包根必须通过 `closure_roots` 显式加入。
 
 *local_macro_retain*
 
@@ -485,9 +485,7 @@ local_macro_opts() ::
     group_args => GroupArgs,
     force_override => ForceOverride,
     max_depth => MaxDepth,
-    extra_functions => [Function/Arity],
-    internal_function => boolean() |
-                         [Function/Arity | {Module, Function, Arity}]}.
+    closure_roots => [Function/Arity]}.
 
 use_macro_opts() ::
   #{debug => boolean(),
@@ -533,40 +531,18 @@ declaration 之前可见的 attributes；普通 function 宏在 attribute scan �
 
 &emsp;&emsp;最大嵌套宏展开链深度。模块级默认值为 100。
 
-*ExtraFunctions*
+*ClosureRoots*
 
 &emsp;&emsp;显式把本地函数加入 local macro 静态发现的闭包。当 helper 无法从宏函数的
 普通本地调用中发现时使用。每一项必须是模块中已定义的 `Function/Arity`。
 
 ```erlang
--local_macro({macro/1, [{extra_functions, [helper/1]}]}).
+-local_macro({macro/1, [{closure_roots, [helper/1]}]}).
 ```
 
-*InternalFunction*
-
-&emsp;&emsp;让 `local_macro` declaration 之前立即可见的指定宏，在该宏的冻结闭包中
-作为普通 Erlang 函数调用。`false` 不选择任何宏，`true` 选择声明点可见的全部宏；
-列表可用 `Function/Arity` 选择本地调用 key，或用 `{Module, Function, Arity}` 选择
-远程调用 key。三元组是 attribute term 中对 `Module:Function/Arity` 的表示。
-
-列表中的每个 key 都必须在 declaration 位点解析为宏；仅存在同名普通模块函数并不
-满足条件。本地宏 key 保持为本地函数调用。如果 `Function/Arity` 通过现有
-`use_macro` 的 `alias` 解析到 imported macro，冻结时会把该调用改写回原始
-`Module:Function(...)`，并从展开环境同时移除 alias key 与原始远程宏 key。因此它会
-正常调用导入模块的函数，而不再作为宏展开。retain 的函数在最终 function context 中
-重展开时也应用相同的过滤和改写。
-
-```erlang
--import_macro(macro_uniform_a).
--use_macro({macro_uniform_a, to_a/1, [{alias, direct_to_a}]}).
--local_macro({outer/1, [{internal_function, [direct_to_a/1]}]}).
-
-outer(Ast) ->
-    direct_to_a(Ast). % 冻结为 macro_uniform_a:to_a(Ast)
-```
-
-如果多个 declaration 的闭包重叠，它们必须为每个共享 helper form 使用兼容的
-internal macro 策略。
+宏实现若需要把同时导出为宏的函数作为普通函数调用，应通过一个未注册进宏环境的
+独立 helper 调用，或者使用 `erlang:apply/3`、函数值等 Erlang 间接调用形式。
+与宏环境匹配的直接调用始终作为宏调用。
 
 *Option Scope*
 
@@ -581,13 +557,12 @@ internal macro 策略。
 | `group_args` | — | definition | definition | — | 把源码实参作为一个列表传入 |
 | `force_override` | — | definition | definition | use 位点 | 允许当前宏映射替换冲突 key |
 | `alias` | — | — | — | 仅 use | 在 use 位点重命名选中的宏 |
-| `extra_functions` | — | — | 仅 local definition | — | 把静态扫描未发现的 helper 加入本地闭包 |
-| `internal_function` | — | — | 仅 local definition | — | 把声明点可见的指定宏调用作为普通函数 |
+| `closure_roots` | — | — | 仅 local definition | — | 把静态扫描未发现的根加入本地闭包发现 |
 
-`extra_functions` 和 `internal_function` 描述本地宏闭包的构造及其冻结宏环境，仅在定义通过
-`-local_macro` 声明时有意义；单独的 `-export_macro` 只负责发布宏供其它模块导入。
-两者也都不是模块级 `-macro_options`。若把它们传给 `-macro_options` 或
-`-export_macro`，它们会作为 unexpected options 报告并忽略。
+`closure_roots` 描述本地宏闭包的构造，仅在定义通过 `-local_macro` 声明时有意义；
+单独的 `-export_macro` 只负责发布宏供其它模块导入。它不是模块级
+`-macro_options`。若把它传给 `-macro_options` 或 `-export_macro`，它会作为
+unexpected option 报告并忽略。
 
 *展开阶段与源码顺序*
 
@@ -617,10 +592,8 @@ internal macro 策略。
 | `invalid_macro_return` | 宏返回的 AST 不适合当前位置 |
 | `invalid_import_macro_attr` | `-import_macro` attribute 无效 |
 | `import_macro_failed` | 导入的宏模块无法加载 |
-| `invalid_extra_functions` | `extra_functions` 中存在模块未定义的函数 |
-| `undefined_internal_functions` | `internal_function` 中存在 declaration 位点不可见的宏 key |
+| `invalid_closure_roots` | `closure_roots` 中存在模块未定义的函数 |
 | `duplicate_local_macro_declaration` | local macro FA 被重复声明，包括同一 declaration 内的重复项 |
-| `conflicting_internal_function_policy` | 重叠的 local macro 闭包为共享 helper 指定了不兼容的 internal macro 环境 |
 | `conflicting_local_macro_closure_environment` | 被保留或复用的 local macro 闭包在另一个必要环境中产生不同展开结果 |
 | `conflicting_local_macro_whitelist` | 冻结闭包再次展开时观察到的 local macro 依赖集合不同 |
 | `illegal_locked_form_mutation` | attribute 展开尝试替换已冻结的 local macro 闭包 form |

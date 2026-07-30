@@ -4,7 +4,7 @@
 
 -baseline(yep).
 
--macro_options([{extra_functions, [{helper, 0}]},
+-macro_options([{closure_roots, [{helper, 0}]},
                 {internal_function, true}]).
 
 -export([value/0]).

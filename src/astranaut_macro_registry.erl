@@ -142,7 +142,7 @@ validate_local_macro_attribute(ClauseMap, Attr) ->
                                fun macro_without_module_attr/1,
                                Validator, local_macro, Attr),
            FAs1 <- remove_undefined_macros(FAs, ClauseMap),
-           Options1 <- validate_extra_functions_defined(Options, ClauseMap),
+           Options1 <- validate_closure_roots_defined(Options, ClauseMap),
            return({FAs1, Options1})
        ]).
 
@@ -351,13 +351,13 @@ remove_undefined_macros(FAs, ClausesMap) ->
               end
       end, [], FAs).
 
-validate_extra_functions_defined(Options, ClauseMap) ->
-    Missing = [FA || FA <- maps:get(extra_functions, Options, []),
+validate_closure_roots_defined(Options, ClauseMap) ->
+    Missing = [FA || FA <- maps:get(closure_roots, Options, []),
                      not maps:is_key(FA, ClauseMap)],
     case Missing of
         [] -> astranaut_return:return(Options);
         _ -> astranaut_return:error_fail(
-               {invalid_extra_functions, Missing})
+               {invalid_closure_roots, Missing})
     end.
 
 build_local_macro_map(
@@ -669,37 +669,14 @@ export_macro_validator() ->
 local_macro_validator() ->
     maps:merge(
       common_macro_definition_validator(),
-      #{extra_functions =>
-            {list_of, fun validate_function_with_arity/1},
-        internal_function => fun validate_internal_function_policy/1}).
+      #{closure_roots =>
+            {list_of, fun validate_function_with_arity/1}}).
 
 validate_function_with_arity({Function, Arity} = FA)
   when is_atom(Function), is_integer(Arity), Arity >= 0 ->
     {ok, FA};
 validate_function_with_arity(FA) ->
     {error, {invalid_function_with_arity, FA}}.
-
-validate_internal_function_policy(Value) when is_boolean(Value) ->
-    {ok, Value};
-validate_internal_function_policy(Functions) when is_list(Functions) ->
-    astranaut_return:foldl_m(
-      fun(Function, Acc) ->
-              case validate_internal_function_ref(Function) of
-                  {ok, Function1} ->
-                      astranaut_return:return([Function1 | Acc]);
-                  {error, Error} ->
-                      astranaut_return:error(Error)
-              end
-      end, [], lists:reverse(Functions));
-validate_internal_function_policy(Value) ->
-    {error, {invalid_internal_function, Value}}.
-
-validate_internal_function_ref({Module, Function, Arity} = MFA)
-  when is_atom(Module), is_atom(Function),
-       is_integer(Arity), Arity >= 0 ->
-    {ok, MFA};
-validate_internal_function_ref(FA) ->
-    validate_function_with_arity(FA).
 
 validate_mfas({Module, FAs}) when is_atom(Module) ->
     validate_fas(FAs);

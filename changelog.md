@@ -15,9 +15,11 @@
   environment and attributes visible at the declaration. Later declarations
   no longer affect an already frozen closure.
 - **Explicit local-macro closure control**: added `-local_macro_retain`,
-  `extra_functions`, and `internal_function` for retaining closure members,
-  including helpers that cannot be found statically, and fixing selected macro
-  calls visible at declaration time as ordinary function calls.
+  and `closure_roots` for retaining closure members, including helpers that
+  cannot be found statically.
+- **Unambiguous macro calls**: removed the `internal_function` option. A direct
+  call matching the macro environment is always a macro call; ordinary
+  function invocation uses a distinct helper or standard Erlang indirection.
 - **Source-ordered macro processing**: the attribute pass now performs
   scan-and-splice in source order and continues scanning generated forms at
   their insertion point. The function-body pass then uses the complete final

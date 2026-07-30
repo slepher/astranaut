@@ -25,6 +25,7 @@ all() ->
      test_macro_with_error,
      test_macro_export_rejects_local_closure_options,
      test_macro_options_rejects_local_closure_options,
+     test_macro_local_rejects_internal_function,
      test_macro_local_retain_warnings,
      test_macro_local_declaration_single_diagnostic,
      test_macro_local_declaration_preserves_prior_registration,
@@ -103,7 +104,7 @@ test_macro_export_rejects_local_closure_options(Config) ->
         [Warning || {_File, FileWarnings} <- Warnings,
                     {_Line, astranaut_macro, Warning} <- FileWarnings],
     ?assertEqual(
-       [[extra_functions, internal_function]],
+       [[closure_roots, internal_function]],
        [lists:sort(Keys)
         || {unexpected_option_keys, Keys} <- MacroWarnings]),
     ok.
@@ -120,7 +121,24 @@ test_macro_options_rejects_local_closure_options(Config) ->
         [Warning || {_File, FileWarnings} <- Warnings,
                     {_Line, astranaut_macro, Warning} <- FileWarnings],
     ?assertEqual(
-       [[extra_functions, internal_function]],
+       [[closure_roots, internal_function]],
+       [lists:sort(Keys)
+        || {unexpected_option_keys, Keys} <- MacroWarnings]),
+    ok.
+
+test_macro_local_rejects_internal_function(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_internal_option_warning_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], Warnings} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    MacroWarnings =
+        [Warning || {_File, FileWarnings} <- Warnings,
+                    {_Line, astranaut_macro, Warning} <- FileWarnings],
+    ?assertEqual(
+       [[internal_function]],
        [lists:sort(Keys)
         || {unexpected_option_keys, Keys} <- MacroWarnings]),
     ok.
@@ -248,7 +266,6 @@ test_macro_format_error_predefined_errors(_Config) ->
           {error, bad_macro, []}},
          {invalid_macro_return, DirectInvalidReturn},
          {invalid_macro_return, NestedInvalidReturn},
-         {undefined_internal_functions, [{missing, 1}]},
          {undefined_local_macro_retain, [{missing, 0}]},
          {ineffective_local_macro_retain, [{ordinary, 0}]}],
     lists:foreach(fun assert_macro_format_error/1, Errors).

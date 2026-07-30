@@ -29,12 +29,10 @@ init_per_suite(Config0) ->
          macro_pass_generated_local_attribute_test,
          macro_pass_local_no_backscan_test,
          macro_pass_external_remaining_test,
-         macro_pass_extra_functions_test,
-         macro_pass_extra_union_test,
-         macro_pass_internal_independent_test,
-         macro_pass_internal_direct_test,
-         macro_pass_internal_remote_test,
-         macro_pass_internal_alias_test,
+         macro_pass_closure_roots_test,
+         macro_pass_closure_roots_union_test,
+         macro_function_helper,
+         macro_pass_function_helper_test,
          macro_pass_retained_helper_test,
          macro_pass_final_outside_snapshot_test,
          macro_pass_generated_function_delay_test,
@@ -63,14 +61,10 @@ all() ->
      test_macro_pass_generated_local_attribute,
      test_macro_pass_local_no_backscan,
      test_macro_pass_external_remaining_cases,
-     test_macro_pass_extra_functions,
-     test_macro_pass_extra_functions_missing_error,
-     test_macro_pass_extra_functions_union,
-     test_macro_pass_internal_function_independent,
-     test_macro_pass_internal_function_direct,
-     test_macro_pass_internal_function_remote,
-     test_macro_pass_internal_function_alias,
-     test_macro_pass_internal_function_undefined_error,
+     test_macro_pass_closure_roots,
+     test_macro_pass_closure_roots_missing_error,
+     test_macro_pass_closure_roots_union,
+     test_macro_pass_function_helper,
      test_macro_pass_retained_helper,
      test_macro_pass_local_body_environment_mutation_error,
      test_macro_pass_locked_spec_mutation_error,
@@ -88,7 +82,6 @@ all() ->
      test_macro_pass_attribute_buffer_self_depth,
      test_macro_pass_attribute_buffer_total_depth,
      test_macro_pass_export_helper_unlocked,
-     test_macro_pass_internal_function_conflict,
      test_macro_pass_local_environment_mutation_errors,
      test_macro_pass_locked_snapshot_mutation_error].
 
@@ -181,60 +174,31 @@ test_macro_pass_external_remaining_cases(_Config) ->
        macro_pass_external_remaining_test:injected_attrs_value()),
     ok.
 
-test_macro_pass_extra_functions(_Config) ->
+test_macro_pass_closure_roots(_Config) ->
     ?assertEqual({extra_helper, ok},
-                 macro_pass_extra_functions_test:value()),
+                 macro_pass_closure_roots_test:value()),
     ok.
 
-test_macro_pass_extra_functions_missing_error(Config) ->
+test_macro_pass_closure_roots_missing_error(Config) ->
     assert_macro_pass_error(
-      macro_pass_extra_missing_error_test, Config,
-      fun({invalid_extra_functions, Missing}) ->
+      macro_pass_closure_roots_missing_error_test, Config,
+      fun({invalid_closure_roots, Missing}) ->
               lists:member({missing_helper, 1}, Missing);
          (_) ->
               false
       end),
     ok.
 
-test_macro_pass_extra_functions_union(_Config) ->
+test_macro_pass_closure_roots_union(_Config) ->
     ?assertEqual({extra_union_a, ok},
-                 macro_pass_extra_union_test:value_a()),
+                 macro_pass_closure_roots_union_test:value_a()),
     ?assertEqual({extra_union_b, ok},
-                 macro_pass_extra_union_test:value_b()),
+                 macro_pass_closure_roots_union_test:value_b()),
     ok.
 
-test_macro_pass_internal_function_independent(_Config) ->
-    ?assertEqual(
-       {internal_independent_a, ok},
-       macro_pass_internal_independent_test:value_a()),
-    ?assertEqual(
-       {internal_independent_b, ok},
-       macro_pass_internal_independent_test:value_b()),
-    ok.
-
-test_macro_pass_internal_function_direct(_Config) ->
-    ?assertEqual({internal_direct, ok},
-                 macro_pass_internal_direct_test:value()),
-    ok.
-
-test_macro_pass_internal_function_remote(_Config) ->
+test_macro_pass_function_helper(_Config) ->
     ?assertEqual({a, {from_a, ok}},
-                 macro_pass_internal_remote_test:value()),
-    ok.
-
-test_macro_pass_internal_function_alias(_Config) ->
-    ?assertEqual({a, {from_a, ok}},
-                 macro_pass_internal_alias_test:value()),
-    ok.
-
-test_macro_pass_internal_function_undefined_error(Config) ->
-    assert_macro_pass_error(
-      macro_pass_internal_undefined_error_test, Config,
-      fun({undefined_internal_functions, [{helper, 1}]}) ->
-              true;
-         (_) ->
-              false
-      end),
+                 macro_pass_function_helper_test:value()),
     ok.
 
 test_macro_pass_retained_helper(_Config) ->
@@ -388,17 +352,6 @@ test_macro_pass_export_helper_unlocked(Config) ->
             (_) ->
                  false
          end, Errors)),
-    ok.
-
-test_macro_pass_internal_function_conflict(Config) ->
-    assert_macro_pass_error(
-      macro_pass_internal_conflict_error_test, Config,
-      fun({conflicting_internal_function_policy,
-           {shared, 1}, _Policies}) ->
-              true;
-         (_) ->
-              false
-      end),
     ok.
 
 test_macro_pass_local_environment_mutation_errors(Config) ->

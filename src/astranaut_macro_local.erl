@@ -24,9 +24,6 @@
          form_id/1, materialize_forms/2, execute_plan/3]).
 
 -type fa() :: {atom(), non_neg_integer()}.
--type macro_key() :: {atom() | {module(), atom()}, non_neg_integer()}.
--type internal_macro_binding() :: local | {remote, module(), atom()}.
--type internal_macro_bindings() :: #{macro_key() => internal_macro_binding()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
 -type macro_environment() ::
         astranaut_macro_registry:macro_environment().
@@ -46,7 +43,6 @@
           candidate_local_macros := ordsets:ordset(fa()),
           function_call_analysis := map(),
           referenced_local_macros := ordsets:ordset(fa()),
-          internal_macro_bindings := internal_macro_bindings(),
           macro_environment_snapshot := macro_environment(),
           source_view := [term()],
           forms := #{form_id() => term()}}.
@@ -77,128 +73,60 @@ register(FAs, Options, SourceView,
          State)
   when is_list(FAs), is_map(Options) ->
     CandidateLocalMap = local_macro_entries(MacroMap),
-    case resolve_internal_macro_bindings(Options, MacroMap) of
-        {ok, InternalBindings} ->
-            do_register(FAs, Options, SourceView, MacroEnvironment,
-                        CandidateLocalMap, InternalBindings, State);
-        {error, _} = Error ->
-            Error
-    end.
+    do_register(FAs, Options, SourceView, MacroEnvironment,
+                CandidateLocalMap, State).
 
 -spec do_register([fa()], map(), [term()], macro_environment(),
-                  map(), internal_macro_bindings(), state()) ->
+                  map(), state()) ->
           {ok, state()} | {error, term()}.
 do_register(FAs, Options, SourceView, MacroEnvironment,
-            CandidateLocalMap, InternalBindings, State) ->
+            CandidateLocalMap, State) ->
     Macros = maps:get(local_macros, State),
     case duplicate_or_existing(FAs, Macros) of
         none ->
             FormMap = forms_id_map(SourceView),
-            CandidateEnv = maps:without(
-                             maps:keys(InternalBindings),
-                             CandidateLocalMap),
-            CandidateFAs = local_macro_fas(CandidateEnv),
-            MacroMapWithoutInternal = maps:without(
-                                        maps:keys(InternalBindings),
-                                        maps:get(
-                                          macro_map,
-                                          MacroEnvironment)),
+            CandidateFAs = local_macro_fas(CandidateLocalMap),
             case closures(
                    FAs, Options, FormMap,
-                   MacroMapWithoutInternal) of
+                   maps:get(macro_map, MacroEnvironment)) of
                 {ok, Closures, FunctionCallAnalysis} ->
-                    case validate_internal_policies(
-                           Closures, InternalBindings, Macros) of
-                        ok ->
-                            Order = next_order(Macros),
-                            Frozen = maps:merge(maps:get(frozen_forms, State),
-                                                freeze_closures(Closures, FormMap)),
-                            NewMacros = lists:foldl(
-                                          fun(FA, Acc) ->
-                                                  Closure = maps:get(FA, Closures),
-                                                  ClosureAnalysis =
-                                                      closure_function_analysis(
-                                                        Closure,
-                                                        FunctionCallAnalysis),
-                                                  Refs = referenced_local_macros(
-                                                           ClosureAnalysis),
-                                                  maps:put(FA, #{order => Order,
-                                                                 macro_environment_snapshot =>
-                                                                     MacroEnvironment,
-                                                                 closure_ids => closure_ids(Closure, FormMap),
-                                                                 closure_fas => Closure,
-                                                                 candidate_local_macros =>
-                                                                     CandidateFAs,
-                                                                 function_call_analysis =>
-                                                                     ClosureAnalysis,
-                                                                 referenced_local_macros => Refs,
-                                                                 internal_macro_bindings =>
-                                                                     InternalBindings,
-                                                                 source_view => SourceView,
-                                                                 options => Options,
-                                                                 status => pending}, Acc)
-                                          end, Macros, FAs),
-                            {ok, State#{local_macros => NewMacros,
-                                       frozen_forms => Frozen}};
-                        {error, _} = Error -> Error
-                    end;
+                    Order = next_order(Macros),
+                    Frozen = maps:merge(
+                               maps:get(frozen_forms, State),
+                               freeze_closures(Closures, FormMap)),
+                    NewMacros =
+                        lists:foldl(
+                          fun(FA, Acc) ->
+                                  Closure = maps:get(FA, Closures),
+                                  ClosureAnalysis =
+                                      closure_function_analysis(
+                                        Closure, FunctionCallAnalysis),
+                                  Refs = referenced_local_macros(
+                                           ClosureAnalysis),
+                                  maps:put(
+                                    FA,
+                                    #{order => Order,
+                                      macro_environment_snapshot =>
+                                          MacroEnvironment,
+                                      closure_ids =>
+                                          closure_ids(Closure, FormMap),
+                                      closure_fas => Closure,
+                                      candidate_local_macros => CandidateFAs,
+                                      function_call_analysis =>
+                                          ClosureAnalysis,
+                                      referenced_local_macros => Refs,
+                                      source_view => SourceView,
+                                      options => Options,
+                                      status => pending},
+                                    Acc)
+                          end, Macros, FAs),
+                    {ok, State#{local_macros => NewMacros,
+                               frozen_forms => Frozen}};
                 {error, _} = Error -> Error
             end;
         FA ->
             {error, {duplicate_local_macro_declaration, FA}}
     end.
-
--spec resolve_internal_macro_bindings(map(), map()) ->
-          {ok, internal_macro_bindings()} | {error, term()}.
-resolve_internal_macro_bindings(#{internal_function := true}, MacroMap) ->
-    {ok, maps:fold(fun add_internal_macro_binding/3, #{}, MacroMap)};
-resolve_internal_macro_bindings(#{internal_function := Refs}, MacroMap)
-  when is_list(Refs) ->
-    {Bindings, Missing} =
-        lists:foldl(
-          fun(Ref, {BindingsAcc, MissingAcc}) ->
-                  Key = internal_macro_key(Ref),
-                  case maps:find(Key, MacroMap) of
-                      {ok, Macro} ->
-                          {add_internal_macro_binding(
-                             Key, Macro, BindingsAcc),
-                           MissingAcc};
-                      error ->
-                          {BindingsAcc, [Ref | MissingAcc]}
-                  end
-          end, {#{}, []}, Refs),
-    case Missing of
-        [] -> {ok, Bindings};
-        _ -> {error, {undefined_internal_functions, lists:reverse(Missing)}}
-    end;
-resolve_internal_macro_bindings(_Options, _MacroMap) ->
-    {ok, #{}}.
-
-internal_macro_key({Function, Arity}) ->
-    {Function, Arity};
-internal_macro_key({Module, Function, Arity}) ->
-    {{Module, Function}, Arity}.
-
-add_internal_macro_binding(Key, Macro, Bindings) ->
-    Binding = internal_macro_binding(Key, Macro),
-    Bindings1 = maps:put(Key, Binding, Bindings),
-    case {Key, Binding} of
-        {{Alias, Arity}, {remote, Module, Function}}
-          when is_atom(Alias) ->
-            maps:put({{Module, Function}, Arity}, Binding, Bindings1);
-        _ ->
-            Bindings1
-    end.
-
-internal_macro_binding(_Key, #{macro_source := local_macro}) ->
-    local;
-internal_macro_binding(_Key,
-                       #{macro_module := Module, function := Function}) ->
-    {remote, Module, Function};
-internal_macro_binding({{Module, Function}, _Arity}, _Macro) ->
-    {remote, Module, Function};
-internal_macro_binding(_Key, _Macro) ->
-    local.
 
 -spec local_macro_entries(map()) -> map().
 local_macro_entries(MacroMap) ->
@@ -431,8 +359,7 @@ expand_final_functions(
     OriginalMap = maps:merge(forms_id_map(Forms), maps:get(frozen_forms, State)),
     PreparationContext =
         #{original_forms => OriginalMap,
-          macro_environment => MacroEnvironment,
-          internal_bindings => internal_bindings_index(State)},
+          macro_environment => MacroEnvironment},
     {Tasks, CompiledForms, TaskMetadata} =
         lists:foldl(
           fun(TargetFA, Acc) ->
@@ -463,8 +390,7 @@ prepare_final_function_task(
   {Name, Arity},
   #{original_forms := OriginalMap,
     macro_environment :=
-        #{macro_map := MacroMap} = MacroEnvironment,
-    internal_bindings := InternalBindingsIndex},
+        #{macro_map := MacroMap} = MacroEnvironment},
   State, Acc) ->
     FormId = {function, Name, Arity},
     case maps:find(FormId, OriginalMap) of
@@ -472,40 +398,32 @@ prepare_final_function_task(
             Acc;
         {ok, OriginalForm} ->
             prepare_final_function_task(
-              FormId, OriginalForm,
-              maps:get(FormId, InternalBindingsIndex, #{}),
-              MacroMap, MacroEnvironment, State, Acc)
+              FormId, OriginalForm, MacroMap,
+              MacroEnvironment, State, Acc)
     end.
 
 prepare_final_function_task(
-  FormId, OriginalForm, InternalBindings,
-  MacroMap, MacroEnvironment, State,
+  FormId, OriginalForm, MacroMap, MacroEnvironment, State,
   {Tasks, CompiledForms, TaskMetadata}) ->
-    MacroMapWithoutInternal = maps:without(
-                                maps:keys(InternalBindings), MacroMap),
     WhitelistControl = final_whitelist_control(FormId, State),
     AllowedLocalFAs = final_allowed_local_fas(
                         WhitelistControl,
-                        local_macro_fas(MacroMapWithoutInternal)),
+                        local_macro_fas(MacroMap)),
     EffectiveMacroMap = keep_allowed_local_fas(
-                          MacroMapWithoutInternal, AllowedLocalFAs),
+                          MacroMap, AllowedLocalFAs),
     FingerprintLocalFAs = fingerprint_local_fas(
                             WhitelistControl, AllowedLocalFAs),
     LocalVersions = local_versions(FingerprintLocalFAs, State),
     Fingerprint = env_fingerprint(
                     EffectiveMacroMap, LocalVersions,
-                    fingerprint_options(
-                      maps:get(macro_options, MacroEnvironment),
-                      InternalBindings)),
+                    maps:get(macro_options, MacroEnvironment)),
     case cached_final_expansion(
            FormId, Fingerprint, WhitelistControl, State) of
         {ok, ExpandedForm} ->
             {Tasks, maps:put(FormId, ExpandedForm, CompiledForms),
              TaskMetadata};
         error ->
-            RewrittenForm = rewrite_internal_macro_calls(
-                              OriginalForm, InternalBindings),
-            Task0 = #{form => RewrittenForm,
+            Task0 = #{form => OriginalForm,
                       macro_map => EffectiveMacroMap,
                       whitelist_control => WhitelistControl},
             Task = add_macro_call_hint(
@@ -515,8 +433,8 @@ prepare_final_function_task(
                        MacroEnvironment, #{}),
                      Task0),
             Metadata = #{fingerprint => Fingerprint,
-                         whitelist_control => WhitelistControl,
-                         fallback_form => RewrittenForm},
+                          whitelist_control => WhitelistControl,
+                          fallback_form => OriginalForm},
             {maps:put(FormId, Task, Tasks), CompiledForms,
              maps:put(FormId, Metadata, TaskMetadata)}
     end.
@@ -553,31 +471,6 @@ cache_final_function_tasks(
                       end
               end
       end, {CompiledForms, State}, TargetFAs).
-
-internal_bindings_index(#{local_macros := Macros}) ->
-    Entries = maps:to_list(Macros),
-    ClosureIndex =
-        lists:foldl(
-          fun({_FA, Entry}, Acc) ->
-                  Bindings = maps:get(
-                               internal_macro_bindings, Entry, #{}),
-                  lists:foldl(
-                    fun(FormId, FormAcc) ->
-                            case maps:is_key(FormId, FormAcc) of
-                                true -> FormAcc;
-                                false -> maps:put(
-                                           FormId, Bindings, FormAcc)
-                            end
-                    end, Acc, maps:get(closure_ids, Entry))
-          end, #{}, Entries),
-    lists:foldl(
-      fun({{Name, Arity}, Entry}, Acc) ->
-              Bindings = maps:get(
-                           internal_macro_bindings, Entry, #{}),
-              maps:put(
-                {spec, Name, Arity}, Bindings,
-                maps:put({function, Name, Arity}, Bindings, Acc))
-      end, ClosureIndex, Entries).
 
 final_whitelist_control(FormId, State) ->
     case maps:is_key(FormId, maps:get(frozen_forms, State)) of
@@ -773,7 +666,6 @@ prepare_request(#{forms := FrozenForms} = Request, WorkflowContext, State) ->
 prepare_request_form(
   FormId, RecordForms,
   #{candidate_local_macros := Candidates,
-    internal_macro_bindings := InternalBindings,
     macro_environment_snapshot :=
         #{macro_map := SnapshotMacroMap,
           macro_options := MacroOptions}} = Request,
@@ -782,16 +674,13 @@ prepare_request_form(
     LocalVersions = local_versions(
                       fingerprint_local_fas(
                         WhitelistControl, Candidates), State),
-    MacroMapWithoutInternal = maps:without(
-                                maps:keys(InternalBindings),
-                                SnapshotMacroMap),
     EffectiveMacroMap0 = keep_allowed_local_fas(
-                           MacroMapWithoutInternal, Candidates),
+                           SnapshotMacroMap, Candidates),
     EffectiveMacroMap = mark_local_macro_callable(
                           EffectiveMacroMap0, State),
     Fingerprint = env_fingerprint(
                     EffectiveMacroMap0, LocalVersions,
-                    fingerprint_options(MacroOptions, InternalBindings)),
+                    MacroOptions),
     case expanded_form(FormId, Fingerprint, State) of
         {ok, #{result := Form}} ->
             astranaut_return:return({Form, State});
@@ -823,12 +712,9 @@ whitelist_control(FormId, State) ->
 expand_and_cache_form(FormId, EffectiveMacroMap, Fingerprint,
                       WhitelistControl, RecordForms,
                       #{forms := FrozenForms,
-                        function_call_analysis := FunctionCallAnalysis,
-                        internal_macro_bindings := InternalBindings} = Request,
+                        function_call_analysis := FunctionCallAnalysis} = Request,
                       WorkflowContext, State) ->
-    OriginalForm0 = maps:get(FormId, FrozenForms),
-    OriginalForm = rewrite_internal_macro_calls(
-                     OriginalForm0, InternalBindings),
+    OriginalForm = maps:get(FormId, FrozenForms),
     case FormId of
         {spec, _Name, _Arity} ->
             cache_form_result(
@@ -838,7 +724,7 @@ expand_and_cache_form(FormId, EffectiveMacroMap, Fingerprint,
                       macro_map => EffectiveMacroMap,
                       whitelist_control => WhitelistControl},
             Task = add_macro_call_hint(
-                     FormId, OriginalForm0,
+                     FormId, OriginalForm,
                      FunctionCallAnalysis, Task0),
             Tasks = #{FormId => Task},
             do([ return ||
@@ -859,30 +745,6 @@ add_macro_call_hint(FormId, OriginalForm, FunctionCallAnalysis, Task) ->
         _ ->
             Task
     end.
-
-fingerprint_options(MacroOptions, InternalBindings) ->
-    {MacroOptions, maps:to_list(InternalBindings)}.
-
-rewrite_internal_macro_calls(Form, InternalBindings)
-  when map_size(InternalBindings) =:= 0 ->
-    Form;
-rewrite_internal_macro_calls(Form, InternalBindings) ->
-    astranaut:smap(
-      fun({call, CallPos, {atom, FunctionPos, Function}, Args} = Node) ->
-              Key = {Function, length(Args)},
-              case maps:find(Key, InternalBindings) of
-                  {ok, {remote, Module, OriginalFunction}} ->
-                      {call, CallPos,
-                       {remote, FunctionPos,
-                        {atom, FunctionPos, Module},
-                        {atom, FunctionPos, OriginalFunction}},
-                       Args};
-                  _ ->
-                      Node
-              end;
-         (Node) ->
-              Node
-      end, Form, #{traverse => post, normalize => false}).
 
 finish_or_schedule_expansion(
   #{needed_local_macros := [_ | _] = Needed}, FormId,
@@ -1043,11 +905,13 @@ form_id({attribute, _Pos, spec, {{Name, Arity}, _Body}}) -> {spec, Name, Arity};
 form_id(_) -> undefined.
 
 closures(FAs, Options, FormMap, MacroMap) ->
-    Extra = maps:get(extra_functions, Options, []),
-    case [FA || FA <- Extra, not maps:is_key({function, element(1, FA), element(2, FA)}, FormMap)] of
+    ClosureRoots = maps:get(closure_roots, Options, []),
+    case [FA || FA <- ClosureRoots,
+                not maps:is_key(
+                      {function, element(1, FA), element(2, FA)}, FormMap)] of
         [] -> closures_1(
-                FAs, Extra, FormMap, MacroMap, #{}, #{});
-        Missing -> {error, {invalid_extra_functions, Missing}}
+                FAs, ClosureRoots, FormMap, MacroMap, #{}, #{});
+        Missing -> {error, {invalid_closure_roots, Missing}}
     end.
 
 closures_1([FA | T], Extra, FormMap, MacroMap,
@@ -1131,55 +995,6 @@ closure_ids(Closure, FormMap) ->
                         Ids = [{function, element(1, FA), element(2, FA)}, {spec, element(1, FA), element(2, FA)}],
                         ordsets:union([Id || Id <- Ids, maps:is_key(Id, FormMap)], Acc)
                 end, ordsets:new(), Closure).
-
-validate_internal_policies(Closures, InternalBindings, Existing) ->
-    NewPolicies = policy_map(
-                    maps:to_list(Closures), InternalBindings, #{}),
-    OldPolicies = maps:fold(fun(FA, Entry, Acc) ->
-                                    policy_map(
-                                      [{FA,
-                                        maps:get(closure_fas, Entry)}],
-                                      maps:get(internal_macro_bindings,
-                                               Entry, #{}),
-                                      Acc)
-                            end, #{}, Existing),
-    case [{FA, Ps} || {FA, Ps} <- maps:to_list(
-                                      merge_policy_maps(
-                                        OldPolicies, NewPolicies)),
-                      length(Ps) > 1] of
-        [] -> ok;
-        [{FA, Ps} | _] -> {error, {conflicting_internal_function_policy, FA, Ps}}
-    end.
-
-merge_policy_maps(OldPolicies, NewPolicies) ->
-    maps:fold(
-      fun(FA, NewPolicy, Acc) ->
-              case maps:find(FA, Acc) of
-                  {ok, OldPolicy} ->
-                      maps:put(
-                        FA, ordsets:union(OldPolicy, NewPolicy), Acc);
-                  error ->
-                      maps:put(FA, NewPolicy, Acc)
-              end
-      end, OldPolicies, NewPolicies).
-
-policy_map([{Root, Closure} | T], InternalBindings, Acc) ->
-    Policy = maps:to_list(InternalBindings),
-    Acc1 = lists:foldl(fun(FA, A) ->
-                               case FA =:= Root of
-                                   true ->
-                                       A;
-                                   false ->
-                                       Ps = maps:get(
-                                              FA, A, ordsets:new()),
-                                       maps:put(
-                                         FA,
-                                         ordsets:add_element(Policy, Ps),
-                                         A)
-                               end
-                       end, Acc, Closure),
-    policy_map(T, InternalBindings, Acc1);
-policy_map([], _InternalBindings, Acc) -> Acc.
 
 needed_entries(all, Macros) -> maps:to_list(Macros);
 needed_entries(FA, Macros) ->
@@ -1283,7 +1098,6 @@ request_for_entry(Entry, Frozen) ->
       function_call_analysis =>
           maps:get(function_call_analysis, Entry),
       referenced_local_macros => maps:get(referenced_local_macros, Entry),
-      internal_macro_bindings => maps:get(internal_macro_bindings, Entry),
       macro_environment_snapshot =>
           maps:get(macro_environment_snapshot, Entry),
       source_view => maps:get(source_view, Entry),

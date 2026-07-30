@@ -12,9 +12,10 @@
 - **本地宏采用声明作用域语义**：`-local_macro` 会冻结声明函数及静态发现的
   helper 闭包，并使用声明位置可见的宏环境和 attributes；后续声明不再反向影响
   已经冻结的闭包。
-- **新增本地宏闭包控制**：支持 `-local_macro_retain`、`extra_functions` 和
-  `internal_function`，可显式保留闭包、加入无法静态发现的 helper，或把声明位置
-  可见的指定宏调用固定为普通函数调用。
+- **新增本地宏闭包控制**：支持 `-local_macro_retain` 和 `closure_roots`，可显式
+  保留闭包或加入无法静态发现的 helper。
+- **明确宏调用语义**：删除 `internal_function` option；匹配宏环境的直接调用始终
+  是宏调用，普通函数调用通过独立 helper 或 Erlang 间接调用完成。
 - **明确宏的源码顺序**：attribute pass 按源码顺序执行 scan-and-splice，宏生成的
   forms 会在当前位置继续扫描；随后 function-body pass 使用完整的最终宏环境。
   生成的 `-import_macro`、`-use_macro`、`-macro_options` 和 `-local_macro`

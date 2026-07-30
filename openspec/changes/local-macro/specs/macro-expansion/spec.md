@@ -201,67 +201,49 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 - **那么** 按注册顺序构造包含全部 local macro 的最终累计模块
 - **并且** 编译输入直接取已确认的 canonical expanded forms
 
-### Requirement: extra_functions 与 internal_function
+### Requirement: closure_roots 补充静态闭包
 
-系统 MUST 将 `extra_functions` 纳入静态闭包；`internal_function` MUST 解析 declaration
-MacroEnv 中当前可见的宏 key，把选中调用固化为普通函数调用，并且不得把该策略交给
-通用展开器。
+系统 MUST 将 `closure_roots` 纳入静态闭包。
 
-#### Scenario: extra_functions 补充闭包
+#### Scenario: closure_roots 补充闭包
 
-- **给定** local macro options 包含 `{extra_functions, [helper/1]}`
+- **给定** local macro options 包含 `{closure_roots, [helper/1]}`
 - **当** 计算闭包时
 - **那么** helper/1 进入闭包并按同一冻结、展开和比对规则处理
 
-#### Scenario: 间接函数引用需要 extra_functions
+#### Scenario: 间接函数引用需要 closure_roots
 
 - **给定** local macro 只通过 `fun helper/1`、动态函数值或 `apply/3` 间接引用 helper
-- **并且** options 未声明 helper/1 为 `extra_functions`
+- **并且** options 未声明 helper/1 为 `closure_roots`
 - **当** 计算静态闭包
 - **那么** 该间接引用不自动形成闭包边
-- **并且** 只有显式加入 `extra_functions` 后 helper/1 才进入冻结闭包
+- **并且** 只有显式加入 `closure_roots` 后 helper/1 才进入冻结闭包
 
-#### Scenario: extra_functions 引用不存在函数失败
+#### Scenario: closure_roots 引用不存在函数失败
 
-- **给定** `{extra_functions, [missing/1]}`
+- **给定** `{closure_roots, [missing/1]}`
 - **当** 注册 local macro 时
-- **那么** 编译以 `invalid_extra_functions` 失败
+- **那么** 编译以 `invalid_closure_roots` 失败
 
-#### Scenario: internal_function 必须解析声明点宏
+### Requirement: 宏调用与普通函数调用严格区分
 
-- **给定** `{internal_function, [helper/1]}`，且模块存在普通 helper/1，但 declaration 前 MacroEnv 没有 helper/1 宏
-- **当** 注册 local macro
-- **那么** 编译以 `undefined_internal_functions` 失败
+与当前 MacroEnv 匹配的直接调用 MUST 始终作为宏调用。系统 MUST NOT 提供
+declaration 级调用排除或 AST 改写 option。宏实现若要普通调用同一函数，MUST 使用
+未注册为宏的 helper，或使用 Erlang 间接调用形式。
 
-#### Scenario: 远程宏作为普通函数
+#### Scenario: helper 普通调用宏函数
 
-- **给定** declaration 前 MacroEnv 包含远程宏 `M:F/A`
-- **并且** `internal_function` 使用 `{M,F,A}`
-- **当** 展开 frozen closure
-- **那么** 远程宏 key 不进入通用展开器的 MacroEnv
-- **并且** AST 中的 `M:F(...)` 保持普通远程函数调用
+- **给定** `M:F/A` 在当前模块的 MacroEnv 中可作为宏调用
+- **并且** 独立 helper `H/A` 未注册为宏，其函数体普通调用 `M:F/A`
+- **当** local macro 调用 `H/A`
+- **那么** 对 `H/A` 的调用不匹配宏
+- **并且** helper 在执行时把 AST term 传给 `M:F/A`
 
-#### Scenario: alias 恢复原始远程函数
+#### Scenario: internal_function 不受支持
 
-- **给定** `use_macro` 已用现有 `alias` 把 `M:F/A` 暴露为 `Alias/A`
-- **并且** local declaration 的 `internal_function` 选择 `Alias/A`
-- **当** 展开 frozen closure 或 retain function 的最终重展开
-- **那么** AST 中 `Alias(Args)` 改写为 `M:F(Args)`
-- **并且** alias key 与原始远程 key 均从有效 MacroEnv 移除
-
-#### Scenario: 共享闭包函数的 internal_function 策略冲突
-
-- **给定** 同一 helper 属于两个 local macro 闭包
-- **并且** 两个 declaration 为该 helper 提供的 internal macro 环境不兼容
-- **当** 校验策略时
-- **那么** 编译以 `conflicting_internal_function_policy` 失败
-
-#### Scenario: internal_function 在构造环境时应用
-
-- **给定** declaration 将声明点可见的 helper/1 宏标记为 internal_function
-- **当** 展开该 declaration 的闭包 function
-- **那么** helper/1 宏 key 不出现在传给通用 function 展开器的 MacroEnv 中
-- **并且** 展开器无需解释 internal_function option
+- **给定** local macro options 包含 `internal_function`
+- **当** 校验 declaration
+- **那么** 该 key 作为 unexpected option 报告并忽略
 
 #### Scenario: local macro 自身不进入自身宏环境
 

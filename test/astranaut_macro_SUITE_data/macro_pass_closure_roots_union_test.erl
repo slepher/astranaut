@@ -1,15 +1,15 @@
 %%%-------------------------------------------------------------------
-%%% extra_functions from multiple macro declarations are unioned.
+%%% closure_roots from multiple macro declarations are unioned.
 %%%-------------------------------------------------------------------
--module(macro_pass_extra_union_test).
+-module(macro_pass_closure_roots_union_test).
 
 -include("quote.hrl").
 -include("macro.hrl").
 
 -export([value_a/0, value_b/0]).
 
--local_macro({[entry_a/1], [{extra_functions, [{helper_a, 1}]}]}).
--local_macro({[entry_b/1], [{extra_functions, [{helper_b, 1}]}]}).
+-local_macro({[entry_a/1], [{closure_roots, [{helper_a, 1}]}]}).
+-local_macro({[entry_b/1], [{closure_roots, [{helper_b, 1}]}]}).
 
 value_a() ->
     entry_a(ok).

@@ -9,8 +9,8 @@
 两者通过同构的 function 展开接口协作：`astranaut_macro_local` 为每个目标
 function 构造最终宏环境，`astranaut_macro` 只按该环境执行与普通 function
 相同的引用匹配和递归展开。local macro 实际引用的识别继续复用
-`astranaut_macro` 的统一宏匹配语义；`internal_function`、声明快照以及目标 FA
-不进入自身宏环境等 local 专属规则由 `astranaut_macro_local` 负责。
+`astranaut_macro` 的统一宏匹配语义；声明快照以及目标 FA 不进入自身宏环境等
+local 专属规则由 `astranaut_macro_local` 负责。
 
 ## 范围
 
