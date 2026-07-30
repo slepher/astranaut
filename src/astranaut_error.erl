@@ -366,14 +366,14 @@ append_formatted_warnings(Warnings, #{formatted_warnings := Warnings0} = Struct)
     Warnings1 = append(Warnings0, Warnings),
     Struct#{formatted_warnings => Warnings1}.
 
--spec append_file_errors([compiler_error()], struct()) -> struct().
+-spec append_file_errors(compiler_error(), struct()) -> struct().
 %% @doc append file_errors to struct.
 append_file_errors(FileErrors, #{file_errors := FileErrors1} = Struct) ->
     FileErrors2 = from_compiler_errors(FileErrors),
     FileErrors3 = merge_file_errors(FileErrors1, FileErrors2),
     Struct#{file_errors => FileErrors3}.
 
--spec append_file_warnings([compiler_error()], struct()) -> struct().
+-spec append_file_warnings(compiler_error(), struct()) -> struct().
 %% @doc append file_warnings to struct.
 append_file_warnings(FileWarnings, #{file_warnings := FileWarnings1} = Struct) ->
     FileWarnings2 = from_compiler_errors(FileWarnings),

@@ -275,23 +275,25 @@ transform 工具箱：
 
 # monad modules
 
-### astranaut\_traverse\_m
+### astranaut\_traverse
 
-&emsp;&emsp;`astranaut_traverse` 的主 monad。
+`astranaut_traverse` 是 `astranaut:map_m/3` 使用的 traversal monad，组合了
+Reader attributes、遍历 State、更新标记以及结构化 errors 和 warnings。
 
-### astranaut\_base\_m
+### astranaut\_return
 
-&emsp;&emsp;带 errors 和 warnings 的 monad，可用于追加错误或警告。
+`astranaut_return` 是 traversal 与 parse-transform helper 使用的结果 monad。
+`to_compiler/1` 可将其转换为 compiler return 格式，`from_compiler/1`
+可将 compiler 结果转换回来。
 
-### astranaut\_return\_m
+### astranaut\_error
 
-&emsp;&emsp;`astranaut_traverse_m:run(MA, Formatter, State)` 的 monad 结果。可以用 `astranaut_return_m:to_compiler/1` 转为 compiler return 格式，也可以用 `astranaut_return_m:from_compiler/1` 从 compiler return 格式转换回来。
+`astranaut_error` 保存 pending、已格式化以及按文件分组的 errors 和 warnings。
 
-### astranaut\_error\_state
+### astranaut\_monad
 
-### astranaut\_walk\_return
-
-&emsp;&emsp;`astranaut_traverse:(map_m|map|reduce|map_with_state|mapfold)(Fun, Forms, Opts)` 中 Fun 的返回类型。
+`astranaut_monad` 提供构造 traversal 实现所需的底层 identity、maybe、either、
+reader、state 和 writer combinator。
 
 # Quote
 
@@ -599,6 +601,7 @@ unexpected option 报告并忽略。
 | `illegal_locked_form_mutation` | attribute 展开尝试替换已冻结的 local macro 闭包 form |
 | `illegal_macro_environment_mutation` | local macro 展开在不允许修改环境的位置生成了宏环境 form |
 | `illegal_local_macro_definition_mutation` | local macro 展开尝试修改已锁定的 local macro 定义 |
+| `local_macro_module_name_conflict` | 生成的 local macro 模块名已被真实模块占用 |
 | `local_macro_module_in_use` | 旧代码仍在使用中，无法安全替换生成的 local macro 模块 |
 
 *Warnings*

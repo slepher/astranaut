@@ -24,22 +24,27 @@
 -spec parse_transform(astranaut:forms(), [compile:option()]) ->
           astranaut:parse_transform_return().
 parse_transform(Forms, Options) ->
-    astranaut_return:to_compiler(
-      do([ return ||
-             Module = astranaut_lib:analyze_forms_module(Forms),
-             File = astranaut_lib:analyze_forms_file(Forms),
-             GlobalMacroOpts0 <-
-                 astranaut_macro_registry:default_options(),
-             {AttributeForms, FunctionEnv} <-
-                 run_attribute_pass(
-                   Module, File, GlobalMacroOpts0, Forms, Options),
-             FunctionForms <-
-                 run_function_macro_pass(AttributeForms, FunctionEnv),
-             format_forms(
-               FunctionForms,
-               maps:get(global_macro_opts, FunctionEnv)),
-             return(FunctionForms)
-         ])).
+    Module = astranaut_lib:analyze_forms_module(Forms),
+    File = astranaut_lib:analyze_forms_file(Forms),
+    astranaut_macro_local:with_local_macro_lifecycle(
+      Module, File,
+      fun() ->
+              do([ return ||
+                     GlobalMacroOpts0 <-
+                         astranaut_macro_registry:default_options(),
+                     {AttributeForms, FunctionEnv} <-
+                         run_attribute_pass(
+                           Module, File, GlobalMacroOpts0,
+                           Forms, Options),
+                     FunctionForms <-
+                         run_function_macro_pass(
+                           AttributeForms, FunctionEnv),
+                     format_forms(
+                       FunctionForms,
+                       maps:get(global_macro_opts, FunctionEnv)),
+                     return(FunctionForms)
+                 ])
+      end).
 
 -spec format_error(term()) -> term().
 format_error({import_macro_failed, Module}) ->
@@ -124,9 +129,16 @@ format_error({conflicting_local_macro_whitelist, FormId, Detail}) ->
 format_error({illegal_locked_form_mutation, Form}) ->
     io_lib:format(
       "local macro expansion modified frozen form: ~p", [Form]);
+format_error({local_macro_module_name_conflict, Module}) ->
+    io_lib:format(
+      "generated local macro module ~p conflicts with an existing module",
+      [Module]);
 format_error(local_macro_module_in_use) ->
     io_lib:format(
       "local macro module is in use and cannot be safely replaced", []);
+format_error(
+  {local_macro_diagnostic, _Formatter, _Error, Message}) ->
+    Message;
 format_error({illegal_macro_environment_mutation, Form}) ->
     io_lib:format(
       "local macro expansion generated illegal macro environment form: ~p",

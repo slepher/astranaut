@@ -380,32 +380,26 @@ used by traversal. Most users should use `astranaut`, `astranaut_traverse`, and
   
 # monad modules
 
-### astranaut\_traverse\_m
+### astranaut\_traverse
 
-&emsp;&emsp; the main monad of astranaut\_traverse.
+`astranaut_traverse` is the traversal monad used by `astranaut:map_m/3`. It
+combines reader attributes, traversal state, update tracking, and structured
+errors and warnings.
 
-### astranaut\_base\_m
+### astranaut\_return
 
-&emsp;&emsp;a monad with errors and warnings.  
-&emsp;&emsp;you could just append errors or warnings to it.
+`astranaut_return` is the result monad used by traversal and parse-transform
+helpers. `to_compiler/1` converts it to compiler return format and
+`from_compiler/1` converts compiler results back.
 
-```erlang
-  astranaut_base_m:then(
-    astranaut_base_m:warning(warning_0),
-    astranaut_base_m:return(ok)).
-```
+### astranaut\_error
 
-### astranaut\_return\_m
+`astranaut_error` stores pending, formatted, and per-file errors and warnings.
 
-&emsp;&emsp;the monad result of astranaut\_traverse\_m:run(MA, Formatter, State).  
-&emsp;&emsp;could be transformed to compiler return format with astranaut\_return\_m:to\_compiler/1.  
-&emsp;&emsp;could transforme compiler return format to astranaut\_return\_m with astranaut\_return\_m:from_compiler/1.
+### astranaut\_monad
 
-### astranaut\_error\_state
-
-### astranaut\_walk\_return
-
-&emsp;&emsp; return type of Fun in astranut\_traverse:(map\_m|map|reduce|map\_with\_state|mapfold|)(Fun, Forms, Opts). 
+`astranaut_monad` provides the lower-level identity, maybe, either, reader,
+state, and writer combinators used to assemble the traversal implementation.
 
 # Quote
 
@@ -916,6 +910,7 @@ or `outer` controls nested expansion at an individual macro call.
 | `illegal_locked_form_mutation` | attribute expansion attempted to replace a frozen local macro closure form |
 | `illegal_macro_environment_mutation` | local macro expansion generated a macro-environment form where environment mutation is not allowed |
 | `illegal_local_macro_definition_mutation` | local macro expansion attempted to change a locked local macro definition |
+| `local_macro_module_name_conflict` | the generated local macro module name is already occupied by a real module |
 | `local_macro_module_in_use` | the generated local macro module cannot be safely replaced while its old code is still in use |
 
 *Warnings*

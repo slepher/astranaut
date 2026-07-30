@@ -47,14 +47,19 @@ test_macro_with_warnings(Config) ->
     ?assertMatch(
        [{2, astranaut_macro, invalid_macro_attribute},
         {3, astranaut_macro, invalid_macro_attribute},
-        {5, Local, noop_function},
-        {12, Local, noop},
-        {18, Local, noop},
-        {20, Local, noop},
+        {5, astranaut_macro,
+         {local_macro_diagnostic, Local, noop_function, _}},
+        {12, astranaut_macro,
+         {local_macro_diagnostic, Local, noop, _}},
+        {18, astranaut_macro,
+         {local_macro_diagnostic, Local, noop, _}},
+        {20, astranaut_macro,
+         {local_macro_diagnostic, Local, noop, _}},
         {25, astranaut_quote,
          {unquote_splicing_pattern_non_empty_tail, [{atom, _, tail}]}}],
        Warnings),
     astranaut_test_lib:assert_formatted_messages(Warnings),
+    ?assertEqual(false, code:is_loaded(Local)),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
     ok.
 
@@ -82,14 +87,18 @@ test_macro_with_error(Config) ->
          {undefined_macro, undefined_macro_2, 0}},
         {9, astranaut_macro,
          {undefined_macro, undefined_macro_3, 0}},
-        {13, Local, {macro_exception, _MFA, [], _StackTrace}},
-        {16, Local, bar},
+        {13, astranaut_macro,
+         {local_macro_diagnostic, Local,
+          {macro_exception, _MFA, [], _StackTrace}, _}},
+        {16, astranaut_macro,
+         {local_macro_diagnostic, Local, bar, _}},
         {27, astranaut_macro,
          {max_macro_expansion_depth_exceeded,
           {macro_example, recursive_macro},
           [{integer, _Pos, 6}]}}],
        Errors),
     astranaut_test_lib:assert_formatted_messages(Errors),
+    ?assertEqual(false, code:is_loaded(Local)),
     ok.
 
 test_macro_export_rejects_local_closure_options(Config) ->
@@ -283,12 +292,21 @@ test_macro_sibling_errors(Config) ->
               {macro_exception,
                #{function := raise_macro}, [], _Exception}}) ->
                  true;
+            ({_Pos, astranaut_macro,
+              {local_macro_diagnostic, _Local,
+               {macro_exception,
+                #{function := raise_macro}, [], _Exception}, _Message}}) ->
+                 true;
             (_) ->
                  false
          end, Errors)),
     ?assert(
        lists:any(
          fun({_Pos, _Formatter, sibling_return_error}) ->
+                 true;
+            ({_Pos, astranaut_macro,
+              {local_macro_diagnostic, _Local,
+               sibling_return_error, _Message}}) ->
                  true;
             (_) ->
                  false

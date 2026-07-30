@@ -245,7 +245,7 @@ loader_return({error, Reason}) ->
 %% @doc Serialize work associated with a generated or reloadable module.
 with_module_lock(Module, Fun)
   when is_atom(Module), is_function(Fun, 0) ->
-    global:trans({?MODULE, Module}, Fun).
+    global:trans({{?MODULE, Module}, self()}, Fun).
 
 -spec reload_binary(module(), binary()) ->
           {ok, {module(), binary()}} | {error, term()}.

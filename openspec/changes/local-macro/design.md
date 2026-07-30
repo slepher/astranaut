@@ -352,9 +352,23 @@ scan 收尾不是“只编译 pending 项”。它按注册表的 declaration �
 
 若某个 FA 已在中间阶段编译，收尾仍会将它纳入最终模块；canonical forms 不因编译阶段或触发者不同而重新展开。最终模块只集中所有已确认结果，不重新解释 declaration environment。
 
-所有累计版本均覆盖加载同一个 `<Module>__local_macro`。编译成功后才换码；加载前清理 old code。`code:soft_purge/1` 返回 `false` 时以 `local_macro_module_in_use` 失败，禁止 `code:purge/1`。调用使用完全限定调用或 `apply/3`，不得跨重载缓存 fun；换码过程以模块级互斥锁串行。
+所有累计版本均覆盖加载同一个 `<Module>__local_macro`。生成模块带有原始模块
+owner attribute；若该名字已被没有匹配 owner 的真实模块占用，以
+`local_macro_module_name_conflict` 失败，禁止覆盖。编译成功后才换码；加载前清理
+old code。`code:soft_purge/1` 返回 `false` 时以 `local_macro_module_in_use`
+失败，禁止 `code:purge/1`。调用使用完全限定调用或 `apply/3`，不得跨重载缓存
+fun；换码过程以模块级互斥锁串行。
 
-模块级互斥范围必须覆盖“读取当前 generation → 计算累计 forms → 编译 → soft purge → load → 提交 State”，避免并行编译相互覆盖。`code:load_binary/3` 成功后，后续完全限定调用进入 current code；旧代码只可由尚在执行它的进程使用。
+模块级互斥范围必须覆盖整个 parse transform 的 local module 生命周期，包括
+“读取当前 generation → 计算累计 forms → 编译 → soft purge → load → 提交
+State → attribute/function expansion → cleanup”，避免并行编译相互覆盖或清理
+另一 generation。`code:load_binary/3` 成功后，后续完全限定调用进入 current
+code；旧代码只可由尚在执行它的进程使用。
+
+parse transform 返回前必须清理 owner 匹配的生成模块。compiler 可能在 transform
+返回后才调用诊断 formatter，因此清理前必须把使用生成模块 formatter 的诊断转为
+由稳定的 `astranaut_macro` formatter 承载的预格式化诊断，同时保留原 formatter
+和原始 reason 供程序化检查。
 
 安全加载的失败不是可忽略的性能问题。若 `soft_purge/1` 返回 false，继续加载可能导致旧代码进程被强制清理或加载失败；工作流必须停止并报告 `local_macro_module_in_use`，把当前 generation 保持为可用状态。
 
