@@ -1,8 +1,0 @@
-ARG ERLANG_VER=28
-FROM erlang:${ERLANG_VER}
-
-WORKDIR /app
-
-# Some Erlang images define an entrypoint. The runner supplies its own command.
-ENTRYPOINT []
-CMD ["bash"]

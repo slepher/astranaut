@@ -671,16 +671,3 @@ astranaut_struct:to_record(StructName, Struct) -> Record.
 astranaut_struct:from_map(StructName, Struct) -> Struct.
 astranaut_struct:update(StructName, Struct) -> Struct.
 ```
-
-# 本地 CI
-
-基于 Docker 的本地 CI 可在多个 Erlang/OTP 版本上验证 `astranaut`。CI
-配置文件位于 `ci_scripts/`。
-
-```powershell
-.\ci_scripts\build.ps1
-.\ci_scripts\run.ps1 -NoView
-```
-
-Bash 命令、suite/case 选择、可选的 xref 与 Dialyzer 检查、checkout
-快照规则及日志查看器说明见 [ci_scripts/README.md](ci_scripts/README.md)。

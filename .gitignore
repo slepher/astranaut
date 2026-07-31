@@ -18,4 +18,3 @@ _build
 rebar3.crashdump
 *~
 doc
-ci_scripts/ci-env.conf

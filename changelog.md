@@ -2,6 +2,13 @@
 
 [中文](changelog.zh.md)
 
+## 0.11.1
+
+### Development tooling
+
+- Replaced the checked-in local Docker CI scripts with project configuration
+  for the host-side `rebar3_docker_ci` plugin.
+
 ## 0.11.0
 
 ### Macro system

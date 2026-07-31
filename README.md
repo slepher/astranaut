@@ -1255,17 +1255,3 @@ astranaut_struct:to_record(StructName, Struct) -> Record. %% convert a struct to
 astranaut_struct:from_map(StructName, Struct) -> Struct. %% build a struct from map, enforce_keys will be checked.
 astranaut_struct:update(StructName, Struct) -> Struct. %% update a struct from it's old version.
 ```
-
-# Local CI
-
-The Docker-based local CI runner verifies `astranaut` across multiple
-Erlang/OTP versions. Its configuration files live in `ci_scripts/`.
-
-```powershell
-.\ci_scripts\build.ps1
-.\ci_scripts\run.ps1 -NoView
-```
-
-See [ci_scripts/README.md](ci_scripts/README.md) for Bash commands,
-suite/case selection, optional xref and Dialyzer checks, checkout snapshots,
-and the log viewer.

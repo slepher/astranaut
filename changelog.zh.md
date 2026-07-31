@@ -2,6 +2,13 @@
 
 [English](changelog.md)
 
+## 0.11.1
+
+### 开发工具
+
+- 删除仓库内的本地 Docker CI 脚本，改用宿主机 `rebar3_docker_ci` 插件及
+  项目配置。
+
 ## 0.11.0
 
 ### 宏系统
