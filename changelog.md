@@ -2,6 +2,14 @@
 
 [中文](changelog.zh.md)
 
+## 0.11.2
+
+### Macro system
+
+- Give each parse-transform invocation a uniquely named local macro module,
+  removing fixed-name lifecycle locking and allowing concurrent compilation of
+  the same source module without sharing generated macro code.
+
 ## 0.11.1
 
 ### Development tooling
