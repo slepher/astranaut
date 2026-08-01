@@ -84,9 +84,7 @@ all() ->
      test_macro_pass_export_helper_unlocked,
      test_macro_pass_local_environment_mutation_errors,
      test_macro_pass_locked_snapshot_mutation_error,
-     test_local_macro_module_cleanup,
-     test_local_macro_module_name_conflict,
-     test_module_lock_serializes_processes].
+     test_local_macro_compile_does_not_wait_for_source_module_lock].
 
 test_macro_pass_generated_import(_Config) ->
     ?assertEqual({pass_generated, ok},
@@ -388,46 +386,8 @@ test_macro_pass_locked_snapshot_mutation_error(Config) ->
       end),
     ok.
 
-test_local_macro_module_cleanup(_Config) ->
-    Module = macro_local_cleanup_test,
-    LocalModule = astranaut_macro_local:module_name(Module),
-    Output = astranaut_macro:parse_transform(
-               local_macro_lifecycle_forms(Module, expanded), []),
-    ?assert(is_list(Output)),
-    ?assertEqual(false, code:is_loaded(LocalModule)),
-    ?assertEqual(non_existing, code:which(LocalModule)),
-    ok.
-
-test_local_macro_module_name_conflict(_Config) ->
-    Module = macro_local_name_conflict_test,
-    LocalModule = astranaut_macro_local:module_name(Module),
-    {just, {LocalModule, _Binary}} =
-        astranaut_return:run(
-          astranaut_lib:reload_forms(
-            real_module_forms(LocalModule), [without_warnings])),
-    try
-        Return = astranaut_macro:parse_transform(
-                   local_macro_lifecycle_forms(Module, expanded), []),
-        {error, FileErrors, _Warnings} = Return,
-        Errors = [Error || {_File, Diagnostics} <- FileErrors,
-                           {_Pos, _Formatter, Error} <- Diagnostics],
-        ?assert(
-           lists:member(
-             {local_macro_module_name_conflict, LocalModule},
-             Errors)),
-        astranaut_test_lib:assert_formatted_messages(
-          [{0, astranaut_macro,
-            {local_macro_module_name_conflict, LocalModule}}]),
-        ?assertEqual(real, LocalModule:value())
-    after
-        code:purge(LocalModule),
-        code:delete(LocalModule),
-        code:purge(LocalModule)
-    end,
-    ok.
-
-test_module_lock_serializes_processes(_Config) ->
-    Module = macro_local_lock_test,
+test_local_macro_compile_does_not_wait_for_source_module_lock(_Config) ->
+    Module = macro_local_unique_compile_test,
     Parent = self(),
     Holder =
         spawn(
@@ -435,32 +395,29 @@ test_module_lock_serializes_processes(_Config) ->
                   astranaut_lib:with_module_lock(
                     Module,
                     fun() ->
-                            Parent ! lock_held,
+                            Parent ! source_module_lock_held,
                             receive release -> ok end
                     end)
           end),
-    receive lock_held -> ok end,
-    Waiter =
+    receive source_module_lock_held -> ok end,
+    Worker =
         spawn(
           fun() ->
-                  Parent ! waiter_ready,
-                  astranaut_lib:with_module_lock(
-                    Module,
-                    fun() -> Parent ! waiter_entered end)
+                  Parent !
+                      {compile_return,
+                       astranaut_macro:parse_transform(
+                         local_macro_lifecycle_forms(Module, expanded), [])}
           end),
-    receive waiter_ready -> ok end,
     try
-        receive waiter_entered -> error(module_lock_did_not_serialize)
-        after 50 -> ok
-        end,
-        Holder ! release,
-        receive waiter_entered -> ok
-        after 1000 -> error(second_lock_timeout)
+        receive
+            {compile_return, Return} -> ?assert(is_list(Return))
+        after 5000 ->
+            error(local_macro_compile_waited_for_source_module_lock)
         end
     after
         Holder ! release,
         exit(Holder, kill),
-        exit(Waiter, kill)
+        exit(Worker, kill)
     end,
     ok.
 
@@ -490,9 +447,3 @@ local_macro_lifecycle_forms(Module, Value) ->
      {function, 4, value, 0,
       [{clause, 4, [], [],
         [{call, 4, {atom, 4, macro_value}, []}]}]}].
-
-real_module_forms(Module) ->
-    [{attribute, 1, module, Module},
-     {attribute, 1, export, [{value, 0}]},
-     {function, 2, value, 0,
-      [{clause, 2, [], [], [{atom, 2, real}]}]}].

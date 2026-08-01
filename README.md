@@ -637,6 +637,10 @@ of that declaration remain ordinary Erlang calls. The declaration is only a
 shared registration input: after the scan, each `Function/Arity` has its own
 macro entry and no persistent group identity is retained.
 
+Each parse-transform invocation compiles its local macros into a uniquely named
+temporary module. Concurrent compilations of the same source module therefore
+do not share local macro code or require source-module locking.
+
 ```erlang
 -local_macro([MacroA/A, MacroB/B]).
 -local_macro({Macro/A, local_macro_opts()}).
@@ -910,8 +914,6 @@ or `outer` controls nested expansion at an individual macro call.
 | `illegal_locked_form_mutation` | attribute expansion attempted to replace a frozen local macro closure form |
 | `illegal_macro_environment_mutation` | local macro expansion generated a macro-environment form where environment mutation is not allowed |
 | `illegal_local_macro_definition_mutation` | local macro expansion attempted to change a locked local macro definition |
-| `local_macro_module_name_conflict` | the generated local macro module name is already occupied by a real module |
-| `local_macro_module_in_use` | the generated local macro module cannot be safely replaced while its old code is still in use |
 
 *Warnings*
 

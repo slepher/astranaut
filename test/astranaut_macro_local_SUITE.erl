@@ -6,7 +6,8 @@
 -compile(export_all).
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> [register_freezes_static_closure,
+all() -> [module_name_is_unique_per_allocation,
+          register_freezes_static_closure,
           duplicate_declaration_fails_atomically,
           cache_rejects_conflicting_environments,
           cache_rejects_conflicting_whitelists,
@@ -40,9 +41,17 @@ all() -> [register_freezes_static_closure,
           compiler_reuses_canonical_forms,
           independent_macros_share_one_boundary,
           attribute_between_independent_macros_shares_one_boundary,
-          safe_load_replaces_current_generation,
-          safe_load_refuses_module_with_old_code_in_use,
           non_frozen_retain_root_has_no_effect].
+
+module_name_is_unique_per_allocation(_Config) ->
+    Module = local_macro_unique_name_test,
+    First = astranaut_macro_local:module_name(Module),
+    Second = astranaut_macro_local:module_name(Module),
+    ?assertNotEqual(First, Second),
+    Prefix = atom_to_list(Module) ++ "__local_macro__",
+    ?assert(lists:prefix(Prefix, atom_to_list(First))),
+    ?assert(lists:prefix(Prefix, atom_to_list(Second))),
+    ok.
 
 register_freezes_static_closure(_Config) ->
     [Foo, Helper, Spec] = forms(),
@@ -585,9 +594,10 @@ independent_declaration_does_not_compile(_Config) ->
 
 dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
     Module = local_macro_dependency_preexpand_test,
+    LocalModule = astranaut_macro_local:module_name(Module),
     Source = [{attribute, 1, module, Module}, macro_a_form(), b_form_calls_a()],
     AMap = #{{a, 0} => #{macro_source => local_macro,
-                         module => astranaut_macro_local:module_name(Module),
+                         module => LocalModule,
                          macro_module => Module,
                          macro => a, function => a,
                          arity => 0, call_arity => 0,
@@ -596,7 +606,7 @@ dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
                          file => [], local_module => Module}},
     {ok, S0} = astranaut_macro_local:register(
                  [{a, 0}], #{}, Source, macro_environment(#{}),
-                 astranaut_macro_local:new()),
+                 astranaut_macro_local:new(LocalModule)),
     Context0 = #{source_view => Source, compile_opts => []},
     {just, S1} = astranaut_return:run(
                    astranaut_macro_local:prepare_declaration(
@@ -635,26 +645,6 @@ compiler_reuses_canonical_forms(_Config) ->
                    astranaut_macro_local:execute_plan(
                      Plan, LaterTriggerContext, S2)),
     ?assertEqual(Generation, maps:get(generation, S3)),
-    ok.
-
-safe_load_replaces_current_generation(_Config) ->
-    Module = astranaut_macro_local_safe_load_test,
-    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, load_forms(Module, first), [without_warnings])),
-    ?assertEqual(first, Module:value()),
-    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, load_forms(Module, second), [without_warnings])),
-    ?assertEqual(second, Module:value()),
-    ok.
-
-safe_load_refuses_module_with_old_code_in_use(_Config) ->
-    Module = astranaut_macro_local_busy_load_test,
-    {just, {Module, _}} = astranaut_return:run(astranaut_macro_local:safe_load(Module, busy_forms(Module, first), [without_warnings])),
-    Pid = spawn(Module, hold, []),
-    timer:sleep(10),
-    {ok, Module, Binary} = compile:forms(busy_forms(Module, second), [binary]),
-    {module, Module} = code:load_binary(Module, [], Binary),
-    Error = astranaut_return:run_error(astranaut_macro_local:safe_load(Module, busy_forms(Module, third), [without_warnings])),
-    ?assertEqual([local_macro_module_in_use], astranaut_error:errors(Error)),
-    Pid ! stop,
     ok.
 
 non_frozen_retain_root_has_no_effect(_Config) ->
@@ -815,14 +805,3 @@ c_form_calls_a() -> {function, 1, c, 0, [{clause, 1, [], [], [{call, 1, {atom, 1
 c_form_calls_b() -> {function, 1, c, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, b}, []}]}]}.
 a_calls_b() -> {function, 1, a, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, b}, []}]}]}.
 unused_form() -> {function, 1, unused, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
-
-load_forms(Module, Value) ->
-    [{attribute, 1, module, Module},
-     {attribute, 1, export, [{value, 0}]},
-     {function, 1, value, 0, [{clause, 1, [], [], [{atom, 1, Value}]}]}].
-
-busy_forms(Module, Value) ->
-    [{attribute, 1, module, Module},
-     {attribute, 1, export, [{hold, 0}, {value, 0}]},
-     {function, 1, hold, 0, [{clause, 1, [], [], [{'receive', 1, [{clause, 1, [{atom, 1, stop}], [], [{atom, 1, ok}]}]}]}]},
-     {function, 1, value, 0, [{clause, 1, [], [], [{atom, 1, Value}]}]}].

@@ -11,7 +11,7 @@
 
 -include("do.hrl").
 
--export([run/5, map_forms_splice/3]).
+-export([run/5, run/6, map_forms_splice/3]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type scanner_state() ::
@@ -35,14 +35,21 @@
 -spec run(module(), file:filename(), map(), [term()], [compile:option()]) ->
           astranaut_return:struct({[term()], scanner_state()}).
 run(Module, File, GlobalMacroOpts, Forms, CompileOpts) ->
+    run(Module, astranaut_macro_local:module_name(Module), File,
+        GlobalMacroOpts, Forms, CompileOpts).
+
+-spec run(module(), module(), file:filename(), map(), [term()],
+          [compile:option()]) ->
+          astranaut_return:struct({[term()], scanner_state()}).
+run(Module, LocalMacroModule, File, GlobalMacroOpts, Forms, CompileOpts) ->
     InitState =
         #{module => Module,
           file => File,
           compile_opts => CompileOpts,
           registry => astranaut_macro_registry:new(
-                        Module, File, GlobalMacroOpts),
+                        Module, LocalMacroModule, File, GlobalMacroOpts),
           passed_forms => [],
-          local_macro_state => astranaut_macro_local:new(),
+          local_macro_state => astranaut_macro_local:new(LocalMacroModule),
           local_declarations => #{}},
     astranaut_traverse:run(
       map_forms_splice(

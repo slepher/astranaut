@@ -386,6 +386,9 @@ expander。
 的宏环境；这些成员之间的调用保持为普通 Erlang 调用。该 declaration 只是一次共享
 注册输入：扫描完成后每个 `Function/Arity` 都是独立宏条目，不再保留持久的分组身份。
 
+每次 parse transform 调用都会把本地宏编译到一个名字唯一的临时模块。同一源码模块
+的并发编译不会共享本地宏代码，也不需要按源码模块加锁。
+
 ```erlang
 -local_macro([MacroA/A, MacroB/B]).
 -local_macro({Macro/A, local_macro_opts()}).
@@ -601,8 +604,6 @@ unexpected option 报告并忽略。
 | `illegal_locked_form_mutation` | attribute 展开尝试替换已冻结的 local macro 闭包 form |
 | `illegal_macro_environment_mutation` | local macro 展开在不允许修改环境的位置生成了宏环境 form |
 | `illegal_local_macro_definition_mutation` | local macro 展开尝试修改已锁定的 local macro 定义 |
-| `local_macro_module_name_conflict` | 生成的 local macro 模块名已被真实模块占用 |
-| `local_macro_module_in_use` | 旧代码仍在使用中，无法安全替换生成的 local macro 模块 |
 
 *Warnings*
 

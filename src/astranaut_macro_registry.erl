@@ -11,7 +11,7 @@
 
 -include("do.hrl").
 
--export([new/3,
+-export([new/3, new/4,
          default_options/0,
          apply_directive/2,
          validate_local_macro_attribute/2,
@@ -53,7 +53,13 @@
 
 -spec new(module(), file:filename(), map()) -> state().
 new(Module, File, GlobalMacroOpts) ->
+    new(Module, astranaut_macro_local:module_name(Module),
+        File, GlobalMacroOpts).
+
+-spec new(module(), module(), file:filename(), map()) -> state().
+new(Module, LocalMacroModule, File, GlobalMacroOpts) ->
     #{module => Module,
+      local_macro_module => LocalMacroModule,
       file => File,
       global_macro_opts => GlobalMacroOpts,
       module_macro_maps => #{},
@@ -151,13 +157,16 @@ validate_local_macro_attribute(ClauseMap, Attr) ->
 add_local_macro(
   FAs, Options, ClauseMap,
   #{module := Module,
+    local_macro_module := LocalMacroModule,
     file := File,
     global_macro_opts := GlobalOpts,
     effective_macro_map := EffectiveMap} = State) ->
     Ctx = #{module => Module,
+            local_macro_module => LocalMacroModule,
             file => File,
             global_macro_opts =>
-                local_macro_global_opts(Module, ClauseMap, GlobalOpts)},
+                local_macro_global_opts(
+                  LocalMacroModule, ClauseMap, GlobalOpts)},
     New = build_local_macro_map(
             Ctx,
             macro_options_by_fa(
@@ -363,12 +372,13 @@ validate_closure_roots_defined(Options, ClauseMap) ->
 build_local_macro_map(
   #{file := File,
     module := Module,
+    local_macro_module := LocalMacroModule,
     global_macro_opts := GlobalMacroOpts}, ModuleMacros) ->
     LocalModuleMacros =
         maps:map(
           fun({Function, Arity}, MacroOptions) ->
                   local_macro_options(
-                    Module, GlobalMacroOpts,
+                    Module, LocalMacroModule, GlobalMacroOpts,
                     Function, Arity, MacroOptions)
           end, ModuleMacros),
     update_module_macros(File, Module, LocalModuleMacros).
@@ -378,19 +388,19 @@ macro_options_by_fa(FAs, Options) ->
       fun(FA, Acc) -> maps:put(FA, Options, Acc) end,
       #{}, FAs).
 
-local_macro_global_opts(Module, ClauseMap, GlobalMacroOpts) ->
+local_macro_global_opts(LocalMacroModule, ClauseMap, GlobalMacroOpts) ->
     case maps:is_key({format_error, 1}, ClauseMap) of
         true ->
             GlobalMacroOpts#{formatter =>
-                                 astranaut_macro_local:module_name(Module)};
+                                 LocalMacroModule};
         false ->
             GlobalMacroOpts#{formatter => astranaut_macro}
     end.
 
 local_macro_options(
-  Module, GlobalMacroOpts, Function, Arity, MacroOptions) ->
+  Module, LocalMacroModule, GlobalMacroOpts, Function, Arity, MacroOptions) ->
     MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
-    MacroOptions1#{module => astranaut_macro_local:module_name(Module),
+    MacroOptions1#{module => LocalMacroModule,
                    macro_module => Module,
                    macro => Function,
                    function => Function,

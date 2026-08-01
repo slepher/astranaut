@@ -136,7 +136,7 @@ FA 注册表同时保存不可变声明快照和逐 FA 生命周期。多个 FA 
 - `local_macros` 的每个条目直接保存不可变 context、闭包与 callable 状态，不保留 `group_id` 或第二份声明表。
 - 同一次 declaration 写入相同的 `order`；它只提供稳定扫描和累计编译顺序，不参与最终宏环境裁剪，也不得由 map 遍历顺序推断。
 - `frozen_forms` 永远保存原始源码 form；任何环境下的展开都从该原始 form 开始。
-- `canonical_expanded_forms` 是所有环境比对通过后的唯一编译候选；`compiled_forms` 是当前 `<Module>__local_macro` 已提交 generation 的完整累计源码。
+- `canonical_expanded_forms` 是所有环境比对通过后的唯一编译候选；`compiled_forms` 是当前编译调用的唯一 local macro 模块已提交 generation 的完整累计源码。
 - `local_macro_expanded_ids` 只记录已作为 local macro closure 完成 canonical 展开验证的 form ID；它与 `frozen_forms`、`retained_form_ids` 是不同集合。
 
 ## 注册规则
@@ -323,7 +323,7 @@ MacroEnvironment、展开触发位置、attribute 值或 compile options 再编�
 
 每一代模块的 forms 由下列部分组成：
 
-- module attribute，模块名为 `<Module>__local_macro`；
+- module attribute，模块名为 `<Module>__local_macro__<Unique>`，其中 suffix 在每次 parse transform 入口分配且只供该次编译使用；
 - 当前累计闭包中已经确认的 canonical function/spec forms；
 - local macro 所需的 export forms；
 - 编译所需的非函数模块 forms，但不复制原模块的普通 export 声明。
@@ -352,25 +352,15 @@ scan 收尾不是“只编译 pending 项”。它按注册表的 declaration �
 
 若某个 FA 已在中间阶段编译，收尾仍会将它纳入最终模块；canonical forms 不因编译阶段或触发者不同而重新展开。最终模块只集中所有已确认结果，不重新解释 declaration environment。
 
-所有累计版本均覆盖加载同一个 `<Module>__local_macro`。生成模块带有原始模块
-owner attribute；若该名字已被没有匹配 owner 的真实模块占用，以
-`local_macro_module_name_conflict` 失败，禁止覆盖。编译成功后才换码；加载前清理
-old code。`code:soft_purge/1` 返回 `false` 时以 `local_macro_module_in_use`
-失败，禁止 `code:purge/1`。调用使用完全限定调用或 `apply/3`，不得跨重载缓存
-fun；换码过程以模块级互斥锁串行。
+一次 parse transform 的所有累计版本覆盖加载该调用唯一的
+`<Module>__local_macro__<Unique>`。模块名在入口分配后显式传给 scanner、registry
+和 local macro state；构造 macro descriptor、选择本地 `format_error/1` formatter
+以及生成 module attribute 时都使用同一名字。
 
-模块级互斥范围必须覆盖整个 parse transform 的 local module 生命周期，包括
-“读取当前 generation → 计算累计 forms → 编译 → soft purge → load → 提交
-State → attribute/function expansion → cleanup”，避免并行编译相互覆盖或清理
-另一 generation。`code:load_binary/3` 成功后，后续完全限定调用进入 current
-code；旧代码只可由尚在执行它的进程使用。
-
-parse transform 返回前必须清理 owner 匹配的生成模块。compiler 可能在 transform
-返回后才调用诊断 formatter，因此清理前必须把使用生成模块 formatter 的诊断转为
-由稳定的 `astranaut_macro` formatter 承载的预格式化诊断，同时保留原 formatter
-和原始 reason 供程序化检查。
-
-安全加载的失败不是可忽略的性能问题。若 `soft_purge/1` 返回 false，继续加载可能导致旧代码进程被强制清理或加载失败；工作流必须停止并报告 `local_macro_module_in_use`，把当前 generation 保持为可用状态。
+不同 parse transform 调用从不共享生成模块，因此不需要按源码模块加锁、标记
+owner、检查固定名字占用或在返回前清理模块。同一次调用内的 generation 按扫描流程
+同步产生；调用使用完全限定调用或 `apply/3`，不得跨 generation 缓存 fun。编译 VM
+是一次性的，生成 module atom 与已加载模块随 VM 退出释放，不承担跨编译生命周期。
 
 ## Retain 与最终跳过集合
 
@@ -421,7 +411,6 @@ Step 2 function 使用完整 FinalLocalEnv。若所得 final fingerprint 与最�
 - `ineffective_local_macro_retain`（warning）：显式 retain FA 不属于任何冻结闭包。
 - `conflicting_local_macro_closure_environment`：同一原始 form 在不同环境下的展开结果不同，或 retain form 的最终环境比对不一致。
 - `illegal_locked_form_mutation`：属性 splice 改写 frozen 原始 form。
-- `local_macro_module_in_use`：安全换码时 old code 仍被引用。
 
 ## 建议接口
 

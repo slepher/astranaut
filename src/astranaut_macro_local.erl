@@ -9,11 +9,7 @@
 -module(astranaut_macro_local).
 
 -include("do.hrl").
--include("stacktrace.hrl").
-
--define(LOCAL_MACRO_OWNER_ATTR, astranaut_local_macro_owner).
-
--export([new/0, register/5, prepare_declaration/3,
+-export([new/0, new/1, register/5, prepare_declaration/3,
          need_callable/3,
          compile_plan/2,
          cache_expanded/5, commit_compiled/3, finalize/2,
@@ -24,8 +20,7 @@
          source_view/2, env_fingerprint/3,
          reject_locked_mutation/2, safe_load/3, finalize_plan/1,
          module_name/1,
-         form_id/1, materialize_forms/2, execute_plan/3,
-         with_generation_lock/2, with_local_macro_lifecycle/3]).
+         form_id/1, materialize_forms/2, execute_plan/3]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
@@ -59,7 +54,12 @@
 
 -spec new() -> state().
 new() ->
+    new(module_name(astranaut_local_macro_test)).
+
+-spec new(module()) -> state().
+new(LocalMacroModule) ->
     #{local_macros => #{},
+      local_macro_module => LocalMacroModule,
       frozen_forms => #{},
       expansion_records => #{},
       canonical_expanded_forms => #{},
@@ -530,109 +530,24 @@ reject_locked_mutation(Forms, State) ->
     end.
 
 %% Generic macro expansion is performed by astranaut_macro before this
-%% boundary.  This module owns selection and assembly of the cumulative local
-%% macro module, followed by its safe replacement. The caller holds
-%% with_generation_lock/2 across expansion, this load, and the state commit.
--spec load_local_macro_forms(ordsets:ordset(fa()), ordsets:ordset(fa()),
+%% boundary. This module owns selection and assembly of the cumulative local
+%% macro module, followed by its sequential replacement within one transform.
+-spec load_local_macro_forms(module(), ordsets:ordset(fa()),
+                             ordsets:ordset(fa()),
                              #{form_id() => term()}, [term()],
                              [compile:option()]) -> astranaut_return:struct(term()).
-load_local_macro_forms([], _LocalMacroRelatedFunctions, _CompiledForms,
+load_local_macro_forms(_LocalModule, [], _LocalMacroRelatedFunctions,
+                       _CompiledForms,
                        _SourceForms, _CompileOpts) ->
     astranaut_return:return(ok);
-load_local_macro_forms(LocalMacroFunctions, LocalMacroRelatedFunctions,
+load_local_macro_forms(LocalModule, LocalMacroFunctions,
+                       LocalMacroRelatedFunctions,
                        CompiledForms, SourceForms, CompileOpts) ->
     MaterializedForms = materialize_forms(SourceForms, CompiledForms),
-    Module = astranaut_lib:analyze_forms_module(MaterializedForms),
-    case ensure_local_macro_module_available(Module) of
-        ok ->
-            Forms = select_local_macro_forms(
-                      LocalMacroRelatedFunctions, MaterializedForms),
-            compile_local_macro_forms(
-              LocalMacroFunctions, Forms, CompileOpts);
-        {error, Error} ->
-            local_macro_module_error(
-              Module, MaterializedForms, Error)
-    end.
-
--spec with_generation_lock(module(), fun(() -> Result)) -> Result.
-with_generation_lock(Module, Fun) ->
-    astranaut_lib:with_module_lock(Module, Fun).
-
--spec with_local_macro_lifecycle(
-        module(), astranaut_error:compile_file(),
-        fun(() -> astranaut_return:struct(astranaut:forms()))) ->
-          astranaut:parse_transform_return().
-with_local_macro_lifecycle(Module, File, Fun) ->
-    with_generation_lock(
-      Module,
-      fun() ->
-              try Fun() of
-                  Return ->
-                      finish_local_macro_lifecycle(
-                        Module, File,
-                        astranaut_return:to_compiler(Return))
-              catch
-                  Class:Reason?CAPTURE_STACKTRACE ->
-                      _ = cleanup_local_macro_module(Module),
-                      erlang:raise(Class, Reason, ?GET_STACKTRACE)
-              end
-      end).
-
-finish_local_macro_lifecycle(Module, File, Return) ->
-    LocalModule = module_name(Module),
-    FrozenReturn = freeze_local_macro_diagnostics(LocalModule, Return),
-    add_cleanup_error(
-      File,
-      cleanup_local_macro_module(Module, LocalModule),
-      FrozenReturn).
-
-cleanup_local_macro_module(Module) ->
-    cleanup_local_macro_module(Module, module_name(Module)).
-
-cleanup_local_macro_module(Module, LocalModule) ->
-    case local_macro_module_owner(LocalModule) of
-        {ok, Module} -> unload_local_macro_module(LocalModule);
-        _ -> ok
-    end.
-
-freeze_local_macro_diagnostics(LocalModule, Return) ->
-    map_compiler_diagnostics(
-      fun(Diagnostic) ->
-              freeze_local_macro_diagnostic(LocalModule, Diagnostic)
-      end, Return).
-
-freeze_local_macro_diagnostic(
-  LocalModule, {Pos, LocalModule, Error}) ->
-    Message = LocalModule:format_error(Error),
-    {Pos, astranaut_macro,
-     {local_macro_diagnostic, LocalModule, Error, Message}};
-freeze_local_macro_diagnostic(_LocalModule, Diagnostic) ->
-    Diagnostic.
-
-map_compiler_diagnostics(Fun, {warning, Forms, Warnings}) ->
-    {warning, Forms, map_file_diagnostics(Fun, Warnings)};
-map_compiler_diagnostics(Fun, {error, Errors, Warnings}) ->
-    {error,
-     map_file_diagnostics(Fun, Errors),
-     map_file_diagnostics(Fun, Warnings)};
-map_compiler_diagnostics(_Fun, Forms) ->
-    Forms.
-
-map_file_diagnostics(Fun, FileDiagnostics) ->
-    [{File, lists:map(Fun, Diagnostics)}
-     || {File, Diagnostics} <- FileDiagnostics].
-
-add_cleanup_error(_File, ok, Return) ->
-    Return;
-add_cleanup_error(File, {error, Error}, Return) ->
-    astranaut_return:to_compiler(
-      astranaut_return:with_error(
-        fun(ErrorStruct) ->
-                astranaut_error:append_file_errors(
-                  [{File, [{0, astranaut_macro, Error}]}],
-                  ErrorStruct)
-        end,
-        astranaut_return:from_compiler(Return))).
+    Forms = select_local_macro_forms(
+              LocalModule, LocalMacroRelatedFunctions, MaterializedForms),
+    compile_local_macro_forms(
+      LocalMacroFunctions, Forms, CompileOpts).
 
 %% Execute pure plan data in two explicit stages. ExpansionValidator prepares
 %% canonical forms first; GenerationCompiler then consumes only those forms.
@@ -667,11 +582,7 @@ compile_boundary(#{members := Members, requests := Requests} = Boundary,
             astranaut_return:return(State);
         false ->
             SourceView = boundary_source_view(Requests, WorkflowContext),
-            Module = astranaut_lib:analyze_forms_module(SourceView),
-            with_generation_lock(
-              Module,
-              fun() ->
-              RequiredIds = lists:foldl(
+            RequiredIds = lists:foldl(
                               fun(Request, Acc) ->
                                       ordsets:union(
                                         maps:get(closure_ids, Request), Acc)
@@ -697,6 +608,7 @@ compile_boundary(#{members := Members, requests := Requests} = Boundary,
                                   Related0, HasFormatter),
                       do([ return ||
                              load_local_macro_forms(
+                               maps:get(local_macro_module, State),
                                LocalFunctions, Related, CompiledForms,
                                SourceView,
                                maps:get(compile_opts, WorkflowContext)),
@@ -713,7 +625,6 @@ compile_boundary(#{members := Members, requests := Requests} = Boundary,
                       astranaut_return:error_fail(
                         {missing_canonical_local_macro_form, Missing})
               end
-              end)
     end.
 
 -spec generation_boundary_key(compilation_boundary()) -> [fa()].
@@ -909,15 +820,21 @@ materialize_forms(Forms, CompiledForms) ->
 
 -spec module_name(module()) -> module().
 module_name(Module) ->
-    list_to_atom(atom_to_list(Module) ++ "__local_macro").
+    Candidate = list_to_atom(
+                  atom_to_list(Module) ++ "__local_macro__" ++
+                  integer_to_list(erlang:unique_integer([positive]))),
+    case {code:is_loaded(Candidate), code:which(Candidate)} of
+        {false, non_existing} -> Candidate;
+        _ -> module_name(Module)
+    end.
 
--spec select_local_macro_forms(ordsets:ordset(fa()), [term()]) -> [term()].
-select_local_macro_forms(LocalMacroRelatedFunctions, Forms) ->
+-spec select_local_macro_forms(module(), ordsets:ordset(fa()), [term()]) ->
+          [term()].
+select_local_macro_forms(LocalModule, LocalMacroRelatedFunctions, Forms) ->
     lists:reverse(
       lists:foldl(
-        fun({attribute, Pos, module, Module}, Acc) ->
-                [{attribute, Pos, ?LOCAL_MACRO_OWNER_ATTR, Module},
-                 {attribute, Pos, module, module_name(Module)} | Acc];
+        fun({attribute, Pos, module, _Module}, Acc) ->
+                [{attribute, Pos, module, LocalModule} | Acc];
            ({function, _Pos, Name, Arity, _Clauses} = Node, Acc) ->
                 append_if(ordsets:is_element({Name, Arity}, LocalMacroRelatedFunctions), Node, Acc);
            ({attribute, _Pos, spec, {{Name, Arity}, _Body}} = Node, Acc) ->
@@ -949,10 +866,8 @@ local_macro_exports(LocalMacroFunctions) ->
 append_if(true, Form, Forms) -> [Form | Forms];
 append_if(false, _Form, Forms) -> Forms.
 
-%% Compile then safely replace the single local-macro module generation.  This
-%% has no force-purge fallback: callers retain their previous generation when
-%% old code is in use.
--spec safe_load(module(), [term()], [compile:option()]) -> astranaut_return:struct({module(), binary()}).
+-spec safe_load(module(), [term()], [compile:option()]) ->
+          astranaut_return:struct({module(), binary()}).
 safe_load(Module, Forms, CompileOpts) ->
     astranaut_lib:with_module_lock(
       Module, fun() -> safe_load_locked(Module, Forms, CompileOpts) end).
@@ -964,74 +879,10 @@ safe_load_locked(Module, Forms, CompileOpts) ->
               case astranaut_lib:reload_binary(Module, Binary) of
                   {ok, Result} ->
                       astranaut_return:return(Result);
-                  {error, {module_in_use, Module}} ->
-                      astranaut_return:error_fail(
-                        local_macro_module_in_use);
                   {error, Reason} ->
                       astranaut_return:error_fail(Reason)
               end
       end).
-
-ensure_local_macro_module_available(Module) ->
-    LocalModule = module_name(Module),
-    case code:is_loaded(LocalModule) of
-        false ->
-            case code:which(LocalModule) of
-                non_existing -> ok;
-                _ -> {error, {local_macro_module_name_conflict, LocalModule}}
-            end;
-        {file, _} ->
-            case local_macro_module_owner(LocalModule) of
-                {ok, Module} -> ok;
-                _ -> {error, {local_macro_module_name_conflict, LocalModule}}
-            end
-    end.
-
-local_macro_module_owner(Module) ->
-    case code:is_loaded(Module) of
-        false ->
-            not_loaded;
-        {file, _} ->
-            try proplists:get_value(
-                  ?LOCAL_MACRO_OWNER_ATTR,
-                  Module:module_info(attributes)) of
-                [Owner] when is_atom(Owner) -> {ok, Owner};
-                _ -> unknown
-            catch
-                error:undef -> not_loaded
-            end
-    end.
-
-unload_local_macro_module(Module) ->
-    case code:soft_purge(Module) of
-        false ->
-            {error, local_macro_module_in_use};
-        true ->
-            unload_current_local_macro_module(Module)
-    end.
-
-unload_current_local_macro_module(Module) ->
-    case code:delete(Module) of
-        true ->
-            case code:soft_purge(Module) of
-                true -> ok;
-                false -> {error, local_macro_module_in_use}
-            end;
-        false ->
-            case code:is_loaded(Module) of
-                false -> ok;
-                {file, _} -> {error, local_macro_module_in_use}
-            end
-    end.
-
-local_macro_module_error(Module, Forms, Error) ->
-    File =
-        case astranaut_lib:analyze_forms_file(Forms) of
-            undefined -> atom_to_list(Module) ++ ".erl";
-            SourceFile -> SourceFile
-        end,
-    astranaut_return:from_compiler(
-      {error, [{File, [{0, astranaut_macro, Error}]}], []}).
 
 duplicate_or_existing(FAs, Macros) ->
     case [FA || FA <- FAs, maps:is_key(FA, Macros)] ++ duplicate_fas(FAs) of
