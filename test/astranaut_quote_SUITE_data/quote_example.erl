@@ -9,6 +9,7 @@
 -module(quote_example).
 
 -include("quote.hrl").
+-include("otp_vsn.hrl").
 
 %% API
 -compile(export_all).
@@ -152,6 +153,21 @@ remote_type(Name, Module, Type) ->
 
 record(Name) ->
     quote_code("-record('_A@Name', {id, hello, world}).").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+native_records() ->
+    [quote(#mod:rec{x = 1}),
+     quote(R#mod:rec{x = 2}),
+     quote(#_{x = X}),
+     quote(R#_{x = 3}),
+     quote(R#mod:rec.x),
+     quote(R#_.x)].
+
+native_record_attributes() ->
+    [quote_code("-record #rec{x}."),
+     quote_code("-export_record([rec])."),
+     quote_code("-import_record(mod, [rec]).")].
+-endif.
 
 spec(Name, Value1, Value2) ->
     quote_code("-spec '_A@Name'('_A@Value1'()) -> '_A@Value2'().").

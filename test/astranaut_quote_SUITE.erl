@@ -13,6 +13,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include("otp_vsn.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -120,7 +121,8 @@ all() ->
      test_dynamic_binding, test_dynamic_binding_pattern,
      test_unquote_splicing_1, test_unquote_splicing_2, test_unquote_splicing_map,
      test_type, test_type_atom, test_type_map, test_type_tuple, test_exp_type, test_remote_type,
-     test_record, test_spec, test_callback, test_opaque,
+     test_record, test_native_records, test_native_record_attributes,
+     test_spec, test_callback, test_opaque,
      test_empty_quote_code, test_empty_quote_type_code,
      test_quote_code_options_must_be_last, test_invalid_binding_values,
      test_quote_public_helpers, test_quote_code_options_last,
@@ -386,6 +388,46 @@ test_record(_Config) ->
     Ast = merl:quote(0, "-record(hello_world, {id, hello, world})."),
     ?assertEqual(Ast, Record),
     ok.
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+test_native_records(_Config) ->
+    [QualifiedCreate, QualifiedUpdate, AnonymousPattern,
+     AnonymousUpdate, QualifiedAccess, AnonymousAccess] =
+        quote_example:native_records(),
+    ?assertMatch({record, _, {mod, rec},
+                  [{record_field, _, {atom, _, x}, {integer, _, 1}}]},
+                 QualifiedCreate),
+    ?assertMatch({record, _, {var, _, _}, {mod, rec},
+                  [{record_field, _, {atom, _, x}, {integer, _, 2}}]},
+                 QualifiedUpdate),
+    ?assertMatch({record, _, [],
+                  [{record_field, _, {atom, _, x}, {var, _, _}}]},
+                 AnonymousPattern),
+    ?assertMatch({record, _, {var, _, _}, [],
+                  [{record_field, _, {atom, _, x}, {integer, _, 3}}]},
+                 AnonymousUpdate),
+    ?assertMatch({record_field, _, {var, _, _}, {mod, rec}, {atom, _, x}},
+                 QualifiedAccess),
+    ?assertMatch({record_field, _, {var, _, _}, [], {atom, _, x}},
+                 AnonymousAccess),
+    ok.
+
+test_native_record_attributes(_Config) ->
+    [NativeRecord, ExportRecord, ImportRecord] =
+        quote_example:native_record_attributes(),
+    ?assertMatch({attribute, _, native_record,
+                  {rec, [{record_field, _, {atom, _, x}}]}},
+                 NativeRecord),
+    ?assertMatch({attribute, _, export_record, [rec]}, ExportRecord),
+    ?assertMatch({attribute, _, import_record, {mod, [rec]}}, ImportRecord),
+    ok.
+-else.
+test_native_records(_Config) ->
+    ok.
+
+test_native_record_attributes(_Config) ->
+    ok.
+-endif.
 
 test_spec(_Config) ->
     Spec = quote_example:spec(hello, map, world),

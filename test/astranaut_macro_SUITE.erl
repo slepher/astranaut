@@ -6,12 +6,13 @@
 -compile(export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("otp_vsn.hrl").
 
 suite() ->
     [{timetrap, {seconds, 60}}].
 
 init_per_suite(Config) ->
-    TestModules = [macro_exports, macro_example, macro_test,
+    TestModules = [macro_exports, macro_native_record, macro_example, macro_test,
                    macro_guard_macros, macro_guard_test,
                    macro_node_role_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
@@ -32,6 +33,7 @@ all() ->
      test_merge_rename_function,
      test_nested_macro,
      test_recursive_macro,
+     test_native_record_macro,
      test_macro_literal,
      test_macro_node_roles,
      test_macro_simple_guard,
@@ -107,6 +109,14 @@ test_nested_macro(_Config) ->
 test_recursive_macro(_Config) ->
     ?assertEqual({4, {3, {2, {1, blast_off}}}},
                  macro_test:test_recursive_macro()).
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+test_native_record_macro(_Config) ->
+    ?assertEqual({40, 41, 42, 42}, macro_test:test_native_record_macro()).
+-else.
+test_native_record_macro(_Config) ->
+    ok.
+-endif.
 
 test_macro_literal(_Config) ->
     %% ?assertMatch({atom, _, ok}, macro_test:test_macro_literal()).

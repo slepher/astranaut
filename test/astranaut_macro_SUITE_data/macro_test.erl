@@ -31,6 +31,12 @@
 -export([test_macro_order/0]).
 -export([test_nested_macro/1, test_recursive_macro/0, test_macro_literal/0]).
 
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-export([test_native_record_macro/0]).
+-endif.
+
 -import_macro(?MACRO_MODULE).
 -import_macro(astranaut_macros).
 
@@ -149,6 +155,11 @@ test_nested_macro(N) ->
 
 test_recursive_macro() ->
     macro_example:recursive_macro(4).
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+test_native_record_macro() ->
+    macro_example:native_record_macro(40).
+-endif.
 
 quote_ok() ->
     quote(ok).

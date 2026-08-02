@@ -487,26 +487,52 @@ role_allowed(Validator, Type, Node, Env) ->
 
 syntax_allowed(Validator, Type, Node, Env) ->
     OtpVsn = maps:get(otp_vsn, Env, otp_vsn()),
-    syntax_node_allowed(Type, OtpVsn) andalso syntax_slot_allowed(Validator, Type, Node, OtpVsn).
+    syntax_node_allowed(Type, Node, OtpVsn) andalso
+        syntax_slot_allowed(Validator, Type, Node, OtpVsn).
 
-syntax_node_allowed(maybe_expr, OtpVsn) ->
+syntax_node_allowed(Type, Node, OtpVsn) ->
+    syntax_node_type_allowed(Type, OtpVsn) andalso
+        (not otp29_native_record_syntax(Type, Node) orelse otp_at_least(OtpVsn, 29)).
+
+syntax_node_type_allowed(maybe_expr, OtpVsn) ->
     otp_at_least(OtpVsn, 25);
-syntax_node_allowed(maybe_match_expr, OtpVsn) ->
+syntax_node_type_allowed(maybe_match_expr, OtpVsn) ->
     otp_at_least(OtpVsn, 25);
-syntax_node_allowed(map_comp, OtpVsn) ->
+syntax_node_type_allowed(map_comp, OtpVsn) ->
     otp_at_least(OtpVsn, 26);
-syntax_node_allowed(map_generator, OtpVsn) ->
+syntax_node_type_allowed(map_generator, OtpVsn) ->
     otp_at_least(OtpVsn, 26);
-syntax_node_allowed(strict_generator, OtpVsn) ->
+syntax_node_type_allowed(strict_generator, OtpVsn) ->
     otp_at_least(OtpVsn, 28);
-syntax_node_allowed(strict_binary_generator, OtpVsn) ->
+syntax_node_type_allowed(strict_binary_generator, OtpVsn) ->
     otp_at_least(OtpVsn, 28);
-syntax_node_allowed(strict_map_generator, OtpVsn) ->
+syntax_node_type_allowed(strict_map_generator, OtpVsn) ->
     otp_at_least(OtpVsn, 28);
-syntax_node_allowed(zip_generator, OtpVsn) ->
+syntax_node_type_allowed(zip_generator, OtpVsn) ->
     otp_at_least(OtpVsn, 28);
-syntax_node_allowed(_Type, _OtpVsn) ->
+syntax_node_type_allowed(_Type, _OtpVsn) ->
     true.
+
+otp29_native_record_syntax(record_expr, Node) ->
+    case revert(Node) of
+        {record, _Pos, Type, _Fields} -> native_record_type(Type);
+        {record, _Pos, _Argument, Type, _Fields} -> native_record_type(Type);
+        _ -> false
+    end;
+otp29_native_record_syntax(record_access, Node) ->
+    case revert(Node) of
+        {record_field, _Pos, _Argument, Type, _Field} -> native_record_type(Type);
+        _ -> false
+    end;
+otp29_native_record_syntax(_Type, _Node) ->
+    false.
+
+native_record_type([]) ->
+    true;
+native_record_type({Module, Name}) when is_atom(Module), is_atom(Name) ->
+    true;
+native_record_type(_Type) ->
+    false.
 
 syntax_slot_allowed({slot, map_field_exact, map_field_exact_key, _Role}, Type, Node, OtpVsn) ->
     otp_at_least(OtpVsn, 23) orelse legacy_map_pattern_key_allowed(Type, Node);
@@ -771,10 +797,19 @@ child_specs_1(maybe_expr, [Body, Else], Attr) ->
      child_spec(else_clause, clause, Else, Attr)];
 child_specs_1(implicit_fun, [Name], Attr) ->
     [child_spec(name, expression, Name, Attr)];
-child_specs_1(record_access, [Argument, Field, Type], Attr) ->
+child_specs_1(record_expr, [Type, Fields], Attr) ->
+    Role = maps:get(node, Attr, expression),
+    [child_spec(type, expression, Type, Attr),
+     child_spec(fields, Role, Fields, Attr)];
+child_specs_1(record_expr, [Argument, Type, Fields], Attr) ->
+    Role = maps:get(node, Attr, expression),
     [child_spec(argument, expression, Argument, Attr),
-     child_spec(field, expression, Field, Attr),
-     child_spec(type, expression, Type, Attr)];
+     child_spec(type, expression, Type, Attr),
+     child_spec(fields, Role, Fields, Attr)];
+child_specs_1(record_access, [Argument, Type, Field], Attr) ->
+    [child_spec(argument, expression, Argument, Attr),
+     child_spec(type, expression, Type, Attr),
+     child_spec(field, expression, Field, Attr)];
 child_specs_1(zip_generator, [Body], Attr) ->
     [child_spec(body, expression, Body, Attr)];
 child_specs_1(_Type, Subtrees, #{node := Role} = Attr) ->

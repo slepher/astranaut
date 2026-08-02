@@ -93,6 +93,9 @@ all() ->
      test_otp25_maybe_expr,
      test_otp26_map_comprehension,
      test_otp28_strict_generator,
+     test_otp29_native_record_forms,
+     test_otp29_native_record_version,
+     test_record_access_child_slot_order,
      test_traverse_validate_changed_node,
      test_traverse_validate_false_opt_out,
      test_traverse_validate_preserves_slot_attr,
@@ -945,6 +948,105 @@ test_validate_empty_list(_Config) ->
     ?assertEqual(ok, validate([], form)),
     ?assertEqual(ok, validate([], pattern)).
 
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+test_otp29_native_record_forms(_Config) ->
+    Field = {record_field, 1, {atom, 1, x}, {integer, 1, 1}},
+    QualifiedCreate = {record, 1, {mod, rec}, [Field]},
+    QualifiedUpdate = {record, 1, {var, 1, 'R'}, {mod, rec}, [Field]},
+    AnonymousPattern = {record, 1, [], [Field]},
+    AnonymousUpdate = {record, 1, {var, 1, 'R'}, [], [Field]},
+    QualifiedAccess = {record_field, 1, {var, 1, 'R'}, {mod, rec}, {atom, 1, x}},
+    AnonymousAccess = {record_field, 1, {var, 1, 'R'}, [], {atom, 1, x}},
+    NativeRecord = {attribute, 1, native_record,
+                    {rec, [{record_field, 1, {atom, 1, x}}]}},
+    ExportRecord = {attribute, 1, export_record, [rec]},
+    ImportRecord = {attribute, 1, import_record, {mod, [rec]}},
+    ?assertEqual(ok, validate(QualifiedCreate, expression)),
+    ?assertEqual(ok, validate(QualifiedUpdate, expression)),
+    ?assertEqual(ok, validate(AnonymousPattern, pattern)),
+    ?assertEqual(ok, validate(AnonymousUpdate, expression)),
+    ?assertEqual(ok, validate(QualifiedAccess, expression)),
+    ?assertEqual(ok, validate(AnonymousAccess, expression)),
+    ?assertEqual(ok, validate(NativeRecord, form)),
+    ?assertEqual(ok, validate(ExportRecord, form)),
+    ?assertEqual(ok, validate(ImportRecord, form)),
+    [ArgumentSpec, TypeSpec, FieldsSpec] =
+        astranaut_syntax:child_specs(
+          record_expr, astranaut_syntax:subtrees(QualifiedUpdate),
+          #{node => expression}),
+    ?assertMatch(#{slot := argument,
+                   validator := {slot, record_expr, argument, expression}},
+                 ArgumentSpec),
+    ?assertMatch(#{slot := type,
+                   validator := {slot, record_expr, type, expression}},
+                 TypeSpec),
+    ?assertMatch(#{slot := fields,
+                   validator := {slot, record_expr, fields, expression}},
+                 FieldsSpec),
+    lists:foreach(
+      fun({Node, Role}) ->
+              ?assertEqual({ok, Node}, astranaut_syntax:normalize(Node, {role, Role}))
+      end,
+      [{QualifiedCreate, expression},
+       {QualifiedUpdate, expression},
+       {AnonymousPattern, pattern},
+       {AnonymousUpdate, expression},
+       {QualifiedAccess, expression},
+       {AnonymousAccess, expression},
+       {NativeRecord, form},
+       {ExportRecord, form},
+       {ImportRecord, form}]).
+
+test_otp29_native_record_version(_Config) ->
+    Field = {record_field, 1, {atom, 1, x}, {integer, 1, 1}},
+    QualifiedCreate = {record, 1, {mod, rec}, [Field]},
+    AnonymousUpdate = {record, 1, {var, 1, 'R'}, [], [Field]},
+    NativeRecord = {attribute, 1, native_record,
+                    {rec, [{record_field, 1, {atom, 1, x}}]}},
+    ExportRecord = {attribute, 1, export_record, [rec]},
+    ImportRecord = {attribute, 1, import_record, {mod, [rec]}},
+    ?assertMatch({error, #{reason := invalid_role}},
+                 astranaut_syntax:normalize(
+                   QualifiedCreate, {role, expression}, #{otp_vsn => 28})),
+    ?assertMatch({error, #{reason := invalid_role}},
+                 astranaut_syntax:normalize(
+                   AnonymousUpdate, {role, expression}, #{otp_vsn => 28})),
+    %% These names were valid wild attributes before OTP 29, so their tuple
+    %% shape alone cannot be version-gated as native-record syntax.
+    ?assertEqual({ok, NativeRecord},
+                 astranaut_syntax:normalize(
+                   NativeRecord, {role, form}, #{otp_vsn => 28})),
+    ?assertEqual({ok, ExportRecord},
+                 astranaut_syntax:normalize(
+                   ExportRecord, {role, form}, #{otp_vsn => 28})),
+    ?assertEqual({ok, ImportRecord},
+                 astranaut_syntax:normalize(
+                   ImportRecord, {role, form}, #{otp_vsn => 28})).
+-else.
+test_otp29_native_record_forms(_Config) ->
+    ok.
+
+test_otp29_native_record_version(_Config) ->
+    ok.
+-endif.
+
+test_record_access_child_slot_order(_Config) ->
+    Argument = [{var, 1, 'R'}],
+    Type = [{atom, 1, rec}],
+    Field = [{atom, 1, x}],
+    [ArgumentSpec, TypeSpec, FieldSpec] =
+        astranaut_syntax:child_specs(
+          record_access, [Argument, Type, Field], #{node => expression}),
+    ?assertMatch(#{slot := argument, subtrees := Argument,
+                   validator := {slot, record_access, argument, expression}},
+                 ArgumentSpec),
+    ?assertMatch(#{slot := type, subtrees := Type,
+                   validator := {slot, record_access, type, expression}},
+                 TypeSpec),
+    ?assertMatch(#{slot := field, subtrees := Field,
+                   validator := {slot, record_access, field, expression}},
+                 FieldSpec).
+
 %%--------------------------------------------------------------------
 %% helpers
 %%--------------------------------------------------------------------
@@ -1151,7 +1253,7 @@ child_spec_cases() ->
      {implicit_fun, [[Expr]], #{node => expression},
       [{name, expression}]},
      {record_access, [[Expr], [Expr], [Expr]], #{node => expression},
-      [{argument, expression}, {field, expression}, {type, expression}]},
+      [{argument, expression}, {type, expression}, {field, expression}]},
      {zip_generator, [[Expr]], #{node => expression},
       [{body, expression}]},
      {tuple, [[Pattern]], #{node => pattern},

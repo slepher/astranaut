@@ -33,6 +33,12 @@
 -export_macro([nested_macro/1, nested_macro_inner/1]).
 -export_macro({[recursive_macro/1], [{max_depth, 5}]}).
 
+-include("otp_vsn.hrl").
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-export_macro([native_record_macro/1]).
+-endif.
+
 -exec_macro({macro_exported_function, [hello, world]}).
 
 %%%===================================================================
@@ -106,8 +112,6 @@ macro_case(Body, TrueClause, FalseClause) ->
           unquote(FalseClause) ->
               false
       end).
-
--include("otp_vsn.hrl").
 
 -ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 macro_try_catch() ->
@@ -232,6 +236,18 @@ recursive_macro(Other) ->
     io:format("Received non-integer AST: ~p~n", [Other]),
     %% 容错处理
     Other.
+
+-ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+native_record_macro(Ast) ->
+    quote(
+      begin
+          R0 = #macro_native_record:rec{x = unquote(Ast)},
+          R1 = R0#macro_native_record:rec{x = R0#macro_native_record:rec.x + 1},
+          R2 = R1#_{x = R1#_.x + 1},
+          #_{x = X} = R2,
+          {R0#_.x, R1#_.x, R2#_.x, X}
+      end).
+-endif.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
