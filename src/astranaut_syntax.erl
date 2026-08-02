@@ -492,7 +492,11 @@ syntax_allowed(Validator, Type, Node, Env) ->
 
 syntax_node_allowed(Type, Node, OtpVsn) ->
     syntax_node_type_allowed(Type, OtpVsn) andalso
-        (not otp29_native_record_syntax(Type, Node) orelse otp_at_least(OtpVsn, 29)).
+        (not otp29_node_shape(Type, Node) orelse otp_at_least(OtpVsn, 29)).
+
+otp29_node_shape(Type, Node) ->
+    otp29_native_record_syntax(Type, Node) orelse
+        otp29_multiple_comprehension_templates(Type, Node).
 
 syntax_node_type_allowed(maybe_expr, OtpVsn) ->
     otp_at_least(OtpVsn, 25);
@@ -527,6 +531,19 @@ otp29_native_record_syntax(record_access, Node) ->
 otp29_native_record_syntax(_Type, _Node) ->
     false.
 
+otp29_multiple_comprehension_templates(list_comp, Node) ->
+    case revert(Node) of
+        {lc, _Pos, Templates, _Body} -> is_list(Templates);
+        _ -> false
+    end;
+otp29_multiple_comprehension_templates(map_comp, Node) ->
+    case revert(Node) of
+        {mc, _Pos, Templates, _Body} -> is_list(Templates);
+        _ -> false
+    end;
+otp29_multiple_comprehension_templates(_Type, _Node) ->
+    false.
+
 native_record_type([]) ->
     true;
 native_record_type({Module, Name}) when is_atom(Module), is_atom(Name) ->
@@ -538,7 +555,8 @@ syntax_slot_allowed({slot, map_field_exact, map_field_exact_key, _Role}, Type, N
     otp_at_least(OtpVsn, 23) orelse legacy_map_pattern_key_allowed(Type, Node);
 syntax_slot_allowed({slot, try_expr, handlers, clause}, clause, Node, OtpVsn) ->
     otp_at_least(OtpVsn, 21) orelse legacy_try_handler_allowed(Node);
-syntax_slot_allowed({slot, size_qualifier, elements, binary_size}, _Type, Node, OtpVsn) ->
+syntax_slot_allowed({slot, size_qualifier, Slot, binary_size}, _Type, Node, OtpVsn)
+  when Slot =:= elements; Slot =:= size ->
     otp_at_least(OtpVsn, 23) orelse legacy_binary_size_allowed(Node);
 syntax_slot_allowed(_Validator, _Type, _Node, _OtpVsn) ->
     true.
@@ -708,11 +726,26 @@ child_specs_1(binary, [Elements], Attr) ->
 child_specs_1(application, [Operator, Arguments], Attr) ->
     [child_spec(operator, expression, Operator, Attr),
      child_spec(arguments, expression, Arguments, Attr)];
+child_specs_1(binary_field, [Values], Attr) ->
+    Role = maps:get(node, Attr, expression),
+    [child_spec(value, Role, Values, Attr)];
+child_specs_1(binary_field, [Values, Types], Attr) ->
+    Role = maps:get(node, Attr, expression),
+    [child_spec(value, Role, Values, Attr),
+     child_spec(types, attribute_body, Types, Attr)];
 child_specs_1(binary_field, [Values, Sizes, Types], Attr) ->
     Role = maps:get(node, Attr, expression),
     [child_spec(value, Role, Values, Attr),
      child_spec(size, binary_size, Sizes, Attr),
      child_spec(types, attribute_body, Types, Attr)];
+child_specs_1(size_qualifier, [[Value], [Size]], Attr) ->
+    Role = maps:get(node, Attr, expression),
+    [child_spec(value, Role, [Value], Attr),
+     child_spec(size, binary_size, [Size], Attr)];
+child_specs_1(size_qualifier, [[Value, Size]], Attr) ->
+    Role = maps:get(node, Attr, expression),
+    [child_spec(value, Role, [Value], Attr),
+     child_spec(size, binary_size, [Size], Attr)];
 child_specs_1(size_qualifier, Subtrees, Attr) ->
     [child_spec(elements, binary_size, Subtrees, Attr)];
 child_specs_1(binary_field, Subtrees, Attr) ->

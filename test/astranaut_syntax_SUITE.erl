@@ -78,6 +78,7 @@ all() ->
      test_all_child_specs_emit_expected_validators,
      test_all_child_spec_validators_accept_and_reject_ast,
      test_slot_roles_do_not_replace_node_role,
+     test_binary_field_projection_slots,
      test_slot_validators_reject_wrong_structural_identity,
      test_slot_validators_reject_malformed_structural_nodes,
      test_validate_node_does_not_recurse_grandchildren,
@@ -93,6 +94,7 @@ all() ->
      test_otp25_maybe_expr,
      test_otp26_map_comprehension,
      test_otp28_strict_generator,
+     test_otp29_multiple_comprehension_templates,
      test_otp29_native_record_forms,
      test_otp29_native_record_version,
      test_record_access_child_slot_order,
@@ -445,6 +447,33 @@ test_slot_roles_do_not_replace_node_role(_Config) ->
                                                 #{node => form}),
     ?assertNot(maps:is_key(node, maps:get(attr, NameSpec))).
 
+test_binary_field_projection_slots(_Config) ->
+    Value = {var, 1, 'X'},
+    Size = {integer, 1, 8},
+    DefaultField = {bin_element, 1, Value, default, default},
+    SizedTypedField = {bin_element, 1, Value, Size, [integer, unsigned]},
+    [DefaultValueSpec] =
+        astranaut_syntax:child_specs(
+          binary_field, astranaut_syntax:subtrees(DefaultField),
+          #{node => pattern}),
+    ?assertMatch(#{slot := value, role := pattern, subtrees := [Value]},
+                 DefaultValueSpec),
+    [QualifiedValueSpec, TypesSpec] =
+        astranaut_syntax:child_specs(
+          binary_field, astranaut_syntax:subtrees(SizedTypedField),
+          #{node => pattern}),
+    #{subtrees := [SizeQualifier]} = QualifiedValueSpec,
+    ?assertMatch(#{slot := value, role := pattern}, QualifiedValueSpec),
+    ?assertMatch(#{slot := types, role := attribute_body}, TypesSpec),
+    [ValueSpec, SizeSpec] =
+        astranaut_syntax:child_specs(
+          size_qualifier, astranaut_syntax:subtrees(SizeQualifier),
+          #{node => pattern}),
+    ?assertMatch(#{slot := value, role := pattern, subtrees := [Value]},
+                 ValueSpec),
+    ?assertMatch(#{slot := size, role := binary_size, subtrees := [Size]},
+                 SizeSpec).
+
 test_slot_validators_reject_wrong_structural_identity(_Config) ->
     BinElement = valid_ast(binary_field),
     MapField = {map_field_exact, 1, {atom, 1, key}, {atom, 1, value}},
@@ -668,6 +697,46 @@ test_otp28_strict_generator(_Config) ->
                 validate(ParsedStrictLc, expression, #{otp_vsn => 27});
         false ->
             ?assertMatch({error, _}, validate(StrictLc, expression))
+    end.
+
+test_otp29_multiple_comprehension_templates(_Config) ->
+    Generator = {generate, 1, {var, 1, 'I'}, {var, 1, 'List'}},
+    SingleListComp = {lc, 1, {var, 1, 'I'}, [Generator]},
+    MultiListComp =
+        {lc, 1, [{var, 1, 'I'}, {op, 1, '-', {var, 1, 'I'}}],
+         [Generator]},
+    SingleMapComp =
+        {mc, 1,
+         {map_field_assoc, 1, {var, 1, 'I'}, {var, 1, 'I'}},
+         [Generator]},
+    MultiMapComp =
+        {mc, 1,
+         [{map_field_assoc, 1, {var, 1, 'I'}, {var, 1, 'I'}},
+          {map_field_assoc, 1, {op, 1, '+', {var, 1, 'I'}, {integer, 1, 1}},
+           {var, 1, 'I'}}],
+         [Generator]},
+    ?assertEqual(ok, validate(SingleListComp, expression, #{otp_vsn => 28})),
+    ?assertEqual(ok, validate(SingleMapComp, expression, #{otp_vsn => 28})),
+    ?assertMatch({error, #{reason := invalid_role, actual_type := list_comp}},
+                 validate(MultiListComp, expression, #{otp_vsn => 28})),
+    ?assertMatch({error, #{reason := invalid_role, actual_type := map_comp}},
+                 validate(MultiMapComp, expression, #{otp_vsn => 28})),
+    case current_otp_at_least(29) of
+        true ->
+            ParsedMultiListComp =
+                function_body_expr(parse_form("f(List) -> [I, -I || I <- List].")),
+            ParsedMultiMapComp =
+                function_body_expr(
+                  parse_form(
+                    "f(List) -> #{I => I, I + 1 => I || I <- List}.")),
+            assert_same_ast(MultiListComp, ParsedMultiListComp),
+            assert_same_ast(MultiMapComp, ParsedMultiMapComp),
+            ?assertEqual(ok, validate(ParsedMultiListComp, expression,
+                                      #{otp_vsn => 29})),
+            ?assertEqual(ok, validate(ParsedMultiMapComp, expression,
+                                      #{otp_vsn => 29}));
+        false ->
+            ok
     end.
 
 test_traverse_validate_changed_node(_Config) ->
