@@ -1,0 +1,567 @@
+%% Erlang abstract-format AST schema for Astranaut code generation.
+%%
+%% This file is the single source of truth for syntax-tree structure and OTP
+%% version availability. Derived indexes, defaults, policies, validation rules,
+%% feature summaries, and generated clauses belong in Erlang modules.
+%%
+%% Top-level fields:
+%%   schema_version     version of this term format
+%%   otp_versions       supported OTP range (inclusive)
+%%   nodes              erl_syntax node types and erl_parse tuple formats
+%%   excluded_nodes     intentionally unsupported erl_syntax node types
+%%   layouts            reusable erl_syntax:subtrees/1 projections
+%%   attribute_layouts  attribute-body projections selected by attribute name
+%%
+%% Node fields:
+%%   type       value returned by erl_syntax:type/1
+%%   roles      AST positions in which the node is structurally valid
+%%   formats    abstract-format tuple variants; id names a variant when needed
+%%   layout(s)  child projections, either named or inline
+%%   alias_of   another node with the same structure
+%%
+%% Abstract-format shape vocabulary:
+%%   anno                 source annotation
+%%   {value, Name}        one non-AST value
+%%   {values, Name}       zero or more non-AST values
+%%   {node, Name}         one AST child
+%%   {nodes, Name}        zero or more AST children
+%%   {optional, Shape}    optional shape member
+%%   default | any        literal abstract-format markers
+%%
+%% Layouts describe groups returned by erl_syntax:subtrees/1, not raw tuple
+%% fields. `groups` is the group count or `any`; child order follows group
+%% order. Cardinality is one, many, or deep_many. The role `inherit` means the
+%% current traversal role. `when_format` and `when_role` select structural
+%% variants.
+%%
+%% `since` and `until` are inclusive OTP release numbers and may occur on a
+%% node, format, or attribute layout. Missing `since`/`until` means the
+%% corresponding boundary from `otp_versions`.
+
+#{nodes =>
+      [#{type => function,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => name,role => name,cardinality => one},
+                     #{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [form],
+         formats => [#{shape => {function,anno,{value,name},{value,arity},{nodes,clauses}}}]},
+       #{type => attribute,
+         roles => [form],
+         layout => attribute,
+         formats => [#{shape => {attribute,anno,{value,name},{value,body}}}]},
+       #{type => eof_marker,roles => [form],formats => [#{shape => {eof,{value,location}}}]},
+       #{type => error_marker,roles => [form],formats => [#{shape => {error,{value,error_info}}}]},
+       #{type => warning_marker,
+         roles => [form],
+         formats => [#{shape => {warning,{value,warning_info}}}]},
+       #{type => comment,roles => [form]},
+       #{type => text,roles => [form]},
+       #{type => atom,
+         roles => [expression,pattern,guard,type,name],
+         formats => [#{shape => {atom,anno,{value,value}}}]},
+       #{type => char,
+         roles => [expression,pattern,guard,type],
+         formats => [#{shape => {char,anno,{value,value}}}]},
+       #{type => float,
+         roles => [expression,pattern,guard],
+         formats => [#{shape => {float,anno,{value,value}}}]},
+       #{type => integer,
+         roles => [expression,pattern,guard,type],
+         formats => [#{shape => {integer,anno,{value,value}}}]},
+       #{type => nil,roles => [expression,pattern,guard,type],formats => [#{shape => {nil,anno}}]},
+       #{type => string,
+         roles => [expression,pattern,guard,type],
+         formats => [#{shape => {string,anno,{value,characters}}}]},
+       #{type => variable,
+         roles => [expression,pattern,guard,type],
+         formats => [#{shape => {var,anno,{value,name}}}]},
+       #{type => underscore,roles => [pattern],formats => [#{shape => {var,anno,'_'}}]},
+       #{type => tuple,
+         roles => [expression,pattern,guard,type],
+         layout => inherited_elements,
+         formats => [#{shape => {tuple,anno,{nodes,elements}}}]},
+       #{type => list,
+         roles => [expression,pattern,guard,type],
+         layout => inherited_elements,
+         formats => [#{shape => {cons,anno,{node,head},{node,tail}}}]},
+       #{type => cons,roles => [expression,pattern,guard,type],alias_of => list},
+       #{type => parentheses,
+         roles => [expression,pattern,guard,type],
+         layout => inherited_elements},
+       #{type => binary,
+         layouts =>
+             [#{groups => 1,
+                children => [#{slot => elements,role => binary_field,cardinality => many}]}],
+         roles => [expression,pattern,guard,type],
+         formats => [#{shape => {bin,anno,{nodes,fields}}}]},
+       #{type => binary_field,
+         layouts =>
+             [#{groups => 1,
+                children => [#{slot => value,role => inherit,cardinality => one}]},
+              #{groups => 2,
+                children =>
+                    [#{slot => value,role => inherit,cardinality => one},
+                     #{slot => types,role => attribute_body,cardinality => many}]}],
+         roles => [expression,pattern,guard],
+         formats =>
+             [#{shape => {bin_element,anno,{node,value},default,default}},
+              #{shape => {bin_element,anno,{node,value},{node,size},default}},
+              #{shape => {bin_element,anno,{node,value},default,{values,type_specifiers}}},
+              #{shape => {bin_element,anno,{node,value},{node,size},{values,type_specifiers}}}]},
+       #{type => size_qualifier,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => value,role => inherit,cardinality => one},
+                     #{slot => size,role => binary_size,cardinality => one}]}],
+         roles => [expression,pattern,guard]},
+       #{type => map_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => fields,role => map_field,cardinality => many}]},
+              #{groups => 2,
+                children =>
+                    [#{slot => argument,role => expression,cardinality => one},
+                     #{slot => fields,role => map_field,cardinality => many}]}],
+         roles => [expression,pattern,guard],
+         formats =>
+             [#{shape => {map,anno,{nodes,fields}}},
+              #{shape => {map,anno,{node,argument},{nodes,fields}}}]},
+       #{type => map_field_assoc,
+         roles => [expression,pattern,guard],
+         layout => map_field,
+         formats => [#{shape => {map_field_assoc,anno,{node,key},{node,value}}}],
+         slot_names => #{value => map_field_assoc_value,key => map_field_assoc_key}},
+       #{type => map_field_exact,
+         roles => [expression,pattern,guard],
+         layout => map_field,
+         formats => [#{shape => {map_field_exact,anno,{node,key},{node,value}}}],
+         slot_names => #{value => map_field_exact_value,key => map_field_exact_key}},
+       #{type => record_expr,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => type,role => expression,cardinality => one_or_many},
+                     #{slot => fields,role => inherit,cardinality => many}]},
+              #{groups => 3,
+                children =>
+                    [#{slot => argument,role => expression,cardinality => one},
+                     #{slot => type,role => expression,cardinality => one_or_many},
+                     #{slot => fields,role => inherit,cardinality => many}]}],
+         roles => [expression,pattern,guard],
+         formats =>
+             [#{id => local_create,
+                shape => {record,anno,{value,local_record_name},{nodes,fields}}},
+              #{id => local_update,
+                shape => {record,anno,{node,argument},{value,local_record_name},{nodes,fields}}},
+              #{id => qualified_native_create,since => 29,
+                shape => {record,anno,{value,native_record_name},{nodes,fields}}},
+              #{id => anonymous_native_pattern,
+                roles => [pattern],
+                since => 29,
+                shape => {record,anno,{value,anonymous_record_name},{nodes,fields}}},
+              #{id => qualified_native_update,since => 29,
+                shape => {record,anno,{node,argument},{value,native_record_name},{nodes,fields}}},
+              #{id => anonymous_native_update,since => 29,
+                shape =>
+                    {record,anno,{node,argument},{value,anonymous_record_name},{nodes,fields}}}]},
+       #{type => record_field,
+         roles => [expression,pattern,guard],
+         layout => inherited_elements,
+         formats =>
+             [#{shape => {record_field,anno,{node,name}}},
+              #{shape => {record_field,anno,{node,name},{node,value}}}]},
+       #{type => record_access,
+         layouts =>
+             [#{groups => 3,
+                children =>
+                    [#{slot => argument,role => expression,cardinality => one},
+                     #{slot => type,role => expression,cardinality => one},
+                     #{slot => field,role => expression,cardinality => one}]}],
+         roles => [expression,guard],
+         formats =>
+             [#{id => local_access,
+                shape =>
+                    {record_field,anno,{node,argument},{value,local_record_name},{node,field}}},
+              #{id => qualified_native_access,since => 29,
+                shape =>
+                    {record_field,anno,{node,argument},{value,native_record_name},{node,field}}},
+              #{id => anonymous_native_access,since => 29,
+                shape =>
+                    {record_field,anno,
+                                  {node,argument},
+                                  {value,anonymous_record_name},
+                                  {node,field}}}]},
+       #{type => record_index_expr,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         formats => [#{shape => {record_index,anno,{value,name},{node,field}}}]},
+       #{type => match_expr,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => left,role => pattern,cardinality => one},
+                     #{slot => right,role => expression,cardinality => one}]}],
+         roles => [expression,pattern],
+         formats => [#{shape => {match,anno,{node,left},{node,right}}}]},
+       #{type => maybe_match_expr,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => left,role => pattern,cardinality => one},
+                     #{slot => right,role => expression,cardinality => one}]}],
+         roles => [expression],
+         since => 25,
+         formats => [#{shape => {maybe_match,anno,{node,left},{node,right}}}]},
+       #{type => infix_expr,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         formats => [#{shape => {op,anno,{value,operator},{node,left},{node,right}}}]},
+       #{type => prefix_expr,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         formats => [#{shape => {op,anno,{value,operator},{node,argument}}}]},
+       #{type => operator,roles => [expression,guard]},
+       #{type => conjunction,roles => [expression,guard],layout => inherited_elements},
+       #{type => disjunction,roles => [expression,guard],layout => inherited_elements},
+       #{type => application,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => operator,role => expression,cardinality => one},
+                     #{slot => arguments,role => expression,cardinality => many}]}],
+         roles => [expression,guard],
+         formats => [#{shape => {call,anno,{node,operator},{nodes,arguments}}}]},
+       #{type => module_qualifier,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         formats => [#{shape => {remote,anno,{node,module},{node,function}}}]},
+       #{type => block_expr,
+         roles => [expression],
+         layout => inherited_elements,
+         formats => [#{shape => {block,anno,{nodes,body}}}]},
+       #{type => case_expr,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => argument,role => expression,cardinality => one},
+                     #{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression],
+         formats => [#{shape => {'case',anno,{node,argument},{nodes,clauses}}}]},
+       #{type => catch_expr,
+         roles => [expression],
+         layout => inherited_elements,
+         formats => [#{shape => {'catch',anno,{node,body}}}]},
+       #{type => if_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression],
+         formats => [#{shape => {'if',anno,{nodes,clauses}}}]},
+       #{type => cond_expr,
+         since => 19,until => 22,
+         layouts =>
+             [#{groups => 1,children => [#{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression]},
+       #{type => receive_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => clauses,role => clause,cardinality => many}]},
+              #{groups => 3,
+                children =>
+                    [#{slot => clauses,role => clause,cardinality => many},
+                     #{slot => timeout,role => expression,cardinality => one},
+                     #{slot => action,role => expression,cardinality => many}]}],
+         roles => [expression],
+         formats =>
+             [#{shape => {'receive',anno,{nodes,clauses}}},
+              #{shape => {'receive',anno,{nodes,clauses},{node,timeout},{nodes,action}}}]},
+       #{type => try_expr,
+         layouts =>
+             [#{groups => 4,
+                children =>
+                    [#{slot => body,role => expression,cardinality => many},
+                     #{slot => clauses,role => clause,cardinality => many},
+                     #{slot => handlers,role => clause,cardinality => many},
+                     #{slot => 'after',role => expression,cardinality => many}]}],
+         roles => [expression],
+         formats =>
+             [#{shape =>
+                    {'try',anno,{nodes,body},{nodes,clauses},{nodes,handlers},{nodes,'after'}}}]},
+       #{type => fun_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression],
+         formats => [#{shape => {'fun',anno,{clauses,{nodes,clauses}}}}]},
+       #{type => named_fun_expr,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => name,role => pattern,cardinality => one},
+                     #{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression],
+         formats => [#{shape => {named_fun,anno,{value,name},{nodes,clauses}}}]},
+       #{type => implicit_fun,
+         layouts =>
+             [#{groups => 1,children => [#{slot => name,role => expression,cardinality => one}]}],
+         roles => [expression],
+         formats =>
+             [#{shape => {'fun',anno,{function,{value,name},{value,arity}}}},
+              #{shape => {'fun',anno,{function,{node,module},{node,name},{node,arity}}}}]},
+       #{type => arity_qualifier,roles => [expression],layout => inherited_elements},
+       #{type => list_comp,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => template,role => expression,cardinality => one},
+                     #{slot => body,role => expression,cardinality => many}],
+                when_format => single_template},
+              #{since => 29,groups => 2,
+                children =>
+                    [#{slot => template,role => expression,cardinality => many},
+                     #{slot => body,role => expression,cardinality => many}],
+                when_format => multiple_templates}],
+         roles => [expression],
+         formats =>
+             [#{id => single_template,shape => {lc,anno,{node,template},{nodes,body}}},
+              #{id => multiple_templates,since => 29,
+                shape => {lc,anno,{nodes,templates},{nodes,body}}}]},
+       #{type => binary_comp,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => template,role => expression,cardinality => one},
+                     #{slot => body,role => expression,cardinality => many}]}],
+         roles => [expression],
+         formats => [#{shape => {bc,anno,{node,template},{nodes,body}}}]},
+       #{type => map_comp,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => template,role => map_field,cardinality => one},
+                     #{slot => body,role => expression,cardinality => many}],
+                when_format => single_template},
+              #{since => 29,groups => 2,
+                children =>
+                    [#{slot => template,role => map_field,cardinality => many},
+                     #{slot => body,role => expression,cardinality => many}],
+                when_format => multiple_templates}],
+         roles => [expression],
+         since => 26,
+         formats =>
+             [#{id => single_template,shape => {mc,anno,{node,template},{nodes,body}}},
+              #{id => multiple_templates,since => 29,
+                shape => {mc,anno,{nodes,templates},{nodes,body}}}]},
+       #{type => generator,
+         roles => [expression],
+         layout => generator,
+         formats => [#{shape => {generate,anno,{node,pattern},{node,body}}}]},
+       #{type => binary_generator,
+         roles => [expression],
+         layout => generator,
+         formats => [#{shape => {b_generate,anno,{node,pattern},{node,body}}}]},
+       #{type => map_generator,
+         roles => [expression],
+         since => 26,layout => generator,
+         formats => [#{shape => {m_generate,anno,{node,pattern},{node,body}}}]},
+       #{type => strict_generator,
+         roles => [expression],
+         since => 28,layout => generator,
+         formats => [#{shape => {generate_strict,anno,{node,pattern},{node,body}}}]},
+       #{type => strict_binary_generator,
+         roles => [expression],
+         since => 28,layout => generator,
+         formats => [#{shape => {b_generate_strict,anno,{node,pattern},{node,body}}}]},
+       #{type => strict_map_generator,
+         roles => [expression],
+         since => 28,layout => generator,
+         formats => [#{shape => {m_generate_strict,anno,{node,pattern},{node,body}}}]},
+       #{type => zip_generator,
+         layouts =>
+             [#{groups => 1,children => [#{slot => body,role => expression,cardinality => many}]}],
+         roles => [expression],
+         since => 28,
+         formats => [#{shape => {zip,anno,{nodes,body}}}]},
+       #{type => maybe_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => body,role => expression,cardinality => many}]},
+              #{groups => 2,
+                children =>
+                    [#{slot => body,role => expression,cardinality => many},
+                     #{slot => else_clause,role => clause,cardinality => many}]}],
+         roles => [expression],
+         since => 25,
+         formats =>
+             [#{shape => {'maybe',anno,{nodes,body}}},
+              #{shape => {'maybe',anno,{nodes,body},{'else',anno,{nodes,clauses}}}}]},
+       #{type => else_expr,
+         layouts =>
+             [#{groups => 1,children => [#{slot => clauses,role => clause,cardinality => many}]}],
+         roles => [expression],
+         since => 25,
+         formats => [#{shape => {'else',anno,{nodes,clauses}}}]},
+       #{type => clause,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => patterns,role => pattern,cardinality => many},
+                     #{slot => body,role => expression,cardinality => many}]},
+              #{groups => 3,
+                children =>
+                    [#{slot => patterns,role => pattern,cardinality => many},
+                     #{slot => guards,role => guard,cardinality => deep_many},
+                     #{slot => body,role => expression,cardinality => many}]}],
+         roles => [clause],
+         formats => [#{shape => {clause,anno,{nodes,patterns},{nodes,guards},{nodes,body}}}]},
+       #{type => class_qualifier,roles => [pattern],layout => inherited_elements},
+       #{type => annotated_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {ann_type,anno,[{node,name},{node,body}]}}]},
+       #{type => bitstring_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,binary,[{node,m},{node,n}]}}]},
+       #{type => fun_type,roles => [type],formats => [#{shape => {type,anno,'fun',[]}}]},
+       #{type => function_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats =>
+             [#{shape => {type,anno,'fun',[{type,anno,product,{nodes,arguments}},{node,return}]}},
+              #{shape => {type,anno,'fun',[{type,anno,any},{node,return}]}}]},
+       #{type => constrained_function_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,bounded_fun,[{node,function},{nodes,constraints}]}}]},
+       #{type => constraint,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,constraint,[{node,name},{nodes,arguments}]}}]},
+       #{type => integer_range_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,range,[{node,low},{node,high}]}}]},
+       #{type => map_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats =>
+             [#{id => any_map,shape => {type,anno,map,any}},
+              #{shape => {type,anno,map,{nodes,fields}}}]},
+       #{type => map_type_assoc,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,map_field_assoc,[{node,key},{node,value}]}}]},
+       #{type => map_type_exact,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,map_field_exact,[{node,key},{node,value}]}}]},
+       #{type => record_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,record,[{node,name}|{nodes,fields}]}}]},
+       #{type => record_type_field,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,field_type,[{node,name},{node,field_type}]}}]},
+       #{type => tuple_type,
+         roles => [type],
+         layout => inherited_elements,
+         formats =>
+             [#{id => any_tuple,shape => {type,anno,tuple,any}},
+              #{shape => {type,anno,tuple,{nodes,elements}}}]},
+       #{type => type_union,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {type,anno,union,{nodes,types}}}]},
+       #{type => type_application,
+         roles => [type],
+         layout => inherited_elements,
+         formats =>
+             [#{shape => {type,anno,{value,name},{nodes,arguments}}},
+              #{shape => {remote_type,anno,[{node,module},{node,name},{nodes,arguments}]}}]},
+       #{type => user_type_application,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {user_type,anno,{value,name},{nodes,arguments}}}]},
+       #{type => typed_record_field,
+         roles => [type],
+         layout => inherited_elements,
+         formats => [#{shape => {typed_record_field,{node,field},{node,field_type}}}]},
+       #{type => type_fun,roles => [type],alias_of => fun_type},
+       #{type => type_tuple,roles => [type],alias_of => tuple_type},
+       #{type => type_record,roles => [type],alias_of => record_type},
+       #{type => type_binary,roles => [type],alias_of => bitstring_type},
+       #{type => type_integer_range,roles => [type],alias_of => integer_range_type},
+       #{type => type_map,roles => [type],alias_of => map_type},
+       #{type => type_map_field,roles => [type],alias_of => map_type_assoc},
+       #{type => remote_type,roles => [type],alias_of => type_application}],
+  schema_version => 2,
+  otp_versions => #{max => 29,min => 19},
+  excluded_nodes =>
+      [#{type => form_list,reason => syntax_tools_form_container},
+       #{type => macro,reason => removed_by_epp}],
+  layouts =>
+      #{inherit =>
+            [#{groups => any,
+               children => [#{slot => elements,role => inherit,cardinality => deep_many}]}],
+        map_field =>
+            [#{context =>
+                   [#{children =>
+                          [#{slot => key,role => expression,cardinality => one},
+                           #{slot => value,role => pattern,cardinality => one}],
+                      when_role => pattern},
+                    #{children =>
+                          [#{slot => key,role => inherit,cardinality => one},
+                           #{slot => value,role => inherit,cardinality => one}],
+                      when_role => any}],
+               groups => 2}],
+        inherited_elements =>
+            [#{groups => any,
+               children => [#{slot => elements,role => inherit,cardinality => deep_many}]}],
+        generator =>
+            [#{groups => 2,
+               children =>
+                   [#{slot => pattern,role => pattern,cardinality => one},
+                    #{slot => body,role => expression,cardinality => one}]}]},
+  attribute_layouts =>
+      #{default =>
+            #{children => [#{slot => body,role => attribute_body,cardinality => many}],
+              body_shape => {value,body}},
+        type =>
+            #{children =>
+                  [#{slot => type_name,role => name,cardinality => one},
+                   #{slot => type_body,role => type,cardinality => one},
+                   #{slot => type_params,role => type_param,cardinality => many}],
+              body_shape => {{value,type_name},{node,type_body},{nodes,type_params}}},
+        record =>
+            #{children => [#{slot => body,role => attribute_body,cardinality => many}],
+              body_shape => {{value,record_name},{nodes,fields}}},
+        spec =>
+            #{children =>
+                  [#{slot => spec_mfa,role => attribute_body,cardinality => one},
+                   #{slot => specs,role => type,cardinality => many}],
+              body_shapes =>
+                  [{{{value,name},{value,arity}},{nodes,specs}},
+                   {{{value,module},{value,name},{value,arity}},{nodes,specs}}]},
+        callback =>
+            #{children =>
+                  [#{slot => spec_mfa,role => attribute_body,cardinality => one},
+                   #{slot => specs,role => type,cardinality => many}],
+              body_shape => {{{value,name},{value,arity}},{nodes,specs}}},
+        native_record =>
+            #{since => 29,
+              children => [#{slot => body,role => attribute_body,cardinality => many}],
+              body_shape => {{value,record_name},{nodes,fields}}},
+        opaque =>
+            #{children =>
+                  [#{slot => type_name,role => name,cardinality => one},
+                   #{slot => type_body,role => type,cardinality => one},
+                   #{slot => type_params,role => type_param,cardinality => many}],
+              body_shape => {{value,type_name},{node,type_body},{nodes,type_params}}},
+        import_record =>
+            #{since => 29,
+              children => [#{slot => body,role => attribute_body,cardinality => many}],
+              body_shape => {{value,module},{values,record_names}}},
+        export_record =>
+            #{since => 29,
+              children => [#{slot => body,role => attribute_body,cardinality => many}],
+              body_shape => {values,record_names}}}}.
