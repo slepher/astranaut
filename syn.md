@@ -6,7 +6,7 @@ Syn 最值得 Astranaut 借鉴的不是 Rust AST 节点本身，而是它对 AST
 
 推荐优先实现：
 
-1. 用机器可读的 AST schema 生成 traversal、validator 和兼容代码。
+1. 用机器可读的 AST schema 生成 traversal 元数据、validator 和 OTP 可用性规则。
 2. 增加类型明确的 Parse/Quote fragment API。
 3. 建立节点优先的 span 与诊断接口。
 4. 从 AST schema 生成分层的 Visit/Fold behavior。
@@ -18,17 +18,18 @@ Syn 最值得 Astranaut 借鉴的不是 Rust AST 节点本身，而是它对 AST
 
 这是收益最高的改进。
 
-Astranaut 当前需要手工维护：
+Astranaut 的 AST 处理包含两类职责：
 
-- `subtrees/1`
-- `update_tree/2`
-- `child_specs/3`
-- `node_roles/1`
-- 父节点各个 child slot 的 validator
-- OTP 版本间的 abstract format 差异
-- 对应的覆盖和兼容性测试
+- AST 的投影与重建：`subtrees/1`、`update_tree/2`、`revert/1`。
+- child 的语义与合法性：`child_specs/3`、`node_roles/1`、slot
+  validator 和 OTP 版本规则。
 
-这些信息本质上来自同一个 AST 结构定义，却分散在实现和测试中。可以借鉴 Syn 的机器可读 AST 描述，为 Astranaut 建立单一 schema：
+投影与重建应继续以 OTP `erl_syntax` 为权威实现。Astranaut 不重复生成
+所有节点的 `subtrees/1` 和 `update_tree/2` clauses，只为已确认的 OTP
+不对称行为保留局部 compatibility adapter。schema 则作为 child 语义、
+validator 和版本合法性的单一来源。
+
+可以借鉴 Syn 的机器可读 AST 描述，为 Astranaut 建立这样的 schema：
 
 ```erlang
 #{
@@ -61,19 +62,29 @@ Astranaut 当前需要手工维护：
 
 ```text
 AST schema
-├── subtrees/update_tree
-├── child_specs
+├── child layout / child_specs 元数据
 ├── node_roles
 ├── slot validators
 ├── visitor/fold dispatch
-├── OTP compatibility clauses
+├── OTP node/format/slot availability rules
 ├── abstract-form documentation
-└── coverage and symmetry tests
+└── coverage tests
+
+erl_syntax
+├── subtrees/update_tree
+└── ordinary-node projection/reconstruction
+
+Astranaut compatibility adapters
+├── confirmed erl_syntax asymmetries only
+└── focused symmetry/round-trip regression tests
 ```
 
 ### 必须保持的不变量
 
-- `subtrees(Node)` 的结果必须能由 `update_tree(Node, Subtrees)` 无损重建。
+- `subtrees(Node)` 的结果必须能由 `update_tree(Node, Subtrees)` 重建为
+  语义等价的 abstract form，允许 OTP 规定的 representation 或 annotation
+  normalization；该不变量用于验证 OTP authority 和局部 adapter，
+  不意味着 Astranaut 要自行生成拆装代码。
 - 每个 child slot 必须声明 cardinality 和 role。
 - 每个可替换 slot 必须具有 validator。
 - schema 中的 OTP 版本必须能生成测试条件。
@@ -82,9 +93,11 @@ AST schema
 
 ### 预期收益
 
-- 新 OTP AST 节点只需修改一处 schema。
+- 新 OTP AST 节点由 `erl_syntax` 负责拆装，Astranaut 只需补充 schema 语义；
+  只有发现真实不对称时才增加 adapter。
 - traversal 和 validator 不会分别遗漏节点。
-- 可以自动检查 `subtrees/1` 与 `update_tree/2` 的对称性。
+- 可以审计 schema layout 与 OTP `subtrees/1` 的一致性，并对 adapter
+  执行定向 round-trip 测试。
 - 可以自动生成 OTP 19～当前版本的测试矩阵。
 - 后续 Visit/Fold API 不需要手写大量节点分派代码。
 
@@ -365,18 +378,18 @@ Syn 通过 crate features 控制 derive/full/visit 等 AST 能力。Astranaut �
 ### Phase 1：Schema 原型
 
 1. 选择 5～10 个常见节点建立 schema。
-2. 生成 `subtrees` 和 `update_tree` clauses。
-3. 对照现有实现运行 property/symmetry tests。
-4. 生成 `child_specs` 和 validators。
-5. 确认生成代码的性能不低于当前实现。
+2. 生成 child layout、`child_specs` 元数据和 validators。
+3. 对照 OTP `erl_syntax:subtrees/1` 审计 group 数量与 cardinality。
+4. 对现有 compatibility adapters 运行定向 symmetry/round-trip tests。
+5. 确认生成的 dispatch 代码性能不低于当前实现。
 
 ### Phase 2：覆盖全部 AST
 
 1. 把当前 OTP 19～当前版本节点迁入 schema。
 2. 自动生成版本条件。
 3. 自动生成 coverage matrix。
-4. 保留旧实现作为短期 differential-test oracle。
-5. 完成一致性验证后删除重复的手写表。
+4. 将 `erl_syntax` 作为 projection/reconstruction oracle。
+5. 删除重复的手写规则，但保留有回归证据的局部 adapters。
 
 ### Phase 3：Typed Parse/Quote
 
@@ -405,4 +418,8 @@ Syn 通过 crate features 控制 derive/full/visit 等 AST 能力。Astranaut �
 | ParseStream combinators | 低到中 | 中 | P3 |
 | `Punctuated`/`VisitMut`/lifetime | 低或不适用 | 高 | 不做 |
 
-最终建议是先做 AST schema/codegen。它能同时降低 traversal、validator、OTP 兼容、文档和测试的维护成本，并为后续 Typed Parse、Typed Quote 和 generated visitor 提供共同基础。
+最终建议是先做 AST schema/codegen，但不重新实现 OTP 已提供的 AST
+projection/reconstruction。schema 聚焦 traversal 语义、validator 和版本
+合法性；`erl_syntax` 负责普通节点拆装；Astranaut 只保留必要的局部
+compatibility adapters。这为后续 Typed Parse、Typed Quote 和 generated visitor
+提供共同基础，同时避免承担完整的 OTP 版本拆装成本。

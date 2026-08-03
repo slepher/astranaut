@@ -552,11 +552,31 @@ check_nonleaf_update(Type, Id, Sample, Groups, Mod) ->
     case safe_apply(Mod, update_tree, [Sample, Groups]) of
         {ok, Updated} ->
             case safe_apply(Mod, type, [Updated]) of
-                {ok, Type} -> [];
+                {ok, Type} -> check_roundtrip(Type, Id, Sample, Updated, Mod);
                 {ok, Actual} -> [{Type, {update_type_mismatch, Id, Actual}}];
                 {error, Reason} -> [{Type, {updated_tree_rejected, Id, Reason}}]
             end;
         {error, Reason} -> [{Type, {update_tree_rejected, Id, Reason}}]
+    end.
+
+%% Layout probes deliberately use the smallest public syntax tree that
+%% exercises a subtree grouping. Some are not complete legal Erlang forms and
+%% cannot be reverted out of their parent context. Concrete format samples,
+%% on the other hand, must survive projection and reconstruction semantically.
+check_roundtrip(_Type, {layout, _Index}, _Sample, _Updated, _Mod) ->
+    [];
+check_roundtrip(Type, Id, Sample, Updated, Mod) ->
+    case {safe_apply(Mod, revert, [Sample]),
+          safe_apply(Mod, revert, [Updated])} of
+        {{ok, OriginalForm}, {ok, OriginalForm}} ->
+            [];
+        {{ok, OriginalForm}, {ok, UpdatedForm}} ->
+            [{Type, {update_roundtrip_mismatch, Id,
+                     OriginalForm, UpdatedForm}}];
+        {{error, Reason}, _} ->
+            [{Type, {original_revert_rejected, Id, Reason}}];
+        {_, {error, Reason}} ->
+            [{Type, {updated_revert_rejected, Id, Reason}}]
     end.
 
 safe_apply(Mod, Function, Args) ->
@@ -604,11 +624,17 @@ sample_values(type_specifiers) -> [integer];
 sample_values(record_names) -> [sample];
 sample_values(_Name) -> [sample].
 
+sample_nodes(clause, guards) -> [[{atom, 1, sample_guard}]];
+sample_nodes(list_comp, templates) ->
+    [{atom, 1, template1}, {atom, 1, template2}];
+sample_nodes(map_comp, templates) ->
+    [{map_field_assoc, 1, {atom, 1, key1}, {atom, 1, value1}},
+     {map_field_assoc, 1, {atom, 1, key2}, {atom, 1, value2}}];
 sample_nodes(try_expr, handlers) -> [sample_try_clause()];
 sample_nodes(Type, Name) -> [sample_node(Type, Name)].
 
 sample_node(record_expr, fields) ->
-    {record_field, 1, field, {atom, 1, value}};
+    {record_field, 1, {atom, 1, field}, {atom, 1, value}};
 sample_node(record_type, fields) ->
     {type, 1, field_type, [{atom, 1, field}, {type, 1, integer, []}]};
 sample_node(map_expr, fields) ->
@@ -617,13 +643,15 @@ sample_node(map_type, fields) ->
     {type, 1, map_field_assoc,
      [{type, 1, atom, []}, {type, 1, integer, []}]};
 sample_node(typed_record_field, field) ->
-    {record_field, 1, field};
+    {record_field, 1, {atom, 1, field}};
 sample_node(_Type, patterns) -> {var, 1, 'X'};
 sample_node(_Type, pattern) -> {var, 1, 'X'};
 sample_node(_Type, clauses) -> sample_clause();
 sample_node(_Type, clause) -> sample_clause();
 sample_node(_Type, handlers) -> sample_try_clause();
 sample_node(_Type, else_clauses) -> sample_clause();
+sample_node(map_comp, template) ->
+    {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
 sample_node(_Type, template) -> {atom, 1, template};
 sample_node(_Type, templates) -> {atom, 1, template};
 sample_node(_Type, size) -> {integer, 1, 8};

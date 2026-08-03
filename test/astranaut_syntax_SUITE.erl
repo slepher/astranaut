@@ -99,6 +99,9 @@ all() ->
      test_otp29_native_record_forms,
      test_otp29_native_record_version,
      test_record_access_child_slot_order,
+     test_attribute_adapter_roundtrip,
+     test_record_field_adapter_roundtrip,
+     test_adapter_slot_replacement,
      test_traverse_validate_changed_node,
      test_traverse_validate_false_opt_out,
      test_traverse_validate_preserves_slot_attr,
@@ -1128,6 +1131,94 @@ test_record_access_child_slot_order(_Config) ->
                    validator := {slot, record_access, field, expression}},
                  FieldSpec).
 
+test_attribute_adapter_roundtrip(_Config) ->
+    Forms =
+        [parse_form("-type t(A) :: {A, integer()}."),
+         parse_form("-opaque opaque_t() :: ok | 42."),
+         parse_form("-spec local(atom()) -> integer()."),
+         {attribute, 1, spec,
+          {{sample_module, remote, 1},
+           [{type, 1, 'fun',
+             [{type, 1, product, [{type, 1, atom, []}]},
+              {type, 1, integer, []}]}]}},
+         parse_form("-callback handle(atom()) -> integer().")],
+    lists:foreach(fun assert_adapter_roundtrip/1, Forms).
+
+test_record_field_adapter_roundtrip(_Config) ->
+    Nodes =
+        [{record_field, 1, {atom, 1, field}},
+         {record_field, 2, {atom, 2, field}, {integer, 2, 42}},
+         {typed_record_field,
+          {record_field, 3, {atom, 3, field}, {integer, 3, 0}},
+          {type, 3, integer, []}}],
+    lists:foreach(fun assert_adapter_roundtrip/1, Nodes),
+    [FieldWithoutDefault, FieldWithDefault, TypedField] = Nodes,
+    ?assertEqual(record_field, astranaut_syntax:type(FieldWithoutDefault)),
+    ?assertEqual(record_field, astranaut_syntax:type(FieldWithDefault)),
+    ?assertEqual(typed_record_field, astranaut_syntax:type(TypedField)),
+    ?assertEqual(3, astranaut_syntax:get_pos(TypedField)),
+    ?assertNot(astranaut_syntax:is_leaf(FieldWithoutDefault)),
+    ?assertNot(astranaut_syntax:is_leaf(TypedField)),
+    ?assertMatch(
+       {typed_record_field, {record_field, 9, _, _}, _},
+       astranaut_syntax:set_pos(TypedField, 9)).
+
+test_adapter_slot_replacement(_Config) ->
+    Field = {record_field, 1, {atom, 1, field}, {integer, 1, 1}},
+    [[FieldName], [_OldValue]] = astranaut_syntax:subtrees(Field),
+    UpdatedField =
+        astranaut_syntax:revert(
+          astranaut_syntax:update_tree(
+            Field, [[FieldName], [{integer, 1, 2}]])),
+    assert_same_ast(
+      {record_field, 1, {atom, 1, field}, {integer, 1, 2}},
+      UpdatedField),
+
+    TypeAttribute = parse_form("-type t(A) :: A."),
+    [[AttributeName], [TypeName, _OldBody|TypeParams]] =
+        astranaut_syntax:subtrees(TypeAttribute),
+    NewBody = {type, 1, integer, []},
+    UpdatedAttribute =
+        astranaut_syntax:revert(
+          astranaut_syntax:update_tree(
+            TypeAttribute,
+            [[AttributeName], [TypeName, NewBody|TypeParams]])),
+    {attribute, _, type, {t, UpdatedBody, UpdatedParams}} = UpdatedAttribute,
+    assert_same_ast(NewBody, UpdatedBody),
+    ?assertEqual(1, length(UpdatedParams)),
+
+    TypedField =
+        {typed_record_field,
+         {record_field, 1, {atom, 1, field}},
+         {type, 1, integer, []}},
+    [[OriginalField], [_OldFieldType]] =
+        astranaut_syntax:subtrees(TypedField),
+    NewFieldType = {type, 1, atom, []},
+    UpdatedTypedField =
+        astranaut_syntax:revert(
+          astranaut_syntax:update_tree(
+            TypedField, [[OriginalField], [NewFieldType]])),
+    assert_same_ast(
+      {typed_record_field,
+       {record_field, 1, {atom, 1, field}},
+       NewFieldType},
+      UpdatedTypedField),
+
+    SpecAttribute = parse_form("-spec local(atom()) -> integer()."),
+    {attribute, _, spec, {OriginalMFA, _OriginalSpecs}} = SpecAttribute,
+    [[SpecAttributeName], [SpecMFA|_OldSpecs]] =
+        astranaut_syntax:subtrees(SpecAttribute),
+    {attribute, _, spec, {_ReplacementMFA, [ReplacementSpec]}} =
+        parse_form("-spec replacement(integer()) -> atom()."),
+    UpdatedSpecAttribute =
+        astranaut_syntax:revert(
+          astranaut_syntax:update_tree(
+            SpecAttribute,
+            [[SpecAttributeName], [SpecMFA, ReplacementSpec]])),
+    assert_same_ast(
+      {attribute, 1, spec, {OriginalMFA, [ReplacementSpec]}},
+      UpdatedSpecAttribute).
+
 %%--------------------------------------------------------------------
 %% helpers
 %%--------------------------------------------------------------------
@@ -1168,6 +1259,14 @@ assert_parser_or_constructed_ast_rejected(Code, ConstructedAst, Role) ->
 assert_same_ast(Expected, Actual) ->
     ?assertEqual(astranaut_lib:replace_pos(Expected, 0),
                  astranaut_lib:replace_pos(Actual, 0)).
+
+assert_adapter_roundtrip(Node) ->
+    Subtrees = astranaut_syntax:subtrees(Node),
+    ?assertNotEqual([], Subtrees),
+    Rebuilt =
+        astranaut_syntax:revert(
+          astranaut_syntax:update_tree(Node, Subtrees)),
+    assert_same_ast(Node, Rebuilt).
 
 current_otp_at_least(Min) ->
     case astranaut_syntax:otp_vsn() of
