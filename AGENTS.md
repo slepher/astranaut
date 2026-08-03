@@ -4,6 +4,27 @@
 
 `lessons.md` records recurring error patterns and their fixes observed during development of this project. Read it before working on monad bridging, traverse state management, or scan-and-splice processing in `astranaut_macro.erl` and `astranaut.erl`.
 
+## Luna Test and Script Execution
+
+When the primary agent is GPT/Codex and a verified Luna worker is available,
+delegate routine execution of Common Test and other existing repository scripts
+or checks to Luna. This includes full or focused `rebar3 ct` runs, benchmarks,
+schema checks, xref, dialyzer, and similar bounded commands.
+
+Before delegating, the primary agent must read the relevant repository and
+script instructions, choose the exact command and working directory, and define
+the expected evidence. Luna must not install dependencies, access credentials,
+modify source files, expand the task, or perform destructive operations merely
+to run a check. The primary agent remains responsible for approval decisions,
+reviewing Luna's output, verifying consequential or ambiguous results, and
+reporting the final conclusion.
+
+If a command requires interactive approval, sandbox escalation, destructive
+access, or complex diagnosis, the primary agent must handle that part directly.
+If verified Luna execution is unavailable, the primary agent may run the command
+and must state that Luna was unavailable. The Windows sandbox rules below and
+the commit-only scope rule remain authoritative.
+
 ## Codex App Sandbox
 
 `scripts/rebar3_sandbox.ps1` is specifically for running this project inside the Codex desktop app sandbox mode on Windows.
