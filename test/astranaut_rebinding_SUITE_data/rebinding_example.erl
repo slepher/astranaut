@@ -16,7 +16,7 @@
 
 -rebinding_all([debug]).
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 -define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
         is_binary(list_to_binary([Var, <<"4">>]))).
 -else.

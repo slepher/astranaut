@@ -1,4 +1,4 @@
-# fetch_absforms.ps1 — 从 erlang/otp 下载 absform 文档 (maint-19 ~ maint-29)
+# fetch_absforms.ps1 — 从 erlang/otp 下载 absform 文档 (maint-21 ~ maint-29)
 
 param(
     [string]$OutDir = "absforms"
@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $results = @()
 $errors  = @()
 
-for ($v = 19; $v -le 29; $v++) {
+for ($v = 21; $v -le 29; $v++) {
     $mdUrl  = "https://raw.githubusercontent.com/erlang/otp/refs/heads/maint-$v/erts/doc/guides/absform.md"
     $xmlUrl = "https://raw.githubusercontent.com/erlang/otp/refs/heads/maint-$v/erts/doc/src/absform.xml"
     $got = $false

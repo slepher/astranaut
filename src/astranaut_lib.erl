@@ -11,7 +11,6 @@
 -module(astranaut_lib).
 
 -include("astranaut_struct_name.hrl").
--include("stacktrace.hrl").
 
 -export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
          original_forms/2, parse_file/2, load_forms/2, reload_forms/2, compile_forms/2,
@@ -140,7 +139,7 @@ parse_file(File, Opts) ->
 -include("otp_vsn.hrl").
 
 %% StartLocation Option is added after OTP-24, it's need to pass dialyzer before OTP-23.
--ifdef(ASTRANAUT_OTP_AT_LEAST_24).
+-if(?ASTRANAUT_OTP_VSN_GE(24)).
 eppopts_add_location(Opts, EppOpts) ->
     WithColumns = proplists:get_value(error_location, Opts, column) =:= column,
     StartLocation = case WithColumns of

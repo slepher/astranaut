@@ -34,7 +34,7 @@ validator 和版本合法性的单一来源。
 ```erlang
 #{
     type => call,
-    since => 19,
+    since => 21,
     roles => [expression, guard],
     children => [
         #{slot => callee, role => expression, cardinality => one},
@@ -98,7 +98,7 @@ Astranaut compatibility adapters
 - traversal 和 validator 不会分别遗漏节点。
 - 可以审计 schema layout 与 OTP `subtrees/1` 的一致性，并对 adapter
   执行定向 round-trip 测试。
-- 可以自动生成 OTP 19～当前版本的测试矩阵。
+- 可以自动生成 OTP 21～当前版本的测试矩阵。
 - 后续 Visit/Fold API 不需要手写大量节点分派代码。
 
 ## 2. 类型明确的 Parse Fragment API
@@ -385,7 +385,7 @@ Syn 通过 crate features 控制 derive/full/visit 等 AST 能力。Astranaut �
 
 ### Phase 2：覆盖全部 AST
 
-1. 把当前 OTP 19～当前版本节点迁入 schema。
+1. 把当前 OTP 21～当前版本节点迁入 schema。
 2. 自动生成版本条件。
 3. 自动生成 coverage matrix。
 4. 将 `erl_syntax` 作为 projection/reconstruction oracle。

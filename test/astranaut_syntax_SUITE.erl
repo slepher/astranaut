@@ -9,7 +9,7 @@
 
 -include("otp_vsn.hrl").
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_25).
+-if(?ASTRANAUT_OTP_VSN_GE(25)).
 -feature(maybe_expr, enable).
 -endif.
 
@@ -423,15 +423,7 @@ test_generated_schema_dispatch(_Config) ->
     ?assertEqual(
        true,
        astranaut_syntax_schema:slot_available(
-         size_qualifier, size, default, default, 19)),
-    ?assertEqual(
-       true,
-       astranaut_syntax_schema:slot_available(
-         try_expr, handlers, clause, legacy_throw_handler_ast(), 20)),
-    ?assertEqual(
-       false,
-       astranaut_syntax_schema:slot_available(
-         try_expr, handlers, clause, stacktrace_throw_handler_ast(), 20)),
+         size_qualifier, size, default, default, 21)),
     ?assertEqual(
        true,
        astranaut_syntax_schema:slot_available(
@@ -599,7 +591,7 @@ test_normalize_recurses_into_grandchildren(_Config) ->
 
 test_otp_vsn(_Config) ->
     OtpVsn = astranaut_syntax:otp_vsn(),
-    ?assert(OtpVsn =:= 'pre-21' orelse is_integer(OtpVsn)).
+    ?assert(is_integer(OtpVsn)).
 
 test_invalid_otp_vsn(_Config) ->
     ?assertError(
@@ -615,19 +607,16 @@ test_try_handler_validation_uses_abstract_format(_Config) ->
                     astranaut_syntax:subtrees(StacktraceHandler)),
     HandlerSlot = {slot, try_expr, handlers, clause},
     ?assertEqual(ok, astranaut_syntax:validate_node(LegacyHandler, HandlerSlot,
-                                                     #{otp_vsn => 'pre-21'})),
+                                                     #{otp_vsn => 21})),
     ?assertEqual(ok,
                  astranaut_syntax:validate_node(
                    legacy_class_qualifier_handler_ast(), HandlerSlot,
-                   #{otp_vsn => 'pre-21'})),
+                   #{otp_vsn => 21})),
     {ok, LegacyHandler1} = astranaut_syntax:normalize(LegacyHandler, HandlerSlot,
-                                                       #{otp_vsn => 'pre-21'}),
+                                                       #{otp_vsn => 21}),
     assert_same_ast(LegacyHandler, LegacyHandler1),
-    {error, #{reason := invalid_role,
-              validator := HandlerSlot,
-              actual_type := clause}} =
-        astranaut_syntax:validate_node(StacktraceHandler, HandlerSlot,
-                                        #{otp_vsn => 'pre-21'}),
+    ?assertEqual(ok, astranaut_syntax:validate_node(StacktraceHandler, HandlerSlot,
+                                                     #{otp_vsn => 21})),
     StacktraceHandlerWithInvalidBody =
         {clause, 1,
          [{tuple, 1, [{atom, 1, throw}, {var, 1, 'P'}, {var, 1, 'S'}]}],
@@ -646,29 +635,17 @@ test_legacy_catch_handler(_Config) ->
     ?assertEqual([], Clauses),
     ?assertNotEqual([], Handlers),
     ?assertEqual([], After),
-    ?assertEqual(ok, validate(LegacyTry, expression, #{otp_vsn => 'pre-21'})),
+    ?assertEqual(ok, validate(LegacyTry, expression, #{otp_vsn => 21})),
     ?assertEqual(ok, validate(LegacyTry, expression,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})).
 
 test_otp21_stacktrace_catch(_Config) ->
     StacktraceTry = stacktrace_catch_try_ast(),
-    case current_otp_at_least(21) of
-        true ->
-            StacktraceForm = parse_form("f() -> try body catch error:Reason:Stacktrace -> Reason end."),
-            ParsedStacktraceTry = function_body_expr(StacktraceForm),
-            assert_same_ast(StacktraceTry, ParsedStacktraceTry),
-            ?assertEqual(ok, validate(ParsedStacktraceTry, expression,
-                                                       #{otp_vsn => astranaut_syntax:otp_vsn()})),
-            {error, #{reason := invalid_role,
-                      actual_type := clause,
-                      parent_type := try_expr}} =
-                validate(ParsedStacktraceTry, expression, #{otp_vsn => 'pre-21'});
-        false ->
-            %% Older erl_syntax versions normalize the third catch pattern
-            %% away before recursive validation can inspect it. The explicit
-            %% pre-21 slot rejection is covered above with validate_node/3.
-            ok
-    end.
+    StacktraceForm = parse_form("f() -> try body catch error:Reason:Stacktrace -> Reason end."),
+    ParsedStacktraceTry = function_body_expr(StacktraceForm),
+    assert_same_ast(StacktraceTry, ParsedStacktraceTry),
+    ?assertEqual(ok, validate(ParsedStacktraceTry, expression,
+                                               #{otp_vsn => astranaut_syntax:otp_vsn()})).
 
 test_legacy_map_pattern_key(_Config) ->
     LegacyField = {map_field_exact, 1, {var, 1, 'K'}, {var, 1, 'V'}},
@@ -682,7 +659,7 @@ test_legacy_map_pattern_key(_Config) ->
     StaticKeyForm = parse_form("f(#{key := V}) -> V."),
     ?assertEqual(ok, validate(
                        map_pattern_field(function_first_pattern(StaticKeyForm)),
-                       pattern, #{otp_vsn => 'pre-21'})).
+                       pattern, #{otp_vsn => 21})).
 
 test_otp23_map_pattern_key_expression(_Config) ->
     NewField = {map_field_exact, 1,
@@ -716,7 +693,7 @@ test_legacy_binary_size(_Config) ->
     StaticSizeForm = parse_form("f(<<X:8>>) -> X."),
     ?assertEqual(ok, validate(
                        function_first_pattern(StaticSizeForm),
-                       pattern, #{otp_vsn => 'pre-21'})).
+                       pattern, #{otp_vsn => 21})).
 
 test_otp23_binary_size_expression(_Config) ->
     NewBin = {bin, 1, [{bin_element, 1, {var, 1, 'X'},
@@ -1039,7 +1016,7 @@ test_validate_empty_list(_Config) ->
     ?assertEqual(ok, validate([], form)),
     ?assertEqual(ok, validate([], pattern)).
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 test_otp29_native_record_forms(_Config) ->
     Field = {record_field, 1, {atom, 1, x}, {integer, 1, 1}},
     QualifiedCreate = {record, 1, {mod, rec}, [Field]},
@@ -1276,12 +1253,7 @@ assert_adapter_roundtrip(Node) ->
     assert_same_ast(Node, Rebuilt).
 
 current_otp_at_least(Min) ->
-    case astranaut_syntax:otp_vsn() of
-        OtpVsn when is_integer(OtpVsn) ->
-            OtpVsn >= Min;
-        'pre-21' ->
-            false
-    end.
+    astranaut_syntax:otp_vsn() >= Min.
 
 function_body_expr({function, _Pos, _Name, _Arity,
                     [{clause, _ClausePos, _Patterns, _Guards, [Expr]}]}) ->

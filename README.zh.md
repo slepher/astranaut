@@ -2,7 +2,7 @@
 
 # requirements
 
-&emsp;&emsp; erlang R19 or higher
+&emsp;&emsp; Erlang/OTP 21 或更高版本
 
 # traverse
 
@@ -244,7 +244,7 @@ astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
 ```erlang
   astranaut_syntax:child_specs(Type, Subtrees, Attr) -> [child_spec()].
   astranaut_syntax:node_roles(Type) -> [node_role()].
-  astranaut_syntax:otp_vsn() -> integer() | 'pre-21'.
+  astranaut_syntax:otp_vsn() -> integer().
 
   astranaut_syntax:type(Node) -> Type.
   astranaut_syntax:get_pos(Node) -> Pos.

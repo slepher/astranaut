@@ -11,7 +11,6 @@
 -compile(export_all).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include("stacktrace.hrl").
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
 %% Info = [tuple()]
@@ -134,20 +133,20 @@ disable_tco(_Config) ->
     try
         disable_tco_example:f(1)
     catch
-        _:_?CAPTURE_STACKTRACE ->
-            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(?GET_STACKTRACE))
+        _:_:Stacktrace ->
+            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(Stacktrace))
     end.
 
 disable_tco_nested_control_flow(_Config) ->
     try
         disable_tco_example:nested_control_flow(1)
     catch
-        _:_?CAPTURE_STACKTRACE ->
+        _:_:Stacktrace ->
             ?assertEqual(
                [{s, [1]},
                 {nested_helper, 1},
                 {nested_control_flow, 1}],
-               extract_stacktrace(?GET_STACKTRACE))
+               extract_stacktrace(Stacktrace))
     end.
 
 disable_tco_transform_contract(_Config) ->

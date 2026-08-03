@@ -8,7 +8,6 @@
 -module(astranaut_macro_expander).
 
 -include("do.hrl").
--include("stacktrace.hrl").
 
 -export([expand_functions/2,
          function_call_analysis/2,
@@ -587,7 +586,7 @@ invoke_macro_function(
             astranaut_traverse:scoped_state(
               ok, astranaut:traverse_return(Return))
     catch
-        Class:Exception?CAPTURE_STACKTRACE ->
+        Class:Exception:Stacktrace ->
             StackTraces1 =
                 lists:takewhile(
                   fun({M, F, A, _Pos}) ->
@@ -595,7 +594,7 @@ invoke_macro_function(
                               {?MODULE, invoke_macro_function, 1};
                      (_Stack) ->
                           false
-                  end, ?GET_STACKTRACE),
+                  end, Stacktrace),
             Error = macro_exception(
                       Arguments, Class, Exception, StackTraces1, Macro),
             astranaut_traverse:fail(Error)

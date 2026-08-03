@@ -154,7 +154,7 @@ remote_type(Name, Module, Type) ->
 record(Name) ->
     quote_code("-record('_A@Name', {id, hello, world}).").
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 native_records() ->
     [quote(#mod:rec{x = 1}),
      quote(R#mod:rec{x = 2}),

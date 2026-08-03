@@ -9,7 +9,6 @@ test_task:
       - image: erlang:24
       - image: erlang:23
       - image: erlang:21
-      - image: erlang:19
   env:
     REBAR_BASE_DIR: .rebar_cache
   rebar3_cache:

@@ -389,7 +389,7 @@ test_record(_Config) ->
     ?assertEqual(Ast, Record),
     ok.
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 test_native_records(_Config) ->
     [QualifiedCreate, QualifiedUpdate, AnonymousPattern,
      AnonymousUpdate, QualifiedAccess, AnonymousAccess] =

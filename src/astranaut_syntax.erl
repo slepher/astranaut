@@ -20,7 +20,7 @@
         #{attr => map(),
           forms => [form()],
           record_defs => [form()],
-          otp_vsn => integer() | 'pre-21',
+          otp_vsn => integer(),
           fail => raise | collect}.
 -type validation_error() :: map().
 -type child_spec() ::
@@ -57,7 +57,7 @@ type({typed_record_field, _Field, _FieldType}) ->
 type(Node) ->
     erl_syntax:type(Node).
 
--spec otp_vsn() -> integer() | 'pre-21'.
+-spec otp_vsn() -> integer().
 otp_vsn() ->
     ?ASTRANAUT_OTP_VSN.
 
@@ -127,7 +127,7 @@ is_leaf(Node) ->
 %% OTP erl_syntax does not project type/opaque/spec/callback attributes
 %% symmetrically with the abstract format. Keep this compatibility projection
 %% local and let every ordinary node fall through to erl_syntax:subtrees/1.
-%% Scope: supported OTP releases 19-29. Regression coverage lives in
+%% Scope: supported OTP releases 21-29. Regression coverage lives in
 %% astranaut_syntax_SUITE's type/spec attribute tests.
 subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name =:= type; Name =:= opaque ->
     NameTree = name_arity_tree(Name, Pos),
@@ -318,7 +318,6 @@ validation_env(Opts) ->
     #{forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
       otp_vsn => normalize_otp_vsn(maps:get(otp_vsn, Opts, otp_vsn()))}.
 
-normalize_otp_vsn('pre-21') -> 19;
 normalize_otp_vsn(OtpVsn) when is_integer(OtpVsn) -> OtpVsn;
 normalize_otp_vsn(OtpVsn) -> erlang:error({invalid_otp_vsn, OtpVsn}).
 

@@ -10,13 +10,13 @@
 
 -include("otp_vsn.hrl").
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_25).
+-if(?ASTRANAUT_OTP_VSN_GE(25)).
 -define(OVER_OTP_25, true).
 -endif.
--ifdef(ASTRANAUT_OTP_AT_LEAST_26).
+-if(?ASTRANAUT_OTP_VSN_GE(26)).
 -define(OVER_OTP_26, true).
 -endif.
--ifdef(ASTRANAUT_OTP_AT_LEAST_28).
+-if(?ASTRANAUT_OTP_VSN_GE(28)).
 -define(OVER_OTP_28, true).
 -endif.
 
@@ -25,7 +25,6 @@
 -endif.
 
 -include("rebinding.hrl").
--include("stacktrace.hrl").
 
 -rebinding_all([debug]).
 
@@ -214,8 +213,8 @@ test_try() ->
     try 
         A
     catch
-        Class:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(Class, Exception, ?GET_STACKTRACE)
+        Class:Exception:Stacktrace ->
+            erlang:raise(Class, Exception, Stacktrace)
     end.
 
 test_operator(A) ->

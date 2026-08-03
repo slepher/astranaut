@@ -2,6 +2,14 @@
 
 [中文](changelog.zh.md)
 
+## 0.13.0
+
+### Compatibility
+
+- Raised the minimum supported Erlang/OTP release from 19 to 21 and removed
+  the pre-21 stacktrace, syntax-schema, reference-data, and CI compatibility
+  paths.
+
 ## 0.11.2
 
 ### Macro system

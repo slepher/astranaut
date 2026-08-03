@@ -141,7 +141,7 @@ format_error({illegal_local_macro_definition_mutation, Form}) ->
 format_error(Error) ->
     astranaut:format_error(Error).
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_24).
+-if(?ASTRANAUT_OTP_VSN_GE(24)).
 format_exception({Class, Reason, StackTrace}) ->
     erl_error:format_exception(Class, Reason, StackTrace).
 -else.

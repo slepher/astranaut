@@ -33,7 +33,7 @@
 
 -include("otp_vsn.hrl").
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 -export([test_native_record_macro/0]).
 -endif.
 
@@ -156,7 +156,7 @@ test_nested_macro(N) ->
 test_recursive_macro() ->
     macro_example:recursive_macro(4).
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 test_native_record_macro() ->
     macro_example:native_record_macro(40).
 -endif.

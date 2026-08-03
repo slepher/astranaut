@@ -1,28 +1,7 @@
 -ifndef(ASTRANAUT_OTP_VSN_HRL).
 -define(ASTRANAUT_OTP_VSN_HRL, true).
 
--ifdef('OTP_RELEASE').
 -define(ASTRANAUT_OTP_VSN, ?OTP_RELEASE).
--define(ASTRANAUT_OTP_VSN_NUM, ?OTP_RELEASE).
--define(ASTRANAUT_OTP_AT_LEAST_21, true).
--if(?OTP_RELEASE >= 24).
--define(ASTRANAUT_OTP_AT_LEAST_24, true).
--endif.
--if(?OTP_RELEASE >= 25).
--define(ASTRANAUT_OTP_AT_LEAST_25, true).
--endif.
--if(?OTP_RELEASE >= 26).
--define(ASTRANAUT_OTP_AT_LEAST_26, true).
--endif.
--if(?OTP_RELEASE >= 28).
--define(ASTRANAUT_OTP_AT_LEAST_28, true).
--endif.
--if(?OTP_RELEASE >= 29).
--define(ASTRANAUT_OTP_AT_LEAST_29, true).
--endif.
--else.
--define(ASTRANAUT_OTP_VSN, 'pre-21').
--define(ASTRANAUT_OTP_VSN_NUM, 0).
--endif.
+-define(ASTRANAUT_OTP_VSN_GE(Vsn), (?OTP_RELEASE >= (Vsn))).
 
 -endif.

@@ -8,8 +8,6 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_uniplate).
 
--include("stacktrace.hrl").
-
 -export_type([uniplate/1]).
 -export_type([node_context/1]).
 
@@ -365,17 +363,17 @@ uniplate(Uniplate, Node, NodeContext1, Opts, ExceptionType) ->
         {Subtreess, MakeTree} ->
             {Subtreess, MakeTree}
     catch
-        EType:Exception?CAPTURE_STACKTRACE ->
+        EType:Exception:Stacktrace ->
             case context_node(NodeContext1) of
                 Node ->
                     case maps:find(parent, Opts) of
                         {ok, Parent} ->
-                            erlang:raise(EType, {invalid_uniplate_subnode, Parent, Node, Exception}, ?GET_STACKTRACE);
+                            erlang:raise(EType, {invalid_uniplate_subnode, Parent, Node, Exception}, Stacktrace);
                         error ->
-                            erlang:raise(EType, {invalid_node, Node, Exception}, ?GET_STACKTRACE)
+                            erlang:raise(EType, {invalid_node, Node, Exception}, Stacktrace)
                         end;
                 Node1 ->
-                    erlang:raise(EType, {ExceptionType, Node, Node1, Exception}, ?GET_STACKTRACE)
+                    erlang:raise(EType, {ExceptionType, Node, Node1, Exception}, Stacktrace)
             end
     end.
 
@@ -385,8 +383,8 @@ make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
         Node1 ->
             Node1
     catch
-        EType:Exception?CAPTURE_STACKTRACE ->
-            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, ?GET_STACKTRACE)
+        EType:Exception:Stacktrace ->
+            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, Stacktrace)
     end.
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->

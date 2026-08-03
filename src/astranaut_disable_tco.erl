@@ -263,9 +263,6 @@ add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
     Node = try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar),
     {Node, NVariables}.
 
--include("otp_vsn.hrl").
-
--ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar) ->
     quote(
       try
@@ -274,13 +271,3 @@ try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar) ->
           _@ClassVar:_@ExceptionVar:_@StackTraceVar ->
               erlang:raise(_@ClassVar, _@ExceptionVar, _@StackTraceVar)
       end, Pos).
--else.
-try_catch_node(Expr, Pos, ClassVar, ExceptionVar, _StackTraceVar) ->
-    quote(
-      try
-          unquote(Expr)
-      catch
-          _@ClassVar:_@ExceptionVar ->
-              erlang:raise(_@ClassVar, _@ExceptionVar, erlang:get_stacktrace())
-      end, Pos).
--endif.

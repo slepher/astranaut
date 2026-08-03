@@ -35,7 +35,7 @@
 
 -include("otp_vsn.hrl").
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 -export_macro([native_record_macro/1]).
 -endif.
 
@@ -113,7 +113,6 @@ macro_case(Body, TrueClause, FalseClause) ->
               false
       end).
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_21).
 macro_try_catch() ->
     Class = {var, 0, 'Class0'},
     Exception = {var, 0, 'Exception0'},
@@ -126,18 +125,6 @@ macro_try_catch() ->
           _@Class:_@Exception:_@Stack ->
               erlang:raise(_L@Expr)
       end).
--else.
-macro_try_catch() ->
-    Class = {var, 0, 'Class0'},
-    Exception = {var, 0, 'Exception0'},
-    quote(
-      try
-          exit(throw)
-      catch
-          _@Class:_@Exception ->
-              erlang:raise(_@Class, _@Exception, erlang:get_stacktrace())
-      end).
--endif.
 
 macro_order_outer(quote = ok) ->
     quote(ok);
@@ -237,7 +224,7 @@ recursive_macro(Other) ->
     %% 容错处理
     Other.
 
--ifdef(ASTRANAUT_OTP_AT_LEAST_29).
+-if(?ASTRANAUT_OTP_VSN_GE(29)).
 native_record_macro(Ast) ->
     quote(
       begin

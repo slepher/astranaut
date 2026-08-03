@@ -224,135 +224,135 @@ node_available(Type, OtpVsn) ->
             true
     end.
 node_bounds(annotated_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(application) ->
-    {19, 29};
+    {21, 29};
 node_bounds(arity_qualifier) ->
-    {19, 29};
+    {21, 29};
 node_bounds(atom) ->
-    {19, 29};
+    {21, 29};
 node_bounds(attribute) ->
-    {19, 29};
+    {21, 29};
 node_bounds(binary) ->
-    {19, 29};
+    {21, 29};
 node_bounds(binary_comp) ->
-    {19, 29};
+    {21, 29};
 node_bounds(binary_field) ->
-    {19, 29};
+    {21, 29};
 node_bounds(binary_generator) ->
-    {19, 29};
+    {21, 29};
 node_bounds(bitstring_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(block_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(case_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(catch_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(char) ->
-    {19, 29};
+    {21, 29};
 node_bounds(class_qualifier) ->
-    {19, 29};
+    {21, 29};
 node_bounds(clause) ->
-    {19, 29};
+    {21, 29};
 node_bounds(comment) ->
-    {19, 29};
+    {21, 29};
 node_bounds(cond_expr) ->
-    {19, 22};
+    {21, 22};
 node_bounds(conjunction) ->
-    {19, 29};
+    {21, 29};
 node_bounds(cons) ->
-    {19, 29};
+    {21, 29};
 node_bounds(constrained_function_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(constraint) ->
-    {19, 29};
+    {21, 29};
 node_bounds(disjunction) ->
-    {19, 29};
+    {21, 29};
 node_bounds(else_expr) ->
     {25, 29};
 node_bounds(eof_marker) ->
-    {19, 29};
+    {21, 29};
 node_bounds(error_marker) ->
-    {19, 29};
+    {21, 29};
 node_bounds(float) ->
-    {19, 29};
+    {21, 29};
 node_bounds(fun_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(fun_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(function) ->
-    {19, 29};
+    {21, 29};
 node_bounds(function_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(generator) ->
-    {19, 29};
+    {21, 29};
 node_bounds(if_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(implicit_fun) ->
-    {19, 29};
+    {21, 29};
 node_bounds(infix_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(integer) ->
-    {19, 29};
+    {21, 29};
 node_bounds(integer_range_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(list) ->
-    {19, 29};
+    {21, 29};
 node_bounds(list_comp) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_comp) ->
     {26, 29};
 node_bounds(map_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_field_assoc) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_field_exact) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_generator) ->
     {26, 29};
 node_bounds(map_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_type_assoc) ->
-    {19, 29};
+    {21, 29};
 node_bounds(map_type_exact) ->
-    {19, 29};
+    {21, 29};
 node_bounds(match_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(maybe_expr) ->
     {25, 29};
 node_bounds(maybe_match_expr) ->
     {25, 29};
 node_bounds(module_qualifier) ->
-    {19, 29};
+    {21, 29};
 node_bounds(named_fun_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(nil) ->
-    {19, 29};
+    {21, 29};
 node_bounds(operator) ->
-    {19, 29};
+    {21, 29};
 node_bounds(parentheses) ->
-    {19, 29};
+    {21, 29};
 node_bounds(prefix_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(receive_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_access) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_field) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_index_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(record_type_field) ->
-    {19, 29};
+    {21, 29};
 node_bounds(remote_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(size_qualifier) ->
-    {19, 29};
+    {21, 29};
 node_bounds(strict_binary_generator) ->
     {28, 29};
 node_bounds(strict_generator) ->
@@ -360,43 +360,43 @@ node_bounds(strict_generator) ->
 node_bounds(strict_map_generator) ->
     {28, 29};
 node_bounds(string) ->
-    {19, 29};
+    {21, 29};
 node_bounds(text) ->
-    {19, 29};
+    {21, 29};
 node_bounds(try_expr) ->
-    {19, 29};
+    {21, 29};
 node_bounds(tuple) ->
-    {19, 29};
+    {21, 29};
 node_bounds(tuple_type) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_application) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_binary) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_fun) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_integer_range) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_map) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_map_field) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_record) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_tuple) ->
-    {19, 29};
+    {21, 29};
 node_bounds(type_union) ->
-    {19, 29};
+    {21, 29};
 node_bounds(typed_record_field) ->
-    {19, 29};
+    {21, 29};
 node_bounds(underscore) ->
-    {19, 29};
+    {21, 29};
 node_bounds(user_type_application) ->
-    {19, 29};
+    {21, 29};
 node_bounds(variable) ->
-    {19, 29};
+    {21, 29};
 node_bounds(warning_marker) ->
-    {19, 29};
+    {21, 29};
 node_bounds(zip_generator) ->
     {28, 29};
 node_bounds(_Type) ->
@@ -419,171 +419,171 @@ format_available(Type, Node, OtpVsn) ->
     end.
 format_bounds(annotated_type, {ann_type, _, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(application, {call, _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(atom, {atom, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(attribute, {attribute, _, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary, {bin, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_comp, {bc, _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_field, {bin_element, _, Node1, default, default})
     when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_field, {bin_element, _, Node1, Node2, default})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_field, {bin_element, _, Node1, default, Values2})
     when not is_list(Node1), is_list(Values2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_field, {bin_element, _, Node1, Node2, Values3})
     when not is_list(Node1), not is_list(Node2), is_list(Values3) ->
-    {19, 29};
+    {21, 29};
 format_bounds(binary_generator, {b_generate, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(bitstring_type, {type, _, binary, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(block_expr, {block, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(case_expr, {'case', _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(catch_expr, {'catch', _, Node1}) when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(char, {char, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(clause, {clause, _, Nodes1, Nodes2, Nodes3})
     when is_list(Nodes1), is_list(Nodes2), is_list(Nodes3) ->
-    {19, 29};
+    {21, 29};
 format_bounds(cons, {cons, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(constrained_function_type,
               {type, _, bounded_fun, [Node1, Nodes2]})
     when is_list(Nodes2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(constraint, {type, _, constraint, [Node1, Nodes2]})
     when is_list(Nodes2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(else_expr, {'else', _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(eof_marker, {eof, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(error_marker, {error, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(float, {float, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(fun_expr, {'fun', _, {clauses, Nodes1}})
     when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(fun_type, {type, _, 'fun', []}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(function, {function, _, _, _, Nodes1})
     when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(function_type,
               {type, _, 'fun', [{type, _, product, Nodes1}, Node2]})
     when not is_list(Node2), is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(function_type, {type, _, 'fun', [{type, _, any}, Node1]})
     when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(generator, {generate, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(if_expr, {'if', _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(implicit_fun, {'fun', _, {function, _, _}}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(implicit_fun, {'fun', _, {function, Node1, Node2, Node3}})
     when not is_list(Node3), not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(infix_expr, {op, _, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(integer, {integer, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(integer_range_type, {type, _, range, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(list, {cons, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(list_comp, {lc, _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(list_comp, {lc, _, Nodes1, Nodes2})
     when is_list(Nodes1), is_list(Nodes2) ->
     {29, 29};
 format_bounds(map_comp, {mc, _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_comp, {mc, _, Nodes1, Nodes2})
     when is_list(Nodes1), is_list(Nodes2) ->
     {29, 29};
 format_bounds(map_expr, {map, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_expr, {map, _, Node1, Nodes2})
     when not is_list(Node1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_field_assoc, {map_field_assoc, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_field_exact, {map_field_exact, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_generator, {m_generate, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_type, {type, _, map, any}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_type, {type, _, map, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_type_assoc,
               {type, _, map_field_assoc, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(map_type_exact,
               {type, _, map_field_exact, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(match_expr, {match, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(maybe_expr, {'maybe', _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(maybe_expr, {'maybe', _, Nodes1, {'else', _, Nodes2}})
     when is_list(Nodes1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(maybe_match_expr, {maybe_match, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(module_qualifier, {remote, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(named_fun_expr, {named_fun, _, _, Nodes1})
     when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(nil, {nil, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(prefix_expr, {op, _, _, Node1}) when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(receive_expr, {'receive', _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(receive_expr, {'receive', _, Nodes1, Node2, Nodes3})
     when is_list(Nodes1), not is_list(Node2), is_list(Nodes3) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_access,
               {record_field, _, Node1, LocalRecord2, Node3})
     when not is_list(Node1), is_atom(LocalRecord2), not is_list(Node3) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_access,
               {record_field, _, Node1, {Module2, Record3}, Node4})
     when
@@ -597,10 +597,10 @@ format_bounds(record_access, {record_field, _, Node1, [], Node2})
     {29, 29};
 format_bounds(record_expr, {record, _, LocalRecord1, Nodes2})
     when is_atom(LocalRecord1), is_list(Nodes2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_expr, {record, _, Node1, LocalRecord2, Nodes3})
     when not is_list(Node1), is_atom(LocalRecord2), is_list(Nodes3) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_expr, {record, _, {Module1, Record2}, Nodes3})
     when is_atom(Record2), is_atom(Module1), is_list(Nodes3) ->
     {29, 29};
@@ -619,96 +619,96 @@ format_bounds(record_expr, {record, _, Node1, [], Nodes2})
     {29, 29};
 format_bounds(record_field, {record_field, _, Node1})
     when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_field, {record_field, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_index_expr, {record_index, _, _, Node1})
     when not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_type, {type, _, record, [Node1 | Nodes2]})
     when is_list(Nodes2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(record_type_field, {type, _, field_type, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(remote_type, {type, _, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(remote_type, {remote_type, _, [Node1, Node2, Nodes3]})
     when is_list(Nodes3), not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(strict_binary_generator,
               {b_generate_strict, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(strict_generator, {generate_strict, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(strict_map_generator,
               {m_generate_strict, _, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(string, {string, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(try_expr, {'try', _, Nodes1, Nodes2, Nodes3, Nodes4})
     when
         is_list(Nodes1),
         is_list(Nodes2),
         is_list(Nodes3),
         is_list(Nodes4) ->
-    {19, 29};
+    {21, 29};
 format_bounds(tuple, {tuple, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(tuple_type, {type, _, tuple, any}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(tuple_type, {type, _, tuple, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_application, {type, _, _, Nodes1})
     when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_application,
               {remote_type, _, [Node1, Node2, Nodes3]})
     when is_list(Nodes3), not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_binary, {type, _, binary, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_fun, {type, _, 'fun', []}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_integer_range, {type, _, range, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_map, {type, _, map, any}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_map, {type, _, map, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_map_field,
               {type, _, map_field_assoc, [Node1, Node2]})
     when not is_list(Node2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_record, {type, _, record, [Node1 | Nodes2]})
     when is_list(Nodes2), not is_list(Node1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_tuple, {type, _, tuple, any}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_tuple, {type, _, tuple, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(type_union, {type, _, union, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(typed_record_field, {typed_record_field, Node1, Node2})
     when not is_list(Node1), not is_list(Node2) ->
-    {19, 29};
+    {21, 29};
 format_bounds(underscore, {var, _, '_'}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(user_type_application, {user_type, _, _, Nodes1})
     when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(variable, {var, _, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(warning_marker, {warning, _}) ->
-    {19, 29};
+    {21, 29};
 format_bounds(zip_generator, {zip, _, Nodes1}) when is_list(Nodes1) ->
-    {19, 29};
+    {21, 29};
 format_bounds(_Type, _Node) ->
     unknown.
 format_required(annotated_type) ->
@@ -912,72 +912,6 @@ slot_available(size_qualifier, size, variable, _ChildNode, OtpVsn)
     true;
 slot_available(size_qualifier, size, _ChildType, _ChildNode, OtpVsn)
     when OtpVsn =< 22 ->
-    false;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _, [], Nodes1, Nodes2},
-               OtpVsn)
-    when OtpVsn =< 20, is_list(Nodes1), is_list(Nodes2) ->
-    true;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _, [Node1, Node2], Nodes3, Nodes4},
-               OtpVsn)
-    when
-        OtpVsn =< 20,
-        not is_list(Node2),
-        not is_list(Node1),
-        is_list(Nodes3),
-        is_list(Nodes4) ->
-    true;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _, [{tuple, _, [Node1, Node2]}], Nodes3, Nodes4},
-               OtpVsn)
-    when
-        OtpVsn =< 20,
-        not is_list(Node1),
-        not is_list(Node2),
-        is_list(Nodes3),
-        is_list(Nodes4) ->
-    true;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _,
-                [{tuple, _, [Node1, Node2, {var, _, '_'}]}],
-                Nodes3, Nodes4},
-               OtpVsn)
-    when
-        OtpVsn =< 20,
-        not is_list(Node1),
-        not is_list(Node2),
-        is_list(Nodes3),
-        is_list(Nodes4) ->
-    true;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _,
-                [{tree, class_qualifier, _,
-                  {class_qualifier, Node1, Node2}}],
-                Nodes3, Nodes4},
-               OtpVsn)
-    when
-        OtpVsn =< 20,
-        not is_list(Node1),
-        not is_list(Node2),
-        is_list(Nodes3),
-        is_list(Nodes4) ->
-    true;
-slot_available(try_expr, handlers, _ChildType,
-               {clause, _,
-                [{tree, class_qualifier, _,
-                  {class_qualifier, Node1, Node2, {var, _, '_'}}}],
-                Nodes3, Nodes4},
-               OtpVsn)
-    when
-        OtpVsn =< 20,
-        not is_list(Node1),
-        not is_list(Node2),
-        is_list(Nodes3),
-        is_list(Nodes4) ->
-    true;
-slot_available(try_expr, handlers, _ChildType, _ChildNode, OtpVsn)
-    when OtpVsn =< 20 ->
     false;
 slot_available(binary, elements, binary_field, _ChildNode, _OtpVsn) ->
     true;
