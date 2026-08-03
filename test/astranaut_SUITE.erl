@@ -134,7 +134,9 @@ all() ->
      test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
-     test_continue_sequence_children, test_record, test_map, test_if_expr, test_case_expr, test_try_catch_expr
+     test_continue_sequence_children, test_record, test_typed_record_field,
+     test_map, test_if_expr, test_case_expr, test_try_catch_expr,
+     test_subtree_callback_without_tree
     ].
 
 %%--------------------------------------------------------------------
@@ -666,6 +668,19 @@ test_record(Config) ->
     ?assertEqual({record_field, 0, {var, 0, 'A'}, test, {atom, 0, a}}, Record4_0),
     ok.
 
+test_typed_record_field(_Config) ->
+    TypedField =
+        {typed_record_field,
+         {record_field, 1, {atom, 1, field}},
+         {type, 1, integer, []}},
+    check_node_without_tree(TypedField),
+    ?assertEqual(
+       {typed_record_field,
+        {record_field, 0, {atom, 0, field}},
+        {type, 0, integer, []}},
+       astranaut_lib:replace_pos(TypedField, 0)),
+    ok.
+
 test_map(Config) ->
     Expressions = proplists:get_value(expressions, Config),
     Maps = maps:get(map, Expressions),
@@ -695,23 +710,28 @@ test_try_catch_expr(Config) ->
     check_node_without_tree(TryCatchExpr),
     ok.
 
+test_subtree_callback_without_tree(_Config) ->
+    Clause =
+        {clause, 1, [],
+         [[{op, 1, '>', {integer, 1, 2}, {integer, 1, 1}}]],
+         [{atom, 1, ok}]},
+    ?assertEqual(
+       Clause,
+       astranaut:smap(
+         fun(Node) ->
+                 case element(1, Node) of
+                     tree -> exit({unexpected_tree_node, Node});
+                     _ -> Node
+                 end
+         end, Clause, #{traverse => subtree, role => clause})),
+    ok.
+
 check_node_without_tree(TopAst) ->
     astranaut:mapfold(
       fun(Node, [Parent|T], #{step := pre}) ->
               case element(1, Node) of
                   tree ->
-                      case erl_syntax:type(Node) of
-                          disjunction ->
-                              {Node, [Node, Parent|T]};
-                          conjunction ->
-                              {Node, [Node, Parent|T]};
-                          operator ->
-                              {Node, [Node, Parent|T]};
-                          class_qualifier ->
-                              {Node, [Node, Parent|T]};                              
-                          _ ->
-                              exit({unexpected_tree_node, Node, Parent})
-                      end;
+                      exit({unexpected_tree_node, Node, Parent});
                   _ ->
                       {Node, [Node, Parent|T]}
               end;

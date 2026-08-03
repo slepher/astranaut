@@ -130,7 +130,7 @@ walk({remote_type, _Line1, [{atom, _Line2, astranaut_struct}, {atom, _Line3, rec
     astranaut:walk_return(#{return => TypeNode, continue => true});
 
 walk(Node, _StructInitMap, Attr) ->
-    Type = erl_syntax:type(Node),
+    Type = astranaut_syntax:type(Node),
     astranaut_uniplate:with_subtrees(
       fun(Subtrees) ->
               astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)

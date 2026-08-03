@@ -166,14 +166,55 @@ map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) whe
 map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
-map_m_2(F, Node, _Uniplate, MOpts, #{traverse := none} = Opts) ->
+map_m_2(F, Node, Uniplate, MOpts, Opts) ->
+    case traversal_node(Node) of
+        {callback, CallbackNode} ->
+            map_m_2_callback(F, CallbackNode, Uniplate, MOpts, Opts);
+        transparent ->
+            map_m_2_transparent(F, Node, Uniplate, MOpts, Opts)
+    end.
+
+%% ASTRANAUT TRAVERSAL SPECIAL CASE
+%% erl_syntax:subtrees/1 can project syntax-tools-only #tree{} containers.
+%% Revert ordinary syntax trees before the callback. Projection containers
+%% explicitly marked transparent in syntax.term are descended and rebuilt by
+%% OTP, but callbacks never observe their private representation.
+traversal_node(Node) ->
+    case erl_syntax:is_tree(Node) of
+        false ->
+            {callback, Node};
+        true ->
+            Node1 = astranaut_syntax:revert(Node),
+            case erl_syntax:is_tree(Node1) of
+                false ->
+                    {callback, Node1};
+                true ->
+                    Type = erl_syntax:type(Node1),
+                    case astranaut_syntax_schema:traverse_transparent(Type) of
+                        true -> transparent;
+                        false -> erlang:error({unclassified_syntax_tree_projection,
+                                               Type, Node1})
+                    end
+            end
+    end.
+
+map_m_2_transparent(_F, Node, _Uniplate, #{return := Return},
+                    #{traverse := none}) ->
+    Return(Node);
+map_m_2_transparent(F, Node, Uniplate, MOpts, Opts) ->
+    descend_m_1(
+      fun(SubNode) ->
+              sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
+      end, Node, Node, Uniplate, MOpts, Opts).
+
+map_m_2_callback(F, Node, _Uniplate, MOpts, #{traverse := none} = Opts) ->
     validate_input_node(
       Node,
       fun(Node1) ->
               updated_node_apply(F, Node1, MOpts, validate_node,
                                  invalid_transform, Opts)
       end, MOpts, Opts);
-map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
+map_m_2_callback(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
@@ -204,13 +245,18 @@ map_m_2(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
                 end)
       end, MOpts, Opts).
 
-sub_apply(F, Node, _Uniplate, MOpts, #{traverse := subtree} = Opts) ->
-    validate_input_node(
-      Node,
-      fun(Node1) ->
-              updated_node_apply(F, Node1, MOpts, validate_node,
-                                 invalid_subtree_transform, Opts)
-      end, MOpts, Opts);
+sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree} = Opts) ->
+    case traversal_node(Node) of
+        {callback, CallbackNode} ->
+            validate_input_node(
+              CallbackNode,
+              fun(Node1) ->
+                      updated_node_apply(F, Node1, MOpts, validate_node,
+                                         invalid_subtree_transform, Opts)
+              end, MOpts, Opts);
+        transparent ->
+            map_m_2_transparent(F, Node, Uniplate, MOpts, Opts)
+    end;
 sub_apply(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 

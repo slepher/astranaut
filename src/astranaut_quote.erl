@@ -140,7 +140,7 @@ quoted(Node) ->
     quoted(Node, #{}).
 
 quoted(Node, #{} = Opts) ->
-    QuotePos = erl_syntax:get_pos(Node),
+    QuotePos = astranaut_syntax:get_pos(Node),
     Opts1 = maps:merge(#{quote_type => expression}, Opts#{quote_pos => QuotePos}),
     Opts2 = maps:map(fun(pos, Pos) -> astranaut_lib:abstract_form(Pos, QuotePos); (_Key, Value) -> Value end, Opts1),
     Quoted = quote(Node, Opts2),
@@ -240,7 +240,7 @@ walk({match, Pos1, {atom, _pos2, quote_code}, {string, _, Code}} = Node, #{node 
     Forms = merl:quote(Pos1, Code),
     quote(Forms, #{}, Node, Attr, WalkOpts);
 walk(Node, Attr, _File) ->
-    Type = erl_syntax:type(Node),
+    Type = astranaut_syntax:type(Node),
     astranaut_traverse:return(
       astranaut_uniplate:with_subtrees(
         fun(Subtrees) ->
@@ -251,7 +251,7 @@ walk(Node, Attr, _File) ->
 %%% get options from quoted ast
 %%%===================================================================
 to_options(Ast) ->
-    Type = erl_syntax:type(Ast),
+    Type = astranaut_syntax:type(Ast),
     case lists:member(Type, [list, nil, map_expr, atom]) of
         true ->
             Pos = astranaut_syntax:get_pos(Ast),
@@ -266,7 +266,7 @@ ast_to_options(AstOptions) ->
     AstOptions1 =
         astranaut:smap(
           fun(Node, _Attr) ->
-                  Type = erl_syntax:type(Node),
+                  Type = astranaut_syntax:type(Node),
                   case lists:member(Type, StaticTypes) of
                       true ->
                           Node;
@@ -323,7 +323,7 @@ split_codes(_Codes, _NodeType, _Acc) ->
     {error, invalid_quote_code}.
 
 quote(Value, Options, Node, Attr, #{file := File, module := Module, debug := Debug}) ->
-    QuotePos = erl_syntax:get_pos(Node),
+    QuotePos = astranaut_syntax:get_pos(Node),
     QuoteType = quote_type(Attr),
     Options1 = maps:merge(#{quote_pos => QuotePos, quote_type => QuoteType, 
                             file => File, module => Module, debug => Debug}, Options),

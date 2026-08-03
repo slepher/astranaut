@@ -69,9 +69,12 @@ generate(Schema) ->
      "%%% AST projection and reconstruction remain owned by erl_syntax.\n",
      "%%%-------------------------------------------------------------------\n",
      "-module(astranaut_syntax_schema).\n\n",
-     "-export([node_roles/1, node_available/2, format_available/3,\n",
-     "         slot_available/5, child_layout/4]).\n\n",
+     "-export([node_roles/1, role_available/2, traverse_transparent/1,\n",
+     "         node_available/2, format_available/3, slot_available/5,\n",
+     "         child_layout/4]).\n\n",
      role_function(RoleEntries),
+     role_available_function(Nodes),
+     traverse_function(Nodes),
      availability_function(Nodes, Schema),
      format_functions(Nodes, Schema),
      slot_validation_function(Nodes, Schema),
@@ -86,6 +89,25 @@ role_entries(Nodes, Excluded) ->
 role_function(Entries) ->
     [function_clause(node_roles, Type, Roles) || {Type, Roles} <- Entries] ++
         ["node_roles(_Type) ->\n    [expression, pattern, guard].\n\n"].
+
+role_available_function(Nodes) ->
+    Entries = lists:sort(
+                [{maps:get(type, Node), Role}
+                 || Node <- Nodes,
+                    Role <- lists:usort(maps:get(slot_roles, Node, []))]),
+    [[io_lib:format("role_available(~p, ~p) -> true;~n", [Type, Role])
+      || {Type, Role} <- Entries],
+     "role_available(Type, Role) ->\n"
+     "    lists:member(Role, node_roles(Type)).\n\n"].
+
+traverse_function(Nodes) ->
+    Transparent = lists:sort(
+                    [maps:get(type, Node)
+                     || Node <- Nodes,
+                        maps:get(traverse, Node, normal) =:= transparent]),
+    [[io_lib:format("traverse_transparent(~p) -> true;~n", [Type])
+      || Type <- Transparent],
+     "traverse_transparent(_Type) -> false.\n\n"].
 
 availability_function(Nodes, Schema) ->
     #{min := SchemaMin, max := SchemaMax} = maps:get(otp_versions, Schema),
@@ -149,12 +171,50 @@ format_clause({Type, Pattern, Guards, {Since, Until}}) ->
 slot_validation_function(Nodes, Schema) ->
     #{min := SchemaMin, max := SchemaMax} = maps:get(otp_versions, Schema),
     Entries = slot_validation_entries(Nodes, Schema, SchemaMin, SchemaMax),
+    StructuralTypes = lists:sort(
+                        [maps:get(type, Node)
+                         || Node <- Nodes, maps:get(structural, Node, false)]),
+    StructuralSlots = structural_slot_entries(Nodes, Schema, StructuralTypes),
     ["slot_available(ParentType, Slot, ChildType, ChildNode, 'pre-21') ->\n",
      "    slot_available(ParentType, Slot, ChildType, ChildNode, 19);\n",
      [slot_validation_clauses(Entry, SchemaMin, SchemaMax)
       || Entry <- Entries],
+     [io_lib:format(
+        "slot_available(~p, ~p, ~p, _ChildNode, _OtpVsn) -> true;~n",
+        [ParentType, Slot, ChildType])
+      || {ParentType, Slot, ChildType} <- StructuralSlots],
+     [io_lib:format(
+        "slot_available(_ParentType, _Slot, ~p, _ChildNode, _OtpVsn) -> false;~n",
+        [ChildType])
+      || ChildType <- StructuralTypes],
      "slot_available(_ParentType, _Slot, _ChildType, _ChildNode, _OtpVsn) ->\n",
      "    true.\n\n"].
+
+structural_slot_entries(Nodes, Schema, StructuralTypes) ->
+    Entries = lists:usort(
+                lists:append(
+                  [begin
+                       ParentType = maps:get(type, Node),
+                       Layouts = resolve_layouts(Node, Schema, Nodes),
+                       lists:append(
+                         [[{ParentType, maps:get(slot, Child), ChildType}
+                           || ChildType <- structural_child_types(
+                                             Child, Nodes)]
+                          || Layout <- Layouts,
+                             Child <- layout_children(Layout)])
+                   end || Node <- Nodes])),
+    case [Entry || {_ParentType, _Slot, ChildType} = Entry <- Entries,
+                   not lists:member(ChildType, StructuralTypes)] of
+        [] -> Entries;
+        Invalid -> erlang:error({non_structural_slot_types, Invalid})
+    end.
+
+structural_child_types(Child, Nodes) ->
+    RoleTypes = [maps:get(type, Node)
+                 || Node <- Nodes,
+                    lists:member(maps:get(role, Child),
+                                 maps:get(slot_roles, Node, []))],
+    lists:usort(RoleTypes ++ maps:get(allowed_structural_types, Child, [])).
 
 slot_validation_entries(Nodes, Schema, SchemaMin, SchemaMax) ->
     lists:usort(

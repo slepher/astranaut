@@ -6,8 +6,9 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_syntax_schema).
 
--export([node_roles/1, node_available/2, format_available/3,
-         slot_available/5, child_layout/4]).
+-export([node_roles/1, role_available/2, traverse_transparent/1,
+         node_available/2, format_available/3, slot_available/5,
+         child_layout/4]).
 
 node_roles(annotated_type) ->
     [type];
@@ -187,6 +188,21 @@ node_roles(zip_generator) ->
     [expression];
 node_roles(_Type) ->
     [expression, pattern, guard].
+
+role_available(binary_field, binary_field) -> true;
+role_available(map_field_assoc, map_field) -> true;
+role_available(map_field_exact, map_field) -> true;
+role_available(variable, type_param) -> true;
+role_available(Type, Role) ->
+    lists:member(Role, node_roles(Type)).
+
+traverse_transparent(arity_qualifier) -> true;
+traverse_transparent(class_qualifier) -> true;
+traverse_transparent(conjunction) -> true;
+traverse_transparent(disjunction) -> true;
+traverse_transparent(operator) -> true;
+traverse_transparent(size_qualifier) -> true;
+traverse_transparent(_Type) -> false.
 
 node_available(Type, 'pre-21') ->
     node_available(Type, 19);
@@ -507,6 +523,18 @@ slot_available(try_expr, handlers, _ChildType, {clause, _, [{tuple, _, [Node1|[N
 slot_available(try_expr, handlers, _ChildType, {clause, _, [{tuple, _, [Node1|[Node2|[{var, _, '_'}|[]]]]}|[]], Nodes3, Nodes4}, OtpVsn) when is_integer(OtpVsn) andalso OtpVsn =< 20 andalso not is_list(Node1) andalso not is_list(Node2) andalso is_list(Nodes3) andalso is_list(Nodes4) -> true;
 slot_available(try_expr, handlers, _ChildType, {clause, _, [{tree, class_qualifier, _, {class_qualifier, Node1, Node2, {var, _, '_'}}}|[]], Nodes3, Nodes4}, OtpVsn) when is_integer(OtpVsn) andalso OtpVsn =< 20 andalso not is_list(Node1) andalso not is_list(Node2) andalso is_list(Nodes3) andalso is_list(Nodes4) -> true;
 slot_available(try_expr, handlers, _ChildType, _ChildNode, OtpVsn) when is_integer(OtpVsn) andalso OtpVsn =< 20 -> false;
+slot_available(binary, elements, binary_field, _ChildNode, _OtpVsn) -> true;
+slot_available(map_comp, template, map_field_assoc, _ChildNode, _OtpVsn) -> true;
+slot_available(map_comp, template, map_field_exact, _ChildNode, _OtpVsn) -> true;
+slot_available(map_expr, fields, map_field_assoc, _ChildNode, _OtpVsn) -> true;
+slot_available(map_expr, fields, map_field_exact, _ChildNode, _OtpVsn) -> true;
+slot_available(map_generator, pattern, map_field_assoc, _ChildNode, _OtpVsn) -> true;
+slot_available(map_generator, pattern, map_field_exact, _ChildNode, _OtpVsn) -> true;
+slot_available(strict_map_generator, pattern, map_field_assoc, _ChildNode, _OtpVsn) -> true;
+slot_available(strict_map_generator, pattern, map_field_exact, _ChildNode, _OtpVsn) -> true;
+slot_available(_ParentType, _Slot, binary_field, _ChildNode, _OtpVsn) -> false;
+slot_available(_ParentType, _Slot, map_field_assoc, _ChildNode, _OtpVsn) -> false;
+slot_available(_ParentType, _Slot, map_field_exact, _ChildNode, _OtpVsn) -> false;
 slot_available(_ParentType, _Slot, _ChildType, _ChildNode, _OtpVsn) ->
     true.
 

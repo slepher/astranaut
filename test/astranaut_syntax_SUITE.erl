@@ -374,6 +374,28 @@ test_validate_list_comp(_Config) ->
 test_generated_schema_proxy(_Config) ->
     ?assertEqual(astranaut_syntax_schema:node_roles(atom),
                  astranaut_syntax:node_roles(atom)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:role_available(
+                   map_field_exact, map_field)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:role_available(
+                   binary_field, binary_field)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:role_available(
+                   variable, type_param)),
+    ?assertEqual(false,
+                 astranaut_syntax_schema:role_available(atom, map_field)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:traverse_transparent(operator)),
+    ?assertEqual(false,
+                 astranaut_syntax_schema:traverse_transparent(record_field)),
+    ?assertEqual(false,
+                 astranaut_syntax_schema:traverse_transparent(
+                   typed_record_field)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:traverse_transparent(arity_qualifier)),
+    ?assertEqual(false,
+                 astranaut_syntax_schema:traverse_transparent(infix_expr)),
     ?assertEqual(false,
                  astranaut_syntax_schema:node_available(maybe_expr, 24)),
     ?assertEqual(true,
@@ -409,7 +431,16 @@ test_generated_schema_proxy(_Config) ->
     ?assertEqual(
        true,
        astranaut_syntax_schema:slot_available(
-         try_expr, handlers, clause, stacktrace_throw_handler_ast(), 21)).
+         try_expr, handlers, clause, stacktrace_throw_handler_ast(), 21)),
+    MapField = {map_field_exact, 1, {atom, 1, key}, {var, 1, 'V'}},
+    ?assertEqual(
+       false,
+       astranaut_syntax_schema:slot_available(
+         tuple, elements, map_field_exact, MapField, 29)),
+    ?assertEqual(
+       true,
+       astranaut_syntax_schema:slot_available(
+         map_generator, pattern, map_field_exact, MapField, 29)).
 
 %%--------------------------------------------------------------------
 %% validator metadata and validation scopes

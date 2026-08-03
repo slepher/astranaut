@@ -536,7 +536,7 @@ root_role_type(Type) ->
     end.
 
 traverse_map_form(F, Node) ->
-    Type = erl_syntax:type(Node),
+    Type = astranaut_syntax:type(Node),
     case Type of
 	    attribute ->
             Name = erl_syntax:concrete(erl_syntax:attribute_name(Node)),
@@ -548,11 +548,11 @@ traverse_map_form(F, Node) ->
                       astranaut_traverse:update_file(File),
                       astranaut_traverse:return(Node));
                 _ ->
-                    Pos = erl_syntax:get_pos(Node),
+                    Pos = astranaut_syntax:get_pos(Node),
                     astranaut_traverse:update_pos(Pos, F(Node))
             end;
         function ->
-            Pos = erl_syntax:get_pos(Node),
+            Pos = astranaut_syntax:get_pos(Node),
             astranaut_traverse:update_pos(Pos, F(Node));
 	    eof_marker ->
             astranaut_traverse:then(
@@ -576,7 +576,7 @@ traverse_form(F, Form) ->
     traverse_map_form(F, Form).
 
 traverse_map_node(F, Node) ->
-    Pos = erl_syntax:get_pos(Node),
+    Pos = astranaut_syntax:get_pos(Node),
     astranaut_traverse:update_pos(Pos, F(Node)).
 
 uniplate(Node) ->

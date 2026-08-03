@@ -15,15 +15,22 @@
 %% Node fields:
 %%   type       value returned by erl_syntax:type/1
 %%   roles      AST positions in which the node is structurally valid
+%%   slot_roles structural child categories accepted by this node
+%%   structural whether the node requires an explicitly compatible child slot
 %%   formats    abstract-format tuple variants; id names a variant when needed
 %%   layout(s)  child projections, either named or inline
 %%   alias_of   another node with the same structure
+%%   traverse   `transparent` marks an Astranaut-only traversal projection:
+%%              descend through it for OTP reconstruction, but never expose
+%%              its syntax-tools #tree{} representation to a callback
 %%
 %% Child fields:
 %%   slot         edge name within the parent node
 %%   role         role required of the child node
 %%   cardinality  one, one_or_many, many, or deep_many
 %%   validation   version-bounded restrictions for this concrete child slot
+%%   allowed_structural_types  structural node types additionally accepted by
+%%                             this concrete parent slot
 %%
 %% Abstract-format shape vocabulary:
 %%   anno                 source annotation
@@ -87,6 +94,7 @@
          formats => [#{shape => {string,anno,{value,characters}}}]},
        #{type => variable,
          roles => [expression,pattern,guard,type],
+         slot_roles => [type_param],
          formats => [#{shape => {var,anno,{value,name}}}]},
        #{type => underscore,roles => [pattern],formats => [#{shape => {var,anno,'_'}}]},
        #{type => tuple,
@@ -116,6 +124,8 @@
                     [#{slot => value,role => inherit,cardinality => one},
                      #{slot => types,role => attribute_body,cardinality => many}]}],
          roles => [expression,pattern,guard],
+         slot_roles => [binary_field],
+         structural => true,
          formats =>
              [#{shape => {bin_element,anno,{node,value},default,default}},
               #{shape => {bin_element,anno,{node,value},{node,size},default}},
@@ -132,7 +142,8 @@
                        validation =>
                            [#{until => 22,
                               allowed_types => [default,integer,variable]}]}]}],
-         roles => [expression,pattern,guard]},
+         roles => [expression,pattern,guard],
+         traverse => transparent},
        #{type => map_expr,
          layouts =>
              [#{groups => 1,children => [#{slot => fields,role => map_field,cardinality => many}]},
@@ -146,6 +157,8 @@
               #{shape => {map,anno,{node,argument},{nodes,fields}}}]},
        #{type => map_field_assoc,
          roles => [expression,pattern,guard],
+         slot_roles => [map_field],
+         structural => true,
          layouts =>
              [#{groups => 2,
                 context =>
@@ -168,6 +181,8 @@
          formats => [#{shape => {map_field_assoc,anno,{node,key},{node,value}}}]},
        #{type => map_field_exact,
          roles => [expression,pattern,guard],
+         slot_roles => [map_field],
+         structural => true,
          layouts =>
              [#{groups => 2,
                 context =>
@@ -286,9 +301,15 @@
          roles => [expression,guard],
          layout => inherited_elements,
          formats => [#{shape => {op,anno,{value,operator},{node,argument}}}]},
-       #{type => operator,roles => [expression,guard]},
-       #{type => conjunction,roles => [expression,guard],layout => inherited_elements},
-       #{type => disjunction,roles => [expression,guard],layout => inherited_elements},
+       #{type => operator,roles => [expression,guard],traverse => transparent},
+       #{type => conjunction,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         traverse => transparent},
+       #{type => disjunction,
+         roles => [expression,guard],
+         layout => inherited_elements,
+         traverse => transparent},
        #{type => application,
          layouts =>
              [#{groups => 2,
@@ -392,7 +413,10 @@
          formats =>
              [#{shape => {'fun',anno,{function,{value,name},{value,arity}}}},
               #{shape => {'fun',anno,{function,{node,module},{node,name},{node,arity}}}}]},
-       #{type => arity_qualifier,roles => [expression],layout => inherited_elements},
+       #{type => arity_qualifier,
+         roles => [expression],
+         layout => inherited_elements,
+         traverse => transparent},
        #{type => list_comp,
          layouts =>
              [#{groups => 2,
@@ -446,7 +470,16 @@
          formats => [#{shape => {b_generate,anno,{node,pattern},{node,body}}}]},
        #{type => map_generator,
          roles => [expression],
-         since => 26,layout => generator,
+         since => 26,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => pattern,
+                       role => pattern,
+                       cardinality => one,
+                       allowed_structural_types =>
+                           [map_field_assoc,map_field_exact]},
+                     #{slot => body,role => expression,cardinality => one}]}],
          formats => [#{shape => {m_generate,anno,{node,pattern},{node,body}}}]},
        #{type => strict_generator,
          roles => [expression],
@@ -458,7 +491,16 @@
          formats => [#{shape => {b_generate_strict,anno,{node,pattern},{node,body}}}]},
        #{type => strict_map_generator,
          roles => [expression],
-         since => 28,layout => generator,
+         since => 28,
+         layouts =>
+             [#{groups => 2,
+                children =>
+                    [#{slot => pattern,
+                       role => pattern,
+                       cardinality => one,
+                       allowed_structural_types =>
+                           [map_field_assoc,map_field_exact]},
+                     #{slot => body,role => expression,cardinality => one}]}],
          formats => [#{shape => {m_generate_strict,anno,{node,pattern},{node,body}}}]},
        #{type => zip_generator,
          layouts =>
@@ -497,7 +539,10 @@
                      #{slot => body,role => expression,cardinality => many}]}],
          roles => [clause],
          formats => [#{shape => {clause,anno,{nodes,patterns},{nodes,guards},{nodes,body}}}]},
-       #{type => class_qualifier,roles => [pattern],layout => inherited_elements},
+       #{type => class_qualifier,
+         roles => [pattern],
+         layout => inherited_elements,
+         traverse => transparent},
        #{type => annotated_type,
          roles => [type],
          layout => inherited_elements,
@@ -579,7 +624,7 @@
        #{type => type_map,roles => [type],alias_of => map_type},
        #{type => type_map_field,roles => [type],alias_of => map_type_assoc},
        #{type => remote_type,roles => [type],alias_of => type_application}],
-  schema_version => 3,
+  schema_version => 4,
   otp_versions => #{max => 29,min => 19},
   excluded_nodes =>
       [#{type => form_list,reason => syntax_tools_form_container},

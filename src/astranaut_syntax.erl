@@ -44,6 +44,18 @@
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
 -spec type(term()) -> atom().
+%% ERLANG AST SEMANTICS
+%% Record fields and typed record fields are real abstract-format nodes, but
+%% erl_syntax only accepts them standalone through syntax-tree wrappers. Keep
+%% callbacks on ordinary tuples while delegating projection and reconstruction
+%% to those OTP wrappers.
+%% ASTRANAUT OTP ADAPTER
+type({record_field, _Pos, _Name}) ->
+    record_field;
+type({record_field, _Pos, _Name, _Value}) ->
+    record_field;
+type({typed_record_field, _Field, _FieldType}) ->
+    typed_record_field;
 type(Node) ->
     erl_syntax:type(Node).
 
@@ -52,10 +64,22 @@ otp_vsn() ->
     ?ASTRANAUT_OTP_VSN.
 
 -spec get_pos(term()) -> term().
+%% ASTRANAUT OTP ADAPTER
+%% typed_record_field has no annotation field of its own in abstract format;
+%% its source position is the position of the contained record_field.
+get_pos({typed_record_field, Field, _FieldType}) ->
+    get_pos(Field);
 get_pos(Node) ->
     erl_syntax:get_pos(Node).
 
 -spec set_pos(term(), term()) -> term().
+%% ASTRANAUT OTP ADAPTER: raw record-field boundary; see type/1.
+set_pos({record_field, _OldPos, _Name} = Node, Pos) ->
+    setelement(2, Node, Pos);
+set_pos({record_field, _OldPos, _Name, _Value} = Node, Pos) ->
+    setelement(2, Node, Pos);
+set_pos({typed_record_field, Field, FieldType}, Pos) ->
+    {typed_record_field, set_pos(Field, Pos), FieldType};
 set_pos(Node, Pos) ->
     case erl_syntax:is_tree(Node) of
         true ->
@@ -85,6 +109,13 @@ is_pos(Pos) ->
     end.
 
 -spec is_leaf(term()) -> boolean().
+%% ASTRANAUT OTP ADAPTER: raw record-field boundary; see type/1.
+is_leaf({record_field, _Pos, _Name}) ->
+    false;
+is_leaf({record_field, _Pos, _Name, _Value}) ->
+    false;
+is_leaf({typed_record_field, _Field, _FieldType}) ->
+    false;
 is_leaf(Node) ->
     erl_syntax:is_leaf(Node).
 
@@ -111,8 +142,26 @@ subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= call
 subtrees({attribute, _Pos, Name, Body})
   when Name =:= type; Name =:= opaque; Name =:= spec; Name =:= callback ->
     erlang:error({invalid_attribute_body, Name, Body});
+%% ASTRANAUT OTP ADAPTER: delegate raw record-field nodes through their
+%% OTP syntax-tree wrappers; child grouping remains owned by erl_syntax.
+subtrees({record_field, _Pos, _Name} = Node) ->
+    erl_syntax:subtrees(record_field_tree(Node));
+subtrees({record_field, _Pos, _Name, _Value} = Node) ->
+    erl_syntax:subtrees(record_field_tree(Node));
+subtrees({typed_record_field, _Field, _FieldType} = Node) ->
+    erl_syntax:subtrees(typed_record_field_tree(Node));
 subtrees(Node) ->
     erl_syntax:subtrees(Node).
+
+record_field_tree({record_field, Pos, Name}) ->
+    erl_syntax:set_pos(erl_syntax:record_field(Name), Pos);
+record_field_tree({record_field, Pos, Name, Value}) ->
+    erl_syntax:set_pos(erl_syntax:record_field(Name, Value), Pos).
+
+typed_record_field_tree({typed_record_field, Field, FieldType}) ->
+    FieldTree = otp_tree(Field),
+    Tree = erl_syntax:typed_record_field(FieldTree, otp_tree(FieldType)),
+    erl_syntax:set_pos(Tree, erl_syntax:get_pos(FieldTree)).
 
 mfa_tree(MFA, Pos) ->
     erl_syntax:set_pos(erl_syntax:tuple(lists:map(fun(Element) -> name_arity_tree(Element, Pos) end, tuple_to_list(MFA))), Pos).
@@ -123,9 +172,33 @@ name_arity_tree(Arity, Pos) when is_integer(Arity) ->
     erl_syntax:set_pos(erl_syntax:integer(Arity), Pos).
 
 -spec update_tree(erl_syntax:syntaxTree(), [[erl_syntax:syntaxTree()]]) -> erl_syntax:syntaxTree().
+%% ASTRANAUT OTP ADAPTER: reconstruct through the same OTP wrapper and
+%% return the standard abstract-format tuple expected by callbacks.
+update_tree({record_field, _Pos, _Name} = Node, Subtrees) ->
+    revert_record_field(
+      erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees)));
+update_tree({record_field, _Pos, _Name, _Value} = Node, Subtrees) ->
+    revert_record_field(
+      erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees)));
+update_tree({typed_record_field, _Field, _FieldType} = Node, Subtrees) ->
+    revert_typed_record_field(
+      erl_syntax:update_tree(typed_record_field_tree(Node),
+                             otp_subtrees(Subtrees)));
 update_tree(Node, Subtrees) ->
     %% OTP AUTHORITY: reconstruction is deliberately not schema-generated.
-    erl_syntax:update_tree(Node, Subtrees).
+    erl_syntax:update_tree(Node, otp_subtrees(Subtrees)).
+
+otp_subtrees(Subtrees) ->
+    [[otp_tree(Node) || Node <- Group] || Group <- Subtrees].
+
+otp_tree({record_field, _Pos, _Name} = Node) ->
+    record_field_tree(Node);
+otp_tree({record_field, _Pos, _Name, _Value} = Node) ->
+    record_field_tree(Node);
+otp_tree({typed_record_field, _Field, _FieldType} = Node) ->
+    typed_record_field_tree(Node);
+otp_tree(Node) ->
+    Node.
 
 -spec revert(term()) -> term().
 revert(Node) ->
@@ -135,17 +208,42 @@ revert(Node) ->
         true ->
             case erl_syntax:type(Node) of
                 attribute ->
-                    %% ASTRANAUT OTP SPECIAL CASE
+                    %% ASTRANAUT OTP ADAPTER
                     %% Revert the attribute projection paired with the marked
                     %% subtrees/1 compatibility clauses above.
                     Name = erl_syntax:concrete(erl_syntax:attribute_name(Node)),
                     Args = erl_syntax:attribute_arguments(Node),
                     Pos = erl_syntax:get_pos(Node),
                     revert_attribute(Name, Args, Pos, Node);
+                record_field ->
+                    %% ASTRANAUT OTP ADAPTER
+                    %% erl_syntax:subtrees/1 projects record fields as #tree{},
+                    %% but erl_syntax:revert/1 leaves that standalone projection
+                    %% wrapped. Record fields are real abstract-format nodes and
+                    %% must therefore reach traversal callbacks as such.
+                    revert_record_field(Node);
+                typed_record_field ->
+                    %% ASTRANAUT OTP SPECIAL CASE
+                    %% Like record_field, this is a real abstract-format node
+                    %% whose standalone OTP projection does not revert to raw.
+                    revert_typed_record_field(Node);
                 _ ->
                     erl_syntax:revert(Node)
             end
     end.
+
+revert_record_field(Node) ->
+    Pos = erl_syntax:get_pos(Node),
+    Name = revert(erl_syntax:record_field_name(Node)),
+    case erl_syntax:record_field_value(Node) of
+        none -> {record_field, Pos, Name};
+        Value -> {record_field, Pos, Name, revert(Value)}
+    end.
+
+revert_typed_record_field(Node) ->
+    {typed_record_field,
+     revert(erl_syntax:typed_record_field_body(Node)),
+     revert(erl_syntax:typed_record_field_type(Node))}.
 
 revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name =:= type; Name =:= opaque ->
     TypeName = erl_syntax:atom_value(TypeNameTree),
@@ -495,8 +593,7 @@ path_item(Slot, Index, Validator, Node) ->
 role_allowed(Validator, Type, Node, Env) ->
     ExpectedRole = validator_role(Validator),
     syntax_allowed(Validator, Type, Node, Env) andalso
-        role_allowed_1(Type, ExpectedRole, Node, Env) andalso
-        slot_type_allowed(Validator, Type).
+        role_allowed_1(Type, ExpectedRole, Node, Env).
 
 syntax_allowed(Validator, Type, Node, Env) ->
     OtpVsn = maps:get(otp_vsn, Env, otp_vsn()),
@@ -514,40 +611,35 @@ syntax_allowed(Validator, Type, Node, Env) ->
                 true
         end.
 
-role_allowed_1(Type, guard, _Node, _Env)
-  when Type =:= conjunction; Type =:= disjunction; Type =:= operator ->
-    true;
-role_allowed_1(_Type, guard, Node, Env) ->
-    try erl_lint:is_guard_test(revert(Node), maps:get(forms, Env, [])) of
-        Result -> Result
-    catch
-        error:badarg -> false
+role_allowed_1(Type, guard, Node, Env) ->
+    case astranaut_syntax_schema:traverse_transparent(Type) of
+        true ->
+            %% ASTRANAUT TRAVERSAL SPECIAL CASE
+            %% syntax-tools projection nodes are traversed only as transparent
+            %% OTP reconstruction containers and never reach a callback.
+            astranaut_syntax_schema:role_available(Type, guard);
+        false ->
+            %% ERLANG SEMANTICS
+            %% Guard legality depends on the concrete expression and record
+            %% environment, so it cannot be reduced to a static schema role.
+            try erl_lint:is_guard_test(revert(Node), maps:get(forms, Env, [])) of
+                Result -> Result
+            catch
+                error:badarg -> false
+            end
     end;
-role_allowed_1(Type, map_field, _Node, _Env) ->
-    lists:member(Type, [map_field_assoc, map_field_exact]);
-role_allowed_1(Type, binary_field, _Node, _Env) ->
-    Type =:= binary_field;
 role_allowed_1(_Type, binary_size, default, _Env) ->
-    true;
-role_allowed_1(Type, binary_size, _Node, _Env)
-  when Type =:= conjunction; Type =:= disjunction; Type =:= infix_expr;
-       Type =:= operator; Type =:= prefix_expr ->
+    %% ERLANG SEMANTICS: `default` is the non-node size marker.
     true;
 role_allowed_1(Type, binary_size, Node, Env) ->
+    %% ERLANG SEMANTICS: an explicit binary size follows guard-expression
+    %% legality; slot-level OTP version restrictions are generated separately.
     role_allowed_1(Type, guard, Node, Env);
-role_allowed_1(Type, type_param, _Node, _Env) ->
-    Type =:= variable;
-role_allowed_1(Type, ExpectedRole, _Node, _Env) ->
-    (ExpectedRole =:= attribute_body) orelse lists:member(ExpectedRole, node_roles(Type)).
-
-slot_type_allowed({slot, ParentType, pattern, pattern}, _Type)
-  when ParentType =:= map_generator; ParentType =:= strict_map_generator ->
+role_allowed_1(_Type, attribute_body, _Node, _Env) ->
+    %% ASTRANAUT SEMANTICS: unknown attribute bodies are deliberately opaque.
     true;
-slot_type_allowed({slot, _ParentType, _Slot, Role}, Type)
-  when Role =/= map_field, Role =/= binary_field ->
-    not lists:member(Type, [map_field_assoc, map_field_exact, binary_field]);
-slot_type_allowed(_Validator, _Type) ->
-    true.
+role_allowed_1(Type, ExpectedRole, _Node, _Env) ->
+    astranaut_syntax_schema:role_available(Type, ExpectedRole).
 
 validator_role({role, Role}) ->
     Role;
