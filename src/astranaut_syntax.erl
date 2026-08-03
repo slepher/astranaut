@@ -316,7 +316,11 @@ slot_role(Role) ->
 
 validation_env(Opts) ->
     #{forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
-      otp_vsn => maps:get(otp_vsn, Opts, otp_vsn())}.
+      otp_vsn => normalize_otp_vsn(maps:get(otp_vsn, Opts, otp_vsn()))}.
+
+normalize_otp_vsn('pre-21') -> 19;
+normalize_otp_vsn(OtpVsn) when is_integer(OtpVsn) -> OtpVsn;
+normalize_otp_vsn(OtpVsn) -> erlang:error({invalid_otp_vsn, OtpVsn}).
 
 validate_node([], _Validator, _Slot, _Env, _Path) ->
     ok;
@@ -607,7 +611,8 @@ node_roles(Type) ->
 -spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [child_spec()].
 child_specs(Type, Subtrees, Attr) ->
     ParentRole = maps:get(node, Attr, expression),
-    case syntax_child_layout(Type, Subtrees, ParentRole, otp_vsn()) of
+    case syntax_child_layout(Type, Subtrees, ParentRole,
+                             normalize_otp_vsn(otp_vsn())) of
         {ok, Children} ->
             Attr1 = child_specs_attr(Type, Subtrees, Attr),
             [child_spec(Type, Slot, Role, ChildSubtrees, GroupMode, Attr1)

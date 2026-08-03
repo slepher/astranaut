@@ -84,6 +84,7 @@ all() ->
      test_validate_node_does_not_recurse_grandchildren,
      test_normalize_recurses_into_grandchildren,
      test_otp_vsn,
+     test_invalid_otp_vsn,
      test_generated_schema_dispatch,
      test_try_handler_validation_uses_abstract_format,
      test_legacy_catch_handler,
@@ -422,7 +423,7 @@ test_generated_schema_dispatch(_Config) ->
     ?assertEqual(
        true,
        astranaut_syntax_schema:slot_available(
-         size_qualifier, size, default, default, 'pre-21')),
+         size_qualifier, size, default, default, 19)),
     ?assertEqual(
        true,
        astranaut_syntax_schema:slot_available(
@@ -599,6 +600,12 @@ test_normalize_recurses_into_grandchildren(_Config) ->
 test_otp_vsn(_Config) ->
     OtpVsn = astranaut_syntax:otp_vsn(),
     ?assert(OtpVsn =:= 'pre-21' orelse is_integer(OtpVsn)).
+
+test_invalid_otp_vsn(_Config) ->
+    ?assertError(
+       {invalid_otp_vsn, invalid},
+       astranaut_syntax:validate_node(
+         {atom, 1, ok}, {role, expression}, #{otp_vsn => invalid})).
 
 test_try_handler_validation_uses_abstract_format(_Config) ->
     LegacyHandler = parse_try_handler("try a catch throw:P -> P end"),
