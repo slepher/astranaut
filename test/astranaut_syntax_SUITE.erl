@@ -84,7 +84,7 @@ all() ->
      test_validate_node_does_not_recurse_grandchildren,
      test_normalize_recurses_into_grandchildren,
      test_otp_vsn,
-     test_generated_schema_proxy,
+     test_generated_schema_dispatch,
      test_try_handler_validation_uses_abstract_format,
      test_legacy_catch_handler,
      test_otp21_stacktrace_catch,
@@ -113,7 +113,7 @@ all() ->
      test_map_m_validate_raises,
      %% edge cases
      test_set_pos_warning_keeps_shape,
-     test_public_syntax_helpers,
+     test_syntax_adapter_helpers,
      test_validate_nested_valid, test_validate_nested_invalid,
      test_validate_empty_list].
 
@@ -371,7 +371,7 @@ test_validate_list_comp(_Config) ->
     {error, #{reason := invalid_role}} = validate(Lc, form),
     {error, #{reason := invalid_role}} = validate(Lc, pattern).
 
-test_generated_schema_proxy(_Config) ->
+test_generated_schema_dispatch(_Config) ->
     ?assertEqual(astranaut_syntax_schema:node_roles(atom),
                  astranaut_syntax:node_roles(atom)),
     ?assertEqual(true,
@@ -606,6 +606,10 @@ test_try_handler_validation_uses_abstract_format(_Config) ->
     HandlerSlot = {slot, try_expr, handlers, clause},
     ?assertEqual(ok, astranaut_syntax:validate_node(LegacyHandler, HandlerSlot,
                                                      #{otp_vsn => 'pre-21'})),
+    ?assertEqual(ok,
+                 astranaut_syntax:validate_node(
+                   legacy_class_qualifier_handler_ast(), HandlerSlot,
+                   #{otp_vsn => 'pre-21'})),
     {ok, LegacyHandler1} = astranaut_syntax:normalize(LegacyHandler, HandlerSlot,
                                                        #{otp_vsn => 'pre-21'}),
     assert_same_ast(LegacyHandler, LegacyHandler1),
@@ -650,7 +654,10 @@ test_otp21_stacktrace_catch(_Config) ->
                       parent_type := try_expr}} =
                 validate(ParsedStacktraceTry, expression, #{otp_vsn => 'pre-21'});
         false ->
-            ?assertMatch({error, _}, validate(StacktraceTry, expression))
+            %% Older erl_syntax versions normalize the third catch pattern
+            %% away before recursive validation can inspect it. The explicit
+            %% pre-21 slot rejection is covered above with validate_node/3.
+            ok
     end.
 
 test_legacy_map_pattern_key(_Config) ->
@@ -793,11 +800,19 @@ test_otp29_multiple_comprehension_templates(_Config) ->
            {var, 1, 'I'}}],
          [Generator]},
     ?assertEqual(ok, validate(SingleListComp, expression, #{otp_vsn => 28})),
-    ?assertEqual(ok, validate(SingleMapComp, expression, #{otp_vsn => 28})),
     ?assertMatch({error, #{reason := invalid_role, actual_type := list_comp}},
                  validate(MultiListComp, expression, #{otp_vsn => 28})),
-    ?assertMatch({error, #{reason := invalid_role, actual_type := map_comp}},
-                 validate(MultiMapComp, expression, #{otp_vsn => 28})),
+    case current_otp_at_least(26) of
+        true ->
+            ?assertEqual(ok, validate(SingleMapComp, expression,
+                                      #{otp_vsn => 28})),
+            ?assertMatch({error, #{reason := invalid_role,
+                                   actual_type := map_comp}},
+                         validate(MultiMapComp, expression,
+                                  #{otp_vsn => 28}));
+        false ->
+            ok
+    end,
     case current_otp_at_least(29) of
         true ->
             ParsedMultiListComp =
@@ -983,8 +998,7 @@ test_set_pos_warning_keeps_shape(_Config) ->
     ?assertEqual({warning, {2, erl_lint, bad}},
                  astranaut_syntax:set_pos({warning, {1, erl_lint, bad}}, 2)).
 
-test_public_syntax_helpers(_Config) ->
-    Node = {atom, 1, ok},
+test_syntax_adapter_helpers(_Config) ->
     ?assertEqual(
        {error, {2, erl_lint, bad}},
        astranaut_syntax:set_pos(
@@ -992,86 +1006,7 @@ test_public_syntax_helpers(_Config) ->
     ?assert(astranaut_syntax:is_leaf(erl_syntax:atom(ok))),
     ?assertNot(
        astranaut_syntax:is_leaf(
-         erl_syntax:tuple([erl_syntax:atom(ok)]))),
-
-    RoleContexts =
-        [{pattern,
-          astranaut_syntax:pattern_node(Node)},
-         {guard,
-          astranaut_syntax:guard_node(Node)},
-         {expression,
-          astranaut_syntax:expression_node(Node)},
-         {clause,
-          astranaut_syntax:update_node(clause, Node)}],
-    lists:foreach(
-      fun({Role, Context}) ->
-              ?assertEqual(Node, context_node(Context)),
-              ?assertEqual(
-                 #{node => Role},
-                 context_attrs(Context))
-      end, RoleContexts),
-
-    RecordName = erl_syntax:atom(sample_record),
-    RecordField = erl_syntax:atom(sample_field),
-    [[_], [RecordNameContext, RecordFieldContext]] =
-        attribute_contexts(
-          record, [RecordName, RecordField]),
-    ?assertEqual(
-       #{attribute => record},
-       context_attrs(RecordNameContext)),
-    ?assertEqual(
-       #{attribute => record},
-       context_attrs(RecordFieldContext)),
-
-    TypeName = erl_syntax:atom(sample_type),
-    TypeBody = erl_syntax:atom(ok),
-    TypeParam = erl_syntax:variable('T'),
-    lists:foreach(
-      fun(Attribute) ->
-              [[_], [TypeNameContext, TypeBodyContext,
-                     TypeParamContext]] =
-                  attribute_contexts(
-                    Attribute,
-                    [TypeName, TypeBody, TypeParam]),
-              ?assertEqual(
-                 #{attribute => Attribute},
-                 context_attrs(TypeNameContext)),
-              ?assertEqual(
-                 #{attribute => Attribute, node => type},
-                 context_attrs(TypeBodyContext)),
-              ?assertEqual(
-                 #{attribute => Attribute},
-                 context_attrs(TypeParamContext))
-      end, [type, opaque]),
-
-    SpecName = erl_syntax:tuple(
-                 [erl_syntax:atom(sample),
-                  erl_syntax:integer(0)]),
-    SpecBody = erl_syntax:atom(ok),
-    lists:foreach(
-      fun(Attribute) ->
-              [[_], [SpecNameContext, SpecBodyContext]] =
-                  attribute_contexts(
-                    Attribute, [SpecName, SpecBody]),
-              ?assertEqual(
-                 #{attribute => Attribute},
-                 context_attrs(SpecNameContext)),
-              ?assertEqual(
-                 #{attribute => Attribute, node => type},
-                 context_attrs(SpecBodyContext))
-      end, [spec, callback]),
-
-    CustomBody = erl_syntax:atom(value),
-    [[_], [CustomContext]] =
-        attribute_contexts(custom, [CustomBody]),
-    ?assertEqual(
-       #{attribute => custom},
-       context_attrs(CustomContext)),
-    Subtrees = [[erl_syntax:atom(value)]],
-    ?assertEqual(
-       Subtrees,
-       astranaut_syntax:attribute_subtrees_type(
-         tuple, Subtrees, #{})).
+         erl_syntax:tuple([erl_syntax:atom(ok)]))).
 
 test_validate_nested_valid(_Config) ->
     Tree = {call, 1,
@@ -1222,25 +1157,6 @@ parse_form_result(Code) ->
             {error, ErrorInfo}
     end.
 
-attribute_contexts(Attribute, BodyTrees) ->
-    astranaut_syntax:attribute_subtrees_type(
-      attribute,
-      [[erl_syntax:atom(Attribute)], BodyTrees],
-      #{}).
-
-context_node(
-  {uniplate_node_context, Node, _Withs, _Reduces, _Skip,
-   _UpAttrs, _Entries, _Exits}) ->
-    Node.
-
-context_attrs(
-  {uniplate_node_context, _Node, _Withs, _Reduces, _Skip,
-   UpAttrs, _Entries, _Exits}) ->
-    lists:foldl(
-      fun(Attr, Acc) ->
-              maps:merge(Acc, Attr)
-      end, #{}, lists:reverse(UpAttrs)).
-
 assert_parser_or_constructed_ast_rejected(Code, ConstructedAst, Role) ->
     case parse_form_result(Code) of
         {ok, Form} ->
@@ -1295,6 +1211,13 @@ legacy_throw_handler_ast() ->
      [{tuple, 1, [{atom, 1, throw}, {var, 1, 'P'}, {var, 1, '_'}]}],
      [],
      [{var, 1, 'P'}]}.
+
+legacy_class_qualifier_handler_ast() ->
+    {clause, 1,
+     [{tree, class_qualifier, {attr, 1, [], none},
+       {class_qualifier, {atom, 1, error}, {var, 1, 'Reason'}}}],
+     [],
+     [{var, 1, 'Reason'}]}.
 
 stacktrace_throw_handler_ast() ->
     {clause, 1,

@@ -237,9 +237,6 @@ astranaut_syntax:normalize(Node, Validator, #{forms => RecordForms}).
   astranaut_forms:insert_forms(NewForms, Forms) -> Forms1.
 ```
 
-`astranaut_syntax` 中的同名函数保留为兼容薄代理；新代码应直接调用
-`astranaut_forms`。
-
 `astranaut:map_m/3` 会保留输入列表的顺序。只有遍历明确需要插入或替换模块
 Forms，并在结束时统一执行一次 `reorder_updated_forms`（包括合并
 `__original__`）时，才使用

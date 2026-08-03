@@ -340,9 +340,6 @@ opaque.
   astranaut_forms:insert_forms(NewForms, Forms) -> Forms1.
 ```
 
-The corresponding functions in `astranaut_syntax` remain compatibility
-proxies. New code should call `astranaut_forms` directly.
-
 `astranaut:map_m/3` preserves the input list order. Use
 `astranaut:map_m_forms/3` when a traversal intentionally inserts or replaces
 module forms and requires one final `reorder_updated_forms` pass, including

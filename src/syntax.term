@@ -386,7 +386,13 @@
                                    {clause,anno,
                                     [{tree,class_qualifier,anno,
                                       {class_qualifier,
-                                       {node,class},{node,reason},{var,anno,'_'}}}],
+                                       {node,class},{node,reason}}}],
+                                    {nodes,guards},{nodes,body}},
+                                   {clause,anno,
+                                    [{tree,class_qualifier,anno,
+                                      {class_qualifier,
+                                       {node,class},{node,reason},
+                                       {var,anno,'_'}}}],
                                     {nodes,guards},{nodes,body}}]}]},
                      #{slot => 'after',role => expression,cardinality => many}]}],
          roles => [expression],
@@ -630,10 +636,7 @@
       [#{type => form_list,reason => syntax_tools_form_container},
        #{type => macro,reason => removed_by_epp}],
   layouts =>
-      #{inherit =>
-            [#{groups => any,
-               children => [#{slot => elements,role => inherit,cardinality => deep_many}]}],
-        inherited_elements =>
+      #{inherited_elements =>
             [#{groups => any,
                children => [#{slot => elements,role => inherit,cardinality => deep_many}]}],
         generator =>

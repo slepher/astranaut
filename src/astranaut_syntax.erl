@@ -3,7 +3,6 @@
 %%% @copyright (C) 2021, Chen Slepher
 %%% @doc OTP-compatible syntax-tree helpers, validation, and normalization.
 %%%
-%%% Form ordering APIs remain as compatibility proxies to astranaut_forms.
 %%% @end
 %%% Created : 18 Mar 2021 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
@@ -29,6 +28,7 @@
           role := node_role(),
           validator := validator(),
           subtrees := term(),
+          group_mode := nodes | groups,
           attr := map()}.
 
 -export_type([node_role/0, validator/0, validation_opts/0,
@@ -37,11 +37,9 @@
 %% API
 -export([type/1, otp_vsn/0, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
--export([subtrees_pge/3, attribute_subtrees_type/3]).
+-export([subtrees_pge/3]).
 -export([validate_node/2, validate_node/3, normalize/2, normalize/3,
          child_specs/3, node_roles/1]).
--export([pattern_node/1, guard_node/1, expression_node/1, update_node/2]).
--export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
 
 -spec type(term()) -> atom().
 %% ERLANG AST SEMANTICS
@@ -271,50 +269,6 @@ name_arity_value(integer, ArityTree) ->
 -spec subtrees_pge(atom(), term(), map()) -> term().
 subtrees_pge(Type, Subtrees, Attr) ->
     child_specs_annotated_subtrees(child_specs(Type, Subtrees, Attr)).
-
--spec attribute_subtrees_type(atom(), term(), map()) -> term().
-attribute_subtrees_type(attribute, [[NameTree], BodyTrees], #{}) ->
-    Name = erl_syntax:atom_value(NameTree),
-    [[NameTree], update_attribute_body_trees(Name, BodyTrees)];
-attribute_subtrees_type(_Type, Subtrees, #{}) ->
-    Subtrees.
-
-update_attribute_body_trees(record = Name, [RecordNameTree|RecordBodyTrees]) ->
-    attribute(Name, [name_node(RecordNameTree)|RecordBodyTrees]);
-update_attribute_body_trees(Name, [TypeNameTree, TypeTree|TypeParamTrees]) when Name =:= type; Name =:= opaque ->
-    attribute(Name, [name_node(TypeNameTree), type_node(TypeTree)|type_param_node(TypeParamTrees)]);
-update_attribute_body_trees(Name, [SpecMFATree|SpecTrees]) when Name =:= spec; Name =:= callback ->
-    attribute(Name, [name_node(SpecMFATree)|type_node(SpecTrees)]);
-update_attribute_body_trees(Name, BodyTrees) ->
-    attribute(Name, BodyTrees).
-
--spec pattern_node(term()) -> term().
-pattern_node(Subtree) ->
-    update_node(pattern, Subtree).
-
--spec guard_node(term()) -> term().
-guard_node(Subtree) ->
-    update_node(guard, Subtree).
-
--spec expression_node(term()) -> term().
-expression_node(Subtree) ->
-    update_node(expression, Subtree).
-
-name_node(Subtree) ->
-    Subtree.
-
-type_node(Subtree) ->
-    update_node(type, Subtree).
-
-type_param_node(Subtree) ->
-    Subtree.
-
-attribute(Attribute, Subtree) ->
-    astranaut_uniplate:up_attr(#{attribute => Attribute}, Subtree).
-
--spec update_node(node_role(), term()) -> term().
-update_node(Node, Subtree) ->
-    astranaut_uniplate:up_attr(#{node => Node}, Subtree).
 
 %%===================================================================
 %% syntax validation functions
@@ -656,9 +610,8 @@ child_specs(Type, Subtrees, Attr) ->
     case syntax_child_layout(Type, Subtrees, ParentRole, otp_vsn()) of
         {ok, Children} ->
             Attr1 = child_specs_attr(Type, Subtrees, Attr),
-            Specs = [child_spec(Slot, Role, ChildSubtrees, GroupMode, Attr1)
-                     || {Slot, Role, ChildSubtrees, GroupMode} <- Children],
-            add_child_validators(Type, Specs);
+            [child_spec(Type, Slot, Role, ChildSubtrees, GroupMode, Attr1)
+             || {Slot, Role, ChildSubtrees, GroupMode} <- Children];
         {error, Reason} ->
             erlang:error(Reason)
     end.
@@ -683,20 +636,14 @@ child_specs_attr(attribute, [[NameTree], _BodyTrees], Attr) ->
 child_specs_attr(_Type, _Subtrees, Attr) ->
     Attr.
 
-add_child_validators(ParentType, Specs) ->
-    lists:map(fun(Spec) -> add_child_validator(ParentType, Spec) end, Specs).
-
-add_child_validator(ParentType, #{slot := Slot, role := Role, attr := Attr} = Spec) ->
+child_spec(ParentType, Slot, Role, Subtrees, GroupMode, Attr) ->
     Validator = {slot, ParentType, Slot, Role},
-    ChildAttr = Attr#{validator => Validator},
-    Spec#{validator => Validator, attr => ChildAttr}.
-
-child_spec(Slot, Role, Subtrees, GroupMode, Attr) ->
     #{slot => Slot,
       role => Role,
+      validator => Validator,
       subtrees => Subtrees,
       group_mode => GroupMode,
-      attr => child_attr(Role, Attr)}.
+      attr => (child_attr(Role, Attr))#{validator => Validator}}.
 
 child_attr(Role, Attr) ->
     case node_role(Role) of
@@ -704,9 +651,8 @@ child_attr(Role, Attr) ->
             Attr#{node => Role};
         false ->
             case Role of
-                map_field ->
-                    Attr;
-                binary_field ->
+                StructuralRole when StructuralRole =:= map_field;
+                                         StructuralRole =:= binary_field ->
                     Attr;
                 _ ->
                     case slot_role(Role) of
@@ -744,18 +690,3 @@ validator_node(#{attr := Attr}, Nodes) ->
       fun(ParentAttr) ->
               maps:merge(maps:without([node, validator], ParentAttr), ChildAttr)
       end, Nodes).
-
-%%===================================================================
-%% update forms related functions
-%%===================================================================
--spec reorder_updated_forms([form() | {updated, form(), [form()]}]) -> [form()].
-reorder_updated_forms(Forms) ->
-    astranaut_forms:reorder_updated_forms(Forms).
-
--spec sort_forms([erl_parse:abstract_form()]) -> [erl_parse:abstract_form()].
-sort_forms(Forms) ->
-    astranaut_forms:sort_forms(Forms).
-
--spec insert_forms([erl_parse:abstract_form()], [erl_parse:abstract_form()]) -> [erl_parse:abstract_form()].
-insert_forms(NewForms, Forms) ->
-    astranaut_forms:insert_forms(NewForms, Forms).
