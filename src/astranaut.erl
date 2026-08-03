@@ -524,7 +524,7 @@ root_role(Node) ->
 
 root_role_type(Type) when Type =:= function; Type =:= attribute;
                           Type =:= eof_marker; Type =:= error_marker;
-                          Type =:= warning_marker; Type =:= form_list ->
+                          Type =:= warning_marker ->
     form;
 root_role_type(clause) ->
     clause;

@@ -46,7 +46,7 @@ groups() ->
 
 all() ->
     [test_validate_expression,
-     test_validate_form_list,
+     test_validate_forms,
      test_validate_root_role_error,
      test_validate_child_role_error,
      test_validate_invalid_node,
@@ -84,6 +84,7 @@ all() ->
      test_validate_node_does_not_recurse_grandchildren,
      test_normalize_recurses_into_grandchildren,
      test_otp_vsn,
+     test_generated_schema_proxy,
      test_try_handler_validation_uses_abstract_format,
      test_legacy_catch_handler,
      test_otp21_stacktrace_catch,
@@ -124,7 +125,7 @@ test_validate_expression(_Config) ->
     Expr = {call, 1, {atom, 1, foo}, [{integer, 1, 1}]},
     ?assertEqual(ok, validate(Expr, expression)).
 
-test_validate_form_list(_Config) ->
+test_validate_forms(_Config) ->
     ?assertEqual(ok, validate([function_form()], form)).
 
 test_validate_root_role_error(_Config) ->
@@ -370,6 +371,46 @@ test_validate_list_comp(_Config) ->
     {error, #{reason := invalid_role}} = validate(Lc, form),
     {error, #{reason := invalid_role}} = validate(Lc, pattern).
 
+test_generated_schema_proxy(_Config) ->
+    ?assertEqual(astranaut_syntax_schema:node_roles(atom),
+                 astranaut_syntax:node_roles(atom)),
+    ?assertEqual(false,
+                 astranaut_syntax_schema:node_available(maybe_expr, 24)),
+    ?assertEqual(true,
+                 astranaut_syntax_schema:node_available(maybe_expr, 25)),
+    Operator = erl_syntax:atom(f),
+    ?assertEqual(
+       {ok, [{operator, expression, [Operator], nodes},
+             {arguments, expression, [], nodes}]},
+       astranaut_syntax_schema:child_layout(
+         application, [[Operator], []], expression, 29)),
+    ?assertEqual(
+       false,
+       astranaut_syntax_schema:slot_available(
+         map_field_exact, map_field_exact_key, infix_expr,
+         {op, 1, '+', {var, 1, 'K'}, {integer, 1, 1}}, 22)),
+    ?assertEqual(
+       true,
+       astranaut_syntax_schema:slot_available(
+         map_field_exact, map_field_exact_key, infix_expr,
+         {op, 1, '+', {var, 1, 'K'}, {integer, 1, 1}}, 23)),
+    ?assertEqual(
+       true,
+       astranaut_syntax_schema:slot_available(
+         size_qualifier, size, default, default, 'pre-21')),
+    ?assertEqual(
+       true,
+       astranaut_syntax_schema:slot_available(
+         try_expr, handlers, clause, legacy_throw_handler_ast(), 20)),
+    ?assertEqual(
+       false,
+       astranaut_syntax_schema:slot_available(
+         try_expr, handlers, clause, stacktrace_throw_handler_ast(), 20)),
+    ?assertEqual(
+       true,
+       astranaut_syntax_schema:slot_available(
+         try_expr, handlers, clause, stacktrace_throw_handler_ast(), 21)).
+
 %%--------------------------------------------------------------------
 %% validator metadata and validation scopes
 %%--------------------------------------------------------------------
@@ -555,6 +596,11 @@ test_legacy_catch_handler(_Config) ->
     LegacyForm = parse_form("f() -> try body catch error:Reason -> Reason end."),
     LegacyTry = function_body_expr(LegacyForm),
     assert_same_ast(legacy_catch_try_ast(), LegacyTry),
+    [Body, Clauses, Handlers, After] = astranaut_syntax:subtrees(LegacyTry),
+    ?assertNotEqual([], Body),
+    ?assertEqual([], Clauses),
+    ?assertNotEqual([], Handlers),
+    ?assertEqual([], After),
     ?assertEqual(ok, validate(LegacyTry, expression, #{otp_vsn => 'pre-21'})),
     ?assertEqual(ok, validate(LegacyTry, expression,
                                                #{otp_vsn => astranaut_syntax:otp_vsn()})).
@@ -1239,7 +1285,6 @@ child_spec_cases() ->
     Guard = valid_ast(guard),
     MapField = valid_ast(map_field),
     Clause = valid_ast(clause),
-    Form = function_form(),
     Name = valid_ast(name),
     Type = valid_ast(type),
     AttributeBody = valid_ast(attribute_body),
@@ -1291,14 +1336,10 @@ child_spec_cases() ->
       [{clauses, clause}, {timeout, expression}, {action, expression}]},
      {try_expr, [[Expr], [Clause], [Clause], [Expr]], #{node => expression},
       [{body, expression}, {clauses, clause}, {handlers, clause}, {'after', expression}]},
-     {try_expr, [[Expr], [Clause], [Clause]], #{node => expression},
-      [{body, expression}, {clauses, clause}, {handlers, clause}]},
      {function, [[Name], [Clause]], #{node => form},
       [{name, name}, {clauses, clause}]},
      {function, [[Clause]], #{node => form},
       [{clauses, clause}]},
-     {form_list, [[Form]], #{node => form},
-      [{forms, form}]},
      {attribute, [[{atom, 1, custom}], [AttributeBody]], #{node => form},
       [{name, name}, {body, attribute_body}]},
      {attribute, [[{atom, 1, type}], [Name, Type]], #{node => form},
