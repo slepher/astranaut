@@ -187,50 +187,36 @@ parent.
 
 &emsp;&emsp;advanced traversal implementation hook. Most users do not need this option.
 
-*SequenceChildren*
+*Per-node child traversal*
 
-&emsp;&emsp; callback to defined your own traverse children method
+&emsp;&emsp;An advanced `pre`/`all` walker can change how the current node's
+children are visited by returning an `astranaut_uniplate` node context. Use
+`with_subtrees/2` to annotate child groups without reordering them, or
+`with_subtrees/3` with a `Reduce` function when the traversal layout must be
+converted back to the AST layout during reconstruction.
 
-```erlang
-SequenceChildren = fun(DeepListOfChildrenM) -> MChildren end.
-```
-
-&emsp;&emsp; traverse right expression first in match expression
-
-```erlang
-SequenceChildren = 
-  fun([PatternMs, ExpressionMs]) -> 
-    %% reverse the traverse order, traverse ExpressionMs first
-    %% deep_r_sequence_m means reverse sequence_m the first level of deep list.
-    astranaut_traverse:deep_r_sequence_m([PatternMs, ExpressionMs]) 
-  end.
-```
-
-&emsp;&emsp; do something special to Clause Patterns
+For example, a match normally exposes its pattern group before its expression
+group. The following walker visits the right-hand expression first while
+preserving the original AST layout:
 
 ```erlang
-SequenceChildren = 
-  fun([PatternMs|GuardsAndExpressionMs]) -> 
-    %% PatternMs is a list of monad, sequence_m it to get a monad of list.
-    PatternsM = astranaut_traverse:deep_sequence_m(PatternMs),
-    %% do something special to PatternsM monad.
-    PatternsM1 = do_something_special(PatternsM),
-    %% deep_sequence_m the new tree.
-    astranaut_traverse:deep_sequence_m([PatternsM1|GuardsAndExpressionMs]) 
-  end.
+Walker =
+  fun({match, _Pos, _Pattern, _Expression} = Match) ->
+          Sequence = fun([Patterns, Expressions]) ->
+                             [Expressions, Patterns]
+                     end,
+          Reduce = fun lists:reverse/1,
+          astranaut_traverse:return(
+            astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
+     (Node) ->
+          astranaut_traverse:return(Node)
+  end,
+astranaut:map_m(Walker, Ast, #{traverse => pre, role => expression}).
 ```
 
-&emsp;&emsp; do something special to Each Clause Patterns
-
-```erlang
-SequenceChildren = 
-  fun([PatternMs|GuardsAndExpressionMs]) -> 
-    %% PatternMs is a list of monad, sequence_m it to get a monad of list.
-    PatternMs1 = lists:map(fun(PatternM) -> do_something_special(PatternM) end, PatternMs),
-    %% deep_sequence_m the new tree.
-    astranaut_traverse:deep_sequence_m([PatternMs1|GuardsAndExpressionMs]) 
-  end.
-```
+The same mechanism is used by variable rebinding for matches, generators, and
+comprehensions. A custom `uniplate` option is the lower-level alternative when
+the child projection itself, rather than one selected node, must change.
   
 *traverse_return(Return)*
 

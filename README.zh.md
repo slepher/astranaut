@@ -152,6 +152,35 @@ astranaut:smap(Fun, Expr, #{traverse => pre, role => expression}).
 
 &emsp;&emsp;高级 traversal 实现 hook。多数用户不需要该选项。
 
+*按节点调整 child 遍历*
+
+&emsp;&emsp;高级 `pre`/`all` walker 可以返回 `astranaut_uniplate` 节点上下文，
+改变当前节点 children 的访问方式。`with_subtrees/2` 用于给 child group 添加上下文
+而不改变顺序；需要改变遍历布局时使用 `with_subtrees/3`，并提供 `Reduce`，在重建
+节点时把遍历布局转换回原始 AST 布局。
+
+例如，match 默认先暴露 pattern group，再暴露 expression group。下面的 walker
+先访问右侧 expression，同时保持最终 AST 布局不变：
+
+```erlang
+Walker =
+  fun({match, _Pos, _Pattern, _Expression} = Match) ->
+          Sequence = fun([Patterns, Expressions]) ->
+                             [Expressions, Patterns]
+                     end,
+          Reduce = fun lists:reverse/1,
+          astranaut_traverse:return(
+            astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
+     (Node) ->
+          astranaut_traverse:return(Node)
+  end,
+astranaut:map_m(Walker, Ast, #{traverse => pre, role => expression}).
+```
+
+变量 rebinding 对 match、generator 和 comprehension 的特殊遍历顺序使用同一机制。
+如果需要改变整体 child projection，而不只是选中节点的顺序，可以使用更底层的
+`uniplate` option。
+
 *traverse_return(Return)*
 
 ```erlang
