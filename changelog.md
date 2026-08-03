@@ -2,7 +2,7 @@
 
 [中文](changelog.zh.md)
 
-## 0.13.0
+## 0.13
 
 ### Compatibility
 
@@ -10,22 +10,24 @@
   the pre-21 stacktrace, syntax-schema, reference-data, and CI compatibility
   paths.
 
-## 0.11.2
+## 0.12
 
-### Macro system
+### Syntax schema
 
-- Give each parse-transform invocation a uniquely named local macro module,
-  removing fixed-name lifecycle locking and allowing concurrent compilation of
-  the same source module without sharing generated macro code.
+- Added a generated syntax schema (`astranaut_syntax_schema` backed by the
+  `syntax.term` reference data) describing OTP abstract-form node layouts, and
+  moved syntax validation, normalization, and uniplate/quote traversal-rule
+  derivation onto it. A versioned audit (`scripts/check_syntax_schema.escript`
+  with `syn.md`) keeps the reference data aligned with each OTP release.
+- Regenerated the syntax schema directly from OTP abstract forms
+  (`scripts/generate_syntax_schema.escript`) and strengthened the
+  syntax-adapter symmetry checks.
+- Simplified the `astranaut_syntax` API surface: removed the form-ordering and
+  attribute-subtree compatibility proxies and the explicit pattern/guard/
+  expression node markers, and fixed legacy OTP validation.
+- Documented subtree traversal and the Luna test execution policy.
 
-## 0.11.1
-
-### Development tooling
-
-- Replaced the checked-in local Docker CI scripts with project configuration
-  for the host-side `rebar3_docker_ci` plugin.
-
-## 0.11.0
+## 0.11
 
 ### Macro system
 
@@ -57,6 +59,9 @@
   macro-call analysis are reused instead of repeatedly rescanning forms.
   Benchmarks now cover deep recursion and macro modules closer to production
   size.
+- Give each parse-transform invocation a uniquely named local macro module,
+  removing fixed-name lifecycle locking and allowing concurrent compilation of
+  the same source module without sharing generated macro code.
 
 ### Traversal, quoting, and AST
 
@@ -126,3 +131,7 @@
   pass, diagnostic, local-state, and scan-and-splice suites.
 - Added a Chinese README, OTP 19–29 abstract-form references and fetch scripts,
   local container CI, coverage tooling, and macro compilation benchmarks.
+- Added support for OTP 29 native record syntax and fixed syntax projection
+  and OTP 29 validation.
+- Replaced the checked-in local Docker CI scripts with project configuration
+  for the host-side `rebar3_docker_ci` plugin.
