@@ -207,23 +207,27 @@ test_quote_context_no_double_counter(_Config) ->
     ok.
 
 expand_forms(Forms) ->
-    case astranaut_macro:parse_transform(Forms, []) of
-        {warning, Forms1, _Warnings} -> Forms1;
-        {error, _Errors, _Warnings} = Error -> exit({expand_failed, Error});
-        Forms1 -> Forms1
+    Expanded = astranaut_return:from_compiler(
+                 astranaut_macro:parse_transform(Forms, [])),
+    case astranaut_return:run(Expanded) of
+        {just, Forms1} ->
+            Forms1;
+        nothing ->
+            exit({expand_failed,
+                  astranaut_error:printable(
+                    astranaut_return:run_error(Expanded))})
     end.
 
 collect_var_names(Nodes) ->
-    lists:usort(var_names(Nodes)).
-
-var_names(Nodes) when is_list(Nodes) ->
-    lists:append([var_names(Node) || Node <- Nodes]);
-var_names({var, _, Name}) when is_atom(Name) ->
-    [Name];
-var_names(Node) when is_tuple(Node) ->
-    var_names(tuple_to_list(Node));
-var_names(_) ->
-    [].
+    Collected =
+        astranaut:reduce(
+          fun({var, _, Name}, Names) when is_atom(Name) ->
+                  [Name | Names];
+             (_Node, Names) ->
+                  Names
+          end, [], Nodes, #{traverse => pre}),
+    {just, Names} = astranaut_return:run(Collected),
+    lists:usort(Names).
 
 has_expanded_counter(Name) ->
     case astranaut_quote:decode_quote_variable(Name) of

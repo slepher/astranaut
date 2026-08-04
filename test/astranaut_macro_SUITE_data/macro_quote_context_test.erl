@@ -39,10 +39,10 @@ test_no_context_capture() ->
     Shared.
 
 test_named_fun() ->
-    ?MACRO_MODULE:named_fun_macro()(5).
+    (?MACRO_MODULE:named_fun_macro())(5).
 
 test_no_context_named_fun() ->
-    ?MACRO_MODULE:no_context_named_fun()(5).
+    (?MACRO_MODULE:no_context_named_fun())(5).
 
 test_same_context() ->
     ?MACRO_MODULE:same_context_macro(42).

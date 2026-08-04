@@ -561,6 +561,17 @@ return_error_contracts(_Config) ->
     ?assertEqual(nothing, astranaut_return:run(ErrorFail)),
     ?assertEqual([fail_reason], astranaut_error:errors(astranaut_return:run_error(ErrorFail))),
 
+    ErrorOk = astranaut_return:error_ok(error_reason, value),
+    ErrorOkFail = astranaut_return:fail_on_error(ErrorOk),
+    ?assertEqual(nothing, astranaut_return:run(ErrorOkFail)),
+    ?assertEqual([error_reason],
+                 astranaut_error:errors(
+                   astranaut_return:run_error(ErrorOkFail))),
+    ?assertEqual(ErrorFail, astranaut_return:fail_on_error(ErrorFail)),
+    ?assertEqual({just, value},
+                 astranaut_return:run(
+                   astranaut_return:fail_on_error(WarningOk))),
+
     ?assertEqual({just, forms}, astranaut_return:run(astranaut_return:from_compiler(forms))),
     ?assertEqual({just, [form]}, astranaut_return:run(astranaut_return:from_compiler([form]))),
 

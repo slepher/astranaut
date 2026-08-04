@@ -872,7 +872,7 @@ test_invalid_context(_Config) ->
         ++ [{eof, 5}],
     ?assertMatch(
        {error, [{_, [{_, astranaut_quote,
-                      {validate_key_failure, {invalid_value, atom}, context, _}}]}], _},
+                      {invalid_quote_context, {var, _, 'Ctx'}}}]}], _},
        astranaut_quote:parse_transform(Forms, [])),
     ok.
 
@@ -975,16 +975,11 @@ test_no_context_named_fun(_Config) ->
     ok.
 
 has_quote_variable(Nodes) ->
-    lists:any(
+    astranaut:search(
       fun({var, _, Name}) ->
               astranaut_quote:decode_quote_variable(Name) =/= not_quote_variable;
-         ({named_fun, _, Name, Clauses}) ->
-              astranaut_quote:decode_quote_variable(Name) =/= not_quote_variable
-                  orelse has_quote_variable(Clauses);
-         (Node) when is_tuple(Node) ->
-              has_quote_variable(tuple_to_list(Node));
-         (Node) when is_list(Node) ->
-              has_quote_variable(Node);
+         ({named_fun, _, Name, _Clauses}) ->
+              astranaut_quote:decode_quote_variable(Name) =/= not_quote_variable;
          (_) ->
               false
-      end, Nodes).
+      end, Nodes, #{traverse => pre}).

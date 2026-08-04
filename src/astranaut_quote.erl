@@ -156,12 +156,12 @@ quoted(Node, #{} = Opts) ->
                     Return
             end;
         nothing ->
-            erlang:error(quoted_error(astranaut_return:run_error(Quoted)))
+            erlang:error(quote_error(astranaut_return:run_error(Quoted)))
     end;
 quoted(Node, Pos) ->
     quoted(Node, #{pos => Pos}).
 
-quoted_error(ErrorStruct) ->
+quote_error(ErrorStruct) ->
     case astranaut_error:errors(ErrorStruct) of
         [Error] ->
             Error;
@@ -181,14 +181,10 @@ quoted_error(ErrorStruct) ->
 %%      Name and Context must be non-empty atoms, otherwise
 %%      `invalid_quote_variable_name' or `invalid_quote_context' is raised.
 encode_quote_variable(Name, Context) ->
-    case validate_quote_variable(Name, Context) of
-        ok ->
-            encode_quote_variable_components(
-              escape_quote_component(atom_to_list(Name)),
-              escape_quote_component(atom_to_list(Context)));
-        {error, Reason} ->
-            erlang:error(Reason)
-    end.
+    quote_validate_or_raise(validate_quote_variable(Name, Context)),
+    encode_quote_variable_components(
+      escape_quote_component(atom_to_list(Name)),
+      escape_quote_component(atom_to_list(Context))).
 
 -spec encode_quote_variable(atom(), atom(), pos_integer()) -> atom().
 %% @doc encode a quote variable and context with counter to expanded name.
@@ -196,36 +192,48 @@ encode_quote_variable(Name, Context) ->
 %%      integer, otherwise `invalid_quote_variable_name', `invalid_quote_context'
 %%      or `invalid_quote_counter' is raised.
 encode_quote_variable(Name, Context, Counter) ->
-    case validate_quote_variable(Name, Context, Counter) of
-        ok ->
-            encode_quote_variable_components(
-              escape_quote_component(atom_to_list(Name)),
-              escape_quote_component(atom_to_list(Context)),
-              Counter);
-        {error, Reason} ->
-            erlang:error(Reason)
-    end.
+    quote_validate_or_raise(validate_quote_variable(Name, Context, Counter)),
+    encode_quote_variable_components(
+      escape_quote_component(atom_to_list(Name)),
+      escape_quote_component(atom_to_list(Context)),
+      Counter).
 
 validate_quote_variable(Name, Context) ->
-    run_quote_validate(
-      #{name => Name, context => Context},
+    quote_validate(
       #{name => fun quote_variable_name_validator/1,
-        context => fun quote_context_validator/1}).
+        context => fun quote_context_validator/1},
+      #{name => Name, context => Context}).
 
 validate_quote_variable(Name, Context, Counter) ->
-    run_quote_validate(
-      #{name => Name, context => Context, counter => Counter},
+    quote_validate(
       #{name => fun quote_variable_name_validator/1,
         context => fun quote_context_validator/1,
-        counter => fun quote_counter_validator/1}).
+        counter => fun quote_counter_validator/1},
+      #{name => Name, context => Context, counter => Counter}).
 
-run_quote_validate(Values, Validators) ->
+quote_validate(Validators, Values) ->
     Validated = astranaut_lib:validate(Validators, Values),
-    case astranaut_return:has_error(Validated) of
-        false ->
+    astranaut_return:fail_on_error(
+      astranaut_return:with_error(
+        fun(ErrorStruct) ->
+                astranaut_error:with_error(
+                  fun quote_validate_error/1, ErrorStruct)
+        end, Validated)).
+
+quote_validate_error(
+  {validate_key_failure, {invalid_value, boolean}, no_context, Value}) ->
+    {invalid_quote_no_context, Value};
+quote_validate_error({validate_key_failure, Reason, _Key, _Value}) ->
+    Reason;
+quote_validate_error(Error) ->
+    Error.
+
+quote_validate_or_raise(Validated) ->
+    case astranaut_return:run(Validated) of
+        {just, _Values} ->
             ok;
-        true ->
-            {error, first_validate_reason(astranaut_return:run_error(Validated))}
+        nothing ->
+            erlang:error(quote_error(astranaut_return:run_error(Validated)))
     end.
 
 quote_variable_name_validator(Value) ->
@@ -240,26 +248,10 @@ quote_context_validator(Value) ->
         false -> {error, {invalid_quote_context, Value}}
     end.
 
-quote_no_context_validator(Value) ->
-    case is_boolean(Value) of
-        true -> {ok, Value};
-        false -> {error, {invalid_quote_no_context, Value}}
-    end.
-
 quote_counter_validator(Value) ->
     case is_integer(Value) andalso Value > 0 of
         true -> {ok, Value};
         false -> {error, {invalid_quote_counter, Value}}
-    end.
-
-first_validate_reason(ErrorStruct) ->
-    case astranaut_error:errors(ErrorStruct) of
-        [{validate_key_failure, Reason, _Key, _Value} | _] ->
-            Reason;
-        [Error | _] ->
-            Error;
-        [] ->
-            {quote_options_error, astranaut_error:formatted_errors(ErrorStruct)}
     end.
 
 -spec decode_quote_variable(atom()) ->
@@ -324,13 +316,10 @@ unescape_quote_component([], Acc) ->
     lists:reverse(Acc).
 
 quote_counter(String) ->
-    try list_to_integer(String) of
-        Counter when Counter > 0 ->
+    case string:to_integer(String) of
+        {Counter, []} when Counter > 0 ->
             {ok, Counter};
         _ ->
-            error
-    catch
-        error:badarg ->
             error
     end.
 
@@ -461,7 +450,7 @@ validate_options(Options, Pos) ->
     Return0 =
         astranaut_lib:validate(
           #{debug => boolean, code_pos => boolean, pos => any,
-            context => atom, no_context => boolean},
+            context => any, no_context => any},
           Options),
     Return =
         astranaut_return:lift_m(
@@ -530,48 +519,42 @@ quote_normalized(Node, #{} = Opts) ->
     quote_1(Node, Opts).
 
 normalize_quote_options(Opts) ->
-    case quote_validate_options(Opts) of
-        {ok, #{context := Context, no_context := true}} ->
-            astranaut_return:error_fail(
-              {conflicting_quote_context_options,
-               Context, no_context});
-        {ok, #{context := Context}} ->
-            quote_context_options(Opts, {context, Context});
-        {ok, #{no_context := true}} ->
-            quote_context_options(Opts, no_context);
-        {ok, #{}} ->
-            default_quote_context(Opts);
-        {error, Reason} ->
-            astranaut_return:error_fail(Reason)
-    end.
+    astranaut_return:bind(
+      quote_validate_options(Opts),
+      fun(Validated) -> normalize_quote_context(Opts, Validated) end).
+
+normalize_quote_context(
+  _Opts, #{context := Context, no_context := true}) ->
+    astranaut_return:error_fail(
+      {conflicting_quote_context_options, Context, no_context});
+normalize_quote_context(Opts, #{context := Context}) ->
+    quote_context_options(Opts, {context, Context});
+normalize_quote_context(Opts, #{no_context := true}) ->
+    quote_context_options(Opts, no_context);
+normalize_quote_context(Opts, _Validated) ->
+    default_quote_context(Opts).
 
 quote_validate_options(Opts) ->
     %% `context' has no default, so an absent context leaves the key out of the
     %% validated map and stays distinguishable from an explicit `undefined'.
     %% `no_context' defaults to false and is therefore always present.
-    Validated =
-        astranaut_lib:validate(
-          #{context => fun quote_context_validator/1,
-            no_context => [fun quote_no_context_validator/1, {default, false}]},
-          maps:with([context, no_context], Opts)),
-    case astranaut_return:has_error(Validated) of
-        false ->
-            {ok, element(2, astranaut_return:run(Validated))};
-        true ->
-            {error, first_validate_reason(astranaut_return:run_error(Validated))}
-    end.
+    quote_validate(
+      #{context => fun quote_context_validator/1,
+        no_context => [boolean, {default, false}]},
+      maps:with([context, no_context], Opts)).
 
 default_quote_context(Opts) ->
     case maps:find(default_context, Opts) of
         error ->
             quote_context_options(Opts, no_context);
         {ok, DefaultContext} ->
-            case quote_context_validator(DefaultContext) of
-                {ok, _} ->
-                    quote_context_options(Opts, {context, DefaultContext});
-                {error, Reason} ->
-                    astranaut_return:error_fail(Reason)
-            end
+            astranaut_return:bind(
+              quote_validate(
+                #{context => fun quote_context_validator/1},
+                #{context => DefaultContext}),
+              fun(#{context := Context}) ->
+                      quote_context_options(Opts, {context, Context})
+              end)
     end.
 
 quote_context_options(Opts, QuoteContext) ->

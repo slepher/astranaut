@@ -31,6 +31,7 @@
 -export([to_monad/1]).
 -export([to_compiler/1]).
 -export([simplify/1]).
+-export([fail_on_error/1]).
 -export([bind/2, return/1]).
 -export([then/2]).
 -export([with_error/2]).
@@ -197,6 +198,15 @@ simplify(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := Error}) ->
     end;
 simplify(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error}) ->
      exit(astranaut_error:printable(Error)).
+
+-spec fail_on_error(struct(A)) -> struct(A).
+fail_on_error(#{?STRUCT_KEY := ?RETURN_OK, error := Error} = Return) ->
+    case astranaut_error:is_empty_error(Error) of
+        true -> Return;
+        false -> fail(Error)
+    end;
+fail_on_error(#{?STRUCT_KEY := ?RETURN_FAIL} = Return) ->
+    Return.
 
 -spec bind(struct(A) | ok, fun((A) -> struct(B))) -> struct(B).
 bind(ok, KMB) ->
