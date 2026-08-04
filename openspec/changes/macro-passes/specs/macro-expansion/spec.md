@@ -117,7 +117,7 @@
 - **给定** final function caller 筛选已用 FinalMacroEnv 分析全部 functions
 - **当** 系统为未变化的原始 function 建立 expansion task
 - **那么** task 复用该 function 的 `has_macro_call`
-- **并且** final analysis 不构造 `local_calls` 或 `local_macro_calls`
+- **并且** final analysis 不构造 `local_calls`，且不启用 `observed_macro_calls` 收集
 - **并且** expander 不再运行独立的 `has_macro_call` traversal
 
 ### Requirement: 白名单不匹配必须独立报告

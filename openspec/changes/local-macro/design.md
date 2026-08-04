@@ -6,12 +6,15 @@
 
 ## 职责边界
 
-`astranaut_macro_local` 管理逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation 编译、retain 和最终跳过集合。统一扫描器通过注册/预展开、通用 `NeedCallable` 及收尾接口与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
+`astranaut_macro_local` 是按需注册的 capability provider，管理 declaration 校验与
+descriptor 构造、逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation
+编译、retain 和最终跳过集合。统一扫描器只拥有 source queue 与 splice 机制，并通过
+provider callbacks 与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
 local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责 pass 编排，
 `astranaut_macro_registry` 负责统一的 `MacroEnvironment` 预解析，
 `astranaut_macro_scan` 负责统一扫描；`astranaut_macro_expander` 负责宏引用匹配、
-调用、返回 AST 规范化、递归 function 展开，以及显式 whitelist control 的观察结果。
+调用、返回 AST 规范化、递归 function 展开，以及显式 observation control 的通用观察结果。
 local declaration 预展开、retain 及 Step 2 普通 function 展开共享该 expander；
 generation compiler 不调用展开器，只消费已经通过多环境一致性校验的 canonical forms。
 
@@ -26,14 +29,15 @@ astranaut_macro
   │    └─ 宏声明、环境更新与阶段化 MacroEnvironment
   ├─ 调用 astranaut_macro_expander
   │    └─ 通用目标解析、宏调用、function 递归展开与展开期 monad state
-  └─ 调用 astranaut_macro_local
+  └─ 首个 local_macro declaration 动态注册 astranaut_macro_local
        ├─ declaration 成员注册、依赖规划与状态转换
        ├─ 闭包、internal policy、冻结、ExpansionRecord、retain、FinalSkipIds
        └─ canonical forms 的累计编译与 local macro 模块加载
 ```
 
-`astranaut_macro_local` 不拥有 scan 队列，也不直接实现 attribute handler。它通过
-注册/预展开、`NeedCallable` 和收尾结果与 `astranaut_macro` 协作。计划由 local-macro
+`astranaut_macro_local` 不拥有 scan 队列或 splice 实现；它通过 `handle_form`、
+`prepare_target`、`validate_generated`、attribute-pass 收尾与 function-pass callbacks
+拥有 local declaration 及生命周期语义。计划由 local-macro
 工作流驱动；引用解析与 function 展开直接调用 `astranaut_macro_expander`，从而复用
 统一错误上下文，并避免把 traverse monad 或扫描队列耦合进 local-macro 模块。
 
@@ -54,7 +58,7 @@ retain 或 declaration order。
 
 ```text
 FunctionCallAnalysis(CandidateLocalEnv, Forms)
-  -> #{FormId => #{local_calls, local_macro_calls, has_macro_call}}
+  -> #{FormId => #{local_calls, observed_macro_calls, has_macro_call}}
 ```
 
 `astranaut_macro_local` 提供候选环境；closure walk 在首次访问 function 时同时保存
@@ -249,12 +253,17 @@ ClosureSourceView = PassedForms ++ CurrentAndRemainingQueue
 
 扫描遇到 `-local_macro(...)` 时：
 
-1. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
-2. 以 declaration 前的 effective map、options 和增量 `AttributeEnv` 解析一个共同 `MacroEnvironment`。
-3. 直接使用该 declaration 前的环境；它自然不含本次新增 members。
-4. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；任何展开都从该输入开始。
-5. 建立带相同 order/context 的逐 FA 生命周期条目，更新实际 local macro 依赖。
-6. 对依赖已就绪的 forms 立即预展开；需要尚不可调用 local macro 时产生 `NeedCallable`。
+1. 若 capability 尚未注册，动态加载并初始化 `astranaut_macro_local`；该 declaration 自身立即由新 provider 处理，不回扫此前 forms。
+2. 使用该时刻的完整 `closure_source_view` 计算闭包；它是已 pass 的输出前缀加上当前尚未 pass 的队列，不包含未来尚未 materialize 的 splice 输出。
+3. 以 declaration 前的 effective map、options 和增量 `AttributeEnv` 解析一个共同 `MacroEnvironment`。
+4. 直接使用该 declaration 前的环境；它自然不含本次新增 members。
+5. 将闭包的原始 function/spec forms 保存到 `frozen_forms`；任何展开都从该输入开始。
+6. 建立带相同 order/context 的逐 FA 生命周期条目，更新实际 local macro 依赖。
+7. 对依赖已就绪的 forms 立即预展开；需要尚不可调用 local macro 时产生 `NeedCallable`。
+
+没有 `-local_macro(...)` 的扫描保持 capability disabled，不加载 provider，也不建立
+local state。核心模块及 `erl_first_files` 不依赖 provider；删除 provider 源文件时普通
+macro parse transform 仍可编译和运行。
 
 后续属性 splice 不得改写 `frozen_forms` 中的 form ID，否则报 `illegal_locked_form_mutation`。
 

@@ -14,32 +14,34 @@
 `astranaut_macro` 负责 attribute/function pass 编排，`astranaut_macro_scan` 负责
 source-ordered scan-and-splice 与扫描期 traverse state，`astranaut_macro_registry`
 负责环境更新和阶段化 macro environment 解析。
-白名单是 local frozen function expansion 的可选观察/校验策略；调用方必须显式传入
-控制值，展开器不得根据 MacroEnv、FormId 或阶段隐式推断：
+observation 是 function expansion 的可选通用观察/校验策略；local provider 把
+`Function/Arity` 写入 descriptor 的 `observation_id`，并显式传入控制值。展开器不识别
+`macro_source := local_macro`，也不得根据 MacroEnv、FormId 或阶段隐式推断：
 
 ```text
-LocalMacroWhitelistControl =
+ObservationControl =
     disabled
-  | #{mode := collect, form_id := FormId}
+  | #{mode := collect, form_id := FormId, conflict_tag := atom()}
   | #{mode := verify,
       form_id := FormId,
+      conflict_tag := atom(),
       expected := ordsets:ordset(FA)}
 
 ExpandFunctions(Forms, #{FormId => #{
   form := OriginalOrFrozenForm,
   macro_map := ResolvedMacroMap,
-  whitelist_control := WhitelistControl
+  observation_control := ObservationControl
 }})
   -> #{forms := ExpandedForms,
        task_results := #{FormId => #{
          form := ExpandedTargetForm,
-         local_macro_whitelist := disabled | ordsets:ordset(FA),
-         needed_local_macros := ordsets:ordset(FA)
+         observed_macro_ids := disabled | ordsets:ordset(term()),
+         needed_macro_ids := ordsets:ordset(term())
        }}}
   | Error
 ```
 
-- `disabled` 不分配 accumulator、不观察 local match、不做完成检查，结果 whitelist 固定为 `disabled` 且 `needed_local_macros` 为空。
+- `disabled` 不分配 accumulator、不观察 descriptor、不做完成检查，结果 observation 固定为 `disabled` 且 `needed_macro_ids` 为空。
 - `collect` 累计原始 function 中实际发现的 local FAs，以及每个 macro 返回 AST 在 `process_macro_return` 中一次性收集的 local FAs；成功后返回 canonical whitelist。
 - `verify` 使用相同来源累计 FAs；每个返回 AST 收集完成后由调用方批量拒绝 expected 之外的集合，完整展开后检查缺失项。final retained context 先用 expected 过滤 LocalEnv，使名单外调用保持普通调用。
 
@@ -69,7 +71,7 @@ declaration 与 final function 是批量展开边界，可能命中 macro map �
 ```text
 Original function match
   -> observe matched local FA
-  -> unavailable: add needed_local_macros and do not invoke
+  -> unavailable: add needed_macro_ids and do not invoke
   -> callable: invoke macro
 
 process_macro_return(Return)
@@ -87,7 +89,7 @@ expand_macro_with
 ```
 
 `process_macro_return` 只收集，不校验也不调用 replacement 中的宏。它以
-`scoped_state_run` 使用局部 analysis map state，同时携带 `local_macro_calls` 与
+`scoped_state_run` 使用局部 analysis map state，同时携带 `observed_macro_calls` 与
 `has_macro_call`；调用方合并 local FAs 并执行批量校验。只有被接受且确实含宏的返回
 AST 才沿既有 pre/post 路径进入 `transform_exprs`。不得增加第二次 return-tree scanner、
 whole-form rescan 或 expanded/original AST diff。宏私有 State 与返回树分析 State 均不得
@@ -157,7 +159,7 @@ fingerprint/展开规则。
 
 ### replacement 驱动 callable 调度
 
-`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_local_macros`，不调用该宏，也不提交部分 expansion；`astranaut_macro_local` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
+`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_macro_ids`，不调用该宏，也不提交部分 expansion；`astranaut_macro_local` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
 
 ## 两步模型
 

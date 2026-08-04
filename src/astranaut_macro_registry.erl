@@ -11,21 +11,23 @@
 
 -include("do.hrl").
 
--export([new/3, new/4,
+-export([new/3,
          default_options/0,
+         validate_definition_attribute/3,
+         macro_definition_validator/0,
+         remove_undefined_macros/2,
          apply_directive/2,
-         validate_local_macro_attribute/2,
-         add_local_macro/4,
+         add_macro_definitions/2,
          prepare_exports/1,
          note_form/2,
          declaration_macro_environment/1,
          resolve_attribute_target/2,
-         final_macro_environment/3,
+         final_macro_environment/2,
          effective_macro_map/1,
          attribute_macro_index/1,
-         global_macro_opts/1]).
+         global_macro_opts/1,
+         context/1]).
 
--type fa() :: {atom(), non_neg_integer()}.
 -type macro_map() :: map().
 -type attribute_env() ::
         #{module := module(),
@@ -53,13 +55,7 @@
 
 -spec new(module(), file:filename(), map()) -> state().
 new(Module, File, GlobalMacroOpts) ->
-    new(Module, astranaut_macro_local:module_name(Module),
-        File, GlobalMacroOpts).
-
--spec new(module(), module(), file:filename(), map()) -> state().
-new(Module, LocalMacroModule, File, GlobalMacroOpts) ->
     #{module => Module,
-      local_macro_module => LocalMacroModule,
       file => File,
       global_macro_opts => GlobalMacroOpts,
       module_macro_maps => #{},
@@ -71,6 +67,17 @@ new(Module, LocalMacroModule, File, GlobalMacroOpts) ->
 -spec default_options() -> astranaut_return:struct(map()).
 default_options() ->
     astranaut_lib:validate(global_macro_validator(), []).
+
+-spec validate_definition_attribute(atom(), term(), map()) ->
+          astranaut_return:struct({[term()], map()}).
+validate_definition_attribute(AttrName, Attr, Validator) ->
+    validate_macro_attribute(
+      fun macro_without_module_attr/1,
+      Validator, AttrName, Attr).
+
+-spec macro_definition_validator() -> map().
+macro_definition_validator() ->
+    common_macro_definition_validator().
 
 -spec apply_directive(term(), state()) ->
           astranaut_return:struct({keep | consume, state()}).
@@ -139,38 +146,14 @@ apply_directive(
                               maps:merge(GlobalMacroOpts, MacroOpts)}})
        ]).
 
--spec validate_local_macro_attribute(map(), term()) ->
-          astranaut_return:struct({[fa()], map()}).
-validate_local_macro_attribute(ClauseMap, Attr) ->
-    do([ return ||
-           Validator = local_macro_validator(),
-           {FAs, Options} <- validate_macro_attribute(
-                               fun macro_without_module_attr/1,
-                               Validator, local_macro, Attr),
-           FAs1 <- remove_undefined_macros(FAs, ClauseMap),
-           Options1 <- validate_closure_roots_defined(Options, ClauseMap),
-           return({FAs1, Options1})
-       ]).
-
--spec add_local_macro([fa()], map(), map(), state()) ->
+-spec add_macro_definitions(map(), state()) ->
           astranaut_return:struct(state()).
-add_local_macro(
-  FAs, Options, ClauseMap,
+add_macro_definitions(
+  ModuleMacros,
   #{module := Module,
-    local_macro_module := LocalMacroModule,
     file := File,
-    global_macro_opts := GlobalOpts,
     effective_macro_map := EffectiveMap} = State) ->
-    Ctx = #{module => Module,
-            local_macro_module => LocalMacroModule,
-            file => File,
-            global_macro_opts =>
-                local_macro_global_opts(
-                  LocalMacroModule, ClauseMap, GlobalOpts)},
-    New = build_local_macro_map(
-            Ctx,
-            macro_options_by_fa(
-              FAs, Options#{macro_source => local_macro})),
+    New = update_module_macros(File, Module, ModuleMacros),
     do([ return ||
            EffectiveMap1 <- merge_macro_maps(EffectiveMap, New),
            return(set_effective_macro_map(EffectiveMap1, State))
@@ -200,18 +183,16 @@ resolve_attribute_target(
   #{attribute_env := AttributeEnv}) ->
     Target#{macro => resolve_macro_attributes(Macro, AttributeEnv)}.
 
--spec final_macro_environment([term()], macro_map(), state()) ->
+-spec final_macro_environment([term()], state()) ->
           macro_environment().
 final_macro_environment(
-  Forms, FinalLocalEnv,
+  Forms,
   #{module := Module,
     file := File,
     global_macro_opts := GlobalMacroOpts,
     effective_macro_map := EffectiveMacroMap}) ->
-    FinalMacroMap = compiled_effective_macro_map(
-                      EffectiveMacroMap, FinalLocalEnv),
     ResolvedFinalMacroMap = resolve_macro_environment(
-                              FinalMacroMap,
+                              EffectiveMacroMap,
                               attribute_env_from_forms(
                                 Module, File, Forms)),
     macro_environment(ResolvedFinalMacroMap, GlobalMacroOpts).
@@ -224,6 +205,14 @@ attribute_macro_index(#{attribute_macro_index := Index}) -> Index.
 
 -spec global_macro_opts(state()) -> map().
 global_macro_opts(#{global_macro_opts := Options}) -> Options.
+
+-spec context(state()) -> map().
+context(#{module := Module,
+          file := File,
+          global_macro_opts := GlobalMacroOpts}) ->
+    #{module => Module,
+      file => File,
+      global_macro_opts => GlobalMacroOpts}.
 
 %%%===================================================================
 %%% Attribute environments
@@ -291,18 +280,8 @@ set_effective_macro_map(MacroMap, State) ->
            attribute_macro_index =>
                astranaut_macro_expander:attribute_macro_index(MacroMap)}.
 
-compiled_effective_macro_map(EffectiveMacroMap, FinalLocalEnv) ->
-    CompiledFAs = ordsets:from_list(maps:keys(FinalLocalEnv)),
-    maps:filter(
-      fun(_Key, #{macro_source := local_macro,
-                  function := Function, arity := Arity}) ->
-              ordsets:is_element({Function, Arity}, CompiledFAs);
-         (_Key, _ExternalMacro) ->
-              true
-      end, EffectiveMacroMap).
-
 %%%===================================================================
-%%% Export and local declarations
+%%% Export declarations
 %%%===================================================================
 
 exported_macros(Forms, ClausesMap) ->
@@ -359,52 +338,6 @@ remove_undefined_macros(FAs, ClausesMap) ->
                         {undefined_macro, Function, Arity}, Acc)
               end
       end, [], FAs).
-
-validate_closure_roots_defined(Options, ClauseMap) ->
-    Missing = [FA || FA <- maps:get(closure_roots, Options, []),
-                     not maps:is_key(FA, ClauseMap)],
-    case Missing of
-        [] -> astranaut_return:return(Options);
-        _ -> astranaut_return:error_fail(
-               {invalid_closure_roots, Missing})
-    end.
-
-build_local_macro_map(
-  #{file := File,
-    module := Module,
-    local_macro_module := LocalMacroModule,
-    global_macro_opts := GlobalMacroOpts}, ModuleMacros) ->
-    LocalModuleMacros =
-        maps:map(
-          fun({Function, Arity}, MacroOptions) ->
-                  local_macro_options(
-                    Module, LocalMacroModule, GlobalMacroOpts,
-                    Function, Arity, MacroOptions)
-          end, ModuleMacros),
-    update_module_macros(File, Module, LocalModuleMacros).
-
-macro_options_by_fa(FAs, Options) ->
-    lists:foldl(
-      fun(FA, Acc) -> maps:put(FA, Options, Acc) end,
-      #{}, FAs).
-
-local_macro_global_opts(LocalMacroModule, ClauseMap, GlobalMacroOpts) ->
-    case maps:is_key({format_error, 1}, ClauseMap) of
-        true ->
-            GlobalMacroOpts#{formatter =>
-                                 LocalMacroModule};
-        false ->
-            GlobalMacroOpts#{formatter => astranaut_macro}
-    end.
-
-local_macro_options(
-  Module, LocalMacroModule, GlobalMacroOpts, Function, Arity, MacroOptions) ->
-    MacroOptions1 = maps:merge(GlobalMacroOpts, MacroOptions),
-    MacroOptions1#{module => LocalMacroModule,
-                   macro_module => Module,
-                   macro => Function,
-                   function => Function,
-                   arity => Arity}.
 
 %%%===================================================================
 %%% Imported and used macros
@@ -675,18 +608,6 @@ common_macro_definition_validator() ->
 
 export_macro_validator() ->
     common_macro_definition_validator().
-
-local_macro_validator() ->
-    maps:merge(
-      common_macro_definition_validator(),
-      #{closure_roots =>
-            {list_of, fun validate_function_with_arity/1}}).
-
-validate_function_with_arity({Function, Arity} = FA)
-  when is_atom(Function), is_integer(Arity), Arity >= 0 ->
-    {ok, FA};
-validate_function_with_arity(FA) ->
-    {error, {invalid_function_with_arity, FA}}.
 
 validate_mfas({Module, FAs}) when is_atom(Module) ->
     validate_fas(FAs);

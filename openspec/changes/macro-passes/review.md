@@ -37,8 +37,8 @@ local macro 的闭包、冻结、缓存、累计编译、retain 和安全加载�
 | FinalLocalEnv 过滤并接入 function pass | `compiled_effective_macro_map/2`, `finalize_attribute_macro_pass/7` | 已实现 |
 | FinalSkipIds 在 function pass 前剔除 | `remove_final_skip_forms/2` | 已实现 |
 | local 与普通 function 共用展开器 | `astranaut_macro_expander:expand_functions/2` | 已实现；无单函数兼容门面和 callback ops |
-| whitelist control 显式区分 disabled/collect/verify | `local_macro_whitelist_control/0`, `whitelist_control/2` | 已实现 |
-| 原始与 replacement AST 在统一发现点观察 local match | `observe_local_macro/2`, `expand_macro_recursive/4` | 已实现 |
+| whitelist control 显式区分 disabled/collect/verify | `observation_control/0`, `observation_control` task field | 已实现 |
+| 原始与 replacement AST 在统一发现点观察 local match | `observe_macro/2`, `expand_macro_recursive/4` | 已实现 |
 | whitelist/result 共同进入 ExpansionRecord | `cache_expanded/4`, `results_by_input` | 已实现 |
 | final local closure 按 canonical whitelist 过滤 | `final_whitelist_control/2`, `final_allowed_local_fas/2`, `keep_allowed_local_fas/2` | 已实现 |
 

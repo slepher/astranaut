@@ -316,7 +316,7 @@ function_call_analysis_combines_closure_and_macro_presence(_Config) ->
     ?assertMatch(
        #{form := Form,
          local_calls := [{helper, 0}, {whitelist_chain_a, 0}],
-         local_macro_calls := [{whitelist_chain_a, 0}],
+         observed_macro_calls := [{whitelist_chain_a, 0}],
          has_macro_call := true},
        maps:get(FormId, Analysis)),
     ?assertEqual([FormId],
@@ -324,7 +324,7 @@ function_call_analysis_combines_closure_and_macro_presence(_Config) ->
                    Analysis)),
     ?assertMatch(
        #{local_calls := [],
-         local_macro_calls := [],
+         observed_macro_calls := [],
          has_macro_call := false},
        maps:get({function, helper, 0}, Analysis)),
     PresenceAnalysis =
@@ -347,13 +347,14 @@ shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
         #{{function, task_a, 0} =>
               #{form => FormA,
                 macro_map => maps:with([{whitelist_chain_a, 0}], MacroMap),
-                whitelist_control =>
+                observation_control =>
                     #{mode => collect,
-                      form_id => {function, task_a, 0}}},
+                      form_id => {function, task_a, 0},
+                      conflict_tag => conflicting_local_macro_whitelist}},
           {function, task_b, 0} =>
               #{form => FormB,
                 macro_map => maps:with([{whitelist_chain_b, 0}], MacroMap),
-                whitelist_control => disabled}},
+                observation_control => disabled}},
     reset_whitelist_macro_counts(),
     {just, #{forms := ExpandedForms, task_results := Results}} =
         astranaut_return:run(
@@ -370,10 +371,10 @@ shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
        ordsets:from_list([{function, task_a, 0}, {function, task_b, 0}]),
        ordsets:from_list(maps:keys(Results))),
     ?assertMatch(
-       #{local_macro_whitelist := [{whitelist_chain_a, 0}]},
+       #{observed_macro_ids := [{whitelist_chain_a, 0}]},
        maps:get({function, task_a, 0}, Results)),
     ?assertMatch(
-       #{local_macro_whitelist := disabled},
+       #{observed_macro_ids := disabled},
        maps:get({function, task_b, 0}, Results)),
     ?assertEqual(1, erlang:erase(whitelist_chain_a_count)),
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
@@ -382,10 +383,12 @@ shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
 shared_expander_follows_external_replacement_presence(_Config) ->
     MacroMap = maps:map(
                  fun(_Key, Macro) ->
-                         Macro#{macro_source => external_macro}
+                         maps:remove(
+                           observation_id,
+                           Macro#{macro_source => external_macro})
                  end, whitelist_macro_map()),
     reset_whitelist_macro_counts(),
-    {just, #{forms := Forms, local_macro_whitelist := disabled}} =
+    {just, #{forms := Forms, observed_macro_ids := disabled}} =
         astranaut_return:run(
           expand_single_function(
             MacroMap, [whitelist_target_form()],
@@ -400,9 +403,10 @@ shared_expander_follows_external_replacement_presence(_Config) ->
 
 shared_expander_collects_recursive_replacement_whitelist(_Config) ->
     FormId = {function, whitelist_target, 0},
-    Control = #{mode => collect, form_id => FormId},
+    Control = #{mode => collect, form_id => FormId,
+                conflict_tag => conflicting_local_macro_whitelist},
     reset_whitelist_macro_counts(),
-    {just, #{forms := Forms, local_macro_whitelist := Whitelist}} =
+    {just, #{forms := Forms, observed_macro_ids := Whitelist}} =
         astranaut_return:run(
           expand_single_function(
             whitelist_macro_map(), [whitelist_target_form()],
@@ -428,6 +432,7 @@ shared_expander_rejects_unexpected_whitelist_immediately(_Config) ->
                 [whitelist_immediate_target_form()],
                 {whitelist_target, 0},
                 #{mode => verify, form_id => FormId,
+                  conflict_tag => conflicting_local_macro_whitelist,
                   expected => Expected})),
     ?assertEqual(
        [{1, astranaut_macro,
@@ -464,6 +469,7 @@ shared_expander_batches_return_whitelist_conflicts(_Config) ->
                 [whitelist_batch_target_form()],
                 {whitelist_target, 0},
                 #{mode => verify, form_id => FormId,
+                  conflict_tag => conflicting_local_macro_whitelist,
                   expected => Expected})),
     Formatted = maps:get(
                   formatted_errors, astranaut_error:printable(Error)),
@@ -496,6 +502,7 @@ shared_expander_expands_expected_after_unexpected(_Config) ->
                 [whitelist_expected_after_unexpected_form()],
                 {whitelist_target, 0},
                 #{mode => verify, form_id => FormId,
+                  conflict_tag => conflicting_local_macro_whitelist,
                   expected => Expected})),
     ?assertEqual(1, length(maps:get(
                              formatted_errors,
@@ -514,6 +521,7 @@ shared_expander_rejects_missing_whitelist_after_completion(_Config) ->
                 whitelist_macro_map(), [whitelist_target_form()],
                 {whitelist_target, 0},
                 #{mode => verify, form_id => FormId,
+                  conflict_tag => conflicting_local_macro_whitelist,
                   expected => Expected})),
     ?assertEqual(
        [{1, astranaut_macro,
@@ -531,20 +539,21 @@ shared_expander_requests_uncallable_local_macro(_Config) ->
     Macro = maps:get({whitelist_chain_a, 0}, MacroMap0),
     MacroMap = maps:put(
                  {whitelist_chain_a, 0},
-                 Macro#{local_macro_callable => false}, MacroMap0),
+                 Macro#{callable => false}, MacroMap0),
     reset_whitelist_macro_counts(),
-    {just, #{local_macro_whitelist := [{whitelist_chain_a, 0}],
-             needed_local_macros := [{whitelist_chain_a, 0}]}} =
+    {just, #{observed_macro_ids := [{whitelist_chain_a, 0}],
+             needed_macro_ids := [{whitelist_chain_a, 0}]}} =
         astranaut_return:run(
           expand_single_function(
             MacroMap, [whitelist_target_form()],
             {whitelist_target, 0},
-            #{mode => collect, form_id => FormId})),
+            #{mode => collect, form_id => FormId,
+              conflict_tag => conflicting_local_macro_whitelist})),
     ?assertEqual(undefined, erlang:erase(whitelist_chain_a_count)),
     ok.
 
 shared_expander_disables_whitelist_for_ordinary_function(_Config) ->
-    {just, #{forms := _Forms, local_macro_whitelist := disabled}} =
+    {just, #{forms := _Forms, observed_macro_ids := disabled}} =
         astranaut_return:run(
           expand_single_function(
             whitelist_macro_map(), [whitelist_target_form()],
@@ -601,6 +610,7 @@ dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
                          macro_module => Module,
                          macro => a, function => a,
                          arity => 0, call_arity => 0,
+                         observation_id => {a, 0},
                          max_depth => 100, order => inner,
                          formatter => astranaut_macro,
                          file => [], local_module => Module}},
@@ -662,7 +672,8 @@ register(FAs, Options, Source, MacroMap, State) ->
     CandidateMap =
         maps:from_list(
           [{{Name, Arity}, #{macro_source => local_macro,
-                            function => Name, arity => Arity}}
+                            function => Name, arity => Arity,
+                            observation_id => {Name, Arity}}}
            || {Name, Arity} <- maps:keys(astranaut_macro_local:local_macros(State))]),
     EffectiveMacroMap = maps:merge(MacroMap, CandidateMap),
     astranaut_macro_local:register(
@@ -683,7 +694,7 @@ expand_single_function(MacroMap, Forms, {Name, Arity}, Control) ->
             FunctionArity =:= Arity],
     Task = #{form => Form,
              macro_map => MacroMap,
-             whitelist_control => Control},
+             observation_control => Control},
     astranaut_return:lift_m(
       fun(#{forms := ExpandedForms,
             task_results := #{FormId := Result}}) ->
@@ -705,6 +716,7 @@ whitelist_macro(Function) ->
       macro => Function,
       function => Function,
       arity => 0,
+      observation_id => {Function, 0},
       call_arity => 0,
       max_depth => 100,
       order => inner,
@@ -713,7 +725,8 @@ whitelist_macro(Function) ->
       local_module => ?MODULE}.
 
 external_macro(Function) ->
-    (whitelist_macro(Function))#{macro_source => external_macro}.
+    maps:remove(observation_id,
+                (whitelist_macro(Function))#{macro_source => external_macro}).
 
 retained_conflict_macro() ->
     {atom, 1, final_value}.

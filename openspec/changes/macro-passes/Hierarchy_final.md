@@ -201,7 +201,7 @@ LocalMacroEntry = {
 DeclarationMacroEnv = PreDeclarationEffectiveMacroMap
 ```
 
-首次预展开把 declaration 前可匹配的 local entries 作为 `CandidateLocalEnv`，并传 `collect(FormId)`。原始 AST 在 `match_macro_call` 成功后观察实际 local FA；每个 macro 返回 AST 则由 `process_macro_return` 在既有规范化 traversal 中一次性收集 local macro FAs 与总体 macro presence，并以 `{ProcessedNode, ReturnAnalysis}` 返回。调用方把 `local_macro_calls` 批次合并到 function-level accumulator。成功结果成为该 FormId 的 `canonical_whitelist`。因此 `bar/1` 中对 `foo/1` 的直接调用仍是普通 Erlang 本地调用和闭包边，因为 declaration 前 CandidateLocalEnv 尚不包含本次 members；反向同理。
+首次预展开把 declaration 前可匹配的 local entries 作为 `CandidateLocalEnv`，并传 `collect(FormId)`。原始 AST 在 `match_macro_call` 成功后观察实际 local FA；每个 macro 返回 AST 则由 `process_macro_return` 在既有规范化 traversal 中一次性收集 local macro FAs 与总体 macro presence，并以 `{ProcessedNode, ReturnAnalysis}` 返回。调用方把 `observed_macro_calls` 批次合并到 function-level accumulator。成功结果成为该 FormId 的 `canonical_whitelist`。因此 `bar/1` 中对 `foo/1` 的直接调用仍是普通 Erlang 本地调用和闭包边，因为 declaration 前 CandidateLocalEnv 尚不包含本次 members；反向同理。
 
 后续 declaration environment 使用 `verify(Expected)` 和当前 CandidateLocalEnv。每个 Return AST 完成收集后，调用方批量拒绝名单外 presence；同一返回 AST 的所有 unexpected FAs 只产生一个汇总错误，并且该 replacement 不进入递归展开。完整 function expansion 结束后再检查缺失项。final retained local closure 先以 canonical whitelist 过滤 FinalLocalEnv，再传 `verify(Expected)`；名单外同声明或后声明调用不匹配为 local macro，保持普通调用。final 的 external macros、options 和已解析 attributes 取 FinalMacroEnvironment。
 
@@ -264,7 +264,7 @@ expand_and_validate(FormId, OriginalForm, MacroEnvironment, WhitelistControl):
 form 与这组 records；`NeedCallable` 后沿用同一上下文从 frozen form 重试，不并发执行宏，
 因此 invocation、错误和提交顺序保持不变。
 
-若原始或 replacement AST 的统一匹配点真正发现一个尚不可调用的 candidate local macro，则 expansion 返回 `needed_local_macros`。scheduler 可以当场通过 `NeedCallable(FA)` 编译最小必要依赖边界，随后从 frozen form 重试；部分 whitelist/result 不提交。这不是 declaration 编译策略或 whitelist 冲突，而是通用的依赖可调用性规则。
+若原始或 replacement AST 的统一匹配点真正发现一个尚不可调用的 candidate local macro，则 expansion 返回 `needed_macro_ids`。scheduler 可以当场通过 `NeedCallable(FA)` 编译最小必要依赖边界，随后从 frozen form 重试；部分 whitelist/result 不提交。这不是 declaration 编译策略或 whitelist 冲突，而是通用的依赖可调用性规则。
 
 ## 7. DependencyScheduler 与 GenerationCompiler
 
@@ -448,7 +448,7 @@ Compile/load failure
 
 - 将 request-specific expansion 与 `compile_boundary` 分离，由 `execute_plan` 仅按“准备后编译”顺序协调。
 - 实现显式 `LocalMacroWhitelistControl`、带 whitelist/result 的 `ExpansionRecord` 和 `expand_and_validate`。
-- 原始 AST 在共享 macro 发现—执行点观察；`process_macro_return` 返回 `{Node, ReturnAnalysis}`，调用方批量合并/校验 `local_macro_calls`，并只递归遍历 `has_macro_call` 为 true 的 accepted replacement。
+- 原始 AST 在共享 macro 发现—执行点观察；`process_macro_return` 返回 `{Node, ReturnAnalysis}`，调用方批量合并/校验 `observed_macro_calls`，并只递归遍历 `has_macro_call` 为 true 的 accepted replacement。
 - GenerationCompiler 只消费 canonical expanded forms。
 
 状态：已实现。

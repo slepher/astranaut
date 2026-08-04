@@ -2,8 +2,9 @@
 %%% @doc Source-ordered macro attribute scan-and-splice.
 %%%
 %%% This module owns the scan queue, passed/remaining source views and the
-%%% traverse state used while attributes are processed. Macro declarations
-%%% and environments are delegated to astranaut_macro_registry.
+%%% traverse state used while attributes are processed. Generic macro
+%%% environments are delegated to astranaut_macro_registry; optional
+%%% declarations are dispatched to their registered capability provider.
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -11,17 +12,16 @@
 
 -include("do.hrl").
 
--export([run/5, run/6, map_forms_splice/3]).
+-export([run/5, map_forms_splice/3]).
 
--type fa() :: {atom(), non_neg_integer()}.
 -type scanner_state() ::
         #{module := module(),
           file := term(),
           compile_opts := [compile:option()],
           registry := astranaut_macro_registry:state(),
           passed_forms := [term()],
-          local_macro_state := map(),
-          local_declarations := #{term() => {term(), [fa()]}},
+          capability := disabled |
+              #{provider := module(), state := term()},
           attribute_expansion =>
               #{count := non_neg_integer(),
                 max_depth := non_neg_integer(),
@@ -35,22 +35,14 @@
 -spec run(module(), file:filename(), map(), [term()], [compile:option()]) ->
           astranaut_return:struct({[term()], scanner_state()}).
 run(Module, File, GlobalMacroOpts, Forms, CompileOpts) ->
-    run(Module, astranaut_macro_local:module_name(Module), File,
-        GlobalMacroOpts, Forms, CompileOpts).
-
--spec run(module(), module(), file:filename(), map(), [term()],
-          [compile:option()]) ->
-          astranaut_return:struct({[term()], scanner_state()}).
-run(Module, LocalMacroModule, File, GlobalMacroOpts, Forms, CompileOpts) ->
     InitState =
         #{module => Module,
           file => File,
           compile_opts => CompileOpts,
           registry => astranaut_macro_registry:new(
-                        Module, LocalMacroModule, File, GlobalMacroOpts),
+                        Module, File, GlobalMacroOpts),
           passed_forms => [],
-          local_macro_state => astranaut_macro_local:new(LocalMacroModule),
-          local_declarations => #{}},
+          capability => disabled},
     astranaut_traverse:run(
       map_forms_splice(
         fun scan_form/1, Forms,
@@ -308,84 +300,76 @@ scan_form(Form) ->
            State <- astranaut_traverse:get(),
            case Form of
                {attribute, _Pos, local_macro, _Attr} ->
-                   scan_local_macro(Form, State);
-               {attribute, _Pos, import_macro, _Attr} ->
-                   scan_env_form(Form, State);
-               {attribute, _Pos, use_macro, _Attr} ->
-                   scan_env_form(Form, State);
-               {attribute, _Pos, macro_options, _Attr} ->
-                   scan_env_form(Form, State);
+                   scan_local_macro_form(Form, State);
                _ ->
-                   scan_attribute_runtime(Form, State)
+                   scan_generic_form(Form, State)
            end
        ]).
 
-scan_local_macro(
-  {attribute, Pos, local_macro, Attr} = Form,
-  #{registry := Registry,
-    local_macro_state := LocalState,
-    local_declarations := LocalDeclarations} = State) ->
-    Queue = remaining_source_forms(State),
-    SourceView = astranaut_macro_local:source_view(
-                   passed_forms(State), Queue),
-    ClauseMap = function_clauses_map(SourceView, #{}),
-    Validation = astranaut_macro_registry:validate_local_macro_attribute(
-                   ClauseMap, Attr),
-    case astranaut_return:run(Validation) of
-        {just, {FAs, Options}} ->
-            do([ traverse ||
-                   astranaut:traverse_return(Validation),
-                   scan_valid_local_macro(
-                     Form, Pos, FAs, Options, ClauseMap,
-                     SourceView, State, Registry, LocalState,
-                     LocalDeclarations)
-               ]);
-        nothing ->
-            astranaut:traverse_return(Validation)
-    end.
+scan_local_macro_form(Form, #{capability := disabled} = State) ->
+    Provider = astranaut_macro_local,
+    case code:ensure_loaded(Provider) of
+        {module, Provider} ->
+            ProviderState = apply(
+                              Provider, init,
+                              [#{module => maps:get(module, State),
+                                 file => maps:get(file, State),
+                                 compile_opts =>
+                                     maps:get(compile_opts, State)}]),
+            handle_capability_form(
+              Form,
+              State#{capability =>
+                         #{provider => Provider,
+                           state => ProviderState}});
+        _ ->
+            astranaut_traverse:fail(
+              {macro_capability_unavailable, Provider})
+    end;
+scan_local_macro_form(Form, State) ->
+    handle_capability_form(Form, State).
 
-scan_valid_local_macro(
-  Form, Pos, FAs, Options, ClauseMap, SourceView,
-  State, Registry, LocalState, LocalDeclarations) ->
+handle_capability_form(
+  Form,
+  #{capability := #{provider := Provider,
+                    state := ProviderState},
+    registry := Registry} = State) ->
+    Result = apply(
+               Provider, handle_form,
+               [Form, capability_context(State), Registry,
+                ProviderState]),
     do([ traverse ||
-           RegisteredLocalState <- register_local_declaration(
-                                     FAs, Options, Pos, SourceView,
-                                     astranaut_macro_registry:
-                                       declaration_macro_environment(
-                                         Registry),
-                                     LocalState),
-           WorkflowContext = local_macro_workflow_context(
-                               SourceView,
-                               maps:get(compile_opts, State)),
-           LocalState1 <- astranaut:traverse_return(
-                            astranaut_macro_local:prepare_declaration(
-                              FAs, WorkflowContext,
-                              RegisteredLocalState)),
-           Registry1 <- astranaut:traverse_return(
-                          astranaut_macro_registry:add_local_macro(
-                            FAs, Options, ClauseMap, Registry)),
-           astranaut_traverse:put(
-             note_passed_form(
-               Form,
-               State#{registry => Registry1,
-                      local_macro_state => LocalState1,
-                      local_declarations =>
-                          maps:put(Form, {Pos, FAs},
-                                   LocalDeclarations)})),
-           return(Form)
+           {Action, Registry1, ProviderState1} <-
+               astranaut:traverse_return(Result),
+           State1 = State#{registry => Registry1,
+                           capability =>
+                               #{provider => Provider,
+                                 state => ProviderState1}},
+           case Action of
+               consume ->
+                   do([ traverse ||
+                          astranaut_traverse:put(State1),
+                          return({splice, []})
+                      ]);
+               keep ->
+                   do([ traverse ||
+                          astranaut_traverse:put(
+                            note_passed_form(Form, State1)),
+                          return(Form)
+                      ])
+           end
        ]).
 
-register_local_declaration(
-  FAs, Options, Pos, SourceView, MacroEnvironment, LocalState) ->
-    case astranaut_macro_local:register(
-           FAs, Options, SourceView, MacroEnvironment, LocalState) of
-        {ok, LocalState1} ->
-            astranaut_traverse:return(LocalState1);
-        {error, Error} ->
-            astranaut_traverse:update_pos(
-              Pos, astranaut_macro,
-              astranaut_traverse:fail(Error))
-    end.
+scan_generic_form(
+  {attribute, _Pos, import_macro, _Attr} = Form, State) ->
+    scan_env_form(Form, State);
+scan_generic_form(
+  {attribute, _Pos, use_macro, _Attr} = Form, State) ->
+    scan_env_form(Form, State);
+scan_generic_form(
+  {attribute, _Pos, macro_options, _Attr} = Form, State) ->
+    scan_env_form(Form, State);
+scan_generic_form(Form, State) ->
+    scan_attribute_runtime(Form, State).
 
 scan_env_form(Form, #{registry := Registry} = State) ->
     do([ traverse ||
@@ -458,9 +442,7 @@ run_root_attribute_macro(Target, State) ->
                        astranaut_macro_expander:expand_attribute_target(
                          Target),
                    ExpandedForms = to_list(Expanded),
-                   assert_scan_frozen_forms(
-                     ExpandedForms,
-                     maps:get(local_macro_state, State1)),
+                   validate_capability_forms(ExpandedForms, State1),
                    return({buffer, ExpandedForms, MaxDepth, Target})
                ])
     end.
@@ -478,8 +460,7 @@ run_buffered_attribute_macro(
            Expanded <- astranaut_macro_expander:expand_attribute_target(
                          Target),
            ExpandedForms = to_list(Expanded),
-           assert_scan_frozen_forms(
-             ExpandedForms, maps:get(local_macro_state, State1)),
+           validate_capability_forms(ExpandedForms, State1),
            astranaut_traverse:put(
              State1#{attribute_expansion =>
                          Expansion#{count => Count + 1}}),
@@ -492,46 +473,34 @@ attribute_expansion_limit_error(
      maps:get(macro, Macro), Arguments}.
 
 ensure_attribute_target_callable(
-    #{macro := #{macro_source := local_macro,
-                 function := Function, arity := Arity}},
-    #{local_macro_state := LocalState,
-      compile_opts := CompileOpts} = State) ->
-    Queue = remaining_source_forms(State),
-    case maps:find(
-           {Function, Arity},
-           astranaut_macro_local:local_macros(LocalState)) of
-        {ok, #{status := compiled}} ->
-            astranaut_traverse:return(State);
-        {ok, _} ->
-            SourceView = astranaut_macro_local:source_view(
-                           passed_forms(State), Queue),
-            do([ traverse ||
-                   WorkflowContext = local_macro_workflow_context(
-                                       SourceView, CompileOpts),
-                   LocalState1 <- astranaut:traverse_return(
-                                    astranaut_macro_local:need_callable(
-                                      {Function, Arity},
-                                      WorkflowContext, LocalState)),
-                   State1 = State#{local_macro_state => LocalState1},
-                   astranaut_traverse:put(State1),
-                   return(State1)
-               ]);
-        error ->
-            astranaut_traverse:return(State)
-    end;
-ensure_attribute_target_callable(_ExternalTarget, State) ->
-    astranaut_traverse:return(State).
+  _Target, #{capability := disabled} = State) ->
+    astranaut_traverse:return(State);
+ensure_attribute_target_callable(
+  Target,
+  #{capability := #{provider := Provider,
+                    state := ProviderState}} = State) ->
+    do([ traverse ||
+           ProviderState1 <- astranaut:traverse_return(
+                               apply(
+                                 Provider, prepare_target,
+                                 [Target, capability_context(State),
+                                  ProviderState])),
+           State1 = State#{capability =>
+                              #{provider => Provider,
+                                state => ProviderState1}},
+           astranaut_traverse:put(State1),
+           return(State1)
+       ]).
 
-assert_scan_frozen_forms(Forms, LocalState) ->
-    case astranaut_macro_local:reject_locked_mutation(
-           Forms, LocalState) of
-        ok ->
-            astranaut_traverse:return(ok);
-        {error, {illegal_locked_form_mutation, Form} = Error} ->
-            astranaut_traverse:update_pos(
-              form_pos(Form), astranaut_macro,
-              astranaut_traverse:fail(Error))
-    end.
+validate_capability_forms(_Forms, #{capability := disabled}) ->
+    astranaut_traverse:return(ok);
+validate_capability_forms(
+  Forms,
+  #{capability := #{provider := Provider,
+                    state := ProviderState}}) ->
+    astranaut:traverse_return(
+      apply(Provider, validate_generated,
+            [Forms, ProviderState])).
 
 %%%===================================================================
 %%% Scan state helpers
@@ -558,21 +527,10 @@ passed_forms(#{passed_forms := PassedForms}) ->
 remaining_source_forms(State) ->
     maps:get(remaining_forms, State, []).
 
-form_pos({attribute, Pos, _Name, _Value}) -> Pos;
-form_pos(_Form) -> 0.
-
-local_macro_workflow_context(SourceView, CompileOpts) ->
-    #{source_view => SourceView,
-      compile_opts => CompileOpts}.
-
-function_clauses_map(
-  [{function, _Pos, Name, Arity, Clauses} | T], Acc) ->
-    function_clauses_map(
-      T, maps:put({Name, Arity}, Clauses, Acc));
-function_clauses_map([_H | T], Acc) ->
-    function_clauses_map(T, Acc);
-function_clauses_map([], Acc) ->
-    Acc.
+capability_context(State) ->
+    #{source_view =>
+          passed_forms(State) ++ remaining_source_forms(State),
+      compile_opts => maps:get(compile_opts, State)}.
 
 to_list(Arguments) when is_list(Arguments) -> Arguments;
 to_list(Arguments) -> [Arguments].

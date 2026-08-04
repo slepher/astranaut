@@ -9,6 +9,7 @@
 
 -export([all/0]).
 -export([basic/1, splice/1, splice_empty/1, expand/1, expand_with_state/1,
+         run_without_local_capability/1,
          preserve_generated_function_position/1, generated_function_original_merge/1,
          generated_merge_preserves_original_spec/1,
          generated_merge_prefers_generated_spec/1,
@@ -16,11 +17,26 @@
          lift_m_bridge/1]).
 
 all() -> [basic, splice, splice_empty, expand, expand_with_state,
+          run_without_local_capability,
           preserve_generated_function_position, generated_function_original_merge,
           generated_merge_preserves_original_spec,
           generated_merge_prefers_generated_spec,
           generated_merge_keeps_generated_spec_without_original,
           lift_m_bridge].
+
+run_without_local_capability(_Config) ->
+    Forms = [{attribute, 1, module, ordinary_macro_scan_test},
+             {function, 2, value, 0,
+              [{clause, 2, [], [], [{atom, 2, ok}]}]}],
+    {just, {_ScannedForms,
+            #{capability := disabled,
+              registry := Registry}}} =
+        astranaut_return:run(
+          astranaut_macro_scan:run(
+            ordinary_macro_scan_test, "ordinary_macro_scan_test.erl",
+            #{max_depth => 100}, Forms, [])),
+    false = maps:is_key(local_macro_module, Registry),
+    ok.
 
 lift_m_bridge(_Config) ->
     TraverseMA = astranaut_traverse:return(42),

@@ -113,6 +113,14 @@
 - [x] 保留 retained frozen function 的 FinalMacroRuntimeContext 重新展开与 canonical 结果比对。
 - [x] 明确多 FA declaration 只共享注册时快照，扫描后不保留 group identity。
 
+## Optional capability isolation
+
+- [x] scanner 在首个 `-local_macro(...)`（包括生成 form）处动态注册 provider；无需额外启用 attribute，也不回扫此前 forms。
+- [x] 未注册路径不初始化 local state，普通 function pass 直接使用通用 expander。
+- [x] declaration 校验、descriptor 构造、callable 准备、冻结保护、retain 与两阶段收尾均由 `astranaut_macro_local` callbacks 拥有。
+- [x] registry 不含 local-macro 分支；expander 通过 `observation_id` / `callable` / `observation_control` 提供通用观察协议。
+- [x] `astranaut_macro_local` 已移出 `erl_first_files`；在干净临时副本中删除其源码后，app 编译与 ordinary external macro 编译/执行通过。
+
 ## 两批热路径优化
 
 ### 第一批：机械降本

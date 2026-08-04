@@ -26,15 +26,13 @@
 parse_transform(Forms, Options) ->
     Module = astranaut_lib:analyze_forms_module(Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
-    LocalMacroModule = astranaut_macro_local:module_name(Module),
     astranaut_return:to_compiler(
       do([ return ||
              GlobalMacroOpts0 <-
                  astranaut_macro_registry:default_options(),
              {AttributeForms, FunctionEnv} <-
                  run_attribute_pass(
-                   Module, LocalMacroModule, File, GlobalMacroOpts0,
-                   Forms, Options),
+                   Module, File, GlobalMacroOpts0, Forms, Options),
              FunctionForms <-
                  run_function_macro_pass(
                    AttributeForms, FunctionEnv),
@@ -106,6 +104,9 @@ format_error({invalid_macro_return, Detail}) ->
 format_error({invalid_closure_roots, Functions}) ->
     io_lib:format(
       "closure_roots contains undefined functions: ~p", [Functions]);
+format_error({macro_capability_unavailable, Provider}) ->
+    io_lib:format(
+      "requested macro capability ~p is unavailable", [Provider]);
 format_error({undefined_local_macro_retain, Functions}) ->
     io_lib:format(
       "local_macro_retain contains undefined functions: ~p", [Functions]);
@@ -166,94 +167,59 @@ invalid_macro_return_mfa(#{current_macro := #{mfa := MFA}}) ->
 %%%===================================================================
 
 run_attribute_pass(
-  Module, LocalMacroModule, File, GlobalMacroOpts0, Forms, CompileOpts) ->
+  Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
     do([ return ||
            {ScannedForms, ScanState} <-
                astranaut_macro_scan:run(
-                 Module, LocalMacroModule, File, GlobalMacroOpts0,
-                 Forms, CompileOpts),
+                 Module, File, GlobalMacroOpts0, Forms, CompileOpts),
            #{registry := Registry,
-             local_macro_state := ScanLocalState,
-             local_declarations := LocalDeclarations} = ScanState,
-           AttributeForms = drop_local_declarations(
-                              ScannedForms, LocalDeclarations),
-           PreparedForms <-
-               astranaut_macro_registry:prepare_exports(AttributeForms),
+             capability := Capability} = ScanState,
            finalize_attribute_macro_pass(
-             File, Registry, ScanLocalState,
-             PreparedForms, CompileOpts)
+             File, Registry, Capability, ScannedForms, CompileOpts)
        ]).
 
-drop_local_declarations(Forms, Declarations) ->
-    [Form || Form <- Forms, not maps:is_key(Form, Declarations)].
-
 finalize_attribute_macro_pass(
-  File, Registry, ScanLocalState, Forms, CompileOpts) ->
+  _File, Registry, disabled, Forms, _CompileOpts) ->
     do([ return ||
-           WorkflowContext = #{source_view => Forms,
-                               compile_opts => CompileOpts},
-           RetainRoots = retain_roots(Forms),
-           {FinalLocalEnv, FinalSkipIds, FinalLocalState} <-
-               astranaut_macro_local:finalize(
-                 RetainRoots, WorkflowContext, ScanLocalState),
-           RetainWarnings = local_macro_retain_warnings(
-                              Forms, FinalLocalState),
-           {UnsortedAttributeForms, FunctionEnv0} <-
-               finalize_attribute_forms(
-                 Forms, Registry, FinalLocalEnv,
-                 FinalSkipIds, FinalLocalState),
-           AttributeForms =
-               astranaut_forms:sort_forms(UnsortedAttributeForms),
+           PreparedForms <-
+               astranaut_macro_registry:prepare_exports(Forms),
+           MacroEnvironment =
+               astranaut_macro_registry:final_macro_environment(
+                 PreparedForms, Registry),
+           MacroMap = maps:get(macro_map, MacroEnvironment),
+           FunctionCallAnalysis =
+               astranaut_macro_expander:function_call_analysis(
+                 PreparedForms, MacroMap, presence),
+           Callers = astranaut_macro_expander:function_macro_callers(
+                       FunctionCallAnalysis),
+           AttributeForms = astranaut_forms:sort_forms(PreparedForms),
+           return(
+             {AttributeForms,
+              #{macro_environment => MacroEnvironment,
+                function_call_analysis => FunctionCallAnalysis,
+                callers => Callers,
+                capability => disabled,
+                global_macro_opts =>
+                    astranaut_macro_registry:global_macro_opts(
+                      Registry)}})
+       ]);
+finalize_attribute_macro_pass(
+  File, Registry,
+  #{provider := Provider, state := ProviderState},
+  Forms, CompileOpts) ->
+    do([ return ||
+           {AttributeForms, FunctionEnv0, ProviderState1} <-
+               apply(
+                 Provider, finish_attribute_pass,
+                 [File, Forms, Registry, CompileOpts, ProviderState]),
            FunctionEnv = FunctionEnv0#{
+                           capability =>
+                               #{provider => Provider,
+                                 state => ProviderState1},
                            global_macro_opts =>
                                astranaut_macro_registry:
                                  global_macro_opts(Registry)},
-           astranaut_return:then(
-             file_formatted_warnings(File, RetainWarnings),
-             return({AttributeForms, FunctionEnv}))
-       ]).
-
-file_formatted_warnings(File, Warnings) ->
-    Error0 = astranaut_error:new(File),
-    Error1 = astranaut_error:append_formatted_warnings(Warnings, Error0),
-    astranaut_return:ok(ok, astranaut_error:eof(Error1)).
-
-finalize_attribute_forms(
-  Forms, Registry, FinalLocalEnv, FinalSkipIds, FinalLocalState) ->
-    do([ return ||
-           Forms1 = remove_final_skip_forms(Forms, FinalSkipIds),
-           FinalMacroEnvironment =
-               astranaut_macro_registry:final_macro_environment(
-                 Forms1, FinalLocalEnv, Registry),
-           ResolvedFinalMacroMap =
-               maps:get(macro_map, FinalMacroEnvironment),
-           FunctionCallAnalysis =
-               astranaut_macro_expander:function_call_analysis(
-                 Forms1, ResolvedFinalMacroMap, presence),
-           DetectedMacroCallers =
-               astranaut_macro_expander:function_macro_callers(
-                 FunctionCallAnalysis),
-           RetainedFunctionIds = ordsets:from_list(
-                                   [Id ||
-                                      Id = {function, _, _} <-
-                                          astranaut_macro_local:
-                                            retained_form_ids(
-                                              FinalLocalState)]),
-           FinalMacroCallers = ordsets:union(
-                                 DetectedMacroCallers,
-                                 RetainedFunctionIds),
-           FinalSkipFunctionIds = ordsets:from_list(
-                                    [{function, Name, Arity}
-                                     || {function, Name, Arity} <-
-                                            FinalSkipIds]),
-           FunctionEnv =
-               #{macro_environment => FinalMacroEnvironment,
-                 local_macro_state => FinalLocalState,
-                 function_call_analysis => FunctionCallAnalysis,
-                 callers => ordsets:subtract(
-                              FinalMacroCallers,
-                              FinalSkipFunctionIds)},
-           return({Forms1, FunctionEnv})
+           return({AttributeForms, FunctionEnv})
        ]).
 
 %%%===================================================================
@@ -263,105 +229,47 @@ finalize_attribute_forms(
 run_function_macro_pass(
   Forms,
   #{macro_environment := MacroEnvironment,
-    local_macro_state := LocalMacroState,
     function_call_analysis := FunctionCallAnalysis,
-    callers := Callers}) ->
+    callers := Callers,
+    capability := disabled}) ->
     do([ return ||
-           {ExpandedForms, _FinalState} <-
-               astranaut_macro_local:expand_final_functions(
-                 Forms,
-                 [{Name, Arity}
-                  || {function, Name, Arity} <- Callers],
-                 MacroEnvironment#{function_call_analysis =>
-                                       FunctionCallAnalysis},
-                 LocalMacroState),
+           Tasks = function_expansion_tasks(
+                     Callers, MacroEnvironment,
+                     FunctionCallAnalysis),
+           #{forms := ExpandedForms} <-
+               astranaut_macro_expander:expand_functions(Forms, Tasks),
+           return(ExpandedForms)
+       ]);
+run_function_macro_pass(
+  Forms,
+  #{capability := #{provider := Provider,
+                    state := ProviderState}} = FunctionEnv) ->
+    do([ return ||
+           {ExpandedForms, _ProviderState1} <-
+               apply(Provider, run_function_pass,
+                     [Forms, FunctionEnv, ProviderState]),
            return(ExpandedForms)
        ]).
 
-%%%===================================================================
-%%% Final form materialization and retain diagnostics
-%%%===================================================================
-
-remove_final_skip_forms(Forms, FinalSkipIds) ->
-    Skip = ordsets:from_list(FinalSkipIds),
-    lists:flatmap(
-      fun(Form) -> remove_final_skip_form(Form, Skip) end,
-      Forms).
-
-remove_final_skip_form(
-  {attribute, Pos, compile, {nowarn_unused_function, FAs}}, Skip) ->
-    RemainingFAs =
-        [FA || FA = {Name, Arity} <- FAs,
-               not ordsets:is_element(
-                     {function, Name, Arity}, Skip)],
-    case RemainingFAs of
-        [] -> [];
-        _ ->
-            [{attribute, Pos, compile,
-              {nowarn_unused_function, RemainingFAs}}]
-    end;
-remove_final_skip_form(Form, Skip) ->
-    case ordsets:is_element(
-           astranaut_macro_local:form_id(Form), Skip) of
-        true -> [];
-        false -> [Form]
-    end.
-
-retain_roots(Forms) ->
+function_expansion_tasks(Callers,
+                         #{macro_map := MacroMap},
+                         FunctionCallAnalysis) ->
     lists:foldl(
-      fun({attribute, _Pos, local_macro_retain, Attr}, Acc) ->
-              retain_fas(Attr, Acc);
-         ({attribute, _Pos, export_macro, Attr}, Acc) ->
-              retain_fas(Attr, Acc);
-         ({attribute, _Pos, export, Attr}, Acc) ->
-              retain_fas(Attr, Acc);
-         (_Form, Acc) ->
-              Acc
-      end, [], Forms).
-
-local_macro_retain_warnings(Forms, LocalMacroState) ->
-    DefinedFAs = ordsets:from_list(
-                   maps:keys(function_clauses_map(Forms, #{}))),
-    lists:flatmap(
-      fun({attribute, Pos, local_macro_retain, Attr}) ->
-              Roots = ordsets:from_list(retain_fas(Attr, [])),
-              Undefined = ordsets:subtract(Roots, DefinedFAs),
-              Existing = ordsets:subtract(Roots, Undefined),
-              Nonclosure =
-                  astranaut_macro_local:nonclosure_retain_roots(
-                    Existing, LocalMacroState),
-              retain_root_warnings(Pos, Undefined, Nonclosure);
-         (_Form) ->
-              []
-      end, Forms).
-
-retain_root_warnings(Pos, Undefined, Nonclosure) ->
-    [{Pos, astranaut_macro,
-      {undefined_local_macro_retain, Undefined}}
-     || Undefined =/= []] ++
-    [{Pos, astranaut_macro,
-      {ineffective_local_macro_retain, Nonclosure}}
-     || Nonclosure =/= []].
-
-retain_fas({FAs, _Options}, Acc) when is_list(FAs) ->
-    retain_fas(FAs, Acc);
-retain_fas(FAs, Acc) when is_list(FAs) ->
-    [FA || FA = {Name, Arity} <- FAs,
-           is_atom(Name), is_integer(Arity)] ++ Acc;
-retain_fas({Name, Arity} = FA, Acc)
-  when is_atom(Name), is_integer(Arity) ->
-    [FA | Acc];
-retain_fas(_Other, Acc) ->
-    Acc.
-
-function_clauses_map(
-  [{function, _Pos, Name, Arity, Clauses} | T], Acc) ->
-    function_clauses_map(
-      T, maps:put({Name, Arity}, Clauses, Acc));
-function_clauses_map([_H | T], Acc) ->
-    function_clauses_map(T, Acc);
-function_clauses_map([], Acc) ->
-    Acc.
+      fun(FormId, Acc) ->
+              case maps:find(FormId, FunctionCallAnalysis) of
+                  {ok, #{form := Form,
+                         has_macro_call := HasMacroCall}} ->
+                      maps:put(
+                        FormId,
+                        #{form => Form,
+                          macro_map => MacroMap,
+                          observation_control => disabled,
+                          has_macro_call => HasMacroCall},
+                        Acc);
+                  error ->
+                      Acc
+              end
+      end, #{}, Callers).
 
 %%%===================================================================
 %%% Debug output

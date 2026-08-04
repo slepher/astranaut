@@ -248,3 +248,11 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 保持 `astranaut_macro_expander` 与 `astranaut_macro_local` 的既有职责和接口，不增加 pipeline 转发层。
 - [x] 更新 `erl_first_files`、专项测试入口及中英文架构文档。
 - [x] `rebar3 compile` 无 warning，`rebar3 xref` 通过；scanner/macro/local 专项 132 项测试及完整 354 项 Common Test 全部通过。
+
+## Optional local provider
+
+- [x] scanner state 只保存 `disabled | #{provider, state}` capability，不再保存平行的 local state/declaration maps。
+- [x] 首个 local declaration 动态注册 provider，并让该 form 立即进入 provider callback；后续生成 declaration 复用同一扫描顺序。
+- [x] disabled attribute/function pass 不加载或调用 local provider。
+- [x] shared expander 删除 local descriptor 分支，改用通用 observation task/result 字段。
+- [x] registry 删除 local validator、descriptor builder 和 final-local filtering。

@@ -413,6 +413,12 @@ unquote_splicing = Asts
 `astranaut_macro_local` 负责本地闭包及 generation 生命周期。所有展开路径共用同一个
 expander。
 
+local-macro 支持是按需注册的可选 capability。scanner 遇到第一个
+`-local_macro(...)` form 时才注册 `astranaut_macro_local`；此前 attribute macro
+生成的 declaration 也遵循同一规则。没有 local declaration 的模块不会加载或初始化
+local provider，因此构建中移除 `astranaut_macro_local.erl` 不影响普通的
+import/export macro 展开。
+
 *export_macro*
 
 &emsp;&emsp;在定义宏的模块中使用。导出的宏可以被其它模块 import。仅声明

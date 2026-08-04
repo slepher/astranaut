@@ -18,32 +18,34 @@
          function_macro_callers/1,
          function_macro_callers/2,
          format_mfa/1]).
--export_type([local_macro_whitelist_control/0]).
+-export_type([observation_control/0]).
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function, atom(), non_neg_integer()}.
 -type macro_map() :: map().
--type local_macro_whitelist_control() ::
+-type observation_control() ::
         disabled |
         #{mode := collect,
-          form_id := {function, atom(), non_neg_integer()}} |
+          form_id := {function, atom(), non_neg_integer()},
+          conflict_tag := atom()} |
         #{mode := verify,
           form_id := {function, atom(), non_neg_integer()},
+          conflict_tag := atom(),
           expected := ordsets:ordset(fa())}.
 -type function_expansion() ::
         #{form := term(),
-          local_macro_whitelist := disabled | ordsets:ordset(fa()),
-          needed_local_macros := ordsets:ordset(fa())}.
+          observed_macro_ids := disabled | ordsets:ordset(term()),
+          needed_macro_ids := ordsets:ordset(term())}.
 -type function_expansion_task() ::
         #{form := term(),
           macro_map := macro_map(),
-          whitelist_control := local_macro_whitelist_control(),
+          observation_control := observation_control(),
           has_macro_call => boolean()}.
 -type function_call_analysis() ::
         #{form := term(),
           has_macro_call := boolean(),
           local_calls => ordsets:ordset(fa()),
-          local_macro_calls => ordsets:ordset(fa())}.
+          observed_macro_calls => ordsets:ordset(term())}.
 -type function_task_expansion() ::
         #{forms := [term()],
           task_results := #{form_id() => function_expansion()}}.
@@ -175,21 +177,21 @@ expand_function_task(
   FormId,
   #{form := Function,
     macro_map := MacroMap,
-    whitelist_control := WhitelistControl} = Task,
+    observation_control := ObservationControl} = Task,
   RecordForms, FunctionClausesUniplate) ->
     Expand =
         do([ traverse ||
                {Function1, ExpansionState} <-
                    astranaut_traverse:scoped_state_run(
-                     initial_expansion_state(WhitelistControl),
+                     initial_expansion_state(ObservationControl),
                      transform_task_function_if_needed(
                        Function, MacroMap, RecordForms,
-                       WhitelistControl, FunctionClausesUniplate,
+                       ObservationControl, FunctionClausesUniplate,
                        maps:find(has_macro_call, Task))),
                #{form := Function2} = Result <-
                    astranaut:traverse_return(
                      finish_function_expansion(
-                       Function1, ExpansionState, WhitelistControl)),
+                       Function1, ExpansionState, ObservationControl)),
                astranaut_traverse:modify(
                  fun(Results) -> maps:put(FormId, Result, Results) end),
                return(Function2)
@@ -199,7 +201,7 @@ expand_function_task(
 
 transform_task_function_if_needed(
   {function, _Pos, _Name, _Arity, Clauses} = Function,
-  MacroMap, RecordForms, WhitelistControl, FunctionClausesUniplate,
+  MacroMap, RecordForms, ObservationControl, FunctionClausesUniplate,
   MacroCallHint) ->
     case function_has_macro_call(Clauses, MacroMap, MacroCallHint) of
         false ->
@@ -209,7 +211,7 @@ transform_task_function_if_needed(
               fun(Clause) ->
                       transform_clause(
                         uniform, MacroMap, Clause, RecordForms,
-                        WhitelistControl)
+                        ObservationControl)
               end, Function,
               #{traverse => subtree,
                 uniplate => FunctionClausesUniplate})
@@ -235,7 +237,7 @@ function_clauses_uniplate() ->
 
 transform_clause(Module, MacroMap,
                  {clause, Pos, Patterns, Guards, Exprs},
-                 RecordForms, WhitelistControl) ->
+                 RecordForms, ObservationControl) ->
     do([ traverse ||
            reset_macro_return_counter(),
            Guards1 <- transform_guard_sequences(
@@ -243,13 +245,13 @@ transform_clause(Module, MacroMap,
                         #{depth => 0,
                           expected_role => guard,
                           forms => RecordForms,
-                          local_macro_whitelist => WhitelistControl}),
+                          observation_control => ObservationControl}),
            Exprs1 <- transform_exprs(
                        Module, MacroMap, Exprs,
                        #{depth => 0,
                          expected_role => expression,
                          forms => RecordForms,
-                         local_macro_whitelist => WhitelistControl}),
+                         observation_control => ObservationControl}),
            return({clause, Pos, Patterns, Guards1, Exprs1})
        ]).
 
@@ -268,8 +270,8 @@ initial_expansion_state(disabled) ->
 initial_expansion_state(#{mode := Mode})
   when Mode =:= collect; Mode =:= verify ->
     #{macro_return_counter => 0,
-      observed_local_macro_whitelist => ordsets:new(),
-      needed_local_macros => ordsets:new()}.
+      observed_macro_ids => ordsets:new(),
+      needed_macro_ids => ordsets:new()}.
 
 reset_macro_return_counter() ->
     astranaut_traverse:modify(
@@ -282,38 +284,38 @@ reset_macro_return_counter() ->
 finish_function_expansion(Form, _State, disabled) ->
     astranaut_return:return(
       #{form => Form,
-        local_macro_whitelist => disabled,
-        needed_local_macros => ordsets:new()});
+        observed_macro_ids => disabled,
+        needed_macro_ids => ordsets:new()});
 finish_function_expansion(Form, State, #{mode := collect}) ->
     astranaut_return:return(
       #{form => Form,
-        local_macro_whitelist =>
-            maps:get(observed_local_macro_whitelist, State),
-        needed_local_macros => maps:get(needed_local_macros, State)});
+        observed_macro_ids => maps:get(observed_macro_ids, State),
+        needed_macro_ids => maps:get(needed_macro_ids, State)});
 finish_function_expansion(
   Form, State,
-  #{mode := verify, form_id := FormId, expected := Expected}) ->
-    Observed = maps:get(observed_local_macro_whitelist, State),
-    Needed = maps:get(needed_local_macros, State),
+  #{mode := verify, form_id := FormId,
+    expected := Expected} = Control) ->
+    Observed = maps:get(observed_macro_ids, State),
+    Needed = maps:get(needed_macro_ids, State),
     case Needed of
         [_ | _] ->
             astranaut_return:return(
               #{form => Form,
-                local_macro_whitelist => Observed,
-                needed_local_macros => Needed});
+                observed_macro_ids => Observed,
+                needed_macro_ids => Needed});
         [] ->
             Missing = ordsets:subtract(Expected, Observed),
             case Missing of
                 [] ->
                     astranaut_return:return(
                       #{form => Form,
-                        local_macro_whitelist => Observed,
-                        needed_local_macros => Needed});
+                        observed_macro_ids => Observed,
+                        needed_macro_ids => Needed});
                 _ ->
                     astranaut_return:error_fail(
-                      {conflicting_local_macro_whitelist, FormId,
-                       whitelist_conflict_detail(
-                         Expected, Observed, ordsets:new(), Missing)})
+                      observation_conflict(
+                        FormId, Expected, Observed,
+                        ordsets:new(), Missing, Control))
             end
     end.
 
@@ -356,7 +358,7 @@ expand_without_pending_dependency(Node, Expand) ->
     do([ traverse ||
            State <- astranaut_traverse:get(),
            case State of
-               #{needed_local_macros := [_ | _]} ->
+               #{needed_macro_ids := [_ | _]} ->
                    astranaut_traverse:return(Node);
                _ ->
                    Expand()
@@ -365,65 +367,63 @@ expand_without_pending_dependency(Node, Expand) ->
 
 expand_observed_macro(Module, MacroMap, Macro, Node, DepthOpts) ->
     do([ traverse ||
-           Decision <- observe_local_macro(Macro, DepthOpts),
+           Decision <- observe_macro(Macro, DepthOpts),
            case Decision of
                expand ->
-                   expand_or_request_local_macro(
+                   expand_or_request_macro(
                      Module, MacroMap, Macro, Node, DepthOpts);
                skip ->
                    return(Node)
            end
        ]).
 
-expand_or_request_local_macro(
+expand_or_request_macro(
   _Module, _MacroMap,
-  #{macro_source := local_macro,
-    local_macro_callable := false,
-    function := Function, arity := Arity},
+  #{observation_id := ObservationId,
+    callable := false},
   Node, _DepthOpts) ->
     do([ traverse ||
            astranaut_traverse:modify(
              fun(State) ->
                      Needed = ordsets:add_element(
-                                {Function, Arity},
-                                maps:get(needed_local_macros, State)),
-                     State#{needed_local_macros => Needed}
+                                ObservationId,
+                                maps:get(needed_macro_ids, State)),
+                     State#{needed_macro_ids => Needed}
              end),
            return(Node)
        ]);
-expand_or_request_local_macro(Module, MacroMap, Macro, _Node, DepthOpts) ->
+expand_or_request_macro(Module, MacroMap, Macro, _Node, DepthOpts) ->
     expand_macro_recursive(Module, MacroMap, Macro, DepthOpts).
 
-observe_local_macro(
-  #{macro_source := local_macro,
-    function := Function, arity := Arity},
-  #{local_macro_whitelist := Control})
+observe_macro(
+  #{observation_id := ObservationId},
+  #{observation_control := Control})
   when Control =/= disabled ->
-    FA = {Function, Arity},
     do([ traverse ||
            State <- astranaut_traverse:get(),
-           Observed0 = maps:get(observed_local_macro_whitelist, State),
-           IsNew = not ordsets:is_element(FA, Observed0),
-           Observed = ordsets:add_element(FA, Observed0),
+           Observed0 = maps:get(observed_macro_ids, State),
+           IsNew = not ordsets:is_element(ObservationId, Observed0),
+           Observed = ordsets:add_element(ObservationId, Observed0),
            astranaut_traverse:put(
-             State#{observed_local_macro_whitelist => Observed}),
-           verify_observed_local_macro(Control, FA, IsNew, Observed)
+             State#{observed_macro_ids => Observed}),
+           verify_observed_macro(
+             Control, ObservationId, IsNew, Observed)
        ]);
-observe_local_macro(_Macro, _Opts) ->
+observe_macro(_Macro, _Opts) ->
     astranaut_traverse:return(expand).
 
-verify_observed_local_macro(
-  #{mode := verify, form_id := FormId, expected := Expected},
-  FA, IsNew, Observed) ->
-    case ordsets:is_element(FA, Expected) of
+verify_observed_macro(
+  #{mode := verify, form_id := FormId,
+    expected := Expected} = Control,
+  ObservationId, IsNew, Observed) ->
+    case ordsets:is_element(ObservationId, Expected) of
         true ->
             astranaut_traverse:return(expand);
         false when IsNew ->
             Unexpected = ordsets:subtract(Observed, Expected),
-            Error =
-                {conflicting_local_macro_whitelist, FormId,
-                 whitelist_conflict_detail(
-                   Expected, Observed, Unexpected, ordsets:new())},
+            Error = observation_conflict(
+                      FormId, Expected, Observed,
+                      Unexpected, ordsets:new(), Control),
             do([ traverse ||
                    astranaut_traverse:error(Error),
                    return(skip)
@@ -431,38 +431,38 @@ verify_observed_local_macro(
         false ->
             astranaut_traverse:return(skip)
     end;
-verify_observed_local_macro(#{mode := collect}, _FA, _IsNew, _Observed) ->
+verify_observed_macro(#{mode := collect}, _Id, _IsNew, _Observed) ->
     astranaut_traverse:return(expand).
 
 observe_macro_return([], _Opts) ->
     astranaut_traverse:return(expand);
 observe_macro_return(_ReturnObserved,
-                     #{local_macro_whitelist := disabled}) ->
+                     #{observation_control := disabled}) ->
     astranaut_traverse:return(expand);
 observe_macro_return(ReturnObserved,
-                     #{local_macro_whitelist := Control}) ->
+                     #{observation_control := Control}) ->
     do([ traverse ||
            State <- astranaut_traverse:get(),
            Observed = ordsets:union(
                         ReturnObserved,
-                        maps:get(observed_local_macro_whitelist, State)),
+                        maps:get(observed_macro_ids, State)),
            astranaut_traverse:put(
-             State#{observed_local_macro_whitelist => Observed}),
+             State#{observed_macro_ids => Observed}),
            verify_macro_return(Control, ReturnObserved, Observed)
        ]).
 
 verify_macro_return(
-  #{mode := verify, form_id := FormId, expected := Expected},
+  #{mode := verify, form_id := FormId,
+    expected := Expected} = Control,
   ReturnObserved, Observed) ->
     case ordsets:subtract(ReturnObserved, Expected) of
         [] ->
             astranaut_traverse:return(expand);
         _ ->
             Unexpected = ordsets:subtract(Observed, Expected),
-            Error =
-                {conflicting_local_macro_whitelist, FormId,
-                 whitelist_conflict_detail(
-                   Expected, Observed, Unexpected, ordsets:new())},
+            Error = observation_conflict(
+                      FormId, Expected, Observed,
+                      Unexpected, ordsets:new(), Control),
             do([ traverse ||
                    astranaut_traverse:error(Error),
                    return(skip)
@@ -476,6 +476,13 @@ whitelist_conflict_detail(Expected, Observed, Unexpected, Missing) ->
       observed => Observed,
       unexpected => Unexpected,
       missing => Missing}.
+
+observation_conflict(
+  FormId, Expected, Observed, Unexpected, Missing,
+  #{conflict_tag := Tag}) ->
+    {Tag, FormId,
+     whitelist_conflict_detail(
+       Expected, Observed, Unexpected, Missing)}.
 
 %%%===================================================================
 %%% Macro matching, invocation, and returned AST processing
@@ -561,7 +568,7 @@ expand_macro_with(
              {Node1, ReturnAnalysis} <-
                  process_macro_return(Node, Macro, Opts),
              Decision <- observe_macro_return(
-                           maps:get(local_macro_calls, ReturnAnalysis),
+                           maps:get(observed_macro_calls, ReturnAnalysis),
                            Opts),
              format_node(Node1, Macro),
              case {Decision,
@@ -603,8 +610,8 @@ invoke_macro_function(
 process_macro_return(Return, Macro, Opts) ->
     ValidateOpts =
         #{record_defs => maps:get(forms, Opts, []), fail => collect},
-    CollectLocalMacros =
-        maps:get(local_macro_whitelist, Opts, disabled) =/= disabled,
+    CollectObservedMacros =
+        maps:get(observation_control, Opts, disabled) =/= disabled,
     Module = maps:get(module, Opts, uniform),
     MacroMap = maps:get(macro_map, Opts, #{}),
     do([ traverse ||
@@ -624,7 +631,8 @@ process_macro_return(Return, Macro, Opts) ->
                                       Node, RenameCounter,
                                       maps:get(pos, Macro)),
                            collect_return_macro_calls(
-                             Module, Node1, MacroMap, CollectLocalMacros)
+                             Module, Node1, MacroMap,
+                             CollectObservedMacros)
                    end, Return,
                    #{traverse => post,
                      validate => input,
@@ -632,30 +640,29 @@ process_macro_return(Return, Macro, Opts) ->
                      validate_opts => ValidateOpts})),
            {Return1, ReturnAnalysis} <-
                astranaut_traverse:scoped_state_run(
-                 #{local_macro_calls => ordsets:new(),
+                 #{observed_macro_calls => ordsets:new(),
                    has_macro_call => false},
                  astranaut_traverse:fail_on_error(ProcessReturn)),
            commit_macro_return_counter(Opts),
            return({Return1, ReturnAnalysis})
        ]).
 
-collect_return_macro_calls(Module, Node, MacroMap, CollectLocalMacros) ->
+collect_return_macro_calls(Module, Node, MacroMap, CollectObservedMacros) ->
     case call_find_macro(Module, Node, MacroMap) of
-        {ok, #{macro_source := local_macro,
-               function := Function, arity := Arity}} ->
+        {ok, #{observation_id := ObservationId}} ->
             do([ traverse ||
                    astranaut_traverse:modify(
                      fun(Observed) ->
                              Observed1 = Observed#{has_macro_call := true},
-                             case CollectLocalMacros of
+                             case CollectObservedMacros of
                                  true ->
-                                     LocalMacros = ordsets:add_element(
-                                                     {Function, Arity},
-                                                     maps:get(
-                                                       local_macro_calls,
-                                                       Observed1)),
-                                     Observed1#{local_macro_calls :=
-                                                    LocalMacros};
+                                     ObservedMacros = ordsets:add_element(
+                                                        ObservationId,
+                                                        maps:get(
+                                                          observed_macro_calls,
+                                                          Observed1)),
+                                     Observed1#{observed_macro_calls :=
+                                                    ObservedMacros};
                                  false ->
                                      Observed1
                              end
@@ -863,18 +870,17 @@ analyze_function_calls(Clauses, MacroMap, closure) ->
               Analysis
       end,
       #{local_calls => ordsets:new(),
-        local_macro_calls => ordsets:new(),
+        observed_macro_calls => ordsets:new(),
         has_macro_call => false},
       Clauses, #{traverse => pre}).
 
 analyze_macro_call(Node, MacroMap, Analysis) ->
     case call_find_macro(uniform, Node, MacroMap) of
-        {ok, #{macro_source := local_macro,
-               function := Function, arity := Arity}} ->
-            Analysis#{local_macro_calls :=
+        {ok, #{observation_id := ObservationId}} ->
+            Analysis#{observed_macro_calls :=
                           ordsets:add_element(
-                            {Function, Arity},
-                            maps:get(local_macro_calls, Analysis)),
+                            ObservationId,
+                            maps:get(observed_macro_calls, Analysis)),
                       has_macro_call := true};
         {ok, _Macro} ->
             Analysis#{has_macro_call := true};
