@@ -4,8 +4,27 @@
 
 ## 0.13
 
+### Quote context
+
+- **Configurable quote context**: quote variables are now encoded as
+  `Name@astranaut_quote@Context` instead of `Name@Module`. The context defaults
+  to the current source module and can be set explicitly with the `context`
+  option, or disabled with `no_context` to keep original variable names.
+- Added a shared quote-variable codec (`encode_quote_variable/2,3`,
+  `decode_quote_variable/1`) used by both quote and the clause macro expander,
+  with `@` and `%` escaping. The expander no longer compares variable suffixes
+  with the macro execution module and now renames named fun binders too.
+- `context` and `no_context` are mutually exclusive; passing both returns
+  `{conflicting_quote_context_options, Context, no_context}`. `context` must be
+  a non-empty atom (the empty atom `''` and any non-atom are rejected with
+  `{invalid_quote_context, _}`), `no_context` must be a boolean, and the low
+  level `quoted/1,2` reports invalid options instead of raising a badmatch.
+
 ### Compatibility
 
+- **Breaking change**: quote variable encoding changed. Clean rebuild all
+  modules that define or use Astranaut macros after upgrading. Mixing old macro
+  beams with the new expander is not supported.
 - Raised the minimum supported Erlang/OTP release from 19 to 21 and removed
   the pre-21 stacktrace, syntax-schema, reference-data, and CI compatibility
   paths.

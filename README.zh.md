@@ -342,7 +342,28 @@ quote(Code) | quote(Code, Options)
   proplists() => map()
   Pos => #{pos => Pos}
   #{pos => Pos, code_pos => CodePos, debug => Debug}
+  #{context => Context}, Context 是静态 atom。
+  no_context
 ```
+
+*Context*
+
+&emsp;&emsp;quote 变量默认使用当前源码 module 作为 Context 编码：
+
+&emsp;&emsp;`Name@astranaut_quote@Module`。
+
+&emsp;&emsp;显式 `context` 可以把 Context 换成任意非空静态 atom(例如 `undefined`),
+使同一 module 中的 helper 使用不同变量命名域,或让不同 module 中的 helper 共享
+同一命名域。空 atom `''` 会被拒绝,返回 `{invalid_quote_context, ''}`。
+
+&emsp;&emsp;Clause macro 展开时会追加 Counter，得到
+`Name@astranaut_quote@Context@Counter`；attribute macro 保留不带 Counter 的模板名。
+变量名和 Context 由统一 codec 转义，非法变量名、Context 和 Counter 会明确报错。
+
+*No Context*
+
+&emsp;&emsp;`no_context` 使 quote 直接引入的变量保持原名。Clause macro expander 不会
+给它们追加 counter，因此可以有意识地与调用方 clause 中的同名变量绑定或冲突。
 
 *Pos*
 

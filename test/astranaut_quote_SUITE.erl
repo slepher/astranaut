@@ -135,6 +135,21 @@ all() ->
      test_parse_transform_literal_name_binding_warning,
      test_quoted_tuple_pos_warning,
      test_quoted_literal_name_binding_warning,
+     test_codec,
+     test_default_context,
+     test_explicit_context,
+     test_no_context,
+     test_no_context_false,
+     test_context_no_context_conflict,
+     test_invalid_context,
+     test_empty_context,
+     test_empty_default_context,
+     test_context_undefined,
+     test_low_level_option_validation,
+     test_context_option_forms,
+     test_wildcard,
+     test_low_level_no_context,
+     test_no_context_named_fun,
      test_guard].
 %%--------------------------------------------------------------------
 %% @spec TestCase(Config0) ->
@@ -224,13 +239,13 @@ test_function_expression_error(_Config) ->
 
 test_named_function_expression_1(_Config) ->
     Expression = quote_example:named_function_expression_1('H'),
-    Ast = merl:quote(0, "fun H(0) -> 0; H(N@quote_example) -> H(N@quote_example - 1) + N@quote_example end"),
+    Ast = merl:quote(0, "fun H(0) -> 0; H(N@astranaut_quote@quote_example) -> H(N@astranaut_quote@quote_example - 1) + N@astranaut_quote@quote_example end"),
     ?assertEqual(Ast, Expression),
     ok.
 
 test_named_function_expression_2(_Config) ->
     Expression = quote_example:named_function_expression_2(),
-    Ast = merl:quote(0, "fun Name@quote_example(0) -> 0; Name@quote_example(N@quote_example) -> Name@quote_example(N@quote_example - 1) + N@quote_example end"),
+    Ast = merl:quote(0, "fun Name@astranaut_quote@quote_example(0) -> 0; Name@astranaut_quote@quote_example(N@astranaut_quote@quote_example) -> Name@astranaut_quote@quote_example(N@astranaut_quote@quote_example - 1) + N@astranaut_quote@quote_example end"),
     ?assertEqual(Ast, Expression),
     ok.
 
@@ -704,3 +719,272 @@ test_guard(_Config) ->
     Ast1 = astranaut_lib:replace_pos(Ast, 0),
     ?assertEqual(Ast1, TestGuard),
     ok.
+
+test_codec(_Config) ->
+    ?assertEqual(
+       {template, a, example_macro},
+       astranaut_quote:decode_quote_variable(
+         astranaut_quote:encode_quote_variable(a, example_macro))),
+    ?assertEqual(
+       {expanded, a, example_macro, 1},
+       astranaut_quote:decode_quote_variable(
+         astranaut_quote:encode_quote_variable(a, example_macro, 1))),
+    ?assertEqual(
+       'A%40part@astranaut_quote@macro%40ctx',
+       astranaut_quote:encode_quote_variable('A@part', 'macro@ctx')),
+    ?assertEqual(
+       {template, 'A@part', 'macro@ctx'},
+       astranaut_quote:decode_quote_variable(
+         astranaut_quote:encode_quote_variable('A@part', 'macro@ctx'))),
+    ?assertEqual(
+       {template, 'A%part', 'macro%ctx'},
+       astranaut_quote:decode_quote_variable(
+         astranaut_quote:encode_quote_variable('A%part', 'macro%ctx'))),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable(a)),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('a@foo')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('a@astranaut_quote@')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('a@astranaut_quote@ctx@x')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('a@astranaut_quote@ctx@0')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('a@astranaut_quote@ctx@1@2')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable('_')),
+    ?assertEqual(not_quote_variable,
+                 astranaut_quote:decode_quote_variable(123)),
+    ?assertEqual(
+       {expanded, 'A@part%x', 'macro%ctx@y', 1},
+       astranaut_quote:decode_quote_variable(
+         astranaut_quote:encode_quote_variable(
+           'A@part%x', 'macro%ctx@y', 1))),
+    ?assertError({invalid_quote_counter, 0},
+                 astranaut_quote:encode_quote_variable(a, ctx, 0)),
+    ?assertError({invalid_quote_counter, -1},
+                 astranaut_quote:encode_quote_variable(a, ctx, -1)),
+    ?assertError({invalid_quote_counter, not_an_integer},
+                 astranaut_quote:encode_quote_variable(a, ctx, not_an_integer)),
+    ?assertError({invalid_quote_variable_name, 123},
+                 astranaut_quote:encode_quote_variable(123, ctx)),
+    ?assertError({invalid_quote_context, 123},
+                 astranaut_quote:encode_quote_variable(a, 123)),
+    ok.
+
+test_context_option_forms(_Config) ->
+    assert_quote_var_context("[{context, ctx_list}]", 'A@astranaut_quote@ctx_list'),
+    assert_quote_var_context("[no_context]", 'A'),
+    assert_quote_var_context("no_context", 'A'),
+    assert_quote_var_context("#{no_context => false}", 'A@astranaut_quote@ctx_option_test'),
+    ok.
+
+assert_quote_var_context(OptionsCode, ExpectedName) ->
+    Forms = merl:quote(
+              ["-file(\"ctx_option_test.erl\", 1).",
+               "-module(ctx_option_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, " ++ OptionsCode ++ ")."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, ExpectedName}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ok.
+
+test_default_context(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"default_context_test.erl\", 1).",
+               "-module(default_context_test).",
+               "-export([run/0]).",
+               "run() -> quote(A)."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, 'A@astranaut_quote@default_context_test'}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ok.
+
+test_explicit_context(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"explicit_context_test.erl\", 1).",
+               "-module(explicit_context_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, #{context => my_ctx})."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, 'A@astranaut_quote@my_ctx'}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ok.
+
+test_no_context(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"no_context_test.erl\", 1).",
+               "-module(no_context_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, no_context)."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, 'A'}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ok.
+
+test_no_context_false(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"no_context_false_test.erl\", 1).",
+               "-module(no_context_false_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, #{no_context => false})."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, 'A@astranaut_quote@no_context_false_test'}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ok.
+
+test_context_no_context_conflict(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"context_conflict_test.erl\", 1).",
+               "-module(context_conflict_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, #{context => my_ctx, no_context => true})."])
+        ++ [{eof, 5}],
+    ?assertMatch(
+       {error, [{_, [{_, astranaut_quote,
+                      {conflicting_quote_context_options, my_ctx, no_context}}]}], []},
+       astranaut_quote:parse_transform(Forms, [])),
+    ok.
+
+test_invalid_context(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"invalid_context_test.erl\", 1).",
+               "-module(invalid_context_test).",
+               "-export([run/1]).",
+               "run(Ctx) -> quote(A, #{context => Ctx})."])
+        ++ [{eof, 5}],
+    ?assertMatch(
+       {error, [{_, [{_, astranaut_quote,
+                      {validate_key_failure, {invalid_value, atom}, context, _}}]}], _},
+       astranaut_quote:parse_transform(Forms, [])),
+    ok.
+
+test_empty_context(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"empty_context_test.erl\", 1).",
+               "-module(empty_context_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, #{context => ''})."])
+        ++ [{eof, 5}],
+    ?assertMatch(
+       {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
+       astranaut_quote:parse_transform(Forms, [])),
+    ?assertError({invalid_quote_context, ''},
+                 astranaut_quote:encode_quote_variable(a, '')),
+    ?assertError({invalid_quote_context, ''},
+                 astranaut_quote:encode_quote_variable(a, '', 1)),
+    ?assertError({invalid_quote_variable_name, ''},
+                 astranaut_quote:encode_quote_variable('', ctx)),
+    ?assertError({invalid_quote_context, ''},
+                 astranaut_quote:quoted(merl:quote(0, "A"), #{context => ''})),
+    ok.
+
+test_empty_default_context(_Config) ->
+    Forms = [{attribute, 1, file, {"empty_default_context_test.erl", 1}},
+             {attribute, 1, module, ''},
+             {function, 2, run, 0,
+              [{clause, 2, [], [],
+                [{call, 2, {atom, 2, quote}, [{var, 2, 'A'}]}]}]},
+             {eof, 3}],
+    ?assertMatch(
+       {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
+       astranaut_quote:parse_transform(Forms, [])),
+    ok.
+
+test_context_undefined(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"context_undefined_test.erl\", 1).",
+               "-module(context_undefined_test).",
+               "-export([run/0]).",
+               "run() -> quote(A, #{context => undefined})."])
+        ++ [{eof, 5}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {var, _, 'A@astranaut_quote@undefined'}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    {value, {var, _, 'B@astranaut_quote@undefined'}, _} =
+        erl_eval:expr(
+          astranaut_quote:quoted(
+            merl:quote(0, "B"), #{context => undefined}),
+          erl_eval:new_bindings()),
+    ok.
+
+test_low_level_option_validation(_Config) ->
+    ?assertError({invalid_quote_context, 123},
+                 astranaut_quote:quoted(
+                   merl:quote(0, "A"), #{context => 123})),
+    ?assertError({invalid_quote_no_context, invalid},
+                 astranaut_quote:quoted(
+                   merl:quote(0, "A"), #{no_context => invalid})),
+    ?assertError({conflicting_quote_context_options, ctx, no_context},
+                 astranaut_quote:quoted(
+                   merl:quote(0, "A"),
+                   #{context => ctx, no_context => true})),
+    ok.
+
+test_wildcard(_Config) ->
+    {value, {var, _, '_'}, _} =
+        erl_eval:expr(
+          astranaut_quote:quoted({var, 0, '_'}), erl_eval:new_bindings()),
+    {value, {var, _, '_'}, _} =
+        erl_eval:expr(
+          astranaut_quote:quoted({var, 0, '_'}, #{context => some_ctx}),
+          erl_eval:new_bindings()),
+    ok.
+
+test_low_level_no_context(_Config) ->
+    {value, {var, _, 'A'}, _} =
+        erl_eval:expr(
+          astranaut_quote:quoted(merl:quote(0, "A")), erl_eval:new_bindings()),
+    ok.
+
+test_no_context_named_fun(_Config) ->
+    Forms = merl:quote(
+              ["-file(\"no_context_named_fun_test.erl\", 1).",
+               "-module(no_context_named_fun_test).",
+               "-export([run/0]).",
+               "run() ->",
+               "  quote(fun Name(0) -> 0;",
+               "            Name(N) -> Name(N - 1) + N",
+               "        end, no_context)."])
+        ++ [{eof, 7}],
+    Transformed = astranaut_quote:parse_transform(Forms, []),
+    {function, _, run, 0, [{clause, _, [], [], [Expression]}]} =
+        lists:keyfind(run, 3, Transformed),
+    {value, {named_fun, _, 'Name', Clauses}, _} =
+        erl_eval:expr(Expression, erl_eval:new_bindings()),
+    ?assertNot(has_quote_variable(Clauses)),
+    ok.
+
+has_quote_variable(Nodes) ->
+    lists:any(
+      fun({var, _, Name}) ->
+              astranaut_quote:decode_quote_variable(Name) =/= not_quote_variable;
+         ({named_fun, _, Name, Clauses}) ->
+              astranaut_quote:decode_quote_variable(Name) =/= not_quote_variable
+                  orelse has_quote_variable(Clauses);
+         (Node) when is_tuple(Node) ->
+              has_quote_variable(tuple_to_list(Node));
+         (Node) when is_list(Node) ->
+              has_quote_variable(Node);
+         (_) ->
+              false
+      end, Nodes).

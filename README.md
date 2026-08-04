@@ -403,7 +403,31 @@ state, and writer combinators used to assemble the traversal implementation.
   proplists() => map(),
   Pos => #{pos => Pos}
   #{pos => Pos, code_pos => CodePos, debug => Debug}.
+  #{context => Context}, Context is a static atom.
+  no_context.
 ```
+
+*Context*
+
+&emsp;&emsp; quote variables are encoded with the default context (the current module):
+
+&emsp;&emsp; `Name@astranaut_quote@Module`.
+
+&emsp;&emsp; an explicit `context` changes the context to an arbitrary non-empty
+static atom (e.g. `undefined`), so helpers in the same module can use different
+variable namespaces, and helpers in different modules can share one. The empty
+atom `''` is rejected with `{invalid_quote_context, ''}`.
+
+&emsp;&emsp; during clause macro expansion a counter is appended, producing
+`Name@astranaut_quote@Context@Counter`. Attribute macros keep the template name
+without a counter. Names and contexts are escaped by the shared quote codec;
+invalid names, contexts, and counters are rejected explicitly.
+
+*No Context*
+
+&emsp;&emsp; `no_context` keeps quote introduced variables with their original names.
+The clause macro expander will not append a counter to them, so they can
+deliberately bind or collide with same-named variables in the caller clause.
 
 *Pos*
 
@@ -969,7 +993,10 @@ macro_2(Name) ->
 
 &emsp;&emsp; each macro expansion has it's unique namespace.
 
-&emsp;&emsp; @{macro\_module\_name}@\_{counter} is added to it's original name.
+&emsp;&emsp; quote encodes variables as `Name@astranaut_quote@Context`. During clause
+macro expansion the expander appends a counter to the template names:
+
+&emsp;&emsp; `Name@astranaut_quote@Context@Counter`.
 
 ```erlang
 -module(macro_example).
@@ -1006,27 +1033,27 @@ test_macro_with_vars(N) ->
 test_macro_with_vars(N) ->
 A1 =
 begin
-  A@macro_example@_1 = 10,
-  B@macro_example@_1 = N,
-  A@macro_example@_1 + B@macro_example@_1
+  A@astranaut_quote@macro_example@1 = 10,
+  B@astranaut_quote@macro_example@1 = N,
+  A@astranaut_quote@macro_example@1 + B@astranaut_quote@macro_example@1
 end,
 A2 = 
 begin
-  A@macro_example@_3 = 10,
-  B@macro_example@_3 = A1,
-  A@macro_example@_3 + B@macro_example@_3
+  A@astranaut_quote@macro_example@3 = 10,
+  B@astranaut_quote@macro_example@3 = A1,
+  A@astranaut_quote@macro_example@3 + B@astranaut_quote@macro_example@3
 end,
 A3 = 
 begin
-  A@macro_example@_4 = 10,
-  B@macro_example@_4 = N,
-  A@macro_example@_4 + B@macro_example@_4
+  A@astranaut_quote@macro_example@4 = 10,
+  B@astranaut_quote@macro_example@4 = N,
+  A@astranaut_quote@macro_example@4 + B@astranaut_quote@macro_example@4
 end,
 A4 =
 begin
-  A@macro_example@_2 = 10,
-  B@macro_example@_2 = A1,
-  A@macro_example@_2 + B@macro_example@_2
+  A@astranaut_quote@macro_example@2 = 10,
+  B@astranaut_quote@macro_example@2 = A1,
+  A@astranaut_quote@macro_example@2 + B@astranaut_quote@macro_example@2
 end,
 A1 + A2 + A3 + A4.
 ```

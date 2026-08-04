@@ -4,8 +4,24 @@
 
 ## 0.13
 
+### Quote context
+
+- **可配置 quote context**:quote 变量从 `Name@Module` 改为
+  `Name@astranaut_quote@Context` 编码。Context 默认取当前源码 module,可通过
+  `context` 选项显式指定,或用 `no_context` 关闭以保持变量原名。
+- 新增 quote/expander 共享的 quote 变量 codec(`encode_quote_variable/2,3`,
+  `decode_quote_variable/1`),并支持 `@`、`%` 转义。expander 不再拿变量后缀与
+  macro 执行 module 比较,并额外处理 named fun binder 的重命名。
+- `context` 与 `no_context` 互斥,同时出现返回
+  `{conflicting_quote_context_options, Context, no_context}`。`context` 必须是
+  非空 atom(空 atom `''` 与非 atom 返回 `{invalid_quote_context, _}`),
+  `no_context` 必须是 boolean,低层 `quoted/1,2` 对非法 option 报告明确错误,
+  不再泄漏 badmatch。
+
 ### 兼容性
 
+- **破坏性变更**:quote 变量编码已变更。升级后需要 clean rebuild 所有定义或使用
+  Astranaut macro 的模块;不支持旧 macro beam 与新 expander 混用。
 - 最低支持版本从 Erlang/OTP 19 提升到 21,并删除 pre-21 的异常栈、语法
   schema、参考数据和 CI 兼容分支。
 

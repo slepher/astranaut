@@ -609,7 +609,7 @@ process_macro_return(Return, Macro, Opts) ->
     MacroMap = maps:get(macro_map, Opts, #{}),
     do([ traverse ||
            Attr <- astranaut_traverse:ask(),
-           RenameContext <- macro_return_rename_context(Macro, Opts),
+           RenameCounter <- macro_return_rename_counter(Opts),
            ProcessReturn =
                astranaut_traverse:with_all_error(
                  fun({invalid_transform_normalization, Detail}) ->
@@ -620,9 +620,9 @@ process_macro_return(Return, Macro, Opts) ->
                  end,
                  astranaut:map_m(
                    fun(Node) ->
-                           Node1 = update_macro_return_node(
-                                     Node, RenameContext,
-                                     maps:get(pos, Macro)),
+                            Node1 = update_macro_return_node(
+                                      Node, RenameCounter,
+                                      maps:get(pos, Macro)),
                            collect_return_macro_calls(
                              Module, Node1, MacroMap, CollectLocalMacros)
                    end, Return,
@@ -893,14 +893,12 @@ has_macro_call(Nodes, MacroMap) ->
               end
       end, false, Nodes, #{traverse => pre}).
 
-macro_return_rename_context(Macro,
-                            #{rename_quoted_variables := true}) ->
+macro_return_rename_counter(#{rename_quoted_variables := true}) ->
     do([ traverse ||
            State <- astranaut_traverse:get(),
-           Counter = macro_return_counter(State),
-           return({macro_name_str(Macro), integer_to_list(Counter)})
+           return(macro_return_counter(State))
        ]);
-macro_return_rename_context(_Macro, #{}) ->
+macro_return_rename_counter(_Opts) ->
     astranaut_traverse:return(undefined).
 
 commit_macro_return_counter(#{rename_quoted_variables := true}) ->
@@ -919,27 +917,41 @@ macro_return_counter(Counter) when is_integer(Counter) ->
 macro_return_counter(State) ->
     maps:get(macro_return_counter, State).
 
-macro_name_str(#{module := Module, function := _Function,
-                 arity := _Arity}) ->
-    atom_to_list(Module).
-
-update_macro_return_node(Node, RenameContext, Pos) ->
-    Node1 = rename_quoted_variable_node(Node, RenameContext),
+update_macro_return_node(Node, RenameCounter, Pos) ->
+    Node1 = rename_quoted_variable_node(Node, RenameCounter),
     Node2 = replace_pos_zero_node(Node1, Pos),
     astranaut_syntax:revert(Node2).
 
 rename_quoted_variable_node(
-  {var, Pos, VarName} = Var, {MacroNameStr, CounterStr}) ->
-    case split_varname(atom_to_list(VarName)) of
-        [Head, MacroNameStr1] when MacroNameStr =:= MacroNameStr1 ->
-            VarName1 = list_to_atom(
-                         Head ++ "@" ++ MacroNameStr ++ "_" ++ CounterStr),
-            {var, Pos, VarName1};
-        _ ->
-            Var
+  {var, Pos, VarName} = Var, Counter) when is_integer(Counter) ->
+    case rename_quote_variable(VarName, Counter) of
+        VarName ->
+            Var;
+        VarName1 ->
+            {var, Pos, VarName1}
     end;
-rename_quoted_variable_node(Node, _RenameContext) ->
+rename_quoted_variable_node(
+  {named_fun, Pos, Name, Clauses} = NamedFun, Counter)
+  when is_integer(Counter) ->
+    case rename_quote_variable(Name, Counter) of
+        Name ->
+            NamedFun;
+        Name1 ->
+            {named_fun, Pos, Name1, Clauses}
+    end;
+rename_quoted_variable_node(Node, _RenameCounter) ->
     Node.
+
+rename_quote_variable(Name, Counter) ->
+    case astranaut_quote:decode_quote_variable(Name) of
+        {template, OriginalName, Context} ->
+            astranaut_quote:encode_quote_variable(
+              OriginalName, Context, Counter);
+        {expanded, _OriginalName, _Context, _ExistingCounter} ->
+            Name;
+        not_quote_variable ->
+            Name
+    end.
 
 replace_pos_zero_node(Node, 0) ->
     Node;
@@ -947,12 +959,6 @@ replace_pos_zero_node(Node, Pos) ->
     case astranaut_syntax:get_pos(Node) of
         0 -> astranaut_syntax:set_pos(Node, Pos);
         _ -> Node
-    end.
-
-split_varname(String) ->
-    case lists:splitwith(fun(Char) -> Char =/= $@ end, String) of
-        {Head, [$@ | Tail]} -> [Head, Tail];
-        {Head, []} -> [Head]
     end.
 
 %%%===================================================================

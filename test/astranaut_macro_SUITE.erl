@@ -14,7 +14,8 @@ suite() ->
 init_per_suite(Config) ->
     TestModules = [macro_exports, macro_native_record, macro_example, macro_test,
                    macro_guard_macros, macro_guard_test,
-                   macro_node_role_test],
+                   macro_node_role_test,
+                   macro_quote_context_example, macro_quote_context_test],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 
 end_per_suite(_Config) ->
@@ -38,7 +39,16 @@ all() ->
      test_macro_node_roles,
      test_macro_simple_guard,
      test_macro_complex_guard,
-     test_macro_guard_call].
+     test_macro_guard_call,
+     test_quote_context_hygienic,
+     test_quote_context_no_context,
+     test_quote_context_named_fun,
+     test_quote_context_same_context,
+     test_quote_context_different_context,
+     test_quote_context_unquote_identity,
+     test_quote_context_local_hygienic,
+     test_quote_context_attribute_no_counter,
+     test_quote_context_no_double_counter].
 
 test_ok_case(_Config) ->
     ?assertEqual(ok, macro_test:test_ok()).
@@ -134,6 +144,92 @@ test_macro_complex_guard(_Config) ->
     ?assertEqual(in_range, macro_guard_test:complex(12.5)),
     ?assertEqual(out_of_range, macro_guard_test:complex(9)),
     ?assertEqual(out_of_range, macro_guard_test:complex(not_a_number)).
+
+test_quote_context_hygienic(_Config) ->
+    ?assertEqual(10, macro_quote_context_test:test_hygienic()).
+
+test_quote_context_no_context(_Config) ->
+    ?assertEqual(20, macro_quote_context_test:test_no_context_capture()),
+    ?assertEqual(120, macro_quote_context_test:test_no_context_named_fun()).
+
+test_quote_context_named_fun(_Config) ->
+    ?assertEqual(120, macro_quote_context_test:test_named_fun()).
+
+test_quote_context_same_context(_Config) ->
+    ?assertEqual(42, macro_quote_context_test:test_same_context()).
+
+test_quote_context_different_context(_Config) ->
+    ?assertEqual({1, 2}, macro_quote_context_test:test_different_context()).
+
+test_quote_context_unquote_identity(_Config) ->
+    ?assertEqual({6, 5}, macro_quote_context_test:test_unquote_identity()).
+
+test_quote_context_local_hygienic(_Config) ->
+    ?assertEqual(10, macro_quote_context_test:test_local_hygienic()).
+
+test_quote_context_attribute_no_counter(_Config) ->
+    Forms = [{attribute, 1, file, {"attr_no_counter_test.erl", 1}},
+             {attribute, 1, module, attr_no_counter_test},
+             {attribute, 2, import_macro, macro_quote_context_example},
+             {attribute, 3, attr_no_counter, [42]},
+             {eof, 4}],
+    Output = expand_forms(Forms),
+    Function = lists:keyfind(generated_attr_fun, 3, Output),
+    ?assertMatch({function, _, generated_attr_fun, 0, _}, Function),
+    Vars = collect_var_names(Function),
+    ?assert(
+       lists:member(
+         'AttrVar@astranaut_quote@macro_quote_context_example', Vars)),
+    ?assertNot(lists:any(fun has_expanded_counter/1, Vars)),
+    ok.
+
+test_quote_context_no_double_counter(_Config) ->
+    Forms = [{attribute, 1, file, {"no_double_counter_test.erl", 1}},
+             {attribute, 1, module, no_double_counter_test},
+             {attribute, 2, import_macro, macro_quote_context_example},
+             {function, 3, run, 0,
+              [{clause, 3, [], [],
+                [{call, 3,
+                  {remote, 3, {atom, 3, macro_quote_context_example},
+                   {atom, 3, already_expanded_macro}},
+                  []}]}]},
+             {eof, 4}],
+    Output = expand_forms(Forms),
+    {function, _, run, 0, _} = lists:keyfind(run, 3, Output),
+    %% the already-expanded variable name is preserved as-is. A double append
+    %% would produce a second counter, so the only var carrying the encoded
+    %% 'Already' prefix must be the original single-counter name.
+    Vars = collect_var_names(Output),
+    ?assertEqual(
+       ['Already@astranaut_quote@macro_quote_context_example@1'],
+       [Name || Name <- Vars,
+                lists:prefix("Already", atom_to_list(Name))]),
+    ok.
+
+expand_forms(Forms) ->
+    case astranaut_macro:parse_transform(Forms, []) of
+        {warning, Forms1, _Warnings} -> Forms1;
+        {error, _Errors, _Warnings} = Error -> exit({expand_failed, Error});
+        Forms1 -> Forms1
+    end.
+
+collect_var_names(Nodes) ->
+    lists:usort(var_names(Nodes)).
+
+var_names(Nodes) when is_list(Nodes) ->
+    lists:append([var_names(Node) || Node <- Nodes]);
+var_names({var, _, Name}) when is_atom(Name) ->
+    [Name];
+var_names(Node) when is_tuple(Node) ->
+    var_names(tuple_to_list(Node));
+var_names(_) ->
+    [].
+
+has_expanded_counter(Name) ->
+    case astranaut_quote:decode_quote_variable(Name) of
+        {expanded, _OriginalName, _Context, _Counter} -> true;
+        _ -> false
+    end.
 
 test_macro_guard_call(_Config) ->
     ?assertEqual(even, macro_guard_test:macro_guard(4)),
