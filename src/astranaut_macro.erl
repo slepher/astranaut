@@ -183,44 +183,63 @@ finalize_attribute_macro_pass(
     do([ return ||
            PreparedForms <-
                astranaut_macro_registry:prepare_exports(Forms),
-           MacroEnvironment =
-               astranaut_macro_registry:final_macro_environment(
-                 PreparedForms, Registry),
-           MacroMap = maps:get(macro_map, MacroEnvironment),
-           FunctionCallAnalysis =
-               astranaut_macro_expander:function_call_analysis(
-                 PreparedForms, MacroMap, presence),
-           Callers = astranaut_macro_expander:function_macro_callers(
-                       FunctionCallAnalysis),
-           AttributeForms = astranaut_forms:sort_forms(PreparedForms),
-           return(
-             {AttributeForms,
-              #{macro_environment => MacroEnvironment,
-                function_call_analysis => FunctionCallAnalysis,
-                callers => Callers,
-                capability => disabled,
-                global_macro_opts =>
-                    astranaut_macro_registry:global_macro_opts(
-                      Registry)}})
+           {AttributeForms, FunctionEnv0} =
+               prepare_function_environment(
+                 PreparedForms, Registry, ordsets:new()),
+           return({AttributeForms,
+                   FunctionEnv0#{capability => disabled}})
        ]);
 finalize_attribute_macro_pass(
   File, Registry,
   #{provider := Provider, state := ProviderState},
   Forms, CompileOpts) ->
     do([ return ||
-           {AttributeForms, FunctionEnv0, ProviderState1} <-
+           Forms0 = apply(
+                      Provider, remove_declarations,
+                      [Forms, ProviderState]),
+           PreparedForms <-
+               astranaut_macro_registry:prepare_exports(Forms0),
+           {FinalForms, AdditionalCallers,
+            ProviderState1, Warnings} <-
                apply(
                  Provider, finish_attribute_pass,
-                 [File, Forms, Registry, CompileOpts, ProviderState]),
+                 [PreparedForms, CompileOpts, ProviderState]),
+           {AttributeForms, FunctionEnv0} =
+               prepare_function_environment(
+                 FinalForms, Registry, AdditionalCallers),
            FunctionEnv = FunctionEnv0#{
                            capability =>
                                #{provider => Provider,
-                                 state => ProviderState1},
-                           global_macro_opts =>
-                               astranaut_macro_registry:
-                                 global_macro_opts(Registry)},
-           return({AttributeForms, FunctionEnv})
+                                 state => ProviderState1}},
+           astranaut_return:then(
+             file_formatted_warnings(File, Warnings),
+             return({AttributeForms, FunctionEnv}))
        ]).
+
+prepare_function_environment(Forms, Registry, AdditionalCallers) ->
+    MacroEnvironment =
+        astranaut_macro_registry:final_macro_environment(
+          Forms, Registry),
+    MacroMap = maps:get(macro_map, MacroEnvironment),
+    FunctionCallAnalysis =
+        astranaut_macro_expander:function_call_analysis(
+          Forms, MacroMap, presence),
+    DetectedCallers =
+        astranaut_macro_expander:function_macro_callers(
+          FunctionCallAnalysis),
+    FunctionEnv =
+        #{macro_environment => MacroEnvironment,
+          function_call_analysis => FunctionCallAnalysis,
+          callers => ordsets:union(
+                       DetectedCallers, AdditionalCallers),
+          global_macro_opts =>
+              astranaut_macro_registry:global_macro_opts(Registry)},
+    {astranaut_forms:sort_forms(Forms), FunctionEnv}.
+
+file_formatted_warnings(File, Warnings) ->
+    Error0 = astranaut_error:new(File),
+    Error1 = astranaut_error:append_formatted_warnings(Warnings, Error0),
+    astranaut_return:ok(ok, astranaut_error:eof(Error1)).
 
 %%%===================================================================
 %%% Function pass orchestration

@@ -9,8 +9,9 @@
 -module(astranaut_macro_local).
 
 -include("do.hrl").
--export([init/1, handle_form/4, prepare_target/3,
-         validate_generated/2, finish_attribute_pass/5,
+-export([init/1, handle_form/3, prepare_target/3,
+         validate_generated/2, remove_declarations/2,
+         finish_attribute_pass/3,
          run_function_pass/3,
          new/0, new/1, register/5, prepare_declaration/3,
          need_callable/3,
@@ -65,25 +66,25 @@ init(#{module := Module}) ->
 handle_form(
   {attribute, Pos, local_macro, Attr} = Form,
   #{source_view := SourceView,
-    compile_opts := CompileOpts}, Registry, State) ->
+    compile_opts := CompileOpts,
+    macro_environment := MacroEnvironment} = Context,
+  State) ->
     ClauseMap = function_clauses_map(SourceView, #{}),
     do([ return ||
            {FAs, Options} <-
                validate_local_macro_attribute(ClauseMap, Attr),
            State1 <- register_return(
                        FAs, Options, SourceView,
-                       astranaut_macro_registry:
-                         declaration_macro_environment(Registry),
-                       State),
+                       MacroEnvironment, State),
            State2 <- prepare_declaration(
                        FAs,
                        #{source_view => SourceView,
                          compile_opts => CompileOpts},
                        State1),
-           Registry1 <- add_local_macro(
-                          FAs, Options, ClauseMap, State2, Registry),
+           Definitions = local_macro_definitions(
+                           FAs, Options, ClauseMap, State2, Context),
            Declarations = maps:get(declarations, State2, #{}),
-           return({keep, Registry1,
+           return({keep, Definitions,
                    State2#{declarations =>
                                maps:put(Form, {Pos, FAs},
                                         Declarations)}})
@@ -113,7 +114,13 @@ prepare_target(_ExternalTarget, _WorkflowContext, State) ->
 validate_generated(Forms, State) ->
     case reject_locked_mutation(Forms, State) of
         ok -> astranaut_return:return(ok);
-        {error, Error} -> astranaut_return:error_fail(Error)
+        {error, {illegal_locked_form_mutation, Form} = Error} ->
+            astranaut_return:with_error(
+              fun(ErrorStruct) ->
+                      astranaut_error:update_pos(
+                        form_pos(Form), astranaut_macro, ErrorStruct)
+              end,
+              astranaut_return:error_fail(Error))
     end.
 
 declarations(State) ->
@@ -152,24 +159,22 @@ validate_closure_roots_defined(Options, ClauseMap) ->
                {invalid_closure_roots, Missing})
     end.
 
-add_local_macro(FAs, Options, ClauseMap, State, Registry) ->
-    #{module := Module,
-      global_macro_opts := GlobalMacroOpts0} =
-        astranaut_macro_registry:context(Registry),
+local_macro_definitions(
+  FAs, Options, ClauseMap, State,
+  #{module := Module,
+    global_macro_opts := GlobalMacroOpts0}) ->
     LocalMacroModule = maps:get(local_macro_module, State),
     GlobalMacroOpts =
         case maps:is_key({format_error, 1}, ClauseMap) of
             true -> GlobalMacroOpts0#{formatter => LocalMacroModule};
             false -> GlobalMacroOpts0#{formatter => astranaut_macro}
         end,
-    Definitions = maps:from_list(
-                    [{FA,
-                      local_macro_options(
-                        Module, LocalMacroModule, GlobalMacroOpts,
-                        FA, Options)}
-                     || FA <- FAs]),
-    astranaut_macro_registry:add_macro_definitions(
-      Definitions, Registry).
+    maps:from_list(
+      [{FA,
+        local_macro_options(
+          Module, LocalMacroModule, GlobalMacroOpts,
+          FA, Options)}
+       || FA <- FAs]).
 
 local_macro_options(
   Module, LocalMacroModule, GlobalMacroOpts,
@@ -184,12 +189,13 @@ local_macro_options(
              arity => Arity,
              observation_id => {Function, Arity}}.
 
-finish_attribute_pass(File, ScannedForms, Registry, CompileOpts, State) ->
+remove_declarations(Forms, State) ->
     Declarations = declarations(State),
-    Forms0 = [Form || Form <- ScannedForms,
-                     not maps:is_key(Form, Declarations)],
+    [Form || Form <- Forms,
+             not maps:is_key(Form, Declarations)].
+
+finish_attribute_pass(Forms, CompileOpts, State) ->
     do([ return ||
-           Forms <- astranaut_macro_registry:prepare_exports(Forms0),
            WorkflowContext = #{source_view => Forms,
                                compile_opts => CompileOpts},
            RetainRoots = retain_roots(Forms),
@@ -197,38 +203,12 @@ finish_attribute_pass(File, ScannedForms, Registry, CompileOpts, State) ->
                finalize(RetainRoots, WorkflowContext, State),
            RetainWarnings = retain_warnings(Forms, State1),
            Forms1 = remove_final_skip_forms(Forms, FinalSkipIds),
-           FinalMacroEnvironment =
-               astranaut_macro_registry:final_macro_environment(
-                 Forms1, Registry),
-           ResolvedFinalMacroMap =
-               maps:get(macro_map, FinalMacroEnvironment),
-           FunctionCallAnalysis =
-               astranaut_macro_expander:function_call_analysis(
-                 Forms1, ResolvedFinalMacroMap, presence),
-           DetectedMacroCallers =
-               astranaut_macro_expander:function_macro_callers(
-                 FunctionCallAnalysis),
            RetainedFunctionIds = ordsets:from_list(
                                    [Id ||
                                       Id = {function, _, _} <-
                                           retained_form_ids(State1)]),
-           FinalMacroCallers = ordsets:union(
-                                 DetectedMacroCallers,
-                                 RetainedFunctionIds),
-           FinalSkipFunctionIds = ordsets:from_list(
-                                    [{function, Name, Arity}
-                                     || {function, Name, Arity} <-
-                                            FinalSkipIds]),
-           FunctionEnv =
-               #{macro_environment => FinalMacroEnvironment,
-                 function_call_analysis => FunctionCallAnalysis,
-                 callers => ordsets:subtract(
-                              FinalMacroCallers,
-                              FinalSkipFunctionIds)},
-           astranaut_return:then(
-             file_formatted_warnings(File, RetainWarnings),
-             return({astranaut_forms:sort_forms(Forms1),
-                     FunctionEnv, State1}))
+           return({Forms1, RetainedFunctionIds,
+                   State1, RetainWarnings})
        ]).
 
 run_function_pass(
@@ -243,11 +223,6 @@ run_function_pass(
       MacroEnvironment#{function_call_analysis =>
                             FunctionCallAnalysis},
       State).
-
-file_formatted_warnings(File, Warnings) ->
-    Error0 = astranaut_error:new(File),
-    Error1 = astranaut_error:append_formatted_warnings(Warnings, Error0),
-    astranaut_return:ok(ok, astranaut_error:eof(Error1)).
 
 remove_final_skip_forms(Forms, FinalSkipIds) ->
     Skip = ordsets:from_list(FinalSkipIds),
@@ -1185,6 +1160,10 @@ forms_id_map(Forms) ->
 form_id({function, _Pos, Name, Arity, _Clauses}) -> {function, Name, Arity};
 form_id({attribute, _Pos, spec, {{Name, Arity}, _Body}}) -> {spec, Name, Arity};
 form_id(_) -> undefined.
+
+form_pos({attribute, Pos, _Name, _Value}) -> Pos;
+form_pos({function, Pos, _Name, _Arity, _Clauses}) -> Pos;
+form_pos(_Form) -> 0.
 
 closures(FAs, Options, FormMap, MacroMap) ->
     ClosureRoots = maps:get(closure_roots, Options, []),

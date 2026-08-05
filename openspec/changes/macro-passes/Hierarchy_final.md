@@ -42,7 +42,10 @@ GenerationCompiler
 一致性记录、调度及 generation 生命周期。expander 不反向调用扫描器或 local-macro
 工作流。local-macro 直接调用 `astranaut_macro_expander:expand_functions/2`；每个
 目标任务携带自己的 form、已解析 macro map 与 whitelist control，不存在回调操作表
-或单函数兼容门面。
+或单函数兼容门面。scanner 以不可变 declaration context 调用 local capability，
+并由 scanner 把返回的 definitions delta 提交给 registry；capability 不持有 registry
+state。最终 MacroEnvironment、caller analysis、warning 格式化和 forms 排序仍由
+`astranaut_macro` 编排。
 
 ## 2. 与当前实现对照
 

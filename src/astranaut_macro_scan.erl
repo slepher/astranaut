@@ -333,13 +333,16 @@ handle_capability_form(
   #{capability := #{provider := Provider,
                     state := ProviderState},
     registry := Registry} = State) ->
+    Context = capability_context(State),
     Result = apply(
                Provider, handle_form,
-               [Form, capability_context(State), Registry,
-                ProviderState]),
+               [Form, Context, ProviderState]),
     do([ traverse ||
-           {Action, Registry1, ProviderState1} <-
+           {Action, Definitions, ProviderState1} <-
                astranaut:traverse_return(Result),
+           Registry1 <- astranaut:traverse_return(
+                          astranaut_macro_registry:add_macro_definitions(
+                            Definitions, Registry)),
            State1 = State#{registry => Registry1,
                            capability =>
                                #{provider => Provider,
@@ -528,9 +531,14 @@ remaining_source_forms(State) ->
     maps:get(remaining_forms, State, []).
 
 capability_context(State) ->
-    #{source_view =>
+    Registry = maps:get(registry, State),
+    RegistryContext = astranaut_macro_registry:context(Registry),
+    RegistryContext#{source_view =>
           passed_forms(State) ++ remaining_source_forms(State),
-      compile_opts => maps:get(compile_opts, State)}.
+      compile_opts => maps:get(compile_opts, State),
+      macro_environment =>
+          astranaut_macro_registry:declaration_macro_environment(
+            Registry)}.
 
 to_list(Arguments) when is_list(Arguments) -> Arguments;
 to_list(Arguments) -> [Arguments].

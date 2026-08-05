@@ -19,6 +19,7 @@ all() -> [module_name_is_unique_per_allocation,
           declaration_environment_snapshot_is_resolved,
           fingerprint_includes_resolved_attributes,
           frozen_splice_is_rejected,
+          frozen_splice_reports_generated_form_position,
           later_declaration_remains_helper_in_earlier_closure,
           declaration_snapshot_and_actual_local_references,
           closure_roots_and_self_recursion,
@@ -154,6 +155,26 @@ retain_controls_final_skip_ids(_Config) ->
 
 source_view_only_contains_materialised_forms(_Config) ->
     ?assertEqual([passed, queued], astranaut_macro_local:source_view([passed], [queued])),
+    ok.
+
+frozen_splice_reports_generated_form_position(_Config) ->
+    Frozen = {function, {7, 1}, foo, 0,
+              [{clause, {7, 1}, [], [], [{atom, {7, 5}, original}]}]},
+    Generated = {function, {42, 3}, foo, 0,
+                 [{clause, {42, 3}, [], [],
+                   [{atom, {42, 7}, replacement}]}]},
+    {ok, State} = astranaut_macro_local:register(
+                    [{foo, 0}], #{}, [Frozen],
+                    macro_environment(#{}),
+                    astranaut_macro_local:new()),
+    Error = astranaut_return:run_error(
+              astranaut_macro_local:validate_generated(
+                [Generated], State)),
+    ?assertEqual(
+       [{{42, 3}, astranaut_macro,
+         {illegal_locked_form_mutation, Generated}}],
+       maps:get(formatted_errors,
+                astranaut_error:printable(Error))),
     ok.
 
 declaration_environment_snapshot_is_resolved(_Config) ->

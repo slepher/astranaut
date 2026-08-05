@@ -254,5 +254,7 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] scanner state 只保存 `disabled | #{provider, state}` capability，不再保存平行的 local state/declaration maps。
 - [x] 首个 local declaration 动态注册 provider，并让该 form 立即进入 provider callback；后续生成 declaration 复用同一扫描顺序。
 - [x] disabled attribute/function pass 不加载或调用 local provider。
+- [x] scanner 使用不可变 declaration context 调用 provider，并通过 registry 统一提交其 definitions delta。
+- [x] 通用 orchestrator 统一负责 final MacroEnvironment、caller analysis、warning 格式化与 forms 排序。
 - [x] shared expander 删除 local descriptor 分支，改用通用 observation task/result 字段。
 - [x] registry 删除 local validator、descriptor builder 和 final-local filtering。

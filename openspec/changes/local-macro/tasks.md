@@ -117,9 +117,11 @@
 
 - [x] scanner 在首个 `-local_macro(...)`（包括生成 form）处动态注册 provider；无需额外启用 attribute，也不回扫此前 forms。
 - [x] 未注册路径不初始化 local state，普通 function pass 直接使用通用 expander。
-- [x] declaration 校验、descriptor 构造、callable 准备、冻结保护、retain 与两阶段收尾均由 `astranaut_macro_local` callbacks 拥有。
+- [x] declaration 校验、definition delta 构造、callable 准备、冻结保护、retain 与生命周期收尾由 `astranaut_macro_local` callbacks 拥有；registry state、最终环境、caller analysis、warning 格式化和排序留在通用 pipeline。
 - [x] registry 不含 local-macro 分支；expander 通过 `observation_id` / `callable` / `observation_control` 提供通用观察协议。
 - [x] `astranaut_macro_local` 已移出 `erl_first_files`；在干净临时副本中删除其源码后，app 编译与 ordinary external macro 编译/执行通过。
+- [x] provider 只接收不可变 declaration context 并返回 definitions delta，不直接接收或修改 registry state。
+- [x] frozen form mutation 诊断使用实际违规生成 form 的位置。
 
 ## 两批热路径优化
 

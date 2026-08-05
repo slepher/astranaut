@@ -7,9 +7,10 @@
 ## 职责边界
 
 `astranaut_macro_local` 是按需注册的 capability provider，管理 declaration 校验与
-descriptor 构造、逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation
-编译、retain 和最终跳过集合。统一扫描器只拥有 source queue 与 splice 机制，并通过
-provider callbacks 与其协作；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
+definition delta 构造、逐 FA 声明条目、闭包、冻结、展开一致性记录、依赖调度、generation
+编译、retain 和最终跳过集合。统一扫描器拥有 source queue、splice 和 registry state，
+把不可变 declaration context 传给 provider，再将 provider 返回的 definitions 通过
+registry 的统一接口合并；扫描和 splice 细节见 [macro-passes](../macro-passes/design.md)。
 
 local macro function 的展开不使用另一套遍历器。`astranaut_macro` 负责 pass 编排，
 `astranaut_macro_registry` 负责统一的 `MacroEnvironment` 预解析，
@@ -35,9 +36,10 @@ astranaut_macro
        └─ canonical forms 的累计编译与 local macro 模块加载
 ```
 
-`astranaut_macro_local` 不拥有 scan 队列或 splice 实现；它通过 `handle_form`、
-`prepare_target`、`validate_generated`、attribute-pass 收尾与 function-pass callbacks
-拥有 local declaration 及生命周期语义。计划由 local-macro
+`astranaut_macro_local` 不拥有 scan 队列、splice、registry state、最终
+MacroEnvironment 构造、caller analysis 或 forms 排序；它通过 `handle_form`、
+`prepare_target`、`validate_generated`、declaration 移除、local lifecycle 收尾与
+function-pass callbacks 拥有 local declaration 及生命周期语义。计划由 local-macro
 工作流驱动；引用解析与 function 展开直接调用 `astranaut_macro_expander`，从而复用
 统一错误上下文，并避免把 traverse monad 或扫描队列耦合进 local-macro 模块。
 
@@ -75,6 +77,21 @@ MacroEnvironment = #{
   macro_options := Options
 }
 
+CapabilityDeclarationContext = #{
+  module := Module,
+  file := File,
+  global_macro_opts := GlobalOptions,
+  macro_environment := MacroEnvironment,
+  source_view := Forms,
+  compile_opts := CompileOptions
+}
+
+CapabilityDeclarationResult = {
+  keep | consume,
+  DefinitionsDelta,
+  ProviderState
+}
+
 LocalMacroWorkflowContext = #{
   source_view := Forms,
   compile_opts := CompileOptions
@@ -94,6 +111,9 @@ ExpansionRequest = #{
 
 `MacroEnvironment` 只描述某个源码时点已经解析完成的宏环境；`macro_map` 中需要
 attribute 注入的 descriptor 已包含 `attributes`，不再包含 raw `inject_attrs` selector。
+`CapabilityDeclarationContext` 是 scanner 在 declaration 点构造的不可变数据快照；
+provider 不接收或修改 registry state。provider 返回 definition delta，由 scanner
+调用 registry 的统一校验与合并接口提交，失败时不更新 scanner/provider state。
 `LocalMacroWorkflowContext` 只描述 local-macro scheduler/compiler 所需的模块构造输入。
 两者不可用同一个模糊 `Context` 形状替代。扫描器必须通过统一构造器生成 workflow
 context；注册时必须保存完整的 `macro_environment_snapshot`，不得同时保存

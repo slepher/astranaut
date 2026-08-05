@@ -286,13 +286,20 @@ attribute pass 全部收尾完成后可调用 `sort_forms/1` 生成 Erlang 编�
 
 ## Attribute pass 收尾与 function pass
 
-扫描完成后调用 local-macro 收尾流程。该流程返回最终可调用的本地宏环境、RetainIds 及 `FinalSkipIds`；具体如何冻结、预展开、比较和编译 canonical forms 见 [local-macro 设计](../local-macro/design.md)。
+扫描完成后，orchestrator 先让 local capability 移除已成功注册的 declaration，再统一
+执行 export preparation。local-macro 收尾只完成其生命周期、retain、skip 和 warning
+计算，返回处理后的 forms、额外 function callers 及 provider state；具体如何冻结、
+预展开、比较和编译 canonical forms 见 [local-macro 设计](../local-macro/design.md)。
 
-function pass 从最终 attribute 输出解析唯一 `FinalMacroEnvironment`。retain 与普通目标
+`astranaut_macro` 随后统一构造唯一 `FinalMacroEnvironment`、执行 caller analysis、
+合并 capability 提供的额外 callers、格式化 warnings 并排序 forms。function pass 从
+该最终 attribute 输出继续处理。retain 与普通目标
 functions 作为任务表交给共享 ExpansionValidator，在一次保序 Forms 遍历中分别使用
 各自环境；若某个 form 曾在 declaration environment 中展开，final environment 不同时
 必须从 original form 展开并与最后一次结果比较。属于 frozen closure 的 retained form
 按 declaration 的 canonical whitelist 过滤 FinalMacroEnvironment；该规则同样适用于
 retained local macro 宏头。
 
-扫描器在收尾前不自行删除 local macro 相关原始 forms，也不解释 local-macro 的编译计划；它只传递完整 forms 流和不透明状态，并消费工作流返回的最终环境、物化 forms 与跳过集合。
+扫描器不解释 local-macro 的编译计划；declaration provider 也不持有 registry state。
+scanner 只负责提交 provider 返回的 definitions delta，pass orchestrator 负责通用环境、
+分析、诊断与排序，local provider 只返回其生命周期产生的 forms/callers/warnings/state。
