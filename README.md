@@ -349,6 +349,19 @@ modules for common AST and parse-transform workflows:
   astranaut_lib:reload_binary(Module, Binary) -> Result.
 ```
 
+### formatter api
+
+```erlang
+  astranaut_lib:format_error({Module, Reason}) -> Message.
+  astranaut_lib:format_error(Reason, FormatterFun) -> Message.
+  astranaut_lib:format_default_error(Reason) -> Message.
+```
+
+`format_error/1,2` are the compiler adapter and shared formatter boundary. When a
+formatter has no matching clause, `format_error/2` uses
+`format_default_error/1`: deep character lists are returned unchanged, and every
+other term is formatted with `io_lib:write/1`.
+
 `reload_forms/2` serializes replacements per module and uses
 `code:soft_purge/1`. It returns an Astranaut error containing
 `{module_in_use, Module}` rather than purging code that is still executing.
@@ -935,6 +948,32 @@ or `outer` controls nested expansion at an individual macro call.
 | --- | --- |
 | `undefined_local_macro_retain` | an explicitly retained FA is not defined in the module |
 | `ineffective_local_macro_retain` | an explicitly retained FA belongs to no local macro closure and is therefore handled only as an ordinary function |
+
+*Diagnostic ownership and formatting*
+
+Expected domain failures are returned as Astranaut error or warning computations.
+The registry-selected formatter for that macro owns and formats those returned
+domain diagnostics; a macro formatter defines only its own domain reasons.
+
+An unexpected `error`, `throw`, or `exit` raised during macro invocation is caught
+at the invocation boundary and recorded as `macro_exception`, owned by
+`astranaut_macro`. This is fault containment, not the domain-failure protocol.
+The diagnostic preserves the exception payload, including its class, reason,
+stacktrace, MFA, arguments, and position.
+
+Framework reasons remain owned by `astranaut_macro`. Struct-transform reasons remain
+owned by `astranaut_struct_transformer`.
+
+`astranaut_struct:format_error/1` remains exported as a compatibility formatter
+with one universal fallback clause:
+
+```erlang
+format_error(Msg) ->
+    astranaut_lib:format_default_error(Msg).
+```
+
+Because that export is present, compiling a struct provider emits no
+`{missing_macro_formatter, astranaut_struct}` warning.
 
 &emsp;&emsp;define macro as normal erlang functions.  
 &emsp;&emsp;macro will be expand at compile time by parse\_transformer astranaut\_macro.  
