@@ -116,6 +116,7 @@ all() ->
      test_from_other_record,
      test_from_map_missing_name, test_update_missing_name, test_update_fail,
      test_parse_transform_import_contract, test_format_error_contract,
+     test_compile_struct_formatter_present,
      test_compile_enforce_fail, test_compile_non_record_fail,
      test_compile_unknown_fields_fail, test_compile_missing_enforce_key_fail,
      test_compile_invalid_struct_name_fail].
@@ -287,10 +288,22 @@ test_format_error_contract(_Config) ->
     ?assertEqual(Text,
                  astranaut_lib:format_error(
                    Text, fun astranaut_struct_transformer:format_error/1)),
-    MacroReason = {undefined_macro, missing, 0},
-    ?assertEqual(
-       astranaut_macro:format_error(MacroReason),
-       astranaut_struct:format_error(MacroReason)),
+    ?assert(lists:member({format_error, 1}, astranaut_struct:module_info(exports))),
+    Deep = ["already ", ["formatted"]],
+    ?assertEqual(astranaut_lib:format_default_error(Deep),
+                 astranaut_struct:format_error(Deep)),
+    Unknown = {unexpected_reason, [term]},
+    ?assertEqual(astranaut_lib:format_default_error(Unknown),
+                 astranaut_struct:format_error(Unknown)),
+    ok.
+
+test_compile_struct_formatter_present(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(astranaut_struct_test, Config),
+    Return = astranaut_test_lib:compile_test_forms(Forms),
+    ErrorStruct = astranaut_return:run_error(Return),
+    Warnings = astranaut_error:warnings(ErrorStruct),
+    ?assertEqual([], Warnings),
+    ?assertNot(lists:member({missing_macro_formatter, astranaut_struct}, Warnings)),
     ok.
 
 test_compile_enforce_fail(Config) ->

@@ -21,7 +21,7 @@
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
          with_attribute/5, forms_with_attribute/5,
          option_map/1, validate/2, validate_attribute_option/4,
-         format_error/1, format_error/2]).
+         format_error/1, format_error/2, format_default_error/1]).
 
 -type options() :: option() | [option()] | option_map().
 -type option() :: atom() | {atom(), term()}.
@@ -622,10 +622,10 @@ format_error(Error, FormatterFun) when is_function(FormatterFun, 1) ->
             Formatted
     catch
         error:function_clause ->
-            default_format_error(Error)
+            format_default_error(Error)
     end.
 
-default_format_error(Error) ->
+format_default_error(Error) ->
     case io_lib:deep_char_list(Error) of
         true -> Error;
         _ -> io_lib:write(Error)

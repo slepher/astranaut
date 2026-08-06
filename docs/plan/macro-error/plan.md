@@ -181,10 +181,9 @@ changes, or either evidence layer is missing, interrupted, stale, or failing.
 
 **Objective:** Keep the public struct formatter protocol present, replace its proxy
 implementation with the exact universal fallback, expose the required library API,
-prove warning-count preservation and formatter ownership boundaries, and reconcile
-the specifications as part of the behavior change.
+and prove warning-count preservation and formatter ownership boundaries.
 
-**Product/test owned paths:**
+**Owned paths:**
 
 - `src/astranaut_struct.erl`
 - `src/astranaut_lib.erl`
@@ -194,39 +193,9 @@ the specifications as part of the behavior change.
 Registry and `astranaut_struct_transformer` source are verification surfaces, not
 owned implementation paths.
 
-**Required specification paths:**
-
-- `openspec/changes/transform-error/design.md`
-- `openspec/changes/transform-error/specs/transform-error-formatting/spec.md`
-- the four macro-error OpenSpec files listed in the authority section, but only after
-  the dispatcher explicitly attributes their existing edits and confirms Task 2 may
-  rework them.
-
-**Frozen specification edit map:**
-
-- Transform-error design: change only the private-default-helper statement/API
-  example to public `format_default_error/1`, retaining the same semantics and
-  `format_error/1,2` dispatch behavior.
-- Transform-error capability: add the public `/1` default-format primitive and its
-  deep-character-list/`io_lib:write/1` behavior; retain the prohibition on
-  `format_default_error/2` and all adapter, fallback, ownership, and warning rules.
-- Macro-error proposal: replace facade-removal/breaking-removal claims with preserved
-  export, universal default behavior, and unchanged warning count.
-- Macro-error design: replace the facade-removal decision, migration step, risk, and
-  rollback text with the exact one-clause struct implementation, public library API,
-  no-warning consequence, and ownership boundary.
-- Macro-error ownership spec: replace the requirement/scenario that removes the
-  export with a requirement that the export remains, proxy clauses are absent, the
-  universal default clause is exact, registry emits no missing warning, framework
-  reasons remain `astranaut_macro`, and struct-transform reasons remain
-  `astranaut_struct_transformer`; retain exact diagnostic count/order preservation.
-- Macro-error tasks: replace removal work with the implementation/API/tests/spec
-  work above and update later README wording to describe behavior preservation rather
-  than removal.
-
-No worker may broadly rewrite the committed transform-error protocol, normalize
-unrelated OpenSpec prose, or treat the four existing macro-error diffs as stageable
-without attribution.
+No specification path is owned by Task 2. Existing or separately authorized
+specification work is outside this coder contract and must not be edited or
+validated by the coding worker.
 
 **Behavior boundary:** Export `format_default_error/1` and rename the current private
 helper implementation to that public name; make `format_error/2` call it. In
@@ -238,11 +207,9 @@ missing-formatter warning for struct imports, unchanged diagnostic count/order,
 `astranaut_macro` ownership for framework-produced reasons, and
 `astranaut_struct_transformer` ownership/messages for struct-transform reasons.
 
-**Prerequisites:** Task 1 passed and was committed. Before Task 2 coding starts, the
-dispatcher must (a) confirm attribution and edit permission for all four currently
-modified macro-error OpenSpec paths, and (b) confirm no unattributed edits overlap
-the product/test or transform-error specification paths. This is a worktree-scope
-gate, not a product-design question.
+**Prerequisites:** Task 1 passed and was committed. The dispatcher confirms that the
+four owned source/test paths are attributable to Task 2; unrelated workflow and
+specification edits remain outside the task.
 
 **Coding Self-Tests (coding worker only):**
 
@@ -251,13 +218,12 @@ gate, not a product-design question.
 - `rebar3 ct --suite=test/astranaut_struct_SUITE.erl`
 - `rebar3 ct --suite=test/astranaut_macro_error_SUITE.erl`
 - `rebar3 xref`
-- `openspec validate macro-error --strict`
-- `openspec validate transform-error --strict`
 - `git diff --check`
 
-**Independent Verification (separate `luna_runner` only):** Repeat every Task 2
-self-test/validation command and return raw completion, exits, test counts, generated
-artifacts, status, and diff names.
+**Independent Verification (separate `luna_runner` only):** Repeat the compile, the
+three focused suites, xref, and diff check against the completed Task 2 worktree;
+return raw completion, exits, test counts, generated artifacts, status, and diff
+names.
 
 **Completion criteria:** The struct export remains; its implementation is exactly one
 universal clause and contains no macro proxy; `format_default_error/1` is exported and
@@ -265,13 +231,14 @@ implements the prior private helper semantics; `format_error/1,2` behavior remai
 compatible; struct registry protocol is present with no missing warning or count/order
 change; framework and struct-transform ownership are proven at the raw diagnostic
 boundary; the exact specification map is complete; both evidence layers pass; Sol
-review passes.
+boundary; both evidence layers pass; Sol review passes. The dispatcher commits only
+the four declared source/test paths.
 
-**Stop conditions:** Stop if the four OpenSpec edits remain unattributed, an owned
-path has conflicting user changes, the API requires changing default-rendering or
-adapter semantics, preserving the export still produces a missing warning, a test
-requires a registry special case, ownership/count/order changes, scope expands beyond
-the listed paths, or either evidence layer is missing, interrupted, stale, or failing.
+**Stop conditions:** Stop if an owned path has conflicting user changes, the API
+requires changing default-rendering or adapter semantics, preserving the export still
+produces a missing warning, a test requires a registry special case,
+ownership/count/order changes, scope expands beyond the listed paths, or either
+evidence layer is missing, interrupted, stale, or failing.
 
 ### Task 3 — Update public documentation and run initiative acceptance
 
@@ -279,8 +246,8 @@ the listed paths, or either evidence layer is missing, interrupted, stale, or fa
 and perform final whole-initiative acceptance. This later task does not make product
 decisions.
 
-**Owned paths:** `README.md`, `README.zh.md` only, plus its workflow artifacts. No
-product, test, OpenSpec, status, or skill path is owned.
+**Owned paths:** `README.md`, `README.zh.md` only. No product, test, specification,
+status, skill, or workflow path is owned.
 
 **Behavior boundary:** Document returned computations as the supported user-domain
 diagnostic protocol; caught `error/throw/exit` as unexpected fault containment owned
@@ -291,9 +258,13 @@ default behavior; no missing struct warning; and continued
 `astranaut_struct_transformer` ownership. Do not describe the struct API as removed or
 recommend exceptions as domain diagnostics.
 
-**Prerequisites:** Tasks 1 and 2 passed and were committed; Task 2 specifications are
-attributed, reconciled, committed, and strictly valid; no unrelated edit overlaps the
-README paths.
+**Prerequisites:** Tasks 1 and 2 passed and were committed; no unrelated edit
+overlaps the README paths.
+
+**Out-of-band acceptance input:** If final strict OpenSpec validation remains
+required by the existing initiative acceptance scope, report it separately as an
+existing-scope check. It is not owned by the Task 3 coder and is not a Task 2
+prerequisite.
 
 **Coding Self-Tests (coding worker only):**
 
@@ -301,18 +272,17 @@ README paths.
 - focused macro/local/struct/Common Test suites from Tasks 1-2
 - full `rebar3 ct` with a real timeout of at least 120 seconds
 - `rebar3 xref`
-- `openspec validate macro-error --strict`
-- `openspec validate transform-error --strict`
 - `git diff --check`
 
-**Independent Verification (separate `luna_runner` only):** Repeat the complete Task
-3 acceptance set and return raw commands, completion/interruption state, exits, test
-counts, generated artifacts, status, and diff names.
+**Independent Verification (separate `luna_runner` only):** Repeat the README task's
+compile, focused/full regression, xref, and diff checks and return raw commands,
+completion/interruption state, exits, test counts, generated artifacts, status, and
+diff names. Report any out-of-band OpenSpec acceptance result separately.
 
 **Completion criteria:** Both README languages match implemented and specified
-behavior; focused/full regression, xref, both strict OpenSpec validations, and diff
-checks pass in both evidence layers; final Sol review has no material findings; each
-task has an exact-scope dispatcher commit.
+behavior; focused/full regression, xref, and diff checks pass in both evidence
+layers; any out-of-band OpenSpec acceptance input is reported separately; final Sol
+review has no material findings; each task has an exact-scope dispatcher commit.
 
 **Stop conditions:** Stop if documentation exposes a new behavior ambiguity, differs
 from committed code/specification, requires product/test/OpenSpec changes, overlaps
@@ -341,16 +311,16 @@ failing.
 
 The initiative is complete only when all three tasks pass in order; external/local
 exception ownership and user-return ownership are proven; the struct export and exact
-universal fallback are present; the public default API and narrow specification
-change are complete; no struct missing-formatter warning or diagnostic-count change
-occurs; struct-transform ownership remains intact; public documentation agrees; all
-self-test, independent-verification, review, and exact-commit gates complete.
+universal fallback are present; the public default API is complete and any separately
+accepted specification inputs are aligned; no struct missing-formatter warning or
+diagnostic-count change occurs; struct-transform ownership remains intact; public
+documentation agrees; all self-test, independent-verification, review, and
+exact-commit gates complete.
 
 ## Initiative stop conditions
 
 Stop and return exact evidence without inventing a design when required work expands
 beyond a task's owned paths, an unattributed worktree edit overlaps required scope,
-the dispatcher has not attributed the four macro-error OpenSpec edits before Task 2,
 source contradicts a frozen contract, preserving diagnostic content/count/order or
 ownership proves impossible, or required evidence is missing/interrupted/failing.
 Do not ask for another struct warning/count decision: the answer is fixed as no new

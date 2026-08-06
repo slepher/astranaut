@@ -503,13 +503,19 @@ test_format_error_unknown_default(_Config) ->
     ?assertException(error, function_clause, astranaut:format_error(Unknown)),
     ?assertEqual(
        io_lib:write(Unknown),
+       astranaut_lib:format_default_error(Unknown)),
+    ?assertEqual(
+       io_lib:write(Unknown),
        astranaut_lib:format_error(Unknown, fun astranaut:format_error/1)),
     ?assertEqual(io_lib:write(Unknown),
                  astranaut_lib:format_error({astranaut, Unknown})),
     ok.
 
 test_format_error_character_list_fallback(_Config) ->
-    Formatted = "already formatted",
+    Formatted = ["already ", ["formatted"]],
+    ?assertEqual(
+       Formatted,
+       astranaut_lib:format_default_error(Formatted)),
     ?assertEqual(
        Formatted,
        astranaut_lib:format_error(
@@ -580,6 +586,9 @@ test_format_error_shared_match(_Config) ->
 
 test_format_error_shared_fallback(_Config) ->
     Error = dispatch_fallback,
+    ?assertEqual(
+       io_lib:write(Error),
+       astranaut_lib:format_default_error(Error)),
     ?assertEqual(
        io_lib:write(Error),
        astranaut_lib:format_error(
