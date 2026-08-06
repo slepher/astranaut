@@ -133,6 +133,9 @@ all() ->
      test_invalid_validator_return_format,
      test_format_error_unknown_default, test_format_error_unknown_throw,
      test_format_error_known_throw_option,
+     test_format_error_dispatch_match,
+     test_format_error_dispatch_fallback,
+     test_format_error_dispatch_nested_function_clause,
      test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
@@ -511,6 +514,70 @@ test_format_error_known_throw_option(_Config) ->
        "validator my_validator for option key my_key returns a invalid_value bad_return",
        lists:flatten(Message)),
     ok.
+
+test_format_error_dispatch_match(_Config) ->
+    ?assertEqual(
+       matched,
+       astranaut_lib:format_error(
+         dispatch_match, #{source => test},
+         fun shared_dispatch_match/1,
+         fun shared_dispatch_fallback/2)),
+    ok.
+
+test_format_error_dispatch_fallback(_Config) ->
+    Error = dispatch_fallback,
+    Options = #{source => test, detail => true},
+    ?assertEqual(
+       {fallback, Error, Options},
+       astranaut_lib:format_error(
+         Error, Options,
+         fun shared_dispatch_no_match/1,
+         fun shared_dispatch_fallback/2)),
+    ok.
+
+test_format_error_dispatch_nested_function_clause(_Config) ->
+    try astranaut_lib:format_error(
+          dispatch_nested, #{source => test},
+          fun shared_dispatch_nested/1,
+          fun shared_dispatch_fallback/2) of
+        _ ->
+            ?assert(false)
+    catch
+        error:function_clause:Stacktrace ->
+            ?assert(
+               case Stacktrace of
+                   [{?MODULE, shared_dispatch_nested_helper, ArityOrArgs, _Info}|_] ->
+                       case ArityOrArgs of
+                           Args when is_list(Args) -> length(Args) =:= 1;
+                           1 -> true;
+                           _ -> false
+                       end;
+                   [{?MODULE, shared_dispatch_nested_helper, ArityOrArgs}|_] ->
+                       case ArityOrArgs of
+                           Args when is_list(Args) -> length(Args) =:= 1;
+                           1 -> true;
+                           _ -> false
+                       end;
+                   _ ->
+                       false
+               end)
+    end,
+    ok.
+
+shared_dispatch_match(dispatch_match) ->
+    matched.
+
+shared_dispatch_no_match(dispatch_other) ->
+    matched.
+
+shared_dispatch_fallback(Error, Options) ->
+    {fallback, Error, Options}.
+
+shared_dispatch_nested(dispatch_nested) ->
+    shared_dispatch_nested_helper(dispatch_nested).
+
+shared_dispatch_nested_helper(dispatch_other) ->
+    matched.
 
 
 test_with_attribute(Config) ->

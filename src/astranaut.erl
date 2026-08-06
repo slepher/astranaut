@@ -595,18 +595,9 @@ format_error(Error) ->
 
 -spec format_error(term(), map()) -> term().
 format_error(Error, Opts) ->
-    try format_error_1(Error) of
-        Formatted ->
-            Formatted
-    catch
-        error:function_clause:Stacktrace ->
-            case format_error_1_no_match(Stacktrace) of
-                true ->
-                    format_error_fallback(Error, Opts);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
-    end.
+    astranaut_lib:format_error(
+      Error, Opts, fun format_error_1/1,
+      fun astranaut_lib:format_default_error/2).
 
 -spec format_error_1(term()) -> term().
 format_error_1({validate_key_failure, required, Key, _Value}) ->
@@ -623,17 +614,3 @@ format_error_1({validate_key_failure, {invalid_validator_return, Validator, Retu
     io_lib:format("validator ~p for option key ~p returns a invalid_value ~p", [Validator, Key, Return]);
 format_error_1({invalid_option_value, Value}) ->
     io_lib:format("~p is not a valid option value", [Value]).
--spec format_error_fallback(term(), map()) -> term().
-format_error_fallback(Message, #{default := throw}) ->
-    throw(Message);
-format_error_fallback(Message, _Opts) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _    -> io_lib:write(Message)
-    end.
-
--spec format_error_1_no_match(list()) -> boolean().
-format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
-    true;
-format_error_1_no_match(_) ->
-    false.
