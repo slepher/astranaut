@@ -1,8 +1,8 @@
 # Astranaut 全仓地图
 
-> 调研日期：2026-08-05
-> 基准版本：`3b7d405` / `3b7d405074063f3d7c9c53457287abcfb7773e7a`
-> 提交主题：`update codebase map for local macro capability refactor`
+> 调研日期：2026-08-06
+> 基准版本：`78683bf` / `78683bfe75d27f3e0ade55810c5487fdb2915788`
+> 提交主题：`Warn on missing macro formatters`
 > 发布版本：`0.13.0` · Erlang/OTP 21+ · MIT
 > 调研边界：正文只描述上述已提交快照；工作区差异单列于文末「未提交增补」。
 
@@ -30,14 +30,14 @@ Astranaut 是一个无第三方依赖的 Erlang 元编程库。它以 Erlang abs
 
 | 指标 | 已提交快照 |
 | --- | ---: |
-| tracked files | 219 |
-| `src/*.erl` | 25 个，13,355 行 |
+| tracked files | 277 |
+| `src/*.erl` | 25 个，13,531 行 |
 | `include/*.hrl` | 11 个 |
 | Common Test suite | 17 个 |
-| suite `all/0` 声明用例 | 422 个 |
-| 测试 Erlang 文件 | 116 个（17 suite + 99 helper/fixture） |
-| 测试 Erlang 代码 | 12,404 行 |
-| OpenSpec 文件 | 19 个，4 组 change |
+| suite `all/0` 声明用例 | 445 个 |
+| 测试 Erlang 文件 | 127 个（17 suite + 110 helper/fixture） |
+| 测试 Erlang 代码 | 13,305 行 |
+| OpenSpec 文件 | 29 个，6 组 change |
 | README | 英文 1,276 行；中文 727 行 |
 
 统计由 `git ls-tree`、`git show HEAD:<path>` 和 suite `all/0` 得出，不包含工作区未提交文件。
@@ -102,7 +102,7 @@ Astranaut 是一个无第三方依赖的 Erlang 元编程库。它以 Erlang abs
 | `astranaut.erl` | 公开门面 | `map/reduce/mapfold/search` 返回 `astranaut_return`；`s*` 版本直接返回值；`map_m/3` 保持普通列表顺序；`map_m_forms/3` 才做 module-form 收尾 |
 | `astranaut_uniplate.erl` | 内部递归内核 | `map_m/5`；`with_subtrees/2,3` 可改变访问顺序并提供逆向重建，不泄漏为通用 AST 语义 |
 | `astranaut_traverse.erl` | traverse monad | Reader 是 traversal attr，State 是 walker state，Writer 追踪 changed，另携 errors/warnings/file/formatter；`scoped_state/2` 隔离嵌套状态 |
-| `astranaut_return.erl` | 结果 monad | `ok/fail/warning_ok/error_ok`；`from_compiler/1`、`to_compiler/1` 连接 Erlang compiler 返回格式 |
+| `astranaut_return.erl` | 结果 monad | `ok/fail/warning_ok/error_ok`；`from_compiler/1`、`to_compiler/1` 将内部 diagnostics 包装为 `astranaut_lib` compiler adapter |
 | `astranaut_error.erl` | 诊断存储 | pending、formatted、per-file 三种阶段；`update_pos`/`update_file` 只补足尚未格式化的上下文 |
 | `astranaut_monad.erl` | 组合子基础 | identity/maybe/either/reader/state/writer 及组合 monad；不是业务入口 |
 | `astranaut_forms.erl` | forms 结构收尾 | 排序、生成 form 插入、冲突函数改名为 `__original__` 语义并合并 spec |
@@ -151,9 +151,9 @@ validator 是 `{role, Role}` 或 `{slot, ParentType, Slot, Role}` 的位置契�
 | --- | --- | --- |
 | `astranaut_macro.erl` | parse transform 入口、默认选项、attribute pass 与 function pass 编排、最终 compiler 结果 | 不保存扫描队列或 local closure 细节 |
 | `astranaut_macro_scan.erl` | `Queue/Output/PassedForms/Registry/Capability`；源码序 scan-and-splice；生成 forms 回插当前位置 | 不解释宏声明语义或递归展开 |
-| `astranaut_macro_registry.erl` | external/export/use/import/options 校验；macro descriptor；冲突/override；AttributeEnv；时点/最终 MacroEnvironment | 不执行宏，不含 local 专属分支 |
+| `astranaut_macro_registry.erl` | external/export/use/import/options 校验；macro descriptor；冲突/override；AttributeEnv；时点/最终 MacroEnvironment；按 source compilation 去重缺失 formatter warning | 不执行宏，不含 local 专属分支 |
 | `astranaut_macro_expander.erl` | attribute/function 统一匹配与调用；inner/outer 递归；depth；AST role 校验；call analysis；observation protocol | 不拥有 source queue 或 local generation |
-| `astranaut_macro_local.erl` | local declaration 校验、closure 冻结、canonical expansion、依赖调度、临时模块编译、retain、finalize | 不改变通用 external expansion 规则 |
+| `astranaut_macro_local.erl` | local declaration 校验、closure 冻结、canonical expansion、依赖调度、临时模块编译、retain、finalize；首次缺失 `/1` formatter warning 使用 source identity | 不改变通用 external expansion 规则 |
 | `astranaut_macros.erl` | 项目内部导出的 `literal/1` macro provider | 不是框架编排模块 |
 
 宏主流程：
@@ -195,7 +195,7 @@ parse_transform(Forms, CompileOpts)
 | `astranaut_disable_tco.erl` | 分析 case/if/receive/try/block/boolean/maybe 等尾位置；只阻断目标调用，保留直接/互递归与 named-fun 的 TCO |
 | `astranaut_compile_meta_transformer.erl` | 从 transform 后 forms 和 compiler diagnostics 生成元数据函数；插入前移除自身 transform 属性 |
 | `astranaut_compile_opts.erl` | 生成导出的 `compile_opts/0` |
-| `astranaut_lib.erl` | AST 构造/位置、forms 分析、选项验证、compile/load/reload、模块锁与 soft purge、安全字符串化等共享工具 |
+| `astranaut_lib.erl` | AST 构造/位置、forms 分析、选项验证、compile/load/reload、模块锁与 soft purge、安全字符串化；compiler `format_error/1` adapter、shared formatter fallback |
 
 ## 目录与事实源
 
@@ -222,26 +222,26 @@ parse_transform(Forms, CompileOpts)
 
 ## 测试地图
 
-下表是各 suite 的 `all/0` 精确声明数，总计 422；不把 `_data` 编译夹具误算成测试用例。
+下表是各 suite 的 `all/0` 精确声明数，总计 445；不把 `_data` 编译夹具误算成测试用例。
 
 | SUITE | 用例 | 主要覆盖 |
 | --- | ---: | --- |
 | `astranaut_syntax_SUITE` | 72 | node role/slot、validate/normalize、OTP AST 兼容、schema 对称性 |
 | `astranaut_quote_SUITE` | 73 | quote/unquote、pattern/type、binding、位置、codec/context、诊断 |
 | `astranaut_macro_pass_SUITE` | 37 | 源码序 pass、generated forms、closure、attribute buffer、final context |
-| `astranaut_macro_local_SUITE` | 36 | closure 冻结、canonical cache、dependency boundary、retain、capability callbacks |
-| `astranaut_SUITE` | 30 | 公开遍历 API、walk return、forms 顺序、validator 集成 |
+| `astranaut_macro_local_SUITE` | 41 | closure 冻结、canonical cache、dependency boundary、retain、capability callbacks |
+| `astranaut_SUITE` | 40 | 公开遍历 API、walk return、forms 顺序、validator 集成、compiler formatter adapter |
 | `astranaut_macro_SUITE` | 27 | 宏基础、递归、guard、quote hygiene |
 | `astranaut_design_SUITE` | 21 | 公开契约、模块加载/锁、compile meta/opts、monad 边界 |
 | `astranaut_uniplate_SUITE` | 20 | map/reduce/mapfold、context、非法节点/重建失败 |
 | `astranaut_macro_uniform_SUITE` | 19 | external/local 统一环境、override、递归深度、validator |
 | `astranaut_struct_SUITE` | 19 | struct API、transform、enforce/unknown/missing fields |
-| `astranaut_rebinding_SUITE` | 18 | comprehension、control flow、map/record、pin/作用域 |
+| `astranaut_rebinding_SUITE` | 21 | comprehension、control flow、map/record、pin/作用域 |
 | `astranaut_traverse_SUITE` | 14 | traverse monad、位置/文件、State、scoped state |
 | `astranaut_macro_scan_SUITE` | 12 | queue/splice/state、generated merge、无 local capability 路径 |
-| `astranaut_macro_error_SUITE` | 11 | warnings/errors、错误格式、局部声明与 sibling errors |
+| `astranaut_macro_error_SUITE` | 17 | warnings/errors、错误格式、局部声明与 sibling errors、缺失 macro formatter warning |
 | `astranaut_error_SUITE` | 6 | error state 累积与读取 |
-| `disable_tco_SUITE` | 5 | TCO 变换及嵌套控制流 |
+| `disable_tco_SUITE` | 4 | TCO 变换及嵌套控制流 |
 | `astranaut_forms_SUITE` | 2 | form 排序与 `__original__` 合并 |
 
 测试导航：
@@ -253,7 +253,7 @@ parse_transform(Forms, CompileOpts)
 
 ## 设计文档与实现状态
 
-四组 OpenSpec change 的 tasks 当前均为已勾选状态：
+六组 OpenSpec change 的实现主题如下：
 
 | Change | 已落地主题 |
 | --- | --- |
@@ -261,6 +261,7 @@ parse_transform(Forms, CompileOpts)
 | `traverse-validator` | opaque validator、slot contract、opt-in validation、macro 错误归因 |
 | `macro-passes` | 两阶段源码序扫描、统一 RuntimeContext、ExpansionValidator、canonical compiler boundary |
 | `local-macro` | declaration snapshot、closure/retain、cache/whitelist、optional capability isolation 与热路径优化 |
+| `transform-error` | compiler diagnostic adapter、纯 `/1` formatter、缺失 macro formatter warning 与 source-compilation 去重 |
 
 `openspec/changes/macro-passes/Hierarchy_final.md` 是宏架构最完整的设计层级；`lessons.md` 是实现操作层面的反例与约束。两者与源码冲突时，以当前源码和回归测试为事实，以文档记录设计意图并标记差异。
 
@@ -280,9 +281,9 @@ parse_transform(Forms, CompileOpts)
 
 | 维度 | 历史版 | 本轮改进 |
 | --- | --- | --- |
-| revision | 头部写 `8f48873` 且未给 full hash；实际文件位于 `3b7d405` | 同时记录 short/full hash、主题，并明确它是调研基准 |
-| 源码规模 | 写成 27 个模块 | 从 committed tree 核验为 25 个 `.erl`、13,355 行 |
-| 测试规模 | “约 19 个、600+”，各 suite 数偏高 | 核验为 17 suite、`all/0` 422 个，并逐 suite 列数 |
+| revision | 历史版基准为 `3b7d405`，缺少后续 compiler-adapter 与 macro-warning 变更 | 当前基准为 `78683bf`，同时记录 short/full hash 与主题 |
+| 源码规模 | 写成 27 个模块 | 从 committed tree 核验为 25 个 `.erl`、13,531 行 |
+| 测试规模 | “约 19 个、600+”，各 suite 数偏高 | 核验为 17 suite、`all/0` 445 个，并逐 suite 列数 |
 | 架构表达 | 模块职责表为主 | 增加编译期/运行期边界、依赖层级、遍历与宏数据流、状态不变量 |
 | 事实源 | 提到 schema 与设计文档 | 明确生成物、源数据、审计脚本、OpenSpec 已落地状态 |
 | 构建/CI | 把 CI 概括成一个版本列表 | 分开 Cirrus、Travis、docker_ci 三套矩阵 |
@@ -306,7 +307,8 @@ parse_transform(Forms, CompileOpts)
 
 ## 未提交增补
 
-> 以下内容存在于调研时的工作区，但不属于基准 revision `3b7d405`，因此没有进入上文事实统计。
+> 以下内容存在于调研时的工作区，但不属于基准 revision `78683bf`，因此没有进入上文事实统计。
 
-- `AGENTS.md`（`M`）：新增 Codebase Map Maintenance 规则，要求正文基于 committed snapshot、工作区变更单列、地图独立提交。本次调研遵循该规则。
-- `luna.md`、`luna_web.md`（`??`）：未跟踪调研/外部检索文档；不属于项目已提交文档集。
+- `.codex/skills/local-workflow/SKILL.md`（`M`）：工作流规则的未提交修改，不属于本次产品提交。
+- `.codex/skills/local-workflow/agents/openai.yaml`（`M`）：工作流 agent 配置的未提交修改，不属于本次产品提交。
+- `openspec/changes/transform-error/design.md`、`proposal.md`、`specs/transform-error-formatting/spec.md`、`tasks.md`（`M`）：OpenSpec 工作区修改，未纳入已提交 product snapshot。
