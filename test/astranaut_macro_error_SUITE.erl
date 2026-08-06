@@ -23,6 +23,9 @@ end_per_suite(_Config) ->
 all() ->
     [test_macro_with_warnings,
      test_macro_with_error,
+     test_macro_local_formatter_legacy,
+     test_macro_local_formatter_strict,
+     test_macro_local_formatter_only_v2,
      test_macro_export_rejects_local_closure_options,
      test_macro_options_rejects_local_closure_options,
      test_macro_local_rejects_internal_function,
@@ -89,6 +92,71 @@ test_macro_with_error(Config) ->
        [{integer, _Pos, 6}]}}] = Errors,
     assert_local_macro_module(macro_with_error, Local),
     astranaut_test_lib:assert_formatted_messages(Errors),
+    ok.
+
+test_macro_local_formatter_legacy(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_formatter_legacy_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], [{File, Warnings}]} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertEqual("macro_local_formatter_legacy_test.erl",
+                 filename:basename(File)),
+    [{8, Local, legacy_local_formatter_warning}] = Warnings,
+    assert_local_macro_module(macro_local_formatter_legacy_test, Local),
+    Exports = Local:module_info(exports),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assertNot(lists:member({format_error, 2}, Exports)),
+    ?assertEqual("legacy local formatter warning",
+                 Local:format_error(legacy_local_formatter_warning)),
+    astranaut_test_lib:assert_formatted_messages(Warnings),
+    ok.
+
+test_macro_local_formatter_strict(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_formatter_strict_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], [{File, Warnings}]} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertEqual("macro_local_formatter_strict_test.erl",
+                 filename:basename(File)),
+    [{19, Local, strict_local_formatter_warning}] = Warnings,
+    assert_local_macro_module(macro_local_formatter_strict_test, Local),
+    Exports = Local:module_info(exports),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assert(lists:member({format_error, 2}, Exports)),
+    ?assertNot(lists:member({format_error_1, 1}, Exports)),
+    ?assertNot(lists:member({strict_local_formatter_message, 0}, Exports)),
+    ?assertEqual("strict local formatter warning",
+                 Local:format_error(strict_local_formatter_warning)),
+    ?assertEqual(
+       "strict local formatter warning",
+       Local:format_error(strict_local_formatter_warning,
+                          #{default => throw})),
+    Unknown = {strict_local_formatter_unknown, [term]},
+    ?assertEqual(astranaut_macro:format_error(Unknown),
+                 Local:format_error(Unknown)),
+    ?assertException(throw, Unknown,
+                     Local:format_error(Unknown, #{default => throw})),
+    astranaut_test_lib:assert_formatted_messages(Warnings),
+    ok.
+
+test_macro_local_formatter_only_v2(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_local_formatter_only_v2_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[], [{File, Warnings}]} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertEqual("macro_local_formatter_only_v2_test.erl",
+                 filename:basename(File)),
+    [{8, astranaut_macro, invalid_macro_attribute}] = Warnings,
+    astranaut_test_lib:assert_formatted_messages(Warnings),
     ok.
 
 test_macro_export_rejects_local_closure_options(Config) ->
