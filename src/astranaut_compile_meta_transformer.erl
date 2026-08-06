@@ -36,28 +36,14 @@ format_error(Error) ->
     format_error(Error, #{}).
 
 format_error(Error, Opts) ->
-    try format_error_1(Error) of
-        Formatted ->
-            Formatted
-    catch
-        error:function_clause:Stacktrace ->
-            case format_error_1_no_match(Stacktrace) of
-                true ->
-                    astranaut:format_error(Error, Opts);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
-    end.
+    astranaut_lib:format_error(
+      Error, Opts, fun format_error_1/1,
+      fun astranaut:format_error/2).
 
 format_error_1({undefined_transformer, Transformer}) ->
     io_lib:format("transformer ~p is not compiled or undefined", [Transformer]);
 format_error_1({invalid_transformer_return, Transformer, Return}) ->
     io_lib:format("transformer ~p returned invalid result ~p", [Transformer, Return]).
-
-format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
-    true;
-format_error_1_no_match(_) ->
-    false.
 
 %%%===================================================================
 %%% meta options

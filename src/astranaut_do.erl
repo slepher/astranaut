@@ -37,28 +37,15 @@ format_error(Error) ->
     format_error(Error, #{}).
 
 format_error(Error, Opts) ->
-    try format_error_1(Error) of
-        Formatted ->
-            Formatted
-    catch
-        error:function_clause:Stacktrace ->
-            case format_error_1_no_match(Stacktrace) of
-                true ->
-                    astranaut:format_error(Error, Opts);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
-    end.
+    astranaut_lib:format_error(
+      Error, Opts, fun format_error_1/1,
+      fun astranaut:format_error/2).
 
 format_error_1(non_empty_do) ->
     "A 'do' construct cannot be empty";
 format_error_1(last_generate_expression) ->
     "The last expression in a 'do' construct count not be a generate expression: A <- B".
 
-format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
-    true;
-format_error_1_no_match(_) ->
-    false.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================

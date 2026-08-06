@@ -48,18 +48,9 @@ format_error(Error) ->
 
 -spec format_error(term(), map()) -> term().
 format_error(Error, Options) ->
-    try format_error_1(Error) of
-        Formatted ->
-            Formatted
-    catch
-        error:function_clause:Stacktrace ->
-            case format_error_1_no_match(Stacktrace) of
-                true ->
-                    astranaut:format_error(Error, Options);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
-    end.
+    astranaut_lib:format_error(
+      Error, Options, fun format_error_1/1,
+      fun astranaut:format_error/2).
 
 -spec format_error_1(term()) -> term().
 format_error_1({import_macro_failed, Module}) ->
@@ -162,12 +153,6 @@ format_error_1({invalid_attr, AttrName, Attr}) ->
     io_lib:format("invalid ~p macro attribute: ~p", [AttrName, Attr]);
 format_error_1({invalid_function_with_arity, Function}) ->
     io_lib:format("invalid macro function and arity: ~p", [Function]).
-
--spec format_error_1_no_match(list()) -> boolean().
-format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
-    true;
-format_error_1_no_match(_) ->
-    false.
 
 -if(?ASTRANAUT_OTP_VSN_GE(24)).
 format_exception({Class, Reason, StackTrace}) ->

@@ -992,18 +992,9 @@ format_error(Error) ->
     format_error(Error, #{}).
 
 format_error(Error, Opts) ->
-    try format_error_1(Error) of
-        Formatted ->
-            Formatted
-    catch
-        error:function_clause:Stacktrace ->
-            case format_error_1_no_match(Stacktrace) of
-                true ->
-                    astranaut:format_error(Error, Opts);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
-    end.
+    astranaut_lib:format_error(
+      Error, Opts, fun format_error_1/1,
+      fun astranaut:format_error/2).
 
 format_error_1({could_not_get_tuple_pos_value, Tuple}) ->
     io_lib:write({could_not_get_tuple_pos_value, Tuple});
@@ -1036,8 +1027,3 @@ format_error_1({invalid_quote_no_context, NoContext}) ->
     io_lib:format("no_context must be a boolean, got ~p.", [NoContext]);
 format_error_1({invalid_quote_counter, Counter}) ->
     io_lib:format("quote counter must be a positive integer, got ~p.", [Counter]).
-
-format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
-    true;
-format_error_1_no_match(_) ->
-    false.
