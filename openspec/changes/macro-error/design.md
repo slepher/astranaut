@@ -66,11 +66,18 @@ local macro 继续把源码模块的公开 formatter closure 编译到生成模�
 
 因此，测试和示例中只为 `macro_exception` 增加的显式代理条款将被删除。用户领域 reason 的具体 clauses 保留，直接 callback 调用保持普通 Erlang clause 语义。
 
-### 删除无领域语义的 struct facade
+### 保留 struct formatter export 作为 universal fallback
 
-`astranaut_struct` 没有自己的 formatter 条款，现有 `/1` facade 只无条件代理 `astranaut_macro`。删除这个导出和函数，使 registry 为其 macro descriptor 自然选择 `astranaut_macro`。struct parse-transformer 的领域诊断仍固定归 `astranaut_struct_transformer`，不受影响。
+`astranaut_struct` 保留 `-export([format_error/1]).`，并将完整 formatter 实现收敛为唯一 clause：
 
-这是公开函数层面的兼容性移除，但避免继续把 facade 误认为错误所有者。调用方应直接使用 diagnostic 中记录的 formatter；若必须手动格式化 macro 框架 reason，则使用 `astranaut_lib:format_error/1,2` adapter。
+```erlang
+format_error(Msg) ->
+    astranaut_lib:format_default_error(Msg).
+```
+
+该公开 API 保留 deep character list 原样返回及其他 term 经 `io_lib:write/1` 的默认语义，不代理 `astranaut_macro`，不增加 reason-specific clause、`/2`、reason dispatch 或 fallback chain。registry 因观察到 `astranaut_struct:format_error/1` 而选择 present 路径，不产生 `{missing_macro_formatter, astranaut_struct}` warning。
+
+struct parse-transformer 的领域诊断仍固定归 `astranaut_struct_transformer`；macro 框架 reason 仍在产生点归 `astranaut_macro`。两者不因 struct universal fallback 改变 ownership。
 
 ### 保持 struct transformer ownership
 
@@ -81,7 +88,7 @@ local macro 继续把源码模块的公开 formatter closure 编译到生成模�
 - [嵌套 formatter 覆盖范围过大，误把用户返回错误归框架] → 只包裹异常 catch 分支产生的 fail computation；用同一 macro 同时产生异常和主动领域错误的回归用例验证两条路径。
 - [调用方把被捕获的异常误解为推荐的领域错误接口] → 文档和测试命名统一使用“unexpected exception”或“fault containment”；领域错误示例只展示返回 computation。
 - [local macro 生成模块身份变化导致既有诊断断言失败] → 仅 `macro_exception` 改为 `astranaut_macro`；用户主动返回的 error/warning 必须继续断言生成 local module。
-- [`astranaut_struct` facade 的外部调用失效] → 在发布说明中标记 breaking change，并提供按真正所有者调用的迁移方式。
+- [`astranaut_struct` universal fallback 改变默认格式] → 直接复用 `astranaut_lib:format_default_error/1` 的既有 deep-character-list 与 `io_lib:write/1` 分支，并用 callable export 和 no-warning 回归测试锁定行为。
 - [错误消息看似仍可由 generic fallback 输出而掩盖路由错误] → 测试同时断言原始 `{Pos, Formatter, Reason}` 中的 formatter identity 和最终非空消息。
 
 ## Migration Plan
@@ -90,11 +97,11 @@ local macro 继续把源码模块的公开 formatter closure 编译到生成模�
 2. 更新 external/local macro 回归断言：框架异常归 `astranaut_macro`，主动返回领域错误仍归 registry formatter。
 3. 删除用户 formatter 中仅用于转发 `macro_exception` 的条款和对 `astranaut_macro` 的引用。
 4. 将异常测试和说明标记为故障隔离；用户领域错误示例只使用返回的 error/warning computation。
-5. 删除 `astranaut_struct` 的 `/1` facade，并更新其 API/formatter contract 测试。
-6. 更新 `README.md` 和 `README.zh.md` 的 macro sections，记录正式领域错误返回协议、异常隔离边界与 facade 移除。
+5. 保留 `astranaut_struct` 的 `/1` export，替换为单一 universal fallback，公开 `astranaut_lib:format_default_error/1`，并更新 API/formatter contract 与 no-warning 测试。
+6. 后续更新 `README.md` 和 `README.zh.md` 的 macro sections，记录正式领域错误返回协议、异常隔离边界、保留的 struct formatter export、public default helper 与 no-warning consequence。
 7. 运行 macro error、macro local、struct 及全量 Common Test，并执行 OpenSpec strict validation。
 
-回滚时可恢复异常分支的继承 formatter 行为及 struct facade；reason 数据结构和持久化格式没有迁移要求。
+回滚时可恢复异常分支的继承 formatter 行为或 struct 的单一 fallback implementation；公开 helper、diagnostic reason 数据结构和持久化格式没有迁移要求。
 
 ## Open Questions
 

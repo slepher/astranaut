@@ -95,15 +95,23 @@
 - **THEN** 框架直接把该诊断记录为 `astranaut_macro`
 - **AND** 用户 formatter 不需要针对 `macro_exception` 增加框架代理条款
 
-### Requirement: Formatter 导出表达实际领域所有权
+### Requirement: astranaut_struct 保留 universal formatter fallback
 
-macro provider MUST 只在拥有自身领域 reason 时导出 formatter。仅无条件代理其他 formatter、但不拥有具体领域条款的 facade MUST NOT 被 registry 视为自定义 formatter。
+`astranaut_struct` MUST 保留公开的 `format_error/1` export，并且该 callback MUST 只有一个 universal clause，委托 `astranaut_lib:format_default_error/1`。它 MUST NOT 包含 `astranaut_macro` proxy、reason-specific clause、`format_error/2`、reason dispatch 或 fallback chain。
 
-#### Scenario: astranaut_struct 没有自身领域 reason
+#### Scenario: astranaut_struct formatter export is present
 
 - **WHEN** registry 分析 `astranaut_struct` 的 macro exports
-- **THEN** 系统 MUST 移除 `astranaut_struct` 现有的 `format_error/1` facade
-- **AND** registry 为其 macro descriptor 选择 `astranaut_macro`
+- **THEN** 系统 MUST 观察到 `astranaut_struct:format_error/1` 存在
+- **AND** 该 callback 对 deep character list 原样返回、对其他 term 返回 `io_lib:write/1`
+- **AND** registry 为其 macro descriptor 选择 present formatter 路径
+- **AND** 该编译不得产生 `{missing_macro_formatter, astranaut_struct}` warning
+
+#### Scenario: Macro framework reasons retain framework ownership
+
+- **WHEN** struct macro processing produces a macro framework reason
+- **THEN** 该诊断的 formatter 仍是 `astranaut_macro`
+- **AND** struct universal fallback 不改变 framework reason ownership
 
 #### Scenario: Struct transformer 产生领域错误
 
@@ -113,7 +121,7 @@ macro provider MUST 只在拥有自身领域 reason 时导出 formatter。仅无
 
 ### Requirement: Formatter 归属变更不改变诊断内容与恢复
 
-除 formatter identity 和删除的兼容 facade 外，系统 MUST 保持 macro 错误的 reason、位置、文件、异常 payload、兄弟诊断顺序及失败调用恢复行为。
+除本 capability 明确的 formatter API 保留与 universal fallback 外，系统 MUST 保持 macro 错误的 reason、位置、文件、异常 payload、兄弟诊断顺序及失败调用恢复行为。
 
 #### Scenario: 一个展开树包含多个失败 sibling
 

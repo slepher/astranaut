@@ -25,7 +25,7 @@
 
 ### Requirement: astranaut_lib 提供 compiler callback 和 shared dispatch
 
-系统 MUST 提供 `astranaut_lib:format_error({Module, Reason})` 作为 compiler callback，并通过 `astranaut_lib:format_error(Reason, fun Module:format_error/1)` 调用领域 formatter。shared dispatch MUST 在 formatter 动态范围内抛出任意 `error:function_clause` 时返回统一默认格式，且 MUST NOT 接收 options 或提供 throw mode。
+系统 MUST 提供 `astranaut_lib:format_error({Module, Reason})` 作为 compiler callback，并通过 `astranaut_lib:format_error(Reason, fun Module:format_error/1)` 调用领域 formatter。shared dispatch MUST 在 formatter 动态范围内抛出任意 `error:function_clause` 时返回统一默认格式，且 MUST NOT 接收 options 或提供 throw mode。`astranaut_lib:format_default_error/1` MUST 是公开的默认格式化 primitive：deep character list 原样返回，其他 term 返回 `io_lib:write/1`；`format_error/2` MUST 在 `error:function_clause` fallback 时调用该 public helper。
 
 #### Scenario: Compiler adapter 格式化已拥有 reason
 

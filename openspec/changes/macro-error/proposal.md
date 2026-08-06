@@ -13,8 +13,8 @@
 - 用户 macro 的可预期领域错误必须通过成功返回的 error 或 warning computation 表达，并继续使用 registry 为该 macro 选择的用户 formatter。
 - 用户 macro 抛出的 `error/throw/exit` 只由调用边界隔离并包装为 `macro_exception`，不得作为用户领域错误路由到 registry formatter，也不得作为推荐的领域错误表达方式。
 - 用户 formatter 只实现自己的领域 reason；框架异常分支不再把 `macro_exception` 交给用户 formatter。
-- 未导出 `format_error/1` 的 macro provider 继续自然使用 `astranaut_macro`；**BREAKING**：移除 `astranaut_struct` 没有领域条款的历史 `/1` formatter facade。
-- fallback mechanics 继续遵循已提交的 transform-error capability，不建立 macro-specific formatter proxy 或 ownership fallback 链。
+- 未导出 `format_error/1` 的 macro provider 继续自然使用 `astranaut_macro`；`astranaut_struct` 保留公开的 `format_error/1`，但只提供委托 `astranaut_lib:format_default_error/1` 的 universal fallback，因此 registry 将其视为 present formatter，不产生 missing-formatter warning。
+- fallback mechanics 继续遵循已提交的 transform-error capability；`astranaut_lib:format_default_error/1` 公开提供 deep character list 原样返回及其他 term 的 `io_lib:write/1` 默认格式，不建立 macro-specific formatter proxy 或 ownership fallback 链。
 
 ## Capabilities
 
@@ -30,6 +30,6 @@
 
 - 影响 macro 调用诊断的 formatter 标记与 `astranaut_macro_expander` 的异常路径。
 - 影响 external macro 与生成 local macro formatter 的测试夹具和断言。
-- `astranaut_struct` 不再作为公开 formatter facade；依赖该历史入口的调用方需要改用真正拥有对应 reason 的 formatter。
+- `astranaut_struct` 保留公开 formatter export 和 universal fallback；其 macro registry descriptor 因此走 present/no-warning 路径，struct-transformer 的领域 formatter 仍由 `astranaut_struct_transformer` 持有。
 - compiler adaptation、unknown-reason fallback 以及 `function_clause` handling 继续由 `astranaut_lib:format_error/1,2` 按 transform-error capability 提供。
 - 不改变错误 reason、位置、异常 payload、兄弟错误恢复、默认格式化协议或 macro 返回 AST 语义；这些异常行为是兼容性的故障隔离，不构成用户领域错误 API。

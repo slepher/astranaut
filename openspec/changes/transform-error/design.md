@@ -57,13 +57,20 @@ format_error(Reason, FormatterFun) ->
     try FormatterFun(Reason) of
         Formatted -> Formatted
     catch
-        error:function_clause -> default_format_error(Reason)
+        error:function_clause -> format_default_error(Reason)
+    end.
+
+-spec format_default_error(term()) -> term().
+format_default_error(Reason) ->
+    case io_lib:deep_char_list(Reason) of
+        true -> Reason;
+        _ -> io_lib:write(Reason)
     end.
 ```
 
 `format_error/1` 是 OTP compiler 在看到 adapter tuple 后调用的固定 callback；`format_error/2` 是可复用 dispatcher。持有 module 的其他调用方同样使用 `fun Module:format_error/1`，不需要 module-specific overload。
 
-`default_format_error/1` 为 library-private：deep character list 原样返回，其他 term 使用 `io_lib:write/1`。公开 API 不接收 options，不提供 throw mode。
+`astranaut_lib:format_default_error/1` 是公开的默认格式化 primitive：deep character list 原样返回，其他 term 使用 `io_lib:write/1`。`format_error/2` 在 formatter 调用范围内捕获 `error:function_clause` 后调用该 helper。公开 API 不接收 options，不提供 throw mode。
 
 ### 领域 formatter 保持纯粹
 

@@ -12,11 +12,12 @@
 - [ ] 2.3 核对其他 macro 框架 reason 的产生路径，确保注册、解析、递归限制和返回值校验继续固定使用 `astranaut_macro`，且没有新增 formatter fallback 链。
 - [ ] 2.4 保留 `astranaut_macro:format_error/1` 的 `macro_exception` 框架 clause；不得在用户 formatter 或 registry 中增加异常 reason dispatch。可将消息改为明确的 unexpected exception 措辞。
 
-## 3. Formatter 身份收敛
+## 3. Struct formatter 与 shared default API
 
-- [ ] 3.1 删除 `astranaut_struct` 的无领域 `/1` facade，使 registry 自然为其 macro descriptor 选择 `astranaut_macro`。
-- [ ] 3.2 更新 struct formatter contract 测试，分别验证 `astranaut_struct` macro 使用框架 formatter、`astranaut_struct_transformer` 继续拥有 struct-specific reason。
-- [ ] 3.3 更新 `README.md` 和 `README.zh.md` 的 macro sections，明确框架 reason 在产生点固定 formatter、用户成功返回的领域诊断才使用 registry formatter、异常捕获仅用于故障隔离，并记录 `astranaut_struct` facade 的移除。
+- [ ] 3.1 在 `astranaut_lib` 公开 `format_default_error/1`，保持 deep character list 原样返回、其他 term 使用 `io_lib:write/1`，并让 `format_error/2` 调用该 helper。
+- [ ] 3.2 保留 `astranaut_struct:format_error/1` export，替换全部 proxy/reason-specific clauses 为唯一 universal fallback clause；registry 走 present/no-warning 路径。
+- [ ] 3.3 更新 `astranaut_SUITE` 与 `astranaut_struct_SUITE`，覆盖 public/shared fallback、struct callable fallback、struct no-warning、framework formatter identity、struct-transformer formatter identity 及既有 diagnostic count/order/recovery invariants；同步 transform-error 与 macro-error 的六个 OpenSpec 文件，使 public helper、preserved struct export、no-warning consequence 和 ownership boundary 与实现及测试一致。
+- [ ] 3.4 后续更新 `README.md` 和 `README.zh.md` 的 macro sections，记录框架 reason 在产生点固定 formatter、用户成功返回的领域诊断才使用 registry formatter、异常捕获仅用于故障隔离，以及保留的 struct formatter export 与 default helper；不得描述为移除 facade。
 
 ## 4. 验证
 
