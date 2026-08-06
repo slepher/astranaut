@@ -215,6 +215,26 @@ Require `task-M.md` to include:
 - expected tracked paths, permitted untracked paths, authorized deletions;
 - proposed commit subject and completion criteria.
 
+### Freeze decisions before coding dispatch
+
+Before routing a coding worker, Sol must freeze every substantive technical and
+specification decision in `task-M.md`. The contract must state the accepted end
+state, exact owned paths, invariants, forbidden alternatives, Coding
+Self-Tests, and stop conditions. Reconciliation, interpretation, or choice
+among conflicting requirements is Sol work, never coding-worker work.
+
+If implementation exposes an ambiguity or conflict the contract did not
+decide, the coding worker stops and reports the exact evidence instead of
+choosing a resolution. Dispatcher preflight rejects a contract that omits the
+required fields or states an unresolved design choice, and returns it to Sol
+for a written decision artifact before dispatch; the dispatcher checks
+completeness only and does not supply or adjudicate the decision.
+
+For a specification rewrite, Sol must give an exact final-state/edit map for
+each owned document or section. An open-ended objective such as “reconcile” is
+not dispatchable unless the contract also fixes the resulting requirements,
+terminology, retained behavior, removed behavior, and cross-document outcome.
+
 ## Implement and self-test
 
 Send `task-M.md` to `luna_coding_worker`. It owns both implementation and every

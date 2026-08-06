@@ -42,30 +42,35 @@
 
 - **WHEN** macro provider 未导出 `format_error/1`
 - **THEN** registry 将其 descriptor formatter 设为 `astranaut_macro`
-- **AND** provider 无需引用或代理 `astranaut_macro:format_error/1,2`
+- **AND** provider 无需引用或代理框架 formatter
 
-### Requirement: Formatter 不通过 fallback 推断错误所有权
+### Requirement: Formatter ownership 不通过 fallback 推断
 
-系统 MUST 在记录诊断时确定 formatter。`dispatch_error/3` 的顶层条款不匹配 MUST 直接使用 `format_default_error/2`，不得把 reason 继续转发给另一个 formatter；formatter 内部发生的真实 `function_clause` MUST 保留 stacktrace 重新抛出。
+系统 MUST 在记录诊断时确定 formatter，不得在最终格式化时根据 reason shape 推断 ownership。领域 formatter MUST 只包含自己拥有的直接 `format_error/1` clauses；unknown-reason fallback 以及 formatter 调用范围内的 `error:function_clause` 行为 MUST 遵循已提交 transform-error capability 的 `astranaut_lib:format_error/1,2` shared adapter。
 
-#### Scenario: 用户 formatter 不匹配领域 reason
+#### Scenario: 领域 formatter 只处理自己的 reason
 
-- **WHEN** 用户 formatter 的具体条款不匹配一个 reason
-- **THEN** 普通 options 使用统一默认字符列表格式
-- **AND** `#{default => throw}` 抛出原始 reason
-- **AND** 系统不尝试 `astranaut_macro` formatter
+- **WHEN** 直接调用领域 formatter 的 `format_error/1` 并传入其拥有的 Reason
+- **THEN** 对应 clause 返回精确领域消息
+- **AND** callback 不包含 formatter-to-formatter proxy 或 generic catch-all
 
-#### Scenario: 用户 formatter 内部失败
+#### Scenario: Unknown reason 使用共享 adapter fallback
 
-- **WHEN** 已匹配的用户 formatter 条款内部触发 `function_clause`
-- **THEN** 系统保留原 stacktrace 重新抛出该异常
-- **AND** 系统不得把它当成顶层 no-match 或改由其他 formatter 处理
+- **WHEN** 一个已记录 formatter 无法匹配 Reason，且调用方需要 compiler-safe 的格式化结果
+- **THEN** 调用方通过 `astranaut_lib:format_error/1,2` shared adapter 获得 transform-error capability 定义的默认格式
+- **AND** 系统不尝试 `astranaut_macro` 或其他 formatter
+
+#### Scenario: Formatter function_clause 行为遵循共享 adapter
+
+- **WHEN** formatter 调用范围内发生 `error:function_clause`
+- **THEN** 结果完全遵循 transform-error shared adapter 的 fallback contract
+- **AND** macro-error 不增加额外 stack inspection、proxy 或 ownership inference
 
 #### Scenario: 用户 formatter 不代理框架 reason
 
 - **WHEN** 用户 macro 同时定义自身领域 formatter 且执行期间发生 `macro_exception`
 - **THEN** 框架直接把该诊断记录为 `astranaut_macro`
-- **AND** 用户 formatter 不需要针对 `macro_exception` 调用 `astranaut_macro:format_error/1,2`
+- **AND** 用户 formatter 不需要针对 `macro_exception` 增加框架代理条款
 
 ### Requirement: Formatter 导出表达实际领域所有权
 
@@ -74,14 +79,14 @@ macro provider MUST 只在拥有自身领域 reason 时导出 formatter。仅无
 #### Scenario: astranaut_struct 没有自身领域 reason
 
 - **WHEN** registry 分析 `astranaut_struct` 的 macro exports
-- **THEN** `astranaut_struct` 不导出 `format_error/1,2`
+- **THEN** 系统 MUST 移除 `astranaut_struct` 现有的 `format_error/1` facade
 - **AND** registry 为其 macro descriptor 选择 `astranaut_macro`
 
 #### Scenario: Struct transformer 产生领域错误
 
 - **WHEN** `astranaut_struct_transformer` 在 struct AST 转换期间产生 struct-specific reason
 - **THEN** 诊断 formatter 是 `astranaut_struct_transformer`
-- **AND** 该 formatter 通过 `dispatch_error/3` 使用统一默认 fallback
+- **AND** 该 formatter 保持纯 `format_error/1` callback，compiler-safe fallback 由 `astranaut_lib:format_error/1,2` 提供
 
 ### Requirement: Formatter 归属变更不改变诊断内容与恢复
 
@@ -94,3 +99,10 @@ macro provider MUST 只在拥有自身领域 reason 时导出 formatter。仅无
 - **AND** 异常和无效返回分别使用 `astranaut_macro`
 - **AND** 用户主动返回的领域错误使用 registry formatter
 - **AND** 每条诊断保持原有位置、reason 和恢复后的调用树行为
+
+#### Scenario: Diagnostic payload and ordering remain stable
+
+- **WHEN** macro expansion produces external or local exceptions, user error/warning computations, and return-validation failures in one traversal
+- **THEN** each exception retains its original MFA, arguments, and stack payload
+- **AND** every diagnostic retains its original position, file, reason, error/warning classification, sibling order, and count
+- **AND** AST returns and sibling recovery behavior remain unchanged apart from the formatter identity required by this capability
