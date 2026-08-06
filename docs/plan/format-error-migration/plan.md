@@ -2,7 +2,7 @@
 
 ## 规划来源与执行协议
 
-本计划由只读 `sol_planner_reviewer` 基于实际源码、测试和当前提交 `4d31096` 生成，dispatcher 已核对其关键路径后持久化。
+本计划由只读 `sol_planner_reviewer` 基于实际源码、测试和当前提交 `4d31096` 生成并裁决，dispatcher 按其决定持久化。
 
 执行链固定为：
 
@@ -10,21 +10,26 @@
 2. 每个待实施任务单独写入 `task-N.md`，一个文件只描述一个封闭实施任务。
 3. Luna coding worker 只实现当前 `task-N.md`，不得自行扩展架构范围。
 4. Luna runner 执行定向验证并返回命令、状态和证据。
-5. dispatcher 将实际 diff 和验证证据交给 Sol 审核。
-6. 每次审核结果写入对应的 `task-review-N.md`；有实质问题时先修复，再重新审核同一任务。
-7. dispatcher 完成最终验收、提交或状态维护。
+5. dispatcher 将实际 diff 和验证证据完整转交 Sol 裁决。
+6. Sol 将 coder-facing 审核决定写入 `task-M-code-review-N.md`；有
+   实质问题时，另写 `task-M-code-review-N-retrospective.md`。只有 Sol
+   确认存在可复用 skill 缺口时，才先写
+   `task-M-code-review-N-skill-change-spec.md` 再修改本地 skill。
+7. dispatcher 不重新裁决 Sol 的技术结论；只负责分发、权限与
+   范围检查、授权后提交及状态维护。
 
 当前已生成：
 
 - [task-1.md](task-1.md)：`astranaut_rebinding` strict formatter 迁移。
+- [task-2.md](task-2.md)：测试 helper formatter protocol 收紧。
 
-当前尚未生成 `task-review-1.md`，因为任务 1 尚未实施，也没有可供 Sol 审核的实际 diff。
+历史审核产物已迁移到 `task-M-code-review-N*` 命名。
 
 ## 总目标
 
-- 保持现有 `format_error/1` 的默认 fallback 行为。
+- 保持 `astranaut_lib:format_default_error/2` 定义的 `format_error/1` 默认行为；`dispatch_error/3` 对所有顶层 formatter no-match 统一使用该共享 fallback，不保留 caller-specific `astranaut:format_error/2` fallback。
 - 增加 `format_error/2` strict 模式；`#{default => throw}` 下未覆盖 reason 必须抛出。
-- 具体 formatter 子句使用 `format_error_1/1`，公共 dispatcher 使用 `astranaut_lib:format_error/4`。
+- 具体 formatter 子句使用 `format_error_1/1`，公共 dispatcher 使用 `astranaut_lib:dispatch_error/3`。
 - formatter 内部发生的 `function_clause` 必须保留原堆栈重新抛出；只有 formatter 自身顶层不匹配才触发 fallback。
 - local macro 生成模块可以携带 formatter 入口及其普通本地 helper，但 formatter 不得成为 local macro compilation boundary 的成员或闭包状态。
 - 测试 helper 对导出的 `/2` 执行 strict 覆盖检查；只有 `/1` 的 legacy formatter 保持兼容但不伪称已完成 strict coverage。
@@ -70,7 +75,7 @@ formatter 信息必须从同一声明时间点的 `SourceView` 推导，不能�
 - `test/astranaut_rebinding_SUITE.erl`
 - rebinding invalid function/option fixtures
 
-内容：导出 `/2`，`/1` 包装 `/2`，用 `astranaut_lib:format_error/4` 只覆盖 `{invalid_rebinding_fun, Function}`，通用 validator reason 委托 `astranaut:format_error/2`。验证 strict 未知 reason 抛出、真实 warning 归属不变。
+内容：导出 `/2`，`/1` 包装 `/2`，用 `astranaut_lib:dispatch_error/3` 只覆盖 `{invalid_rebinding_fun, Function}`，通用 validator reason 由具体 formatter 子句委托 `astranaut:format_error/2`。验证 strict 未知 reason 抛出、真实 warning 归属不变。
 
 详细实施契约见 [task-1.md](task-1.md)。
 
@@ -95,7 +100,7 @@ git diff --check
 - 同时有 `/1`、`/2`：调用 `/2(Error, #{default => throw})`，要求返回非空字符列表。
 - 只有 `/1`：调用 `/1` 并验证非空字符列表，标记为 legacy，不宣称 strict coverage。
 - 只有 `/2` 或没有 `/1`：测试失败，因为 compiler formatter 入口不可用。
-- 不改变 `astranaut_lib:format_error/4` 的 nested `function_clause` 传播语义。
+- 不改变 `astranaut_lib:dispatch_error/3` 的 nested `function_clause` 传播语义。
 
 完成标准：helper 不再静默跳过 `/1`，并能区分 legacy、strict、无效 formatter 协议。
 
@@ -141,16 +146,16 @@ git diff --check
 
 完成标准：三态协议和 local macro 生命周期不变量都有可失败的具体断言。
 
-### Task 5：迁移真实 local macro diagnostic fixtures
+### Task 5：验收已提交的真实 local macro `dispatch_error/3` 迁移
 
-文件：
+Task 5 的原始 `/4` contract 未被接受。提交 `6308e25` (`Switch formatter callers to dispatch_error`)
+已经把三个真实 fixture、`astranaut_macro_error_SUITE.erl` 以及共享 formatter callers
+迁移到 `dispatch_error/3`；因此当前剩余工作是对该提交进行独立机械验证和 Sol 语义/断言/范围验收，
+不是再次实现或产生新的 product diff。
 
-- `test/astranaut_macro_SUITE_data/macro_with_warnings.erl`
-- `test/astranaut_macro_SUITE_data/macro_with_error.erl`
-- `test/astranaut_macro_SUITE_data/macro_sibling_errors_test.erl`
-- `test/astranaut_macro_error_SUITE.erl`
-
-将 fixture 的自定义 reason 移到私有 `format_error_1/1`，增加 `/1` 包装和 `/2` dispatcher；保持现有 `noop`、`bar`、macro exception、sibling error 的消息、位置、数量和 reason 不变。测试必须证明真实生成 local module 的 `/2` 被 strict helper 调用。
+四个已提交的 Task 5 路径和新的验收 contract 见
+[task-5-replan.md](task-5-replan.md)。Task 5 通过后不创建重复 commit；dispatcher 记录既有
+`6308e25` 的验收边界，再进入 Task 6。
 
 ### Task 6：完整回归与最终验收
 
