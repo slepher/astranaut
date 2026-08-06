@@ -29,6 +29,7 @@ all() ->
      test_macro_local_retain_warnings,
      test_macro_local_declaration_single_diagnostic,
      test_macro_local_declaration_preserves_prior_registration,
+     test_macro_invalid_attr_errors,
      test_use_macro_errors,
      test_macro_format_error_predefined_errors,
      test_macro_sibling_errors].
@@ -200,6 +201,21 @@ test_macro_local_declaration_preserves_prior_registration(Config) ->
          end, Warnings)),
     ok.
 
+test_macro_invalid_attr_errors(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_invalid_attr_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[{_File, Errors}], []} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertMatch(
+       [{2, astranaut_macro, {invalid_attr, use_macro, foo}},
+        {3, astranaut_macro, {invalid_attr, local_macro, bar}}],
+       Errors),
+    astranaut_test_lib:assert_formatted_messages(Errors),
+    ok.
+
 test_use_macro_errors(Config) ->
     Forms = astranaut_test_lib:test_module_forms(
               macro_use_error_test, Config),
@@ -266,7 +282,10 @@ test_macro_format_error_predefined_errors(_Config) ->
          {invalid_macro_return, NestedInvalidReturn},
          {undefined_local_macro_retain, [{missing, 0}]},
          {ineffective_local_macro_retain, [{ordinary, 0}]}],
-    lists:foreach(fun assert_macro_format_error/1, Errors).
+    lists:foreach(fun assert_macro_format_error/1, Errors),
+    Unknown = {unknown_macro_format_error, [term]},
+    ?assertException(throw, Unknown,
+                     astranaut_macro:format_error(Unknown, #{default => throw})).
 
 test_macro_sibling_errors(Config) ->
     Forms = astranaut_test_lib:test_module_forms(
@@ -315,7 +334,7 @@ test_macro_sibling_errors(Config) ->
     ok.
 
 assert_macro_format_error(Error) ->
-    Message = astranaut_macro:format_error(Error),
+    Message = astranaut_macro:format_error(Error, #{default => throw}),
     ?assert(io_lib:deep_char_list(Message)),
     ?assertNotEqual([], lists:flatten(Message)).
 

@@ -15,7 +15,7 @@
 -include("do.hrl").
 -include("otp_vsn.hrl").
 
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, format_error/1, format_error/2]).
 
 %%%===================================================================
 %%% Parse transform and diagnostics
@@ -43,104 +43,131 @@ parse_transform(Forms, Options) ->
          ])).
 
 -spec format_error(term()) -> term().
-format_error({import_macro_failed, Module}) ->
+format_error(Error) ->
+    format_error(Error, #{}).
+
+-spec format_error(term(), map()) -> term().
+format_error(Error, Options) ->
+    try format_error_1(Error) of
+        Formatted ->
+            Formatted
+    catch
+        error:function_clause:Stacktrace ->
+            case format_error_1_no_match(Stacktrace) of
+                true ->
+                    astranaut:format_error(Error, Options);
+                false ->
+                    erlang:raise(error, function_clause, Stacktrace)
+            end
+    end.
+
+-spec format_error_1(term()) -> term().
+format_error_1({import_macro_failed, Module}) ->
     io_lib:format(
       "could not import macro from module ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.",
       [Module]);
-format_error({invalid_import_macro_attr, Macro}) ->
+format_error_1({invalid_import_macro_attr, Macro}) ->
     io_lib:format(
       "~p is not a valid module in -import_macro(~p). ",
       [Macro, Macro]);
-format_error({unimported_macro_module, Module}) ->
+format_error_1({unimported_macro_module, Module}) ->
     io_lib:format(
       "-import_macro(~p). is required before use of -use_macro",
       [Module]);
-format_error({unexported_macro, Module, Function, Arity}) ->
+format_error_1({unexported_macro, Module, Function, Arity}) ->
     io_lib:format(
       "unexported macro ~p:~p/~p.",
       [Module, Function, Arity]);
-format_error({undefined_macro, Function, Arity}) ->
+format_error_1({undefined_macro, Function, Arity}) ->
     io_lib:format("macro ~p/~p undefined.", [Function, Arity]);
-format_error({invalid_use_macro, Opts}) ->
+format_error_1({invalid_use_macro, Opts}) ->
     io_lib:format("invalid use macro ~p.", [Opts]);
-format_error(
+format_error_1(
   {macro_override, MacroKey, ExistingMacro, OverridingMacro}) ->
     io_lib:format(
       "macro ~p is already defined by ~p and cannot be overridden by ~p without force_override.",
       [MacroKey,
        format_macro_ref(ExistingMacro),
        format_macro_ref(OverridingMacro)]);
-format_error({non_exported_formatter, Module}) ->
+format_error_1({non_exported_formatter, Module}) ->
     io_lib:format(
       "format_error/1 is not exported from module ~p.", [Module]);
-format_error({unloaded_formatter_module, Module}) ->
+format_error_1({unloaded_formatter_module, Module}) ->
     io_lib:format(
       "formatter module ~p could not be loaded.", [Module]);
-format_error(invalid_macro_attribute) ->
+format_error_1(invalid_macro_attribute) ->
     io_lib:format("invalid attribute macro call: macro not found", []);
-format_error(
+format_error_1(
   {max_macro_expansion_depth_exceeded,
    {MacroModule, Function}, Arguments}) ->
     io_lib:format(
       "maximum macro expansion depth exceeded when applying macro ~p:~p with arguments ~p.",
       [MacroModule, Function, Arguments]);
-format_error(
+format_error_1(
   {max_macro_expansion_depth_exceeded, Function, Arguments}) ->
     io_lib:format(
       "maximum macro expansion depth exceeded when applying macro ~p with arguments ~p.",
       [Function, Arguments]);
-format_error({macro_exception, MFA, Arguments, Exception}) ->
+format_error_1({macro_exception, MFA, Arguments, Exception}) ->
     io_lib:format(
       "apply macro ~s ~p failed:~n~s",
       [astranaut_macro_expander:format_mfa(MFA),
        Arguments,
        format_exception(Exception)]);
-format_error({invalid_macro_return, Detail}) ->
+format_error_1({invalid_macro_return, Detail}) ->
     io_lib:format(
       "macro ~s returned invalid AST: ~p",
       [astranaut_macro_expander:format_mfa(
          invalid_macro_return_mfa(Detail)),
        Detail]);
-format_error({invalid_closure_roots, Functions}) ->
+format_error_1({invalid_closure_roots, Functions}) ->
     io_lib:format(
       "closure_roots contains undefined functions: ~p", [Functions]);
-format_error({macro_capability_unavailable, Provider}) ->
+format_error_1({macro_capability_unavailable, Provider}) ->
     io_lib:format(
       "requested macro capability ~p is unavailable", [Provider]);
-format_error({undefined_local_macro_retain, Functions}) ->
+format_error_1({undefined_local_macro_retain, Functions}) ->
     io_lib:format(
       "local_macro_retain contains undefined functions: ~p", [Functions]);
-format_error({ineffective_local_macro_retain, Functions}) ->
+format_error_1({ineffective_local_macro_retain, Functions}) ->
     io_lib:format(
       "local_macro_retain has no effect for functions outside every local macro closure: ~p",
       [Functions]);
-format_error({duplicate_local_macro_declaration, Function}) ->
+format_error_1({duplicate_local_macro_declaration, Function}) ->
     io_lib:format(
       "duplicate local macro declaration for ~p", [Function]);
-format_error({conflicting_local_macro_closure_environment, FormId}) ->
+format_error_1({conflicting_local_macro_closure_environment, FormId}) ->
     io_lib:format(
       "local macro closure has conflicting expansion environments for ~p",
       [FormId]);
-format_error({conflicting_local_macro_whitelist, FormId, Detail}) ->
+format_error_1({conflicting_local_macro_whitelist, FormId, Detail}) ->
     io_lib:format(
       "local macro closure has conflicting whitelist for ~p: ~p",
       [FormId, Detail]);
-format_error({illegal_locked_form_mutation, Form}) ->
+format_error_1({illegal_locked_form_mutation, Form}) ->
     io_lib:format(
       "local macro expansion modified frozen form: ~p", [Form]);
-format_error(
+format_error_1(
   {local_macro_diagnostic, _Formatter, _Error, Message}) ->
     Message;
-format_error({illegal_macro_environment_mutation, Form}) ->
+format_error_1({illegal_macro_environment_mutation, Form}) ->
     io_lib:format(
       "local macro expansion generated illegal macro environment form: ~p",
       [Form]);
-format_error({illegal_local_macro_definition_mutation, Form}) ->
+format_error_1({illegal_local_macro_definition_mutation, Form}) ->
     io_lib:format(
       "local macro expansion modified locked local macro snapshot form: ~p",
       [Form]);
-format_error(Error) ->
-    astranaut:format_error(Error).
+format_error_1({invalid_attr, AttrName, Attr}) ->
+    io_lib:format("invalid ~p macro attribute: ~p", [AttrName, Attr]);
+format_error_1({invalid_function_with_arity, Function}) ->
+    io_lib:format("invalid macro function and arity: ~p", [Function]).
+
+-spec format_error_1_no_match(list()) -> boolean().
+format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
+    true;
+format_error_1_no_match(_) ->
+    false.
 
 -if(?ASTRANAUT_OTP_VSN_GE(24)).
 format_exception({Class, Reason, StackTrace}) ->
