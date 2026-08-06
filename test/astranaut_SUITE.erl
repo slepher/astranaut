@@ -529,28 +529,30 @@ test_formatter_protocol(_Config) ->
 test_format_error_dispatch_match(_Config) ->
     ?assertEqual(
        matched,
-       astranaut_lib:format_error(
+       astranaut_lib:dispatch_error(
          dispatch_match, #{source => test},
-         fun shared_dispatch_match/1,
-         fun shared_dispatch_fallback/2)),
+         fun shared_dispatch_match/1)),
     ok.
 
 test_format_error_dispatch_fallback(_Config) ->
     Error = dispatch_fallback,
     Options = #{source => test, detail => true},
     ?assertEqual(
-       {fallback, Error, Options},
-       astranaut_lib:format_error(
+       io_lib:write(Error),
+       astranaut_lib:dispatch_error(
          Error, Options,
-         fun shared_dispatch_no_match/1,
-         fun shared_dispatch_fallback/2)),
+         fun shared_dispatch_no_match/1)),
+    ?assertException(
+       throw, Error,
+       astranaut_lib:dispatch_error(
+         Error, Options#{default => throw},
+         fun shared_dispatch_no_match/1)),
     ok.
 
 test_format_error_dispatch_nested_function_clause(_Config) ->
-    try astranaut_lib:format_error(
+    try astranaut_lib:dispatch_error(
           dispatch_nested, #{source => test},
-          fun shared_dispatch_nested/1,
-          fun shared_dispatch_fallback/2) of
+          fun shared_dispatch_nested/1) of
         _ ->
             ?assert(false)
     catch
@@ -580,9 +582,6 @@ shared_dispatch_match(dispatch_match) ->
 
 shared_dispatch_no_match(dispatch_other) ->
     matched.
-
-shared_dispatch_fallback(Error, Options) ->
-    {fallback, Error, Options}.
 
 shared_dispatch_nested(dispatch_nested) ->
     shared_dispatch_nested_helper(dispatch_nested).

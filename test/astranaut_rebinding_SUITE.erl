@@ -282,10 +282,10 @@ test_pattern_save_var_in_case(_Config) ->
 
 test_format_error_contract(_Config) ->
     Error = {invalid_rebinding_fun, 42},
-    Historical = io_lib:write(Error),
-    ?assertEqual(Historical, astranaut_rebinding:format_error(Error)),
+    Expected = io_lib:format("invalid rebinding function: ~p", [42]),
+    ?assertEqual(Expected, astranaut_rebinding:format_error(Error)),
     ?assertEqual(
-       Historical,
+       Expected,
        astranaut_rebinding:format_error(Error, #{default => throw})),
     Generic =
         {validate_key_failure,

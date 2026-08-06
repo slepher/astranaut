@@ -595,9 +595,8 @@ format_error(Error) ->
 
 -spec format_error(term(), map()) -> term().
 format_error(Error, Opts) ->
-    astranaut_lib:format_error(
-      Error, Opts, fun format_error_1/1,
-      fun astranaut_lib:format_default_error/2).
+    astranaut_lib:dispatch_error(
+      Error, Opts, fun format_error_1/1).
 
 -spec format_error_1(term()) -> term().
 format_error_1({validate_key_failure, required, Key, _Value}) ->

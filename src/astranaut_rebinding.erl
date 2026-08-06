@@ -37,13 +37,16 @@ format_error(Error) ->
 
 -spec format_error(term(), map()) -> term().
 format_error(Error, Options) ->
-    astranaut_lib:format_error(
-      Error, Options, fun format_error_1/1,
-      fun astranaut:format_error/2).
+    astranaut_lib:dispatch_error(
+      Error, Options, fun format_error_1/1).
 
 -spec format_error_1(term()) -> term().
-format_error_1({invalid_rebinding_fun, _Function} = Error) ->
-    io_lib:write(Error).
+format_error_1({invalid_rebinding_fun, Function}) ->
+    io_lib:format("invalid rebinding function: ~p", [Function]);
+format_error_1({validate_key_failure, _Failure, _Key, _Value} = Error) ->
+    astranaut:format_error(Error, #{default => throw});
+format_error_1({invalid_option_value, _Value} = Error) ->
+    astranaut:format_error(Error, #{default => throw}).
 %%%===================================================================
 %%% load options
 %%%===================================================================

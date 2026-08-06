@@ -12,9 +12,9 @@ format_error(Error) ->
     format_error(Error, #{}).
 
 format_error(Error, Options) ->
-    astranaut_lib:format_error(
-      Error, Options, fun(strict_local_formatter_warning) -> format_error_1(strict_local_formatter_warning) end,
-      fun astranaut_macro:format_error/2).
+    astranaut_lib:dispatch_error(
+      Error, Options,
+      fun(strict_local_formatter_warning) -> format_error_1(strict_local_formatter_warning) end).
 
 format_error_1(strict_local_formatter_warning) ->
     strict_local_formatter_message().

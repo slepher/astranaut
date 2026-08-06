@@ -38,9 +38,8 @@ format_error(Error) ->
     format_error(Error, #{}).
 
 format_error(Error, Options) ->
-    astranaut_lib:format_error(
-      Error, Options, fun format_error_1/1,
-      fun astranaut_lib:format_default_error/2).
+    astranaut_lib:dispatch_error(
+      Error, Options, fun format_error_1/1).
 
 format_error_1({undefined_record, Record}) ->
     io_lib:format("record ~p in is not defined", [Record]);

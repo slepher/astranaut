@@ -104,7 +104,7 @@ lib_public_api_contracts(_Config) ->
            {with_attribute, 5}, {forms_with_attribute, 5},
            {option_map, 1}, {validate, 2},
            {validate_attribute_option, 4},
-           {format_error, 4}, {format_default_error, 2}]),
+           {dispatch_error, 3}, {format_default_error, 2}]),
     Actual =
         ordsets:from_list(
           [{Name, Arity}

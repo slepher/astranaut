@@ -21,13 +21,12 @@
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
          with_attribute/5, forms_with_attribute/5,
          option_map/1, validate/2, validate_attribute_option/4,
-         format_error/4, format_default_error/2]).
+         dispatch_error/3, format_default_error/2]).
 
 -type options() :: option() | [option()] | option_map().
 -type option() :: atom() | {atom(), term()}.
 -type option_map() :: #{atom() => term()}.
 -type formatter_fun() :: fun((term()) -> term()).
--type fallback_fun() :: fun((term(), map()) -> term()).
 -type validators() :: validator() | [validator()].
 -type validator() :: internal_validator() | validator_fun().
 -type validator_attrs() :: #{key := atom(), data := option_map(),
@@ -610,10 +609,10 @@ option_map(Options) when is_map(Options) ->
 option_map(Options) ->
     astranaut_return:warning_ok({invalid_option_value, Options}, #{}).
 
--spec format_error(term(), map(), formatter_fun(), fallback_fun()) -> term().
-%% @doc Apply a formatter and use the fallback only when its own clauses do not match.
-format_error(Error, Options, FormatterFun, FallbackFun)
-  when is_function(FormatterFun, 1), is_function(FallbackFun, 2) ->
+-spec dispatch_error(term(), map(), formatter_fun()) -> term().
+%% @doc Apply a formatter, falling back to format_default_error/2 when it does not match.
+dispatch_error(Error, Options, FormatterFun)
+  when is_function(FormatterFun, 1) ->
     try FormatterFun(Error) of
         Formatted ->
             Formatted
@@ -621,7 +620,7 @@ format_error(Error, Options, FormatterFun, FallbackFun)
         error:function_clause:Stacktrace ->
             case formatter_no_match(Stacktrace, FormatterFun) of
                 true ->
-                    FallbackFun(Error, Options);
+                    format_default_error(Error, Options);
                 false ->
                     erlang:raise(error, function_clause, Stacktrace)
             end

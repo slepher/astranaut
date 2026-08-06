@@ -13,7 +13,18 @@
 
 -macro_options([debug_module_ast]).
 
--export([format_error/1]).
+-export([format_error/1, format_error/2]).
+
+format_error(Error) ->
+    format_error(Error, #{}).
+
+format_error(Error, Options) ->
+    astranaut_lib:dispatch_error(
+      Error, Options,
+      fun(bar) -> format_error_1(bar); ({macro_exception, _, _, _} = MacroError) -> astranaut_macro:format_error(MacroError, #{default => throw}) end).
+
+format_error_1(bar) ->
+    "oops, bar".
 
 -baseline(yep).
 
@@ -43,8 +54,3 @@ return_error() ->
 
 max_depth_error() ->
     macro_example:recursive_macro(6).
-
-format_error(bar) ->
-    "oops, bar";
-format_error(Error) ->
-    astranaut_macro:format_error(Error).

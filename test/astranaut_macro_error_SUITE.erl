@@ -57,6 +57,14 @@ test_macro_with_warnings(Config) ->
       {unquote_splicing_pattern_non_empty_tail, [{atom, _, tail}]}}] =
         Warnings,
     assert_local_macro_module(macro_with_warnings, Local),
+    Exports = Local:module_info(exports),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assert(lists:member({format_error, 2}, Exports)),
+    ?assertNot(lists:member({format_error_1, 1}, Exports)),
+    ?assertEqual("oops, noop",
+                 Local:format_error(noop, #{default => throw})),
+    ?assertEqual(io_lib:write(noop_function),
+                 Local:format_error(noop_function, #{default => throw})),
     astranaut_test_lib:assert_formatted_messages(Warnings),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
     ok.
@@ -91,6 +99,12 @@ test_macro_with_error(Config) ->
        {macro_example, recursive_macro},
        [{integer, _Pos, 6}]}}] = Errors,
     assert_local_macro_module(macro_with_error, Local),
+    Exports = Local:module_info(exports),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assert(lists:member({format_error, 2}, Exports)),
+    ?assertNot(lists:member({format_error_1, 1}, Exports)),
+    ?assertEqual("oops, bar",
+                 Local:format_error(bar, #{default => throw})),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -398,6 +412,14 @@ test_macro_sibling_errors(Config) ->
             (_) ->
                  false
          end, Errors)),
+    Local = sibling_local_formatter(Errors),
+    Exports = Local:module_info(exports),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assert(lists:member({format_error, 2}, Exports)),
+    ?assertNot(lists:member({format_error_1, 1}, Exports)),
+    ?assertEqual(io_lib:write(sibling_return_error),
+                 Local:format_error(sibling_return_error,
+                                    #{default => throw})),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -410,3 +432,26 @@ assert_local_macro_module(SourceModule, LocalModule) ->
     Prefix = atom_to_list(SourceModule) ++ "__local_macro__",
     ?assert(lists:prefix(Prefix, atom_to_list(LocalModule))),
     ?assertMatch({file, _}, code:is_loaded(LocalModule)).
+
+sibling_local_formatter(Errors) ->
+    Prefix = atom_to_list(macro_sibling_errors_test) ++ "__local_macro__",
+    Candidates =
+        lists:flatmap(
+          fun({_Pos, Formatter, _Error}) when is_atom(Formatter) ->
+                  case lists:prefix(Prefix, atom_to_list(Formatter)) of
+                      true -> [Formatter];
+                      false -> []
+                  end;
+             ({_Pos, astranaut_macro,
+               {local_macro_diagnostic, Local, _Error, _Message}}) ->
+                  [Local];
+             (_) ->
+                  []
+          end, Errors),
+    case Candidates of
+        [Local | _] ->
+            assert_local_macro_module(macro_sibling_errors_test, Local),
+            Local;
+        [] ->
+            ct:fail({missing_sibling_local_formatter, Errors})
+    end.

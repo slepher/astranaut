@@ -48,9 +48,8 @@ format_error(Error) ->
 
 -spec format_error(term(), map()) -> term().
 format_error(Error, Options) ->
-    astranaut_lib:format_error(
-      Error, Options, fun format_error_1/1,
-      fun astranaut:format_error/2).
+    astranaut_lib:dispatch_error(
+      Error, Options, fun format_error_1/1).
 
 -spec format_error_1(term()) -> term().
 format_error_1({import_macro_failed, Module}) ->
