@@ -9,44 +9,46 @@
 
 ## Repository snapshot
 
-- HEAD: `55a98c3 55a98c3 2026-08-07 Preserve struct formatter with public default fallback`
-- Worktree summary: Task 2 implementation and review are committed; OpenSpec edits remain uncommitted and outside Task 2; the previous initiative task/review files remain deleted
-- Expected task paths: `docs/plan/macro-error/plan.md`, `status.md`, `task-1.md`, `task-2.md`; Task 2 contract excludes documentation
-- Unexpected paths: seven OpenSpec files remain preserved and uncommitted; no unrelated implementation path is authorized
+- HEAD: `d1dc2eb d1dc2eb 2026-08-07 Document macro error ownership and formatting`
+- Worktree summary: Task 3 README documentation, contract, and review are committed; the previous initiative task/review files remain deleted
+- Expected task paths: `docs/plan/macro-error/plan.md`, `status.md`, `task-1.md`, `task-2.md`, `task-3.md`; all planned boundaries are complete
+- Unexpected paths: none
 
 ## Progress
 
 - Current task: none
-- Current phase: handoff
-- Latest completed boundary: Task 2 Sol review passed and dispatcher committed `55a98c3`
-- Exact next action: await explicit authorization for a separate README/documentation boundary; do not dispatch it as a coder task
+- Current phase: complete
+- Latest completed boundary: dispatcher committed Task 3 as `d1dc2eb`
+- Exact next action: verify final repository status and report initiative completion
 - Blocker: none
 
 ## Active task evidence
 
 - Task artifact: `docs/plan/macro-error/task-2.md`
-- Changed paths: `.codex/skills/local-workflow/SKILL.md`; `docs/plan/macro-error/status.md`; `docs/plan/macro-error/task-2.md`; four source/test paths contain preserved Task 2 edits; six OpenSpec paths contain preserved out-of-scope edits
+- Changed paths: none; Task 3 README and workflow artifacts are committed
 - Coding self-tests: compile 0; `astranaut_SUITE` 40 passed; `astranaut_struct_SUITE` 20 passed; `astranaut_macro_error_SUITE` 18 passed; xref 0; diff check 0
 - Independent verification: compile 0; `astranaut_SUITE` 40 passed; `astranaut_struct_SUITE` 20 passed; `astranaut_macro_error_SUITE` 18 passed; xref 0; diff check 0
-- Latest review: `docs/plan/macro-error/task-2-code-review-1.md`; prior Task 1 reviews and retrospective retained
-- Review verdict: Task 2 round 1 `passed`
+- Latest review: `docs/plan/macro-error/task-3-code-review-1.md`; Task 2 review retained
+- Review verdict: Task 2 round 1 `passed`; Task 3 round 1 `passed`
 
 ## Commit
 
-- State: Task 2 committed
-- Last completed task commits: Task 1 `bd38f1dae8a95bf8497f2abf241a7b01513cb5b4`; scope checkpoint `29f67ac`; Task 2 `55a98c3`
+- State: initiative implementation, specification, and README boundaries committed
+- Last completed task commits: Task 1 `bd38f1dae8a95bf8497f2abf241a7b01513cb5b4`; scope checkpoint `29f67ac`; Task 2 `55a98c3`; specifications `d9e8175`; Task 3 `d1dc2eb`
 
 ## Continuity
 
-- Next task: none until a separate documentation boundary is explicitly authorized
+- Next task: none
 - Next Sol: none
-- Reason: Task 2 is complete; the remaining README work is documentation and must not be dispatched as a coder task under the updated skill
-- Evidence focus: n/a
-- Last known child: `019fd83a-a3ac-77c3-bcc9-27e21829692d` (Task 2 review round 1; passed)
+- Reason: initiative README boundary is complete and Task 3 review passed
+- Evidence focus: final status verification
+- Last known child: `019fd83a-a3ac-77c3-bcc9-27e21829692d` (Task 3 planning/review; passed)
 
 ## Completed tasks
 
 - Task 1 — committed as `bd38f1d`
+- Task 2 — committed as `55a98c3`
+- Task 3 — committed as `d1dc2eb`
 
 ## Notes
 
