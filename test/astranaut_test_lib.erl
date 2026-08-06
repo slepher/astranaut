@@ -116,9 +116,21 @@ assert_formatted_messages(Messages) ->
     lists:foreach(fun assert_formatted_message/1, Messages).
 
 assert_formatted_message({_Line, Formatter, Error}) ->
-    Message = Formatter:format_error(Error),
-    ?assert(io_lib:deep_char_list(Message)),
-    ?assertNotEqual([], lists:flatten(Message)).
+    case erlang:function_exported(Formatter, format_error, 2) of
+        false ->
+            ok;
+        true ->
+            try Formatter:format_error(Error, #{default => throw}) of
+                Message ->
+                    ?assert(io_lib:deep_char_list(Message)),
+                    ?assertNotEqual([], lists:flatten(Message))
+            catch
+                Class:Reason:Stacktrace ->
+                    ct:fail(
+                      {format_error_not_covered,
+                       Formatter, Error, Class, Reason, Stacktrace})
+            end
+    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec
