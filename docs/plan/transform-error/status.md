@@ -19,9 +19,9 @@
 ## Progress
 
 - Current task: Task 1 — atomic `to_compiler` adapter and pure `/1` protocol migration
-- Current phase: committing
-- Latest completed boundary: accepted Task 1 paths and workflow review artifacts are staged; cached scope and diff check passed
-- Exact next action: commit the staged Task 1 change set with subject `Adapt compiler diagnostics through astranaut_lib`, then record the hash and final status
+- Current phase: handoff
+- Latest completed boundary: Task 1 committed as `ae32f6c` after independent verification and Sol Code Review 2 passed
+- Exact next action: execute the recorded continuity decision by reusing Sol for Task 2 planning after confirming the current repository packet
 - Blocker: none
 
 ## Active task evidence
@@ -35,9 +35,9 @@
 
 ## Commit
 
-- State: ready to commit
+- State: committed
 - Expected subject: Adapt compiler diagnostics through astranaut_lib
-- Commit hash: none
+- Commit hash: ae32f6c
 
 ## Continuity
 
@@ -45,7 +45,7 @@
 - Next Sol: reuse after Task 1 review
 - Reason: shared formatter protocol and macro warning migration are directly ordered
 - Evidence focus: Task 1 declared paths, protocol residual search, focused suites, full CT
-- Last known child: `019fd75a-6267-7903-a409-957c8cca951f` (`Bohr`) — resume for quote-suite rework; live child IDs are non-durable hints and must be rechecked before reuse
+- Last known child: `019fd77d-ae88-7500-a6e5-08af6374ae97` (`Hume`) — Code Review 2 passed; live child IDs are non-durable hints and must be rechecked before reuse
 
 ## Completed tasks
 
