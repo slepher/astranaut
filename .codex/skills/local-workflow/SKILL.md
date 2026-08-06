@@ -246,8 +246,10 @@ that a worker can complete by choosing an outcome.
 
 ### Staged Sol implementation for simple `src/` tasks
 
-A task is eligible for the staged simple-task path only when its implementation
-is a simple, low-risk, fully frozen edit exclusively to code beneath `src/`.
+A task is eligible for the staged simple-task path when its Sol-owned source
+implementation is a simple, low-risk, fully frozen edit exclusively to code
+beneath `src/`; the task may still include exact test paths for Luna's separate
+completion stage.
 Keep it as one `task-M` with three sequential implementation and verification
 stages; do not create separate Sol and coding tasks. The task contract must
 explicitly include `Staged Simple Implementation: allowed` and define:
@@ -270,6 +272,12 @@ Coding Self-Test, and makes only authorized bounded fixes. If no test-file edit
 is needed, it must still evaluate the existing tests against the frozen test
 semantics, record the bounded reason no test change is required, and run every
 Coding Self-Test.
+
+Luna owns test-file implementation and test self-test execution on this path.
+Test code style, abstraction quality, and refactoring quality are not review
+gates. The dispatcher and Sol enforce only declared test-path scope, command
+completion, and whether the test result/evidence satisfies the frozen behavior
+boundary; do not create findings merely to improve test structure or style.
 
 If either the source implementation or test completion becomes ambiguous,
 broad, architectural, higher-risk, or dependent on an unowned path, stop the
@@ -382,8 +390,9 @@ independent verification evidence, and decisive source paths. Sol writes
 Sol consumes the coding worker's completed implementation and self-test report
 together with completed independent `luna_runner` evidence. For a staged simple
 task, the packet also identifies the initial Sol source-edit stage. Sol inspects
-the implementation, performs the patch
-correctness and capability-reuse audit passes, and writes
+the source implementation and performs the patch-correctness and
+capability-reuse audit passes; it does not perform a test-code quality audit on
+Luna-owned test files. It writes
 `task-M-code-review-N.md` plus the required
 `task-M-code-review-N-retrospective.md` when changes are required. Sol does not
 execute verification commands.

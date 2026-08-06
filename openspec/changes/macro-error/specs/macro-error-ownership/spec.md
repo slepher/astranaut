@@ -24,7 +24,7 @@
 
 ### Requirement: 用户 macro 领域诊断使用 registry formatter
 
-系统 MUST 让用户 macro 成功返回的 error 和 warning computation 使用该 macro descriptor 的 registry formatter。该规则 MUST 与框架在调用外围产生的诊断相互独立。
+系统 MUST 要求用户 macro 通过成功返回的 error 和 warning computation 表达可预期领域失败，并使用该 macro descriptor 的 registry formatter。该规则 MUST 与框架在调用外围产生的诊断相互独立。用户 macro 抛出的 `error/throw/exit` MUST NOT 被解释成用户领域诊断。
 
 #### Scenario: External macro 主动返回领域错误
 
@@ -43,6 +43,29 @@
 - **WHEN** macro provider 未导出 `format_error/1`
 - **THEN** registry 将其 descriptor formatter 设为 `astranaut_macro`
 - **AND** provider 无需引用或代理框架 formatter
+
+#### Scenario: 用户 macro 抛出与领域 reason 相同的异常 term
+
+- **WHEN** 用户 macro 抛出一个 term，且该 term 恰好也可被用户 `format_error/1` 匹配
+- **THEN** 系统仍将其视为意外执行故障并包装为 `macro_exception`
+- **AND** formatter 是 `astranaut_macro`，不得根据异常 reason 调用 registry formatter
+
+### Requirement: Macro 异常捕获是故障隔离而非领域错误协议
+
+系统 MUST 在 macro 调用边界隔离 `error/throw/exit`，保存异常 class、reason、stacktrace、MFA 和 arguments，并以 `astranaut_macro` 记录 `macro_exception`。该行为 MUST 被描述为意外故障的兼容性保护，而不是用户 macro 报告可预期领域错误的接口。
+
+#### Scenario: 可预期领域校验失败
+
+- **WHEN** 用户 macro 检测到无效输入、配置或领域类型
+- **THEN** macro 通过返回 error/warning computation 报告该失败
+- **AND** 诊断使用 registry formatter，而不是构造或抛出异常
+
+#### Scenario: 非预期执行异常
+
+- **WHEN** 用户 macro 执行期间意外抛出 `error/throw/exit`
+- **THEN** 调用边界将其包装为框架 `macro_exception`
+- **AND** 保留原始异常 payload，以便诊断实现缺陷
+- **AND** 该隔离行为不把异常升级为用户领域错误 API
 
 ### Requirement: Formatter ownership 不通过 fallback 推断
 
