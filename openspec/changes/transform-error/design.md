@@ -1,114 +1,122 @@
 ## Context
 
-Erlang compiler 对 `{Position, FormatterModule, Reason}` 直接调用 `FormatterModule:format_error(Reason)`。Astranaut 当前为了让每个 callback 同时支持具体领域消息和默认消息，在多个模块重复以下结构：公开 `/1` 转发到 `/2`、`/2` 调用 `dispatch_error/3`、私有 `format_error_1/1` 保存真正条款。测试再通过 `#{default => throw}` 判断具体条款是否命中。
+Astranaut 的内部诊断以 `{Position, FormatterModule, Reason}` 保存。`astranaut_return:to_compiler/1` 通过 `astranaut_error:realize/1` 将其组织为 Erlang parse-transform 返回值；OTP 随后直接调用 compiler tuple 中 module 的 `format_error/1`。
 
-这个结构把同一套控制流复制到了每个 parse-transformer。formatter 的固定外壳应由共享库拥有，transformer 只提供领域映射。当前 `dispatch_error/3` 还通过 stack frame 判断 `function_clause` 是顶层未匹配还是 formatter 内部失败；新协议明确不作该区分。
+当前 strict formatter 迁移把 fallback 外壳放进每个领域 callback：公开 `/1` 转发到 `/2`，`/2` 调用 shared dispatcher，private `format_error_1/1` 才保存实际领域 clauses。第一次 `transform-error` 设计虽删除了 `/2` 和 `_1`，却仍要求每个 `/1` 用匿名 fun 调 shared dispatcher，因而没有解决根本问题：领域 formatter 仍同时承担领域映射和共享 fallback。
+
+统一边界实际是 `to_compiler/1`。它应把内部诊断适配为由 `astranaut_lib` 格式化的 compiler diagnostic，同时在 payload 中保留真正的领域 formatter。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 用一个二参数共享函数统一 formatter dispatch 和普通默认格式化。
-- parse-transformer 只公开 OTP 要求的 `format_error/1`。
-- 删除 `/2`、private `format_error_1/1`、options 和 `default => throw` 协议。
-- module 与 fun 调用方共享完全相同的 dispatch 语义。
+- 领域 `format_error/1` 只用直接 clauses 完成 reason 到文本的纯映射。
+- `to_compiler/1` 成为内部诊断协议到 OTP compiler formatter 协议的唯一适配边界。
+- `astranaut_lib` 统一拥有 compiler callback、formatter dispatch 和默认 fallback。
+- 删除领域 formatter `/2`、通用 `format_error_1/1`、options 和 throw mode。
 - 用户 macro 缺少 formatter 时给出可见 warning。
 
 **Non-Goals:**
 
-- 不改变 OTP diagnostic tuple 或 compiler 对 `Module:format_error/1` 的调用方式。
-- 不根据 stacktrace、reason tuple 或 formatter module 推断领域所有权。
-- 不保留 formatter 内部 `function_clause` 的异常传播。
+- 不在 `astranaut_error` 的积累、位置绑定或 `realize/1` 阶段预先生成文本。
+- 不让领域 `format_error/1` 调用 shared dispatcher 或实现 catch-all。
+- 不根据 reason tuple 猜测错误所有者；所有者继续由内部 diagnostic formatter 字段确定。
 - 不捕获 `function_clause` 之外的异常。
 
 ## Decisions
 
-### 共享 API 只接受消息和一元 formatter fun
+### to_compiler 统一包装 formatter identity
 
-`astranaut_lib` 提供：
+`astranaut_error:realize/1` 继续返回内部形状：
 
 ```erlang
+{Position, DomainFormatter, Reason}
+```
+
+`astranaut_return:to_compiler/1` 在构造 parse-transform 返回值时，针对 errors 和 warnings 的每个 diagnostic 转换为：
+
+```erlang
+{Position, astranaut_lib, {DomainFormatter, Reason}}
+```
+
+文件分组、顺序、位置及 error/warning 分类保持不变。这个转换只发生在 `to_compiler/1`；直接调用 `astranaut_error:realize/1` 的内部 API 和测试仍可观察原始 formatter identity。
+
+选择 wrapper payload 而不是预先格式化文本，是为了延续 OTP 的延迟格式化协议，并保留原始 formatter 和 reason 供 diagnostics 消费者检查。
+
+### astranaut_lib 同时提供 compiler callback 与 shared dispatch
+
+`astranaut_lib` 公开：
+
+```erlang
+-spec format_error({module(), term()}) -> term().
+format_error({Module, Reason}) ->
+    format_error(Reason, fun Module:format_error/1).
+
 -spec format_error(term(), fun((term()) -> term())) -> term().
-format_error(Msg, FormatterFun) ->
-    try FormatterFun(Msg) of
+format_error(Reason, FormatterFun) ->
+    try FormatterFun(Reason) of
         Formatted -> Formatted
     catch
-        error:function_clause -> default_format_error(Msg)
+        error:function_clause -> default_format_error(Reason)
     end.
 ```
 
-`default_format_error/1` 为 library-private：若 `Msg` 已是 deep character list，则原样返回；否则返回 `io_lib:write(Msg)`。公开 API 不接收 options，也不提供 throw mode。
+`format_error/1` 是 OTP compiler 在看到 adapter tuple 后调用的固定 callback；`format_error/2` 是可复用 dispatcher。持有 module 的其他调用方同样使用 `fun Module:format_error/1`，不需要 module-specific overload。
 
-持有 module 的调用方不需要另一套重载：
+`default_format_error/1` 为 library-private：deep character list 原样返回，其他 term 使用 `io_lib:write/1`。公开 API 不接收 options，不提供 throw mode。
 
-```erlang
-astranaut_lib:format_error(Msg, fun Module:format_error/1)
-```
+### 领域 formatter 保持纯粹
 
-动态 remote fun 在目标 OTP 基线上可用，并保留 module/name/arity 身份。共享函数不需要知道第二个参数最初来自 module 还是本地/匿名 fun。
-
-### Parse-transformer callback 使用匿名领域 formatter
-
-每个 callback 保持 OTP 的固定单参数入口，在内部把具体条款作为匿名 fun 交给共享 API：
+parse-transformer 和用户 macro formatter 直接定义自己拥有的 reason clauses：
 
 ```erlang
-format_error(Msg) ->
-    astranaut_lib:format_error(
-      Msg,
-      fun({owned_reason, Value}) ->
-              io_lib:format("invalid value: ~p", [Value]);
-         (another_owned_reason) ->
-              "another message"
-      end).
+format_error({owned_reason, Value}) ->
+    io_lib:format("invalid value: ~p", [Value]);
+format_error(another_owned_reason) ->
+    "another message".
 ```
 
-因此 callback 没有 catch-all、`format_error/2` 或 `format_error_1/1`。OTP 直接调用 `/1` 时仍会进入 shared dispatch；模块外的显式调用也得到相同结果。
+领域 callback 不调用 `astranaut_lib:format_error/2`，不包含 generic catch-all，也不需要 `/2`、anonymous dispatch fun 或 private `format_error_1/1`。如果具体领域消息需要复杂计算，可以调用有领域名称的普通 helper；禁止仅为协议跳转而保留通用 `_1` helper。
 
-选择匿名 fun 而不是命名 private helper，是因为 `/1` 的唯一可变部分就是局部领域映射；额外命名函数只会重建一层所有 transformer 都相同的跳转。较大的 formatter 仍按 reason 顺序组织匿名 fun clauses。
+已明确属于另一个 formatter 的共享 reason 应在诊断产生处绑定正确 formatter。迁移期间若某模块仍确实拥有一个组合 reason，可用精确 clause 调用领域 helper；不得使用 catch-all delegation 代替所有权。
 
-### 任意 function_clause 都触发 fallback
+### 任意 function_clause 都触发 shared fallback
 
-shared dispatch 捕获 formatter fun 执行动态范围内的任意 `error:function_clause`，不检查首个 stack frame，也不重新抛出。这包括：
+只有经过 `astranaut_lib:format_error/1,2` 的 formatter 调用具有 fallback。其动态范围内任意 `error:function_clause` 都返回原始 Reason 的默认格式，不检查 stack frame，也不重新抛出。这包括领域 `/1` 无匹配 clause，以及已匹配 clause 下游 helper 的 `function_clause`。其他异常类型保留原 class、reason 和 stacktrace。
 
-- 匿名 fun 没有匹配当前消息；
-- 已匹配条款调用的 helper 内发生 `function_clause`；
-- remote `Module:format_error/1` 自身或其下游发生 `function_clause`。
+领域 callback 被直接调用时保持普通 Erlang 函数语义；未知 reason 会抛出 `function_clause`。需要 fallback 的调用方必须经过 shared adapter。正常 compiler 路径由 `to_compiler/1` 保证这一点。
 
-这是有意的简化：`function_clause` 在 formatter 协议中统一表示“无法格式化该消息”。formatter 的其他异常类型仍传播，避免把所有实现错误静默转换成文本。
+### 测试分别验证内部与 compiler 协议
 
-### 删除 strict `/2` 测试协议
+内部诊断测试继续针对 `astranaut_error:realize/1` 断言原 formatter ownership。compiler boundary 测试针对 `astranaut_return:to_compiler/1` 断言 adapter tuple，并通过 `astranaut_lib:format_error/1` 验证最终消息。
 
-测试调用 formatter 时统一使用：
-
-```erlang
-astranaut_lib:format_error(Error, fun Formatter:format_error/1)
-```
-
-具体领域条款通过精确消息断言证明命中；未知消息通过 `io_lib:write/1` 等价断言证明 fallback。由于任意 `function_clause` 都合法进入 fallback，测试不再使用 throw mode 区分命中路径。
+直接测试领域 formatter 时只传入其已拥有的 reason，并断言精确消息；未知 reason fallback 必须通过 `astranaut_lib:format_error(Reason, fun Module:format_error/1)` 测试。测试不再调用 formatter `/2` 或使用 throw option。
 
 ### 缺失用户 macro formatter 产生框架 warning
 
-external macro registry 在导入 provider exports、local macro workflow 在首次解析源码 formatter protocol 时检查 `format_error/1`。不存在时继续选择 `astranaut_macro`，并以 `astranaut_macro` formatter 产生 `{missing_macro_formatter, Module}` warning。
+external registry 在导入 provider exports、local workflow 在首次解析源码 formatter protocol 时检查 `format_error/1`。不存在时继续选择 `astranaut_macro`，并以 `astranaut_macro` formatter 产生 `{missing_macro_formatter, Module}` warning。
 
-同一 provider 在一次 source module 编译中 MUST 只警告一次，避免每个导出 macro 或每次调用重复报告。external provider 使用实际 module；local macro 使用声明它的 source module，而不是带 generation identity 的临时 module。仅导出 `/2` 不构成有效 formatter。
+同一 provider 在一次 source module 编译中最多警告一次。external provider 使用实际 module；local macro 使用声明 source module，而不是 generation module。仅导出 `/2` 不构成有效 formatter。
 
 ## Risks / Trade-offs
 
-- [formatter helper 的真实 `function_clause` 被默认文本掩盖] → 这是协议定义；为领域条款增加精确消息测试，其他异常类型继续传播。
-- [匿名 fun 使大型 formatter 函数变长] → 保持每个 reason 一个 clause，并允许 clause 调用具有领域名称的普通消息构造 helper；不再建立通用 `format_error_1` 跳转层。
-- [删除 `/2` 破坏外部调用方] → 标记 breaking change；迁移到 `/1` 或 `astranaut_lib:format_error(Msg, fun Module:format_error/1)`。
-- [缺失 formatter warning 对无自定义 reason 的 macro provider 产生噪音] → 每个 provider 每次编译仅报告一次，并继续使用框架 formatter，不阻止编译。
+- [compiler tuple 的 formatter identity 变为 adapter] → 原 formatter identity 明确保存在 `{DomainFormatter, Reason}` payload；内部 `realize/1` 形状不变，并分别测试两个协议层。
+- [绕过 to_compiler 的直接 formatter 调用没有 fallback] → 这是纯 callback 的预期语义；需要安全格式化的调用方显式使用 `astranaut_lib:format_error/2`。
+- [领域 helper 的真实 `function_clause` 被 adapter fallback 掩盖] → 这是 shared dispatch 的明确语义；精确领域消息测试负责暴露常见实现错误，其他异常仍传播。
+- [删除 `/2` 破坏外部调用方] → 标记 breaking change；迁移到纯 `/1` 或 shared `format_error(Reason, fun Module:format_error/1)`。
+- [缺失 formatter warning 对无自定义 reason 的 provider 产生噪音] → 每个 provider 每次编译只报告一次，且不阻止注册或展开。
 
 ## Migration Plan
 
-1. 用 `format_error/2` 替换 `dispatch_error/3` 和公开 default helper，先建立匹配、fallback、任意 `function_clause` 及其他异常测试。
-2. 将 Astranaut 自带 formatter 迁移为单一 `/1` callback 和匿名领域 fun，删除 `/2`、`format_error_1/1` 及跨 formatter strict delegation。
-3. 将 macro 测试 provider 和 local generated formatter protocol 收敛到仅 `/1`。
-4. 更新所有显式 module formatter 调用点与测试 helper，删除 throw-option 断言。
-5. 在 external/local macro formatter 检测处加入一次性缺失 warning。
-6. 运行专项及完整 Common Test、API surface 检查和 OpenSpec strict validation。
+1. 为 `astranaut_lib:format_error/1,2` 和 `to_compiler/1` adapter tuple 建立回归测试。
+2. 实现 shared compiler callback/dispatcher，并在 `to_compiler/1` 统一包装 errors 和 warnings。
+3. 将所有领域 formatter 恢复为直接 `/1` clauses，删除 callback 内的 shared dispatch、`/2` 和通用 `_1`。
+4. 收敛 local generated formatter closure 到纯 `/1` 及其真实 helper。
+5. 更新显式 module 格式化调用点和测试 helper；区分内部 ownership 与 compiler adapter 断言。
+6. 加入 external/local missing formatter warning。
+7. 运行专项和完整 Common Test、xref、dialyzer及 OpenSpec strict validation。
 
-该迁移一次完成；混用 strict `/2` 与新 `/1` protocol 会造成检测歧义，不设置双协议过渡期。
+迁移一次完成，不提供 strict `/2` 兼容期。当前按旧版 `transform-error` 设计产生的匿名-dispatch callback 实现必须返工，不作为兼容形态保留。
 
 ## Open Questions
 

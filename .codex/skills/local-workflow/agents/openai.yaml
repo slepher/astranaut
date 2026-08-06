@@ -1,4 +1,4 @@
 interface:
   display_name: "Local Workflow"
   short_description: "Run or resume durable task workflows in this repository"
-  default_prompt: "Use $local-workflow to read plan.md and status.md, resume the current task from its first incomplete phase, and continue through review and commit."
+  default_prompt: "Use $local-workflow, first resolve the user's explicit Goal to its matching initiative, then read only that Goal's plan.md and status.md, resume its first incomplete phase, and continue through review and commit."

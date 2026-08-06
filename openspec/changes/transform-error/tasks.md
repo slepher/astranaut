@@ -1,19 +1,20 @@
-## 1. 共享格式化 API
+## 1. Compiler adapter 与共享格式化 API
 
-- [ ] 1.1 为 `astranaut_lib:format_error/2` 添加 match、顶层 no-match、内部 helper `function_clause`、character-list fallback 和其他异常传播测试。
-- [ ] 1.2 实现 `format_error(Msg, FormatterFun)` 及 library-private 默认格式化，任意 `error:function_clause` 直接 fallback。
-- [ ] 1.3 删除 `dispatch_error/3`、公开 `format_default_error/2`、stack-frame 区分逻辑及对应 API surface 断言。
+- [ ] 1.1 为 `astranaut_return:to_compiler/1` 添加 error/warning adapter 测试，验证 `{Pos, DomainFormatter, Reason}` 转为 `{Pos, astranaut_lib, {DomainFormatter, Reason}}` 且分组、顺序和位置不变。
+- [ ] 1.2 为 `astranaut_lib:format_error/1,2` 添加 compiler wrapper、match、no-match、内部 helper `function_clause`、character-list fallback 和其他异常传播测试。
+- [ ] 1.3 实现 `format_error({Module, Reason})`、`format_error(Reason, FormatterFun)` 和 private 默认格式化，并在 `to_compiler/1` 统一包装 diagnostics。
+- [ ] 1.4 删除 `dispatch_error/3`、公开 `format_default_error/2`、stack-frame 区分逻辑及对应 API surface 断言。
 
 ## 2. Parse-transformer formatter 迁移
 
-- [ ] 2.1 将 `astranaut`、`astranaut_macro` 和 `astranaut_quote` 迁移为单一 `format_error/1` callback 加匿名领域 formatter fun。
-- [ ] 2.2 将 `astranaut_do`、`astranaut_rebinding` 和 `astranaut_struct_transformer` 迁移到单一 callback，并删除 strict 跨 formatter delegation。
-- [ ] 2.3 将 compile-meta、compile-opts、disable-tco 等其余 parse-transformer formatter 迁移到单一 callback。
-- [ ] 2.4 检查所有生产 formatter，确认不再导出 `/2`、不存在通用 `format_error_1/1`、options 或本地 catch-all。
+- [ ] 2.1 将 `astranaut`、`astranaut_macro` 和 `astranaut_quote` 恢复为直接的纯 `format_error/1` 领域 clauses，删除 callback 内 shared dispatch。
+- [ ] 2.2 将 `astranaut_do`、`astranaut_rebinding` 和 `astranaut_struct_transformer` 恢复为纯 callback，并让共享 reason 在产生处绑定正确 formatter或由精确 clause 处理。
+- [ ] 2.3 将 compile-meta、compile-opts、disable-tco 等其余 formatter 恢复为纯 callback。
+- [ ] 2.4 检查所有生产领域 formatter，确认不导出 `/2`、不调用 shared dispatcher、不存在通用 `format_error_1/1`、options 或 generic catch-all。
 
 ## 3. Macro formatter 协议
 
-- [ ] 3.1 将 external/local macro 测试 provider 的 formatter 改为单一 `/1` callback，并删除 `/2`、throw options 和通用 `_1` 跳转层。
+- [ ] 3.1 将 external/local macro 测试 provider 的 formatter 改为纯 `/1` clauses，并删除 callback 内 shared dispatch、`/2`、throw options 和通用 `_1` 跳转层。
 - [ ] 3.2 收敛 local macro formatter protocol/closure detection，使生成模块只复制和导出 `/1` 及其真实 helper 依赖。
 - [ ] 3.3 更新 formatter module 调用点和测试 helper，统一使用 `astranaut_lib:format_error(Error, fun Module:format_error/1)`。
 
@@ -26,7 +27,7 @@
 
 ## 5. 回归与验证
 
-- [ ] 5.1 更新各 formatter contract 测试，用精确领域消息证明 match、用统一默认消息证明 fallback，不再使用 `default => throw`。
+- [ ] 5.1 更新 formatter contract 测试：直接 `/1` 精确消息证明领域映射，`astranaut_error:realize/1` 证明内部 ownership，`to_compiler/1` 证明 wrapper，shared adapter 证明 fallback。
 - [ ] 5.2 运行 compile、astranaut、macro error、macro local、quote、rebinding、struct 和 design 专项 Common Test。
 - [ ] 5.3 运行完整 Common Test，确认 compiler diagnostics、位置、reason 和 parse-transform 行为无回归。
 - [ ] 5.4 运行 `rebar3 xref`、`rebar3 dialyzer`、`openspec validate transform-error --strict` 和 `git diff --check`。

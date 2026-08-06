@@ -1,12 +1,45 @@
 ---
 name: local-workflow
-description: Execute or resume multi-task repository work through a durable initiative directory containing plan.md and status.md, with Sol owning technical decisions, Luna implementing and verifying, and the dispatcher routing decisions and performing authorized Git operations. Use when starting a project plan, continuing a partially completed task, recovering after interruption or a new session, processing tasks one at a time, or requiring independent review and per-task commits. Use $delegate for all worker-routing mechanics.
+description: Execute or resume multi-task repository work through a durable initiative directory containing plan.md and status.md, with Sol owning technical decisions, Luna implementing and verifying, and the dispatcher routing decisions and performing authorized Git operations. The user's explicit Goal selects the initiative; unrelated plans must not be read or resumed. Use when starting a project plan, continuing a partially completed task, recovering after interruption or a new session, processing tasks one at a time, or requiring independent review and per-task commits. Use $delegate for all worker-routing mechanics.
 ---
 
 # Project Workflow
 
 Run one project task at a time. Use `$delegate` for role selection, spawn
 contracts, runtime identity checks, permissions, and result verification.
+
+## Goal routing
+
+The user's explicit `Goal` is authoritative for initiative selection. Treat
+phrases such as `Goal = transform-error`, `goal: transform-error`, or an
+explicit request to work on `transform-error` as the canonical initiative
+name, preserving the spelling used by the repository when resolving paths.
+
+Before reading any workflow plan or status:
+
+1. Resolve the requested Goal only to its repository-scoped initiative
+   directory, normally `docs/plan/<Goal>/`. Goal selects the workflow
+   initiative; it does not select, imply, or require an OpenSpec path.
+2. Read only the selected Goal's `plan.md`, `status.md`, and task artifacts.
+   Read OpenSpec documents independently when the user explicitly names them,
+   a task explicitly references them, or repository instructions require them.
+   Do not assume `openspec/changes/<Goal>/` exists, is authoritative, or must
+   match the initiative name. A plan with a similar subject, historical
+   migration, stale root `status.md`, or another Goal is unrelated unless the
+   user explicitly asks to use it.
+3. If the matching initiative directory is absent, create a new initiative
+   for the requested Goal. Do not infer that an existing unrelated initiative
+   is a predecessor, continuation, or source of requirements.
+4. If the matching initiative exists, reconcile it against the requested
+   Goal and the explicitly selected specification/input documents. If its
+   artifacts describe another Goal, treat them as invalid for this request
+   and start a fresh matching initiative rather than repairing or reusing it.
+
+The Goal is also the top-level objective in the new `plan.md` and `status.md`.
+Every delegated contract must repeat the exact Goal, identify specification
+inputs separately from the initiative path, and explicitly state out-of-scope
+documents. When a user names a Goal, never let an old workflow artifact
+silently override the user's current specification.
 
 ## Separate decisions from dispatch
 
