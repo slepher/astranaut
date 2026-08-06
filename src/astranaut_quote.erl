@@ -14,7 +14,7 @@
 -export([fix_user_type/1]).
 -export([validate_pos/2]).
 -export([quote_type_code/1, quoted/1, quoted/2]).
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, format_error/1, format_error/2]).
 -export([encode_quote_variable/2, encode_quote_variable/3,
          decode_quote_variable/1]).
 
@@ -988,34 +988,56 @@ parse_binding_1(_) ->
 %%%===================================================================
 %%% format_error/1
 %%%===================================================================
-format_error({invalid_unquote_splicing_binding, VarName}) ->
+format_error(Error) ->
+    format_error(Error, #{}).
+
+format_error(Error, Opts) ->
+    try format_error_1(Error) of
+        Formatted ->
+            Formatted
+    catch
+        error:function_clause:Stacktrace ->
+            case format_error_1_no_match(Stacktrace) of
+                true ->
+                    astranaut:format_error(Error, Opts);
+                false ->
+                    erlang:raise(error, function_clause, Stacktrace)
+            end
+    end.
+
+format_error_1({could_not_get_tuple_pos_value, Tuple}) ->
+    io_lib:write({could_not_get_tuple_pos_value, Tuple});
+format_error_1({invalid_unquote_splicing_binding, VarName}) ->
     io_lib:format("_L@~s not works without list in abstract tree, "
                   " _@~s expected.", [VarName, VarName]);
-format_error({invalid_unquote_splicing, Unquote}) ->
+format_error_1({invalid_unquote_splicing, Unquote}) ->
     UnquoteStr = astranaut_lib:ast_safe_to_string(Unquote),
     io_lib:format("unquote_splicing(~s) not works without list in abstract tree, "
                   "unquote(~s) expected", [UnquoteStr, UnquoteStr]);
-format_error({only_bindings_supported, Bindings, VarName, Name}) ->
+format_error_1({only_bindings_supported, Bindings, VarName, Name}) ->
     BindingsStr = string:join(
                     lists:map(
                       fun(Binding) ->
                               io_lib:format("_~s@~s", [Binding, VarName])
                       end, Bindings), " or "),
     io_lib:format("~s expected, not ~s.", [BindingsStr, Name]);
-format_error({unquote_splicing_pattern_non_empty_tail, Rest}) ->
+format_error_1({unquote_splicing_pattern_non_empty_tail, Rest}) ->
     io_lib:format("non empty expression '~s' after unquote_splicing in pattern", [astranaut_lib:ast_safe_to_string(Rest)]);
-format_error({invalid_quote, Node}) ->
+format_error_1({invalid_quote, Node}) ->
     io_lib:format("invalid quote ~s", [astranaut_lib:ast_safe_to_string(Node)]);
-format_error({conflicting_quote_context_options, Context, no_context}) ->
+format_error_1({conflicting_quote_context_options, Context, no_context}) ->
     io_lib:format(
       "conflicting quote context options: context ~p and no_context.", [Context]);
-format_error({invalid_quote_context, Context}) ->
+format_error_1({invalid_quote_context, Context}) ->
     io_lib:format("quote context must be a non-empty atom, got ~p.", [Context]);
-format_error({invalid_quote_variable_name, Name}) ->
+format_error_1({invalid_quote_variable_name, Name}) ->
     io_lib:format("quote variable name must be a non-empty atom, got ~p.", [Name]);
-format_error({invalid_quote_no_context, NoContext}) ->
+format_error_1({invalid_quote_no_context, NoContext}) ->
     io_lib:format("no_context must be a boolean, got ~p.", [NoContext]);
-format_error({invalid_quote_counter, Counter}) ->
-    io_lib:format("quote counter must be a positive integer, got ~p.", [Counter]);
-format_error(Message) ->
-    astranaut:format_error(Message).
+format_error_1({invalid_quote_counter, Counter}) ->
+    io_lib:format("quote counter must be a positive integer, got ~p.", [Counter]).
+
+format_error_1_no_match([{?MODULE, format_error_1, _Arity, _Info}|_]) ->
+    true;
+format_error_1_no_match(_) ->
+    false.

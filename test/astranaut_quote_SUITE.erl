@@ -696,12 +696,15 @@ assert_invalid_quote(CallCode, Function) ->
                "-export([run/0]).",
                "run() -> " ++ CallCode ++ "."])
         ++ [{eof, 5}],
+    Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error,
          [{_, [{_, astranaut_quote,
                {invalid_quote, {call, _, {atom, _, Function}, _}}}]}],
         []},
-       astranaut_quote:parse_transform(Forms, [])),
+       Result),
+    {error, [{_, Errors}], []} = Result,
+    astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
 
@@ -857,10 +860,13 @@ test_context_no_context_conflict(_Config) ->
                "-export([run/0]).",
                "run() -> quote(A, #{context => my_ctx, no_context => true})."])
         ++ [{eof, 5}],
+    Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error, [{_, [{_, astranaut_quote,
                       {conflicting_quote_context_options, my_ctx, no_context}}]}], []},
-       astranaut_quote:parse_transform(Forms, [])),
+       Result),
+    {error, [{_, Errors}], []} = Result,
+    astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
 test_invalid_context(_Config) ->
@@ -870,10 +876,13 @@ test_invalid_context(_Config) ->
                "-export([run/1]).",
                "run(Ctx) -> quote(A, #{context => Ctx})."])
         ++ [{eof, 5}],
+    Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error, [{_, [{_, astranaut_quote,
                       {invalid_quote_context, {var, _, 'Ctx'}}}]}], _},
-       astranaut_quote:parse_transform(Forms, [])),
+       Result),
+    {error, [{_, Errors}], _} = Result,
+    astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
 test_empty_context(_Config) ->
@@ -883,9 +892,12 @@ test_empty_context(_Config) ->
                "-export([run/0]).",
                "run() -> quote(A, #{context => ''})."])
         ++ [{eof, 5}],
+    Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
-       astranaut_quote:parse_transform(Forms, [])),
+       Result),
+    {error, [{_, Errors}], _} = Result,
+    astranaut_test_lib:assert_formatted_messages(Errors),
     ?assertError({invalid_quote_context, ''},
                  astranaut_quote:encode_quote_variable(a, '')),
     ?assertError({invalid_quote_context, ''},
@@ -903,9 +915,12 @@ test_empty_default_context(_Config) ->
               [{clause, 2, [], [],
                 [{call, 2, {atom, 2, quote}, [{var, 2, 'A'}]}]}]},
              {eof, 3}],
+    Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
-       astranaut_quote:parse_transform(Forms, [])),
+       Result),
+    {error, [{_, Errors}], _} = Result,
+    astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
 test_context_undefined(_Config) ->
