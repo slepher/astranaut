@@ -131,6 +131,8 @@ all() ->
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_validator_failure_contracts,
      test_invalid_validator_return_format,
+     test_format_error_unknown_default, test_format_error_unknown_throw,
+     test_format_error_known_throw_option,
      test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
@@ -483,6 +485,28 @@ test_invalid_validator_return_format(_Config) ->
           {validate_key_failure,
            {invalid_validator_return, my_validator, bad_return},
            my_key, my_value}),
+    ?assertEqual(
+       "validator my_validator for option key my_key returns a invalid_value bad_return",
+       lists:flatten(Message)),
+    ok.
+
+test_format_error_unknown_default(_Config) ->
+    Unknown = {unknown_format_error, [term]},
+    ?assertEqual(io_lib:write(Unknown), astranaut:format_error(Unknown)),
+    ok.
+
+test_format_error_unknown_throw(_Config) ->
+    Unknown = {unknown_format_error, [term]},
+    ?assertException(throw, Unknown,
+                     astranaut:format_error(Unknown, #{default => throw})),
+    ok.
+
+test_format_error_known_throw_option(_Config) ->
+    Error =
+        {validate_key_failure,
+         {invalid_validator_return, my_validator, bad_return},
+         my_key, my_value},
+    Message = astranaut:format_error(Error, #{default => throw}),
     ?assertEqual(
        "validator my_validator for option key my_key returns a invalid_value bad_return",
        lists:flatten(Message)),
