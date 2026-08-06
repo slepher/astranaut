@@ -244,6 +244,26 @@ user-requested specification task may be selected. A clarification, unresolved
 trade-off, or missing authority is a gate recorded in `status.md`, not a task
 that a worker can complete by choosing an outcome.
 
+### Keep coder tasks implementation-only
+
+`task-M.md` is the implementation contract sent to a coding worker. Its owned
+paths and expected diff MUST be limited to product source, test files, and
+implementation fixtures explicitly required by the frozen behavior. Do not put
+OpenSpec, README, `plan.md`, `status.md`, review artifacts, or skill files in a
+coder task's owned paths, self-tests, or completion criteria. A coding worker
+must not be asked to update or validate documentation as part of an
+implementation task.
+
+When the frozen behavior requires a specification change, finish that change
+as a separate, explicitly authorized specification boundary before dispatching
+the dependent coder task. Sol must provide the exact final-state/edit map;
+the dispatcher must scope and commit that specification boundary separately.
+Do not combine specification edits with source/test implementation merely to
+reconcile documents during coding. Specification validation belongs to the
+specification boundary; coder self-tests cover only the implementation task's
+source and tests. If a proposed coder contract contains documentation paths or
+documentation-only commands, reject it and return it to Sol for rescoping.
+
 ### Staged Sol implementation for simple `src/` tasks
 
 A task is eligible for the staged simple-task path when its Sol-owned source
