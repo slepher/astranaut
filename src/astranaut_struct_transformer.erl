@@ -11,7 +11,7 @@
 -include("quote.hrl").
 
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, format_error/1, format_error/2]).
 
 %%%===================================================================
 %%% API
@@ -34,21 +34,24 @@ parse_transform(Forms, _Options) ->
           end),
     astranaut_return:to_compiler(Return).
 
-format_error({undefined_record, Record}) ->
+format_error(Error) ->
+    format_error(Error, #{}).
+
+format_error(Error, Options) ->
+    astranaut_lib:format_error(
+      Error, Options, fun format_error_1/1,
+      fun astranaut_lib:format_default_error/2).
+
+format_error_1({undefined_record, Record}) ->
     io_lib:format("record ~p in is not defined", [Record]);
-format_error({invalid_struct_name, Struct}) ->
+format_error_1({invalid_struct_name, Struct}) ->
     io_lib:format("~p is not a valid struct name", [Struct]);
-format_error({enforce_keys_not_in_struct, RecordName, Keys}) ->
+format_error_1({enforce_keys_not_in_struct, RecordName, Keys}) ->
     io_lib:format("the enforce keys must be defined in record ~p: ~p", [RecordName, Keys]);
-format_error({missing_enforce_keys, RecordName, Keys}) ->
+format_error_1({missing_enforce_keys, RecordName, Keys}) ->
     io_lib:format("the following keys must also be given when building struct ~p: ~p", [RecordName, Keys]);
-format_error({undefined_record_field, RecordName, FieldName}) ->
-    io_lib:format("field ~p undefined in record ~p", [FieldName, RecordName]);
-format_error(Message) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _ -> io_lib:write(Message)
-    end.
+format_error_1({undefined_record_field, RecordName, FieldName}) ->
+    io_lib:format("field ~p undefined in record ~p", [FieldName, RecordName]).
 
 %%%===================================================================
 %%% Internal functions

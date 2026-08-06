@@ -276,12 +276,21 @@ test_format_error_contract(_Config) ->
     lists:foreach(
       fun(Reason) ->
               ?assert(io_lib:deep_char_list(
-                        astranaut_struct_transformer:format_error(Reason)))
+                        astranaut_struct_transformer:format_error(
+                          Reason, #{default => throw})))
       end, Reasons),
     Text = "already formatted",
     ?assertEqual(Text, astranaut_struct_transformer:format_error(Text)),
     ?assert(io_lib:deep_char_list(
               astranaut_struct_transformer:format_error(unexpected_reason))),
+    ?assertException(
+       throw, unexpected_reason,
+       astranaut_struct_transformer:format_error(
+         unexpected_reason, #{default => throw})),
+    MacroReason = {undefined_macro, missing, 0},
+    ?assertEqual(
+       astranaut_macro:format_error(MacroReason, #{default => throw}),
+       astranaut_struct:format_error(MacroReason, #{default => throw})),
     ok.
 
 test_compile_enforce_fail(Config) ->

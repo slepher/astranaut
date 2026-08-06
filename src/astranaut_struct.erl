@@ -18,12 +18,15 @@
 %% API
 -export([to_map/2]).
 -export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5, from_other_record_impl/7]).
--export([format_error/1]).
+-export([format_error/1, format_error/2]).
 %%%===================================================================
 %%% API
 %%%===================================================================
-format_error(Reason) ->
-    astranaut_macro:format_error(Reason).
+format_error(Error) ->
+    format_error(Error, #{}).
+
+format_error(Error, Options) ->
+    astranaut_macro:format_error(Error, Options).
 
 from_record(RecordName, Record) ->
     do_record_function(quote(from_record_impl), RecordName, Record).
