@@ -10,7 +10,7 @@
 -module(astranaut_compile_opts).
 
 %% API
--export([parse_transform/2, format_error/1, format_error/2]).
+-export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
@@ -20,8 +20,7 @@ parse_transform(BaseForms, Opts) ->
     CompileOptsForms = astranaut_lib:gen_exported_function(compile_opts, OptsAst),
     astranaut_forms:insert_forms(CompileOptsForms, BaseForms).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Opts) ->
-    astranaut:format_error(Error, Opts).
+format_error({validate_key_failure, _Failure, _Key, _Value} = GenericError) ->
+    astranaut:format_error(GenericError);
+format_error({invalid_option_value, _Value} = GenericError) ->
+    astranaut:format_error(GenericError).

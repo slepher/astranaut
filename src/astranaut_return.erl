@@ -180,13 +180,20 @@ to_compiler(#{?STRUCT_KEY := ?RETURN_OK, return := Forms, error := Error}) ->
         {[], []} ->
             Forms;
         {[], Warnings} ->
-            {warning, Forms, Warnings};
+            {warning, Forms, compiler_diagnostics(Warnings)};
         {Errors, Warnings} ->
-            {error, Errors, Warnings}
+            {error, compiler_diagnostics(Errors), compiler_diagnostics(Warnings)}
     end;
 to_compiler(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error}) ->
     {Errors, Warnings} = astranaut_error:realize(Error),
-    {error, Errors, Warnings}.
+    {error, compiler_diagnostics(Errors), compiler_diagnostics(Warnings)}.
+
+compiler_diagnostics(FileErrors) ->
+    [{File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]} ||
+        {File, Diagnostics} <- FileErrors].
+
+compiler_diagnostic({Pos, Formatter, Reason}) ->
+    {Pos, astranaut_lib, {Formatter, Reason}}.
 
 -spec simplify(struct(A)) -> A | no_return().
 simplify(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := Error}) ->

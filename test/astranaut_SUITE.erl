@@ -132,12 +132,15 @@ all() ->
      test_reduce_attr, test_with_formatter, 
      test_options, test_validator, test_validator_failure_contracts,
      test_invalid_validator_return_format,
-     test_format_error_unknown_default, test_format_error_unknown_throw,
-     test_format_error_known_throw_option,
+     test_format_error_unknown_default, test_format_error_character_list_fallback,
+     test_format_error_known_match,
+     test_to_compiler_adapter,
      test_formatter_protocol,
-     test_format_error_dispatch_match,
-     test_format_error_dispatch_fallback,
-     test_format_error_dispatch_nested_function_clause,
+     test_format_error_shared_match,
+     test_format_error_shared_fallback,
+     test_format_error_shared_nested_function_clause,
+     test_format_error_shared_remote_fun,
+     test_format_error_shared_other_exception,
      test_with_attribute, test_forms_with_attribute,
      test_traverse_m_updated, test_map_m_preserves_form_order,
      test_map_forms, test_sequence_nodes,
@@ -497,25 +500,67 @@ test_invalid_validator_return_format(_Config) ->
 
 test_format_error_unknown_default(_Config) ->
     Unknown = {unknown_format_error, [term]},
-    ?assertEqual(io_lib:write(Unknown), astranaut:format_error(Unknown)),
+    ?assertException(error, function_clause, astranaut:format_error(Unknown)),
+    ?assertEqual(
+       io_lib:write(Unknown),
+       astranaut_lib:format_error(Unknown, fun astranaut:format_error/1)),
+    ?assertEqual(io_lib:write(Unknown),
+                 astranaut_lib:format_error({astranaut, Unknown})),
     ok.
 
-test_format_error_unknown_throw(_Config) ->
-    Unknown = {unknown_format_error, [term]},
-    ?assertException(throw, Unknown,
-                     astranaut:format_error(Unknown, #{default => throw})),
+test_format_error_character_list_fallback(_Config) ->
+    Formatted = "already formatted",
+    ?assertEqual(
+       Formatted,
+       astranaut_lib:format_error(
+         Formatted, fun shared_dispatch_no_match/1)),
     ok.
 
-test_format_error_known_throw_option(_Config) ->
+test_format_error_known_match(_Config) ->
     Error =
         {validate_key_failure,
          {invalid_validator_return, my_validator, bad_return},
          my_key, my_value},
-    Message = astranaut:format_error(Error, #{default => throw}),
+    Message = astranaut:format_error(Error),
     ?assertEqual(
        "validator my_validator for option key my_key returns a invalid_value bad_return",
        lists:flatten(Message)),
     ok.
+
+test_to_compiler_adapter(_Config) ->
+    Errors = [{"a.erl", [{3, astranaut, error_a},
+                          {5, astranaut_quote, error_b}]},
+              {"b.erl", [{2, astranaut_macro, error_c}]}],
+    Warnings = [{"a.erl", [{4, astranaut, warning_a}]},
+                {"b.erl", [{6, astranaut_quote, warning_b}]}],
+    ErrorStruct =
+        astranaut_error:append_file_errors(
+          Errors,
+          astranaut_error:append_file_warnings(Warnings, astranaut_error:new())),
+    ?assertEqual({Errors, Warnings}, astranaut_error:realize(ErrorStruct)),
+    WrappedErrors = compiler_diagnostics(Errors),
+    WrappedWarnings = compiler_diagnostics(Warnings),
+    ?assertEqual(
+       {error, WrappedErrors, WrappedWarnings},
+       astranaut_return:to_compiler(astranaut_return:fail(ErrorStruct))),
+    ?assertEqual(
+       {error, WrappedErrors, WrappedWarnings},
+       astranaut_return:to_compiler(
+         astranaut_return:ok([form], ErrorStruct))),
+    WarningStruct = astranaut_error:append_file_warnings(
+                      Warnings, astranaut_error:new()),
+    ?assertEqual(
+       {warning, [form], WrappedWarnings},
+       astranaut_return:to_compiler(
+         astranaut_return:ok([form], WarningStruct))),
+    ok.
+
+compiler_diagnostics(FileDiagnostics) ->
+    [{File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]} ||
+        {File, Diagnostics} <- FileDiagnostics].
+
+compiler_diagnostic({Pos, Formatter, Reason}) ->
+    {Pos, astranaut_lib, {Formatter, Reason}}.
 
 test_formatter_protocol(_Config) ->
     astranaut_test_lib:assert_formatted_messages(
@@ -526,54 +571,55 @@ test_formatter_protocol(_Config) ->
     assert_invalid_formatter(astranaut_test_lib),
     ok.
 
-test_format_error_dispatch_match(_Config) ->
+test_format_error_shared_match(_Config) ->
     ?assertEqual(
        matched,
-       astranaut_lib:dispatch_error(
-         dispatch_match, #{source => test},
-         fun shared_dispatch_match/1)),
+       astranaut_lib:format_error(
+         dispatch_match, fun shared_dispatch_match/1)),
     ok.
 
-test_format_error_dispatch_fallback(_Config) ->
+test_format_error_shared_fallback(_Config) ->
     Error = dispatch_fallback,
-    Options = #{source => test, detail => true},
     ?assertEqual(
        io_lib:write(Error),
-       astranaut_lib:dispatch_error(
-         Error, Options,
-         fun shared_dispatch_no_match/1)),
-    ?assertException(
-       throw, Error,
-       astranaut_lib:dispatch_error(
-         Error, Options#{default => throw},
-         fun shared_dispatch_no_match/1)),
+       astranaut_lib:format_error(
+         Error, fun shared_dispatch_no_match/1)),
     ok.
 
-test_format_error_dispatch_nested_function_clause(_Config) ->
-    try astranaut_lib:dispatch_error(
-          dispatch_nested, #{source => test},
-          fun shared_dispatch_nested/1) of
+test_format_error_shared_nested_function_clause(_Config) ->
+    ?assertEqual(
+       io_lib:write(dispatch_nested),
+       astranaut_lib:format_error(
+         dispatch_nested, fun shared_dispatch_nested/1)),
+    ok.
+
+test_format_error_shared_remote_fun(_Config) ->
+    FormatterModule = astranaut,
+    Error = {invalid_option_value, bad},
+    ?assertEqual(
+       astranaut:format_error(Error),
+       astranaut_lib:format_error(
+         Error, fun FormatterModule:format_error/1)),
+    ?assertEqual(
+       io_lib:write(unknown_remote_error),
+       astranaut_lib:format_error(
+         unknown_remote_error, fun FormatterModule:format_error/1)),
+    ok.
+
+test_format_error_shared_other_exception(_Config) ->
+    try astranaut_lib:format_error(
+          shared_dispatch_other_exception,
+          fun shared_dispatch_other_exception/1) of
         _ ->
             ?assert(false)
     catch
-        error:function_clause:Stacktrace ->
+        error:shared_dispatch_non_function:Stacktrace ->
             ?assert(
-               case Stacktrace of
-                   [{?MODULE, shared_dispatch_nested_helper, ArityOrArgs, _Info}|_] ->
-                       case ArityOrArgs of
-                           Args when is_list(Args) -> length(Args) =:= 1;
-                           1 -> true;
-                           _ -> false
-                       end;
-                   [{?MODULE, shared_dispatch_nested_helper, ArityOrArgs}|_] ->
-                       case ArityOrArgs of
-                           Args when is_list(Args) -> length(Args) =:= 1;
-                           1 -> true;
-                           _ -> false
-                       end;
-                   _ ->
-                       false
-               end)
+               lists:any(
+                 fun({?MODULE, shared_dispatch_other_exception, _, _}) -> true;
+                    ({?MODULE, shared_dispatch_other_exception, _}) -> true;
+                    (_) -> false
+                 end, Stacktrace))
     end,
     ok.
 
@@ -588,6 +634,9 @@ shared_dispatch_nested(dispatch_nested) ->
 
 shared_dispatch_nested_helper(dispatch_other) ->
     matched.
+
+shared_dispatch_other_exception(shared_dispatch_other_exception) ->
+    erlang:error(shared_dispatch_non_function).
 
 assert_invalid_formatter(Formatter) ->
     try astranaut_test_lib:assert_formatted_messages([{1, Formatter, invalid}]) of

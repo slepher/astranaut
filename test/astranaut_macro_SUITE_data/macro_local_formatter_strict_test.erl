@@ -4,19 +4,11 @@
 -include("quote.hrl").
 -include("macro.hrl").
 
--export([format_error/1, format_error/2, value/0]).
+-export([format_error/1, value/0]).
 
 -baseline(yep).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Options) ->
-    astranaut_lib:dispatch_error(
-      Error, Options,
-      fun(strict_local_formatter_warning) -> format_error_1(strict_local_formatter_warning) end).
-
-format_error_1(strict_local_formatter_warning) ->
+format_error(strict_local_formatter_warning) ->
     strict_local_formatter_message().
 
 strict_local_formatter_message() ->

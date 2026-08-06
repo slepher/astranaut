@@ -31,9 +31,7 @@ parse_transform(Forms, _Opts) ->
 format_error(error_0) ->
     io_lib:format("get error 0", []);
 format_error(warning_0) ->
-    io_lib:format("get warning 0", []);
-format_error(Error) ->
-    astranaut:format_error(Error).
+    io_lib:format("get warning 0", []).
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

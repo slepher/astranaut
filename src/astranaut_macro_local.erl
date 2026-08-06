@@ -28,7 +28,7 @@
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
--type formatter_protocol() :: none | legacy | strict.
+-type formatter_protocol() :: present | missing.
 -type local_formatter_info() ::
         #{protocol := formatter_protocol(),
           roots := ordsets:ordset(fa()),
@@ -792,9 +792,9 @@ reject_locked_mutation(Forms, State) ->
         [Form | _] -> {error, {illegal_locked_form_mutation, Form}}
     end.
 
-formatter_options(#{protocol := strict}, LocalMacroModule, GlobalMacroOpts) ->
+formatter_options(#{protocol := present}, LocalMacroModule, GlobalMacroOpts) ->
     GlobalMacroOpts#{formatter => LocalMacroModule};
-formatter_options(#{protocol := _Protocol}, _LocalMacroModule,
+formatter_options(#{protocol := missing}, _LocalMacroModule,
                   GlobalMacroOpts) ->
     GlobalMacroOpts#{formatter => astranaut_macro}.
 
@@ -811,12 +811,8 @@ formatter_info_for_source(ClauseMap, SourceView) ->
 local_formatter_info(ClauseMap) ->
     Protocol = formatter_protocol(ClauseMap),
     FormatterFunctions = case Protocol of
-                             strict ->
-                                 [FA || FA <- [{format_error, 1},
-                                               {format_error, 2}],
-                                        maps:is_key(FA, ClauseMap)];
-                             legacy -> [];
-                             none -> []
+                             present -> [{format_error, 1}];
+                             missing -> []
                          end,
     FormatterFAs = ordsets:from_list(FormatterFunctions),
     #{protocol => Protocol,
@@ -828,11 +824,9 @@ local_formatter_info(ClauseMap) ->
 
 -spec formatter_protocol(#{term() => term()}) -> formatter_protocol().
 formatter_protocol(ClauseMap) ->
-    case {maps:is_key({format_error, 1}, ClauseMap),
-          maps:is_key({format_error, 2}, ClauseMap)} of
-        {true, _} -> strict;
-        {false, true} -> legacy;
-        {false, false} -> none
+    case maps:is_key({format_error, 1}, ClauseMap) of
+        true -> present;
+        false -> missing
     end.
 
 formatter_info_with_closure(

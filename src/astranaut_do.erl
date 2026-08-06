@@ -12,7 +12,7 @@
 
 %% API
 -export([do/2]).
--export([parse_transform/2, format_error/1, format_error/2]).
+-export([parse_transform/2, format_error/1]).
 
 %%%===================================================================
 %%% API
@@ -33,21 +33,14 @@ parse_transform(Forms, _Opts) ->
     TransformOpts = #{formatter => ?MODULE, traverse => post, normalize => true},
     astranaut_return:to_compiler(astranaut:map(fun walk_node/2, Forms, TransformOpts)).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Opts) ->
-    astranaut_lib:dispatch_error(
-      Error, Opts, fun format_error_1/1).
-
-format_error_1(non_empty_do) ->
+format_error(non_empty_do) ->
     "A 'do' construct cannot be empty";
-format_error_1(last_generate_expression) ->
+format_error(last_generate_expression) ->
     "The last expression in a 'do' construct count not be a generate expression: A <- B";
-format_error_1({validate_key_failure, _Failure, _Key, _Value} = Error) ->
-    astranaut:format_error(Error, #{default => throw});
-format_error_1({invalid_option_value, _Value} = Error) ->
-    astranaut:format_error(Error, #{default => throw}).
+format_error({validate_key_failure, _Failure, _Key, _Value} = GenericError) ->
+    astranaut:format_error(GenericError);
+format_error({invalid_option_value, _Value} = GenericError) ->
+    astranaut:format_error(GenericError).
 
 %%%===================================================================
 %%% Internal functions

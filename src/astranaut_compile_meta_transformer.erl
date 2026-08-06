@@ -10,7 +10,7 @@
 -module(astranaut_compile_meta_transformer).
 
 %% API
--export([parse_transform/2, format_error/1, format_error/2]).
+-export([parse_transform/2, format_error/1]).
 
 parse_transform(Forms, Opts) ->
     File = astranaut_lib:analyze_forms_file(Forms),
@@ -32,16 +32,9 @@ parse_transform(Forms, Opts) ->
     OutputForms = append_meta_forms(FormsForModule, Forms, Errors, Warnings, MetaOpts),
     report(OutputForms, Errors, Warnings, MetaOpts).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Opts) ->
-    astranaut_lib:dispatch_error(
-      Error, Opts, fun format_error_1/1).
-
-format_error_1({undefined_transformer, Transformer}) ->
+format_error({undefined_transformer, Transformer}) ->
     io_lib:format("transformer ~p is not compiled or undefined", [Transformer]);
-format_error_1({invalid_transformer_return, Transformer, Return}) ->
+format_error({invalid_transformer_return, Transformer, Return}) ->
     io_lib:format("transformer ~p returned invalid result ~p", [Transformer, Return]).
 
 %%%===================================================================

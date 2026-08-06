@@ -10,7 +10,7 @@
 
 -include("quote.hrl").
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2]).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -22,11 +22,6 @@ parse_transform(Forms, _Opt) ->
               walk(Node, Variables, Attr, RecursiveGroups)
       end, sets:new(), Forms, Opts).
 
-format_error(Message) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _    -> io_lib:write(Message)
-    end.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

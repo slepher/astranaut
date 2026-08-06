@@ -18,15 +18,62 @@
 %% API
 -export([to_map/2]).
 -export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5, from_other_record_impl/7]).
--export([format_error/1, format_error/2]).
+-export([format_error/1]).
 %%%===================================================================
 %%% API
 %%%===================================================================
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Options) ->
-    astranaut_macro:format_error(Error, Options).
+format_error({import_macro_failed, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_import_macro_attr, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({unimported_macro_module, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({unexported_macro, _, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({undefined_macro, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_use_macro, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({macro_override, _, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({non_exported_formatter, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({unloaded_formatter_module, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error(invalid_macro_attribute) ->
+    astranaut_macro:format_error(invalid_macro_attribute);
+format_error({max_macro_expansion_depth_exceeded, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({macro_exception, _, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_macro_return, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_closure_roots, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({macro_capability_unavailable, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({undefined_local_macro_retain, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({ineffective_local_macro_retain, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({duplicate_local_macro_declaration, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({conflicting_local_macro_closure_environment, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({conflicting_local_macro_whitelist, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({illegal_locked_form_mutation, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({local_macro_diagnostic, _, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({illegal_macro_environment_mutation, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({illegal_local_macro_definition_mutation, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_attr, _, _} = Error) ->
+    astranaut_macro:format_error(Error);
+format_error({invalid_function_with_arity, _} = Error) ->
+    astranaut_macro:format_error(Error).
 
 from_record(RecordName, Record) ->
     do_record_function(quote(from_record_impl), RecordName, Record).

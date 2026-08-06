@@ -18,21 +18,11 @@
 
 -export([test_attributes/0]).
 -export([unquote_splicing_warnings/1]).
--export([format_error/1, format_error/2]).
+-export([format_error/1]).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Options) ->
-    astranaut_lib:dispatch_error(
-      Error, Options,
-      fun(noop) -> format_error_1(noop);
-         (noop_function) -> format_error_1(noop_function)
-      end).
-
-format_error_1(noop) ->
+format_error(noop) ->
     "oops, noop";
-format_error_1(noop_function) ->
+format_error(noop_function) ->
     io_lib:write(noop_function).
 
 -local_macro([function_macro/1]).

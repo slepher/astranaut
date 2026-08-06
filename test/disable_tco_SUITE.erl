@@ -109,8 +109,7 @@ all() ->
     [disable_tco,
      disable_tco_nested_control_flow,
      disable_tco_transform_contract,
-     disable_tco_nested_control_flow_transform_contract,
-     disable_tco_format_error_contract].
+     disable_tco_nested_control_flow_transform_contract].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -349,16 +348,6 @@ disable_tco_nested_control_flow_transform_contract(_Config) ->
     ?assertMatch({call, _, {atom, _, source}, []}, ProtectedCall),
     ?assertMatch({'try', _, _, _, _, _}, TryTailCall),
     ?assertMatch({'try', _, _, _, _, _}, CatchTailCall),
-    ok.
-
-disable_tco_format_error_contract(_Config) ->
-    ?assertEqual(
-       "already formatted",
-       astranaut_disable_tco:format_error("already formatted")),
-    ?assertEqual(
-       "not_formatted",
-       lists:flatten(
-         astranaut_disable_tco:format_error(not_formatted))),
     ok.
 
 extract_stacktrace(StackTrace) ->

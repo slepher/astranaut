@@ -13,18 +13,12 @@
 
 -macro_options([debug_module_ast]).
 
--export([format_error/1, format_error/2]).
+-export([format_error/1]).
 
-format_error(Error) ->
-    format_error(Error, #{}).
-
-format_error(Error, Options) ->
-    astranaut_lib:dispatch_error(
-      Error, Options,
-      fun(bar) -> format_error_1(bar); ({macro_exception, _, _, _} = MacroError) -> astranaut_macro:format_error(MacroError, #{default => throw}) end).
-
-format_error_1(bar) ->
-    "oops, bar".
+format_error(bar) ->
+    "oops, bar";
+format_error({macro_exception, _, _, _} = MacroError) ->
+    astranaut_macro:format_error(MacroError).
 
 -baseline(yep).
 

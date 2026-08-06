@@ -21,7 +21,7 @@
          gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
          with_attribute/5, forms_with_attribute/5,
          option_map/1, validate/2, validate_attribute_option/4,
-         dispatch_error/3, format_default_error/2]).
+         format_error/1, format_error/2]).
 
 -type options() :: option() | [option()] | option_map().
 -type option() :: atom() | {atom(), term()}.
@@ -609,51 +609,27 @@ option_map(Options) when is_map(Options) ->
 option_map(Options) ->
     astranaut_return:warning_ok({invalid_option_value, Options}, #{}).
 
--spec dispatch_error(term(), map(), formatter_fun()) -> term().
-%% @doc Apply a formatter, falling back to format_default_error/2 when it does not match.
-dispatch_error(Error, Options, FormatterFun)
-  when is_function(FormatterFun, 1) ->
+-spec format_error({module(), term()}) -> term().
+%% @doc Adapt the compiler callback payload to the shared formatter dispatch.
+format_error({Module, Error}) when is_atom(Module) ->
+    format_error(Error, fun Module:format_error/1).
+
+-spec format_error(term(), formatter_fun()) -> term().
+%% @doc Apply a formatter, falling back to the generic error representation.
+format_error(Error, FormatterFun) when is_function(FormatterFun, 1) ->
     try FormatterFun(Error) of
         Formatted ->
             Formatted
     catch
-        error:function_clause:Stacktrace ->
-            case formatter_no_match(Stacktrace, FormatterFun) of
-                true ->
-                    format_default_error(Error, Options);
-                false ->
-                    erlang:raise(error, function_clause, Stacktrace)
-            end
+        error:function_clause ->
+            default_format_error(Error)
     end.
 
--spec format_default_error(term(), map()) -> term().
-%% @doc Preserve Astranaut's generic formatting fallback.
-format_default_error(Error, #{default := throw}) ->
-    throw(Error);
-format_default_error(Error, _Options) ->
+default_format_error(Error) ->
     case io_lib:deep_char_list(Error) of
         true -> Error;
         _ -> io_lib:write(Error)
     end.
-
-formatter_no_match([{Module, Name, Arity, _Info}|_], FormatterFun) ->
-    formatter_frame_matches(Module, Name, Arity, FormatterFun);
-formatter_no_match([{Module, Name, Arity}|_], FormatterFun) ->
-    formatter_frame_matches(Module, Name, Arity, FormatterFun);
-formatter_no_match(_, _) ->
-    false.
-
-formatter_frame_matches(Module, Name, ArityOrArgs, FormatterFun) ->
-    {module, FormatterModule} = erlang:fun_info(FormatterFun, module),
-    {name, FormatterName} = erlang:fun_info(FormatterFun, name),
-    {arity, FormatterArity} = erlang:fun_info(FormatterFun, arity),
-    FrameArity = case ArityOrArgs of
-                     Args when is_list(Args) -> length(Args);
-                     Arity -> Arity
-                 end,
-    Module =:= FormatterModule andalso
-        Name =:= FormatterName andalso
-        FrameArity =:= FormatterArity.
 
 validate_attribute_option(Validator, ParseTransformer, Attribute, Forms) ->
     {MapValidator, DefaultValidator} = split_default_validator(Validator),

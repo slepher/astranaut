@@ -581,8 +581,8 @@ test_binding_warning_format(_Config) ->
         astranaut_quote:parse_transform(Forms, []),
     ?assert(
        lists:any(
-         fun({_Pos, astranaut_quote,
-              {only_bindings_supported, ["A", ""], 'Module', '_V@Module'}}) ->
+         fun({_Pos, astranaut_lib, {astranaut_quote,
+              {only_bindings_supported, ["A", ""], 'Module', '_V@Module'}}}) ->
                  true;
             (_) ->
                  false
@@ -648,8 +648,8 @@ test_parse_transform_tuple_pos_warning(_Config) ->
     {warning, _QuotedForms, [{_File, [Warning]}]} =
         astranaut_quote:parse_transform(Forms, []),
     ?assertEqual(
-       {60, astranaut_quote,
-        {could_not_get_tuple_pos_value, {foo, bar}}},
+       {60, astranaut_lib,
+        {astranaut_quote, {could_not_get_tuple_pos_value, {foo, bar}}}},
        Warning),
     astranaut_test_lib:assert_formatted_messages([Warning]),
     ok.
@@ -664,8 +664,8 @@ test_parse_transform_literal_name_binding_warning(_Config) ->
     {warning, _QuotedForms, [{_File, [Warning]}]} =
         astranaut_quote:parse_transform(Forms, []),
     ?assertEqual(
-       {4, astranaut_quote,
-        {only_bindings_supported, ["A"], 'Name', '_V@Name'}},
+       {4, astranaut_lib,
+        {astranaut_quote, {only_bindings_supported, ["A"], 'Name', '_V@Name'}}},
        Warning),
     astranaut_test_lib:assert_formatted_messages([Warning]),
     ok.
@@ -699,8 +699,8 @@ assert_invalid_quote(CallCode, Function) ->
     Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
        {error,
-         [{_, [{_, astranaut_quote,
-               {invalid_quote, {call, _, {atom, _, Function}, _}}}]}],
+         [{_, [{_, astranaut_lib,
+               {astranaut_quote, {invalid_quote, {call, _, {atom, _, Function}, _}}}}]}],
         []},
        Result),
     {error, [{_, Errors}], []} = Result,
@@ -862,8 +862,9 @@ test_context_no_context_conflict(_Config) ->
         ++ [{eof, 5}],
     Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
-       {error, [{_, [{_, astranaut_quote,
-                      {conflicting_quote_context_options, my_ctx, no_context}}]}], []},
+       {error, [{_, [{_, astranaut_lib,
+                      {astranaut_quote,
+                       {conflicting_quote_context_options, my_ctx, no_context}}}]}], []},
        Result),
     {error, [{_, Errors}], []} = Result,
     astranaut_test_lib:assert_formatted_messages(Errors),
@@ -878,8 +879,8 @@ test_invalid_context(_Config) ->
         ++ [{eof, 5}],
     Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
-       {error, [{_, [{_, astranaut_quote,
-                      {invalid_quote_context, {var, _, 'Ctx'}}}]}], _},
+       {error, [{_, [{_, astranaut_lib,
+                      {astranaut_quote, {invalid_quote_context, {var, _, 'Ctx'}}}}]}], _},
        Result),
     {error, [{_, Errors}], _} = Result,
     astranaut_test_lib:assert_formatted_messages(Errors),
@@ -894,7 +895,8 @@ test_empty_context(_Config) ->
         ++ [{eof, 5}],
     Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
-       {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
+       {error, [{_, [{_, astranaut_lib,
+                      {astranaut_quote, {invalid_quote_context, ''}}}]}], _},
        Result),
     {error, [{_, Errors}], _} = Result,
     astranaut_test_lib:assert_formatted_messages(Errors),
@@ -917,7 +919,8 @@ test_empty_default_context(_Config) ->
              {eof, 3}],
     Result = astranaut_quote:parse_transform(Forms, []),
     ?assertMatch(
-       {error, [{_, [{_, astranaut_quote, {invalid_quote_context, ''}}]}], _},
+       {error, [{_, [{_, astranaut_lib,
+                      {astranaut_quote, {invalid_quote_context, ''}}}]}], _},
        Result),
     {error, [{_, Errors}], _} = Result,
     astranaut_test_lib:assert_formatted_messages(Errors),

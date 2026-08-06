@@ -54,6 +54,4 @@ fail_after_b(Ast) ->
     {error, {uniform_a_error, Ast}}.
 
 format_error({uniform_a_error, Ast}) ->
-    io_lib:format("uniform macro a failed after receiving ~p", [Ast]);
-format_error(Error) ->
-    astranaut_macro:format_error(Error).
+    io_lib:format("uniform macro a failed after receiving ~p", [Ast]).

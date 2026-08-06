@@ -284,30 +284,32 @@ test_format_error_contract(_Config) ->
     Error = {invalid_rebinding_fun, 42},
     Expected = io_lib:format("invalid rebinding function: ~p", [42]),
     ?assertEqual(Expected, astranaut_rebinding:format_error(Error)),
-    ?assertEqual(
-       Expected,
-       astranaut_rebinding:format_error(Error, #{default => throw})),
     Generic =
         {validate_key_failure,
          {invalid_value, boolean},
          strict, invalid},
     ?assertEqual(
-       astranaut:format_error(Generic, #{default => throw}),
-       astranaut_rebinding:format_error(Generic, #{default => throw})),
+       astranaut:format_error(Generic),
+       astranaut_rebinding:format_error(Generic)),
     Unknown = {unknown_rebinding_error, value},
-    ?assertException(
-       throw, Unknown,
-       astranaut_rebinding:format_error(Unknown, #{default => throw})),
+    ?assertEqual(io_lib:write(Unknown),
+                 astranaut_lib:format_error(
+                   Unknown, fun astranaut_rebinding:format_error/1)),
     Text = "already formatted",
-    ?assertEqual(Text, astranaut_rebinding:format_error(Text)),
-    ?assertEqual(io_lib:write(unknown), astranaut_rebinding:format_error(unknown)),
+    ?assertEqual(Text,
+                 astranaut_lib:format_error(
+                   Text, fun astranaut_rebinding:format_error/1)),
+    ?assertEqual(io_lib:write(unknown),
+                 astranaut_lib:format_error(
+                   unknown, fun astranaut_rebinding:format_error/1)),
     ok.
 
 test_invalid_rebinding_fun_warning(Config) ->
     Forms = astranaut_test_lib:test_module_forms(rebinding_invalid_fun_test, Config),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[], [{File, Warnings}]} = astranaut_error:realize(ErrorStruct),
+    {[], [{File, Warnings}]} =
+        astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
     ?assertEqual("rebinding_invalid_fun_test.erl", filename:basename(File)),
     [_] =
         [Warning0 ||
@@ -320,7 +322,8 @@ test_invalid_rebinding_option_error(Config) ->
     Forms = astranaut_test_lib:test_module_forms(rebinding_invalid_option_test, Config),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{File, Errors}], []} = astranaut_error:realize(ErrorStruct),
+    {[{File, Errors}], []} =
+        astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
     ?assertEqual("rebinding_invalid_option_test.erl", filename:basename(File)),
     [_] =
         [Error0 ||

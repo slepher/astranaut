@@ -43,5 +43,5 @@ expression_outer() ->
 expression_inner() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
 
-format_error(Error) ->
+format_error({invalid_macro_return, _} = Error) ->
     astranaut_macro:format_error(Error).

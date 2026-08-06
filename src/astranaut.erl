@@ -17,7 +17,7 @@
 -export([map_m/3, map_m_forms/3, traverse_form/2]).
 -export([walk_return/1, traverse_return/1]).
 -export([uniplate/1]).
--export([format_error/1, format_error/2]).
+-export([format_error/1]).
 
 -export_type([tree/0, trees/0, form/0, forms/0,
               traverse_opts/0, straverse_opts/0, traverse_attr/0,
@@ -590,26 +590,17 @@ uniplate(Node) ->
     end.
 
 -spec format_error(term()) -> term().
-format_error(Error) ->
-    format_error(Error, #{}).
-
--spec format_error(term(), map()) -> term().
-format_error(Error, Opts) ->
-    astranaut_lib:dispatch_error(
-      Error, Opts, fun format_error_1/1).
-
--spec format_error_1(term()) -> term().
-format_error_1({validate_key_failure, required, Key, _Value}) ->
+format_error({validate_key_failure, required, Key, _Value}) ->
     io_lib:format("option key ~p is required", [Key]);
-format_error_1({validate_key_failure, {invalid_validator, Validator}, Key, _Value}) ->
+format_error({validate_key_failure, {invalid_validator, Validator}, Key, _Value}) ->
     io_lib:format("validator ~p for option key ~p is invalid", [Validator, Key]);
-format_error_1({validate_key_failure, {invalid_validator_arg, {Validator, Arg}}, Key, _Value}) ->
+format_error({validate_key_failure, {invalid_validator_arg, {Validator, Arg}}, Key, _Value}) ->
     io_lib:format("argument ~p of validator ~p for option key ~p is invalid", [Arg, Validator, Key]);
-format_error_1({validate_key_failure, {invalid_validator_arg, Validator}, Key, _Value}) when is_atom(Validator) ->
+format_error({validate_key_failure, {invalid_validator_arg, Validator}, Key, _Value}) when is_atom(Validator) ->
     io_lib:format("argument of validator ~p for option key ~p is empty", [Validator, Key]);
-format_error_1({validate_key_failure, {invalid_value, Validator}, Key, Value}) ->
+format_error({validate_key_failure, {invalid_value, Validator}, Key, Value}) ->
     io_lib:format("validator ~p for option key ~p's value ~p failed", [Validator, Key, Value]);
-format_error_1({validate_key_failure, {invalid_validator_return, Validator, Return}, Key, _Value}) ->
+format_error({validate_key_failure, {invalid_validator_return, Validator, Return}, Key, _Value}) ->
     io_lib:format("validator ~p for option key ~p returns a invalid_value ~p", [Validator, Key, Return]);
-format_error_1({invalid_option_value, Value}) ->
+format_error({invalid_option_value, Value}) ->
     io_lib:format("~p is not a valid option value", [Value]).

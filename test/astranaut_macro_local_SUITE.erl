@@ -45,8 +45,7 @@ all() -> [module_name_is_unique_per_allocation,
           non_frozen_retain_root_has_no_effect,
           formatter_protocol_none,
           formatter_protocol_v1_only,
-          formatter_protocol_v1_takes_precedence,
-          formatter_only_v2_uses_macro_fallback,
+          formatter_protocol_v1_is_present,
           formatter_closure_is_private_and_identity_free].
 
 module_name_is_unique_per_allocation(_Config) ->
@@ -711,21 +710,12 @@ formatter_protocol_v1_only(_Config) ->
                  maps:get(formatter, Definition)),
     ok.
 
-formatter_protocol_v1_takes_precedence(_Config) ->
-    LocalModule = local_macro_formatter_v1_and_v2,
+formatter_protocol_v1_is_present(_Config) ->
+    LocalModule = local_macro_formatter_v1,
     Definition = formatter_definition(
                    LocalModule,
-                   [macro_member_form(), formatter_v1_form(),
-                    formatter_v2_form()]),
+                   [macro_member_form(), formatter_v1_form()]),
     ?assertEqual(LocalModule,
-                 maps:get(formatter, Definition)),
-    ok.
-
-formatter_only_v2_uses_macro_fallback(_Config) ->
-    Definition = formatter_definition(
-                   local_macro_formatter_only_v2,
-                   [macro_member_form(), formatter_v2_form()]),
-    ?assertEqual(astranaut_macro,
                  maps:get(formatter, Definition)),
     ok.
 
@@ -734,15 +724,14 @@ formatter_closure_is_private_and_identity_free(_Config) ->
     LocalModule = astranaut_macro_local:module_name(Module),
     Source = [{attribute, 1, module, Module},
               macro_member_form(), formatter_v1_form(),
-              formatter_v2_form(), formatter_v1_helper_form(),
               formatter_private_helper_form()],
     {ok, State0} = register([{macro_member, 0}], #{}, Source, #{},
                              astranaut_macro_local:new(LocalModule)),
     #{{macro_member, 0} := Entry} =
         astranaut_macro_local:local_macros(State0),
     FormatterInfo = maps:get(formatter_info, State0),
-    ?assertEqual(strict, maps:get(protocol, FormatterInfo)),
-    ?assertEqual([{format_error, 1}, {format_error, 2}],
+    ?assertEqual(present, maps:get(protocol, FormatterInfo)),
+    ?assertEqual([{format_error, 1}],
                  maps:get(roots, FormatterInfo)),
     ?assertEqual([{function, macro_member, 0}],
                  maps:get(closure_ids, Entry)),
@@ -776,7 +765,6 @@ formatter_closure_is_private_and_identity_free(_Config) ->
                             maps:get(closure_fas, Request))),
     ?assertNot(maps:is_key({function, format_error, 1}, RequestForms)),
     ?assertNot(maps:is_key({function, format_error, 2}, RequestForms)),
-    ?assertNot(maps:is_key({function, format_error_1, 1}, RequestForms)),
     ?assertNot(maps:is_key({function, formatter_private_helper, 0},
                            RequestForms)),
     {just, State2} = astranaut_return:run(
@@ -821,12 +809,8 @@ formatter_closure_is_private_and_identity_free(_Config) ->
     Exports = LocalModule:module_info(exports),
     ?assert(lists:member({macro_member, 0}, Exports)),
     ?assert(lists:member({format_error, 1}, Exports)),
-    ?assert(lists:member({format_error, 2}, Exports)),
-    ?assertNot(lists:member({format_error_1, 1}, Exports)),
     ?assertNot(lists:member({formatter_private_helper, 0}, Exports)),
     ?assertEqual("formatter helper", apply(LocalModule, format_error, [error])),
-    ?assertEqual("formatter helper",
-                 apply(LocalModule, format_error, [error, #{}])),
     ok.
 
 formatter_definition(LocalModule, Source) ->
@@ -849,19 +833,7 @@ macro_member_form() ->
 
 formatter_v1_form() ->
     {function, 1, format_error, 1,
-     [{clause, 1, [{var, 1, 'Error'}], [],
-       [{call, 1, {atom, 1, format_error_1},
-         [{var, 1, 'Error'}]}]}]}.
-
-formatter_v2_form() ->
-    {function, 1, format_error, 2,
-     [{clause, 1, [{var, 1, 'Error'}, {var, 1, '_Options'}], [],
-       [{call, 1, {atom, 1, format_error_1},
-         [{var, 1, 'Error'}]}]}]}.
-
-formatter_v1_helper_form() ->
-    {function, 1, format_error_1, 1,
-     [{clause, 1, [{var, 1, '_Error'}], [],
+     [{clause, 1, [{atom, 1, error}], [],
        [{call, 1, {atom, 1, formatter_private_helper}, []}]}]}.
 
 formatter_private_helper_form() ->

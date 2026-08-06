@@ -47,7 +47,9 @@ realize_with_baseline(Baseline, ErrorStruct) ->
                (Error) ->
                     Error
             end, ErrorStruct),
-    astranaut_error:realize(ErrorStruct1).
+    {Errors, Warnings} = astranaut_error:realize(ErrorStruct1),
+    {unwrap_compiler_diagnostics(Errors),
+     unwrap_compiler_diagnostics(Warnings)}.
 
 compile_test_module(Module, Config) ->
     DataDir = configured_data_dir(Config),
@@ -117,14 +119,13 @@ assert_formatted_messages(Messages) ->
 
 assert_formatted_message({_Line, Formatter, Error}) ->
     case formatter_protocol(Formatter) of
-        strict ->
+        present ->
             assert_formatter_result(
               Formatter, Error,
-              fun() -> Formatter:format_error(Error, #{default => throw}) end);
-        legacy ->
-            assert_formatter_result(
-              Formatter, Error,
-              fun() -> Formatter:format_error(Error) end);
+              fun() ->
+                      astranaut_lib:format_error(
+                        Error, fun Formatter:format_error/1)
+              end);
         {invalid, Reason} ->
             ct:fail({invalid_formatter_protocol, Formatter, Reason})
     end.
@@ -132,13 +133,10 @@ assert_formatted_message({_Line, Formatter, Error}) ->
 formatter_protocol(Formatter) when is_atom(Formatter) ->
     case code:ensure_loaded(Formatter) of
         {module, Formatter} ->
-            case {erlang:function_exported(Formatter, format_error, 1),
-                  erlang:function_exported(Formatter, format_error, 2)} of
-                {true, true} ->
-                    strict;
-                {true, false} ->
-                    legacy;
-                {false, _} ->
+            case erlang:function_exported(Formatter, format_error, 1) of
+                true ->
+                    present;
+                false ->
                     {invalid, missing_format_error_1}
             end;
         {error, Reason} ->
@@ -176,6 +174,17 @@ assert_formatted_message_result(Formatter, Error, Message) ->
         false ->
             ct:fail({invalid_formatted_message, Formatter, Error, Message})
     end.
+
+unwrap_compiler_diagnostics(FileDiagnostics) ->
+    [{File, [unwrap_compiler_diagnostic(Diagnostic) ||
+             Diagnostic <- Diagnostics]} ||
+        {File, Diagnostics} <- FileDiagnostics].
+
+unwrap_compiler_diagnostic(
+  {Pos, astranaut_lib, {Formatter, Reason}}) ->
+    {Pos, Formatter, Reason};
+unwrap_compiler_diagnostic(Diagnostic) ->
+    Diagnostic.
 %%--------------------------------------------------------------------
 %% @doc
 %% @spec

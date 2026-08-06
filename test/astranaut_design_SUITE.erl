@@ -104,7 +104,7 @@ lib_public_api_contracts(_Config) ->
            {with_attribute, 5}, {forms_with_attribute, 5},
            {option_map, 1}, {validate, 2},
            {validate_attribute_option, 4},
-           {dispatch_error, 3}, {format_default_error, 2}]),
+           {format_error, 1}, {format_error, 2}]),
     Actual =
         ordsets:from_list(
           [{Name, Arity}
@@ -301,11 +301,11 @@ do_error_contracts(_Config) ->
     ?assertEqual([last_generate_expression],
                  astranaut_error:errors(astranaut_return:run_error(LastGenerateError))),
     ?assert(io_lib:deep_char_list(
-              astranaut_do:format_error(non_empty_do, #{default => throw}))),
+              astranaut_do:format_error(non_empty_do))),
     ?assert(io_lib:deep_char_list(
-              astranaut_do:format_error(last_generate_expression, #{default => throw}))),
+              astranaut_do:format_error(last_generate_expression))),
     ?assert(io_lib:deep_char_list(
-              astranaut_do:format_error({invalid_option_value, bad}, #{default => throw}))).
+              astranaut_do:format_error({invalid_option_value, bad}))).
 
 monad_transformer_stack_contract(_Config) ->
     ?assertEqual(
@@ -633,11 +633,13 @@ compile_opts_contract(_Config) ->
     Opts = compile_opts_contract_mod:compile_opts(),
     ?assert(lists:member(debug_info, Opts)),
     ?assert(lists:member({i, "include"}, Opts)),
-    ?assert(io_lib:deep_char_list(astranaut_compile_opts:format_error("already text"))),
+    ?assert(io_lib:deep_char_list(
+              astranaut_lib:format_error(
+                "already text", fun astranaut_compile_opts:format_error/1))),
     ?assert(
        io_lib:deep_char_list(
          astranaut_compile_opts:format_error(
-           {invalid_option_value, bad}, #{default => throw}))).
+           {invalid_option_value, bad}))).
 
 compile_meta_success_contract(_Config) ->
     Forms = meta_forms(compile_meta_success_mod, [compile_meta_identity_transformer], []),
@@ -698,11 +700,11 @@ compile_meta_option_and_compile_contracts(_Config) ->
     ?assert(
        io_lib:deep_char_list(
          astranaut_compile_meta_transformer:format_error(
-           {undefined_transformer, missing_transformer}, #{default => throw}))),
+           {undefined_transformer, missing_transformer}))),
     ?assert(
        io_lib:deep_char_list(
          astranaut_compile_meta_transformer:format_error(
-           {invalid_transformer_return, transformer, invalid}, #{default => throw}))),
+           {invalid_transformer_return, transformer, invalid}))),
 
     OptionForms =
         meta_forms(

@@ -59,12 +59,10 @@ test_macro_with_warnings(Config) ->
     assert_local_macro_module(macro_with_warnings, Local),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
-    ?assert(lists:member({format_error, 2}, Exports)),
-    ?assertNot(lists:member({format_error_1, 1}, Exports)),
     ?assertEqual("oops, noop",
-                 Local:format_error(noop, #{default => throw})),
+                 Local:format_error(noop)),
     ?assertEqual(io_lib:write(noop_function),
-                 Local:format_error(noop_function, #{default => throw})),
+                 Local:format_error(noop_function)),
     astranaut_test_lib:assert_formatted_messages(Warnings),
     ?assertEqual(ok, macro_with_warnings:test_attributes()),
     ok.
@@ -101,10 +99,8 @@ test_macro_with_error(Config) ->
     assert_local_macro_module(macro_with_error, Local),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
-    ?assert(lists:member({format_error, 2}, Exports)),
-    ?assertNot(lists:member({format_error_1, 1}, Exports)),
     ?assertEqual("oops, bar",
-                 Local:format_error(bar, #{default => throw})),
+                 Local:format_error(bar)),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -138,24 +134,17 @@ test_macro_local_formatter_strict(Config) ->
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertEqual("macro_local_formatter_strict_test.erl",
                  filename:basename(File)),
-    [{19, Local, strict_local_formatter_warning}] = Warnings,
+    [{11, Local, strict_local_formatter_warning}] = Warnings,
     assert_local_macro_module(macro_local_formatter_strict_test, Local),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
-    ?assert(lists:member({format_error, 2}, Exports)),
-    ?assertNot(lists:member({format_error_1, 1}, Exports)),
     ?assertNot(lists:member({strict_local_formatter_message, 0}, Exports)),
     ?assertEqual("strict local formatter warning",
                  Local:format_error(strict_local_formatter_warning)),
-    ?assertEqual(
-       "strict local formatter warning",
-       Local:format_error(strict_local_formatter_warning,
-                          #{default => throw})),
     Unknown = {strict_local_formatter_unknown, [term]},
-    ?assertEqual(astranaut_macro:format_error(Unknown),
-                 Local:format_error(Unknown)),
-    ?assertException(throw, Unknown,
-                     Local:format_error(Unknown, #{default => throw})),
+    ?assertEqual(io_lib:write(Unknown),
+                 astranaut_lib:format_error(
+                   Unknown, fun Local:format_error/1)),
     astranaut_test_lib:assert_formatted_messages(Warnings),
     ok.
 
@@ -366,15 +355,17 @@ test_macro_format_error_predefined_errors(_Config) ->
          {ineffective_local_macro_retain, [{ordinary, 0}]}],
     lists:foreach(fun assert_macro_format_error/1, Errors),
     Unknown = {unknown_macro_format_error, [term]},
-    ?assertException(throw, Unknown,
-                     astranaut_macro:format_error(Unknown, #{default => throw})).
+    ?assertEqual(io_lib:write(Unknown),
+                 astranaut_lib:format_error(
+                   Unknown, fun astranaut_macro:format_error/1)).
 
 test_macro_sibling_errors(Config) ->
     Forms = astranaut_test_lib:test_module_forms(
               macro_sibling_errors_test, Config),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} = astranaut_error:realize(ErrorStruct),
+    {[{_File, Errors}], []} =
+        astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
     ?assertEqual(3, length(Errors)),
     ?assert(
        lists:any(
@@ -415,16 +406,13 @@ test_macro_sibling_errors(Config) ->
     Local = sibling_local_formatter(Errors),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
-    ?assert(lists:member({format_error, 2}, Exports)),
-    ?assertNot(lists:member({format_error_1, 1}, Exports)),
     ?assertEqual(io_lib:write(sibling_return_error),
-                 Local:format_error(sibling_return_error,
-                                    #{default => throw})),
+                 Local:format_error(sibling_return_error)),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
 assert_macro_format_error(Error) ->
-    Message = astranaut_macro:format_error(Error, #{default => throw}),
+    Message = astranaut_macro:format_error(Error),
     ?assert(io_lib:deep_char_list(Message)),
     ?assertNotEqual([], lists:flatten(Message)).
 
