@@ -116,20 +116,65 @@ assert_formatted_messages(Messages) ->
     lists:foreach(fun assert_formatted_message/1, Messages).
 
 assert_formatted_message({_Line, Formatter, Error}) ->
-    case erlang:function_exported(Formatter, format_error, 2) of
-        false ->
-            ok;
+    case formatter_protocol(Formatter) of
+        strict ->
+            assert_formatter_result(
+              Formatter, Error,
+              fun() -> Formatter:format_error(Error, #{default => throw}) end);
+        legacy ->
+            assert_formatter_result(
+              Formatter, Error,
+              fun() -> Formatter:format_error(Error) end);
+        {invalid, Reason} ->
+            ct:fail({invalid_formatter_protocol, Formatter, Reason})
+    end.
+
+formatter_protocol(Formatter) when is_atom(Formatter) ->
+    case code:ensure_loaded(Formatter) of
+        {module, Formatter} ->
+            case {erlang:function_exported(Formatter, format_error, 1),
+                  erlang:function_exported(Formatter, format_error, 2)} of
+                {true, true} ->
+                    strict;
+                {true, false} ->
+                    legacy;
+                {false, _} ->
+                    {invalid, missing_format_error_1}
+            end;
+        {error, Reason} ->
+            {invalid, {module_not_loaded, Reason}}
+    end;
+formatter_protocol(_Formatter) ->
+    {invalid, invalid_formatter_identifier}.
+
+assert_formatter_result(Formatter, Error, FormatterFun) ->
+    Result =
+        try FormatterFun() of
+            FormattedMessage ->
+                {ok, FormattedMessage}
+        catch
+            Class:Reason:Stacktrace ->
+                {error, {format_error_not_covered,
+                         Formatter, Error, Class, Reason, Stacktrace}}
+        end,
+    case Result of
+        {ok, Message} ->
+            assert_formatted_message_result(Formatter, Error, Message);
+        {error, Failure} ->
+            ct:fail(Failure)
+    end.
+
+assert_formatted_message_result(Formatter, Error, Message) ->
+    case io_lib:deep_char_list(Message) of
         true ->
-            try Formatter:format_error(Error, #{default => throw}) of
-                Message ->
-                    ?assert(io_lib:deep_char_list(Message)),
-                    ?assertNotEqual([], lists:flatten(Message))
-            catch
-                Class:Reason:Stacktrace ->
-                    ct:fail(
-                      {format_error_not_covered,
-                       Formatter, Error, Class, Reason, Stacktrace})
-            end
+            case lists:flatten(Message) of
+                [] ->
+                    ct:fail({invalid_formatted_message, Formatter, Error, Message});
+                _ ->
+                    ok
+            end;
+        false ->
+            ct:fail({invalid_formatted_message, Formatter, Error, Message})
     end.
 %%--------------------------------------------------------------------
 %% @doc

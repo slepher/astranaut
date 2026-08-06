@@ -33,7 +33,8 @@ suite() ->
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
     erlang:system_flag(backtrace_depth, 20),
-    Config1 = astranaut_test_lib:load_data_modules(Config, [sample_transformer_1]),
+    Config1 = astranaut_test_lib:load_data_modules(
+                Config, [sample_transformer_1, sample_transformer_only_v2]),
     Forms = astranaut_test_lib:test_module_forms(sample_1, Config1),
     Forms1 = astranaut_test_lib:test_module_forms(sample_expressions, Config1),
     Expressions =
@@ -133,6 +134,7 @@ all() ->
      test_invalid_validator_return_format,
      test_format_error_unknown_default, test_format_error_unknown_throw,
      test_format_error_known_throw_option,
+     test_formatter_protocol,
      test_format_error_dispatch_match,
      test_format_error_dispatch_fallback,
      test_format_error_dispatch_nested_function_clause,
@@ -515,6 +517,15 @@ test_format_error_known_throw_option(_Config) ->
        lists:flatten(Message)),
     ok.
 
+test_formatter_protocol(_Config) ->
+    astranaut_test_lib:assert_formatted_messages(
+      [{1, astranaut, {invalid_option_value, bad}}]),
+    astranaut_test_lib:assert_formatted_messages(
+      [{1, sample_transformer_1, error_0}]),
+    assert_invalid_formatter(sample_transformer_only_v2),
+    assert_invalid_formatter(astranaut_test_lib),
+    ok.
+
 test_format_error_dispatch_match(_Config) ->
     ?assertEqual(
        matched,
@@ -578,6 +589,17 @@ shared_dispatch_nested(dispatch_nested) ->
 
 shared_dispatch_nested_helper(dispatch_other) ->
     matched.
+
+assert_invalid_formatter(Formatter) ->
+    try astranaut_test_lib:assert_formatted_messages([{1, Formatter, invalid}]) of
+        _ ->
+            ?assert(false)
+    catch
+        exit:{test_case_failed, Reason} ->
+            ?assertEqual(
+               {invalid_formatter_protocol, Formatter, missing_format_error_1},
+               Reason)
+    end.
 
 
 test_with_attribute(Config) ->
