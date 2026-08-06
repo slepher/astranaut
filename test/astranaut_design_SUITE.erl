@@ -632,7 +632,11 @@ compile_opts_contract(_Config) ->
     Opts = compile_opts_contract_mod:compile_opts(),
     ?assert(lists:member(debug_info, Opts)),
     ?assert(lists:member({i, "include"}, Opts)),
-    ?assert(io_lib:deep_char_list(astranaut_compile_opts:format_error("already text"))).
+    ?assert(io_lib:deep_char_list(astranaut_compile_opts:format_error("already text"))),
+    ?assert(
+       io_lib:deep_char_list(
+         astranaut_compile_opts:format_error(
+           {invalid_option_value, bad}, #{default => throw}))).
 
 compile_meta_success_contract(_Config) ->
     Forms = meta_forms(compile_meta_success_mod, [compile_meta_identity_transformer], []),
@@ -666,16 +670,22 @@ compile_meta_invalid_and_undefined_contracts(_Config) ->
     InvalidForms = meta_forms(compile_meta_invalid_mod, [compile_meta_invalid_transformer], [silent_warning]),
     InvalidOutput = astranaut_compile_meta_transformer:parse_transform(InvalidForms, []),
     {module, compile_meta_invalid_mod} = compile_and_load(compile_meta_invalid_mod, InvalidOutput),
-    [{_File, [{0, astranaut_compile_meta_transformer,
-               {invalid_transformer_return, compile_meta_invalid_transformer, invalid_return}}]}] =
-        compile_meta_invalid_mod:warnings(),
+    [{_File, InvalidWarnings}] = compile_meta_invalid_mod:warnings(),
+    ?assertEqual(
+       [{0, astranaut_compile_meta_transformer,
+         {invalid_transformer_return, compile_meta_invalid_transformer, invalid_return}}],
+       InvalidWarnings),
+    astranaut_test_lib:assert_formatted_messages(InvalidWarnings),
 
     UndefinedForms = meta_forms(compile_meta_undefined_mod, [compile_meta_missing_transformer], [silent_warning]),
     UndefinedOutput = astranaut_compile_meta_transformer:parse_transform(UndefinedForms, []),
     {module, compile_meta_undefined_mod} = compile_and_load(compile_meta_undefined_mod, UndefinedOutput),
-    [{_File1, [{0, astranaut_compile_meta_transformer,
-                {undefined_transformer, compile_meta_missing_transformer}}]}] =
-        compile_meta_undefined_mod:warnings(),
+    [{_File1, UndefinedWarnings}] = compile_meta_undefined_mod:warnings(),
+    ?assertEqual(
+       [{0, astranaut_compile_meta_transformer,
+         {undefined_transformer, compile_meta_missing_transformer}}],
+       UndefinedWarnings),
+    astranaut_test_lib:assert_formatted_messages(UndefinedWarnings),
 
     CrashForms = meta_forms(compile_meta_crash_mod, [compile_meta_crash_transformer], [silent_error]),
     CrashOutput = astranaut_compile_meta_transformer:parse_transform(CrashForms, []),
@@ -687,11 +697,11 @@ compile_meta_option_and_compile_contracts(_Config) ->
     ?assert(
        io_lib:deep_char_list(
          astranaut_compile_meta_transformer:format_error(
-           {undefined_transformer, missing_transformer}))),
+           {undefined_transformer, missing_transformer}, #{default => throw}))),
     ?assert(
        io_lib:deep_char_list(
          astranaut_compile_meta_transformer:format_error(
-           {invalid_transformer_return, transformer, invalid}))),
+           {invalid_transformer_return, transformer, invalid}, #{default => throw}))),
 
     OptionForms =
         meta_forms(

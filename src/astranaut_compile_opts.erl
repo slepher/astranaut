@@ -10,7 +10,7 @@
 -module(astranaut_compile_opts).
 
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, format_error/1, format_error/2]).
 
 %%%===================================================================
 %%% API
@@ -21,4 +21,7 @@ parse_transform(BaseForms, Opts) ->
     astranaut_forms:insert_forms(CompileOptsForms, BaseForms).
 
 format_error(Error) ->
-    astranaut:format_error(Error).
+    format_error(Error, #{}).
+
+format_error(Error, Opts) ->
+    astranaut:format_error(Error, Opts).
