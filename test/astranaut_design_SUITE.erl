@@ -299,9 +299,12 @@ do_error_contracts(_Config) ->
                                                         monad_fail => astranaut_monad}),
     ?assertEqual([last_generate_expression],
                  astranaut_error:errors(astranaut_return:run_error(LastGenerateError))),
-    ?assert(io_lib:deep_char_list(astranaut_do:format_error(non_empty_do))),
-    ?assert(io_lib:deep_char_list(astranaut_do:format_error(last_generate_expression))),
-    ?assert(io_lib:deep_char_list(astranaut_do:format_error({invalid_option_value, bad}))).
+    ?assert(io_lib:deep_char_list(
+              astranaut_do:format_error(non_empty_do, #{default => throw}))),
+    ?assert(io_lib:deep_char_list(
+              astranaut_do:format_error(last_generate_expression, #{default => throw}))),
+    ?assert(io_lib:deep_char_list(
+              astranaut_do:format_error({invalid_option_value, bad}, #{default => throw}))).
 
 monad_transformer_stack_contract(_Config) ->
     ?assertEqual(
