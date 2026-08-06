@@ -42,7 +42,12 @@ all() -> [module_name_is_unique_per_allocation,
           compiler_reuses_canonical_forms,
           independent_macros_share_one_boundary,
           attribute_between_independent_macros_shares_one_boundary,
-          non_frozen_retain_root_has_no_effect].
+          non_frozen_retain_root_has_no_effect,
+          formatter_protocol_none,
+          formatter_protocol_v1_only,
+          formatter_protocol_v1_takes_precedence,
+          formatter_only_v2_uses_macro_fallback,
+          formatter_closure_is_private_and_identity_free].
 
 module_name_is_unique_per_allocation(_Config) ->
     Module = local_macro_unique_name_test,
@@ -688,6 +693,172 @@ non_frozen_retain_root_has_no_effect(_Config) ->
     {_Env, Skip, _S2} = astranaut_macro_local:finalize([{ordinary, 0}], S1),
     ?assertEqual([{function, foo, 0}], Skip),
     ok.
+
+formatter_protocol_none(_Config) ->
+    Definition = formatter_definition(
+                   local_macro_formatter_none,
+                   [macro_member_form()]),
+    ?assertEqual(astranaut_macro,
+                 maps:get(formatter, Definition)),
+    ok.
+
+formatter_protocol_v1_only(_Config) ->
+    LocalModule = local_macro_formatter_v1_only,
+    Definition = formatter_definition(
+                   LocalModule,
+                   [macro_member_form(), formatter_v1_form()]),
+    ?assertEqual(LocalModule,
+                 maps:get(formatter, Definition)),
+    ok.
+
+formatter_protocol_v1_takes_precedence(_Config) ->
+    LocalModule = local_macro_formatter_v1_and_v2,
+    Definition = formatter_definition(
+                   LocalModule,
+                   [macro_member_form(), formatter_v1_form(),
+                    formatter_v2_form()]),
+    ?assertEqual(LocalModule,
+                 maps:get(formatter, Definition)),
+    ok.
+
+formatter_only_v2_uses_macro_fallback(_Config) ->
+    Definition = formatter_definition(
+                   local_macro_formatter_only_v2,
+                   [macro_member_form(), formatter_v2_form()]),
+    ?assertEqual(astranaut_macro,
+                 maps:get(formatter, Definition)),
+    ok.
+
+formatter_closure_is_private_and_identity_free(_Config) ->
+    Module = local_macro_formatter_closure_test,
+    LocalModule = astranaut_macro_local:module_name(Module),
+    Source = [{attribute, 1, module, Module},
+              macro_member_form(), formatter_v1_form(),
+              formatter_v2_form(), formatter_v1_helper_form(),
+              formatter_private_helper_form()],
+    {ok, State0} = register([{macro_member, 0}], #{}, Source, #{},
+                             astranaut_macro_local:new(LocalModule)),
+    #{{macro_member, 0} := Entry} =
+        astranaut_macro_local:local_macros(State0),
+    FormatterInfo = maps:get(formatter_info, State0),
+    ?assertEqual(strict, maps:get(protocol, FormatterInfo)),
+    ?assertEqual([{format_error, 1}, {format_error, 2}],
+                 maps:get(roots, FormatterInfo)),
+    ?assertEqual([{function, macro_member, 0}],
+                 maps:get(closure_ids, Entry)),
+    ?assertEqual([{function, macro_member, 0}],
+                 astranaut_macro_local:frozen_ids(State0)),
+    PlainSource = [{attribute, 1, module, Module}, macro_member_form()],
+    {ok, PlainState} = register([{macro_member, 0}], #{}, PlainSource, #{},
+                                 astranaut_macro_local:new(LocalModule)),
+    #{{macro_member, 0} := PlainEntry} =
+        astranaut_macro_local:local_macros(PlainState),
+    ?assertEqual(maps:get(macro_environment_snapshot, PlainEntry),
+                 maps:get(macro_environment_snapshot, Entry)),
+    ?assertEqual(entry_fingerprint(PlainEntry), entry_fingerprint(Entry)),
+    Context = #{source_view => Source, compile_opts => []},
+    {just, State1} = astranaut_return:run(
+                       astranaut_macro_local:prepare_declaration(
+                         [{macro_member, 0}], Context, State0)),
+    {ok, [Plan]} = astranaut_macro_local:compile_plan(
+                     {macro_member, 0}, State1),
+    ?assertEqual([{macro_member, 0}], maps:get(members, Plan)),
+    [Request] = maps:get(requests, Plan),
+    ?assertEqual([{function, macro_member, 0}],
+                 maps:get(closure_ids, Request)),
+    {just, State2} = astranaut_return:run(
+                       astranaut_macro_local:execute_plan(
+                         [Plan], Context, State1)),
+    ?assertEqual(FormatterInfo, maps:get(formatter_info, State2)),
+    ?assertEqual([{function, macro_member, 0}],
+                 maps:keys(maps:get(compiled_forms, State2))),
+    ?assertEqual([{function, macro_member, 0}],
+                 maps:get(local_macro_expanded_ids, State2)),
+    ?assertEqual([{format_error, 1}],
+                 astranaut_macro_local:nonclosure_retain_roots(
+                   [{format_error, 1}], State2)),
+    #{{macro_member, 0} := #{status := compiled}} =
+        astranaut_macro_local:local_macros(State2),
+    PlainLocalModule = astranaut_macro_local:module_name(
+                         local_macro_formatter_plain_identity),
+    {ok, PlainState0} = register(
+                          [{macro_member, 0}], #{}, PlainSource, #{},
+                          astranaut_macro_local:new(PlainLocalModule)),
+    PlainContext = #{source_view => PlainSource, compile_opts => []},
+    {just, PlainState1} = astranaut_return:run(
+                            astranaut_macro_local:prepare_declaration(
+                              [{macro_member, 0}], PlainContext, PlainState0)),
+    {ok, [PlainPlan]} = astranaut_macro_local:compile_plan(
+                          {macro_member, 0}, PlainState1),
+    {just, PlainState2} = astranaut_return:run(
+                            astranaut_macro_local:execute_plan(
+                              [PlainPlan], PlainContext, PlainState1)),
+    %% Formatter-only forms do not alter the generation boundary key or the
+    %% callable local-macro lifecycle state.
+    ?assertEqual(maps:get(committed_boundaries, PlainState2),
+                 maps:get(committed_boundaries, State2)),
+    #{{macro_member, 0} := #{status := PlainStatus,
+                             compiled_generation := PlainGeneration}} =
+        astranaut_macro_local:local_macros(PlainState2),
+    #{{macro_member, 0} := #{status := FormatterStatus,
+                             compiled_generation := FormatterGeneration}} =
+        astranaut_macro_local:local_macros(State2),
+    ?assertEqual({PlainStatus, PlainGeneration},
+                 {FormatterStatus, FormatterGeneration}),
+    Exports = LocalModule:module_info(exports),
+    ?assert(lists:member({macro_member, 0}, Exports)),
+    ?assert(lists:member({format_error, 1}, Exports)),
+    ?assert(lists:member({format_error, 2}, Exports)),
+    ?assertNot(lists:member({format_error_1, 1}, Exports)),
+    ?assertNot(lists:member({formatter_private_helper, 0}, Exports)),
+    ?assertEqual("formatter helper", apply(LocalModule, format_error, [error])),
+    ?assertEqual("formatter helper",
+                 apply(LocalModule, format_error, [error, #{}])),
+    ok.
+
+formatter_definition(LocalModule, Source) ->
+    Context = #{module => formatter_definition_context,
+                source_view => Source,
+                compile_opts => [],
+                macro_environment => macro_environment(#{}),
+                global_macro_opts => #{formatter => astranaut_macro}},
+    {just, {keep, Definitions, _State}} =
+        astranaut_return:run(
+          astranaut_macro_local:handle_form(
+            {attribute, 1, local_macro, [{macro_member, 0}]},
+            Context,
+            astranaut_macro_local:new(LocalModule))),
+    maps:get({macro_member, 0}, Definitions).
+
+macro_member_form() ->
+    {function, 1, macro_member, 0,
+     [{clause, 1, [], [], [{atom, 1, macro_member_result}]}]}.
+
+formatter_v1_form() ->
+    {function, 1, format_error, 1,
+     [{clause, 1, [{var, 1, 'Error'}], [],
+       [{call, 1, {atom, 1, format_error_1},
+         [{var, 1, 'Error'}]}]}]}.
+
+formatter_v2_form() ->
+    {function, 1, format_error, 2,
+     [{clause, 1, [{var, 1, 'Error'}, {var, 1, '_Options'}], [],
+       [{call, 1, {atom, 1, format_error_1},
+         [{var, 1, 'Error'}]}]}]}.
+
+formatter_v1_helper_form() ->
+    {function, 1, format_error_1, 1,
+     [{clause, 1, [{var, 1, '_Error'}], [],
+       [{call, 1, {atom, 1, formatter_private_helper}, []}]}]}.
+
+formatter_private_helper_form() ->
+    {function, 1, formatter_private_helper, 0,
+     [{clause, 1, [], [], [{string, 1, "formatter helper"}]}]}.
+
+entry_fingerprint(Entry) ->
+    Snapshot = maps:get(macro_environment_snapshot, Entry),
+    astranaut_macro_local:env_fingerprint(
+      maps:get(macro_map, Snapshot), #{}, maps:get(macro_options, Snapshot)).
 
 register(FAs, Options, Source, MacroMap, State) ->
     CandidateMap =

@@ -28,6 +28,14 @@
 
 -type fa() :: {atom(), non_neg_integer()}.
 -type form_id() :: {function | spec, atom(), non_neg_integer()}.
+-type formatter_protocol() :: none | legacy | strict.
+-type local_formatter_info() ::
+        #{protocol := formatter_protocol(),
+          roots := ordsets:ordset(fa()),
+          exports := ordsets:ordset(fa()),
+          related_fas := ordsets:ordset(fa()),
+          related_ids := ordsets:ordset(form_id()),
+          related_forms := #{form_id() => term()}}.
 -type macro_environment() ::
         astranaut_macro_registry:macro_environment().
 -type local_macro_whitelist_control() ::
@@ -39,7 +47,8 @@
               #{term() => #{whitelist := disabled | ordsets:ordset(fa()),
                             result := term()}}}.
 -type workflow_context() :: #{source_view := [term()],
-                              compile_opts := [compile:option()]}.
+                              compile_opts := [compile:option()],
+                              formatter_info := local_formatter_info()}.
 -type expansion_request() ::
         #{closure_ids := ordsets:ordset(form_id()),
           closure_fas := ordsets:ordset(fa()),
@@ -76,13 +85,16 @@ handle_form(
            State1 <- register_return(
                        FAs, Options, SourceView,
                        MacroEnvironment, State),
+           FormatterInfo = maps:get(formatter_info, State1),
+           WorkflowContext = #{source_view => SourceView,
+                               compile_opts => CompileOpts,
+                               formatter_info => FormatterInfo},
            State2 <- prepare_declaration(
                        FAs,
-                       #{source_view => SourceView,
-                         compile_opts => CompileOpts},
+                       WorkflowContext,
                        State1),
            Definitions = local_macro_definitions(
-                           FAs, Options, ClauseMap, State2, Context),
+                           FAs, Options, FormatterInfo, State2, Context),
            Declarations = maps:get(declarations, State2, #{}),
            return({keep, Definitions,
                    State2#{declarations =>
@@ -160,15 +172,13 @@ validate_closure_roots_defined(Options, ClauseMap) ->
     end.
 
 local_macro_definitions(
-  FAs, Options, ClauseMap, State,
+  FAs, Options, FormatterInfo, State,
   #{module := Module,
     global_macro_opts := GlobalMacroOpts0}) ->
     LocalMacroModule = maps:get(local_macro_module, State),
     GlobalMacroOpts =
-        case maps:is_key({format_error, 1}, ClauseMap) of
-            true -> GlobalMacroOpts0#{formatter => LocalMacroModule};
-            false -> GlobalMacroOpts0#{formatter => astranaut_macro}
-        end,
+        formatter_options(FormatterInfo, LocalMacroModule,
+                          GlobalMacroOpts0),
     maps:from_list(
       [{FA,
         local_macro_options(
@@ -195,9 +205,11 @@ remove_declarations(Forms, State) ->
              not maps:is_key(Form, Declarations)].
 
 finish_attribute_pass(Forms, CompileOpts, State) ->
+    FormatterInfo = maps:get(formatter_info, State),
     do([ return ||
            WorkflowContext = #{source_view => Forms,
-                               compile_opts => CompileOpts},
+                               compile_opts => CompileOpts,
+                               formatter_info => FormatterInfo},
            RetainRoots = retain_roots(Forms),
            {_FinalLocalEnv, FinalSkipIds, State1} <-
                finalize(RetainRoots, WorkflowContext, State),
@@ -326,9 +338,10 @@ register(FAs, Options, SourceView,
            macro_options := _} = MacroEnvironment,
          State)
   when is_list(FAs), is_map(Options) ->
+    State1 = declaration_formatter_state(SourceView, State),
     CandidateLocalMap = local_macro_entries(MacroMap),
     do_register(FAs, Options, SourceView, MacroEnvironment,
-                CandidateLocalMap, State).
+                CandidateLocalMap, State1).
 
 -spec do_register([fa()], map(), [term()], macro_environment(),
                   map(), state()) ->
@@ -779,37 +792,102 @@ reject_locked_mutation(Forms, State) ->
         [Form | _] -> {error, {illegal_locked_form_mutation, Form}}
     end.
 
+formatter_options(#{protocol := strict}, LocalMacroModule, GlobalMacroOpts) ->
+    GlobalMacroOpts#{formatter => LocalMacroModule};
+formatter_options(#{protocol := _Protocol}, _LocalMacroModule,
+                  GlobalMacroOpts) ->
+    GlobalMacroOpts#{formatter => astranaut_macro}.
+
+declaration_formatter_state(_SourceView, #{formatter_info := _} = State) ->
+    State;
+declaration_formatter_state(SourceView, State) ->
+    ClauseMap = function_clauses_map(SourceView, #{}),
+    State#{formatter_info =>
+               formatter_info_for_source(ClauseMap, SourceView)}.
+
+formatter_info_for_source(ClauseMap, SourceView) ->
+    formatter_info_with_closure(local_formatter_info(ClauseMap), SourceView).
+
+local_formatter_info(ClauseMap) ->
+    Protocol = formatter_protocol(ClauseMap),
+    FormatterFunctions = case Protocol of
+                             strict ->
+                                 [FA || FA <- [{format_error, 1},
+                                               {format_error, 2}],
+                                        maps:is_key(FA, ClauseMap)];
+                             legacy -> [];
+                             none -> []
+                         end,
+    FormatterFAs = ordsets:from_list(FormatterFunctions),
+    #{protocol => Protocol,
+      roots => FormatterFAs,
+      exports => FormatterFAs,
+      related_fas => ordsets:new(),
+      related_ids => ordsets:new(),
+      related_forms => #{}}.
+
+-spec formatter_protocol(#{term() => term()}) -> formatter_protocol().
+formatter_protocol(ClauseMap) ->
+    case {maps:is_key({format_error, 1}, ClauseMap),
+          maps:is_key({format_error, 2}, ClauseMap)} of
+        {true, _} -> strict;
+        {false, true} -> legacy;
+        {false, false} -> none
+    end.
+
+formatter_info_with_closure(
+  #{roots := FormatterRoots} = FormatterInfo, SourceView) ->
+    FormMap = forms_id_map(SourceView),
+    {ok, FormatterRelated, _FunctionCallAnalysis} =
+        closure(FormatterRoots, FormMap, #{}, #{}, ordsets:new()),
+    RelatedIds = closure_ids(FormatterRelated, FormMap),
+    FormatterInfo#{related_fas => FormatterRelated,
+                   related_ids => RelatedIds,
+                   related_forms => maps:with(RelatedIds, FormMap)}.
+
 %% Generic macro expansion is performed by astranaut_macro before this
 %% boundary. This module owns selection and assembly of the cumulative local
 %% macro module, followed by its sequential replacement within one transform.
 -spec load_local_macro_forms(module(), ordsets:ordset(fa()),
                              ordsets:ordset(fa()),
                              #{form_id() => term()}, [term()],
-                             [compile:option()]) -> astranaut_return:struct(term()).
+                             [compile:option()], local_formatter_info()) ->
+          astranaut_return:struct(term()).
 load_local_macro_forms(_LocalModule, [], _LocalMacroRelatedFunctions,
                        _CompiledForms,
-                       _SourceForms, _CompileOpts) ->
+                       _SourceForms, _CompileOpts, _FormatterInfo) ->
     astranaut_return:return(ok);
-load_local_macro_forms(LocalModule, LocalMacroFunctions,
+load_local_macro_forms(LocalModule, Members,
                        LocalMacroRelatedFunctions,
-                       CompiledForms, SourceForms, CompileOpts) ->
+                       CompiledForms, SourceForms, CompileOpts,
+                       #{related_fas := FormatterRelated,
+                         exports := FormatterExports}) ->
     MaterializedForms = materialize_forms(SourceForms, CompiledForms),
+    SelectedFunctions = ordsets:union(
+                          ordsets:from_list(Members),
+                          ordsets:union(LocalMacroRelatedFunctions,
+                                        FormatterRelated)),
+    ExportFunctions = ordsets:union(
+                        ordsets:from_list(Members), FormatterExports),
     Forms = select_local_macro_forms(
-              LocalModule, LocalMacroRelatedFunctions, MaterializedForms),
+              LocalModule, SelectedFunctions, MaterializedForms),
     compile_local_macro_forms(
-      LocalMacroFunctions, Forms, CompileOpts).
+      ExportFunctions, Forms, CompileOpts).
 
 %% Execute pure plan data in two explicit stages. ExpansionValidator prepares
 %% canonical forms first; GenerationCompiler then consumes only those forms.
 -spec execute_plan([compilation_boundary()], workflow_context(), state()) ->
           astranaut_return:struct(state()).
-execute_plan([], _WorkflowContext, State) ->
+execute_plan(Plan, WorkflowContext, State) ->
+    execute_plan_1(Plan, thread_formatter_info(WorkflowContext, State), State).
+
+execute_plan_1([], _WorkflowContext, State) ->
     astranaut_return:return(State);
-execute_plan([Boundary | Rest], WorkflowContext, State) ->
+execute_plan_1([Boundary | Rest], WorkflowContext, State) ->
     Members = maps:get(members, Boundary),
     case Members of
         [] ->
-            execute_plan(Rest, WorkflowContext, State);
+            execute_plan_1(Rest, WorkflowContext, State);
         _ ->
             do([ return ||
                    PreparedState <- prepare_requests(
@@ -817,9 +895,12 @@ execute_plan([Boundary | Rest], WorkflowContext, State) ->
                                       WorkflowContext, State),
                    State1 <- compile_boundary(
                                Boundary, WorkflowContext, PreparedState),
-                   execute_plan(Rest, WorkflowContext, State1)
+                   execute_plan_1(Rest, WorkflowContext, State1)
                ])
     end.
+
+thread_formatter_info(WorkflowContext, #{formatter_info := FormatterInfo}) ->
+    WorkflowContext#{formatter_info => FormatterInfo}.
 
 -spec compile_boundary(compilation_boundary(), workflow_context(), state()) ->
           astranaut_return:struct(state()).
@@ -837,40 +918,36 @@ compile_boundary(#{members := Members, requests := Requests} = Boundary,
                                       ordsets:union(
                                         maps:get(closure_ids, Request), Acc)
                               end, ordsets:new(), Requests),
-              Canonical = maps:get(canonical_expanded_forms, State, #{}),
-              case [Id || Id <- RequiredIds, not maps:is_key(Id, Canonical)] of
-                  [] ->
-                      BoundaryForms = maps:with(RequiredIds, Canonical),
-                      CompiledForms = maps:merge(
-                                        maps:get(compiled_forms, State),
-                                        BoundaryForms),
-                      HasFormatter = has_function(
-                                       format_error, 1, SourceView),
-                      LocalFunctions = maybe_add_formatter(
-                                         ordsets:from_list(Members),
-                                         HasFormatter),
-                      Related0 = lists:foldl(
-                                   fun(Request, Acc) ->
-                                           ordsets:union(
-                                             maps:get(closure_fas, Request), Acc)
-                                   end, ordsets:new(), Requests),
-                      Related = maybe_add_formatter(
-                                  Related0, HasFormatter),
-                      do([ return ||
-                             load_local_macro_forms(
-                               maps:get(local_macro_module, State),
-                               LocalFunctions, Related, CompiledForms,
-                               SourceView,
-                               maps:get(compile_opts, WorkflowContext)),
-                             State1 = commit_compiled(
-                                        Members, CompiledForms, State),
-                             Committed = maps:put(
-                                           BoundaryKey,
-                                           maps:get(generation, State1),
-                                           maps:get(committed_boundaries,
-                                                    State1, #{})),
-                             return(State1#{committed_boundaries => Committed})
-                         ]);
+            Canonical = maps:get(canonical_expanded_forms, State, #{}),
+            case [Id || Id <- RequiredIds, not maps:is_key(Id, Canonical)] of
+                [] ->
+                    BoundaryForms = maps:with(RequiredIds, Canonical),
+                    CompiledForms = maps:merge(
+                                      maps:get(compiled_forms, State),
+                                      BoundaryForms),
+                    FormatterInfo = maps:get(formatter_info,
+                                             WorkflowContext),
+                    Related0 = lists:foldl(
+                                 fun(Request, Acc) ->
+                                         ordsets:union(
+                                           maps:get(closure_fas, Request), Acc)
+                                 end, ordsets:new(), Requests),
+                    do([ return ||
+                           load_local_macro_forms(
+                             maps:get(local_macro_module, State),
+                             Members, Related0, CompiledForms,
+                             SourceView,
+                             maps:get(compile_opts, WorkflowContext),
+                             FormatterInfo),
+                           State1 = commit_compiled(
+                                      Members, CompiledForms, State),
+                           Committed = maps:put(
+                                         BoundaryKey,
+                                         maps:get(generation, State1),
+                                         maps:get(committed_boundaries,
+                                                  State1, #{})),
+                           return(State1#{committed_boundaries => Committed})
+                       ]);
                   [Missing | _] ->
                       astranaut_return:error_fail(
                         {missing_canonical_local_macro_form, Missing})
@@ -1046,22 +1123,6 @@ cache_form_result(FormId, Fingerprint, Whitelist, Form, State) ->
         {ok, State1} -> astranaut_return:return({Form, State1});
         {error, Error} -> astranaut_return:error_fail(Error)
     end.
-
--spec maybe_add_formatter(ordsets:ordset(fa()), boolean()) ->
-          ordsets:ordset(fa()).
-maybe_add_formatter([], _HasFormatter) -> [];
-maybe_add_formatter(Functions, true) ->
-    ordsets:add_element({format_error, 1}, Functions);
-maybe_add_formatter(Functions, false) ->
-    Functions.
-
-has_function(Name, Arity, Forms) ->
-    lists:any(
-      fun({function, _Pos, Name0, Arity0, _Clauses}) ->
-              Name0 =:= Name andalso Arity0 =:= Arity;
-         (_Form) ->
-              false
-      end, Forms).
 
 -spec materialize_forms([term()], #{form_id() => term()}) -> [term()].
 materialize_forms(Forms, CompiledForms) ->
