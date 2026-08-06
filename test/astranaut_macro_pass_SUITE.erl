@@ -187,7 +187,8 @@ test_macro_pass_closure_roots_missing_error(Config) ->
               lists:member({missing_helper, 1}, Missing);
          (_) ->
               false
-      end),
+      end,
+      []),
     ok.
 
 test_macro_pass_closure_roots_union(_Config) ->
@@ -216,7 +217,9 @@ test_macro_pass_local_body_environment_mutation_error(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{1, astranaut_macro,
+        {missing_macro_formatter, macro_pass_local_body_env_error_test}}]),
     ok.
 
 test_macro_pass_locked_spec_mutation_error(Config) ->
@@ -227,7 +230,9 @@ test_macro_pass_locked_spec_mutation_error(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{1, astranaut_macro,
+        {missing_macro_formatter, macro_pass_locked_spec_error_test}}]),
     ok.
 
 test_macro_pass_final_expands_outside_snapshot(_Config) ->
@@ -289,7 +294,11 @@ test_macro_pass_generated_macro_options(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{3, astranaut_macro,
+        {missing_macro_formatter, macro_pass_boot}},
+       {5, astranaut_macro,
+        {missing_macro_formatter, macro_pass_depth}}]),
     ok.
 
 test_macro_pass_attribute_buffer(_Config) ->
@@ -305,7 +314,9 @@ test_macro_pass_attribute_buffer_cross_depth(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{2, astranaut_macro,
+        {missing_macro_formatter, macro_pass_depth}}]),
     ok.
 
 test_macro_pass_attribute_buffer_self_depth(Config) ->
@@ -316,7 +327,9 @@ test_macro_pass_attribute_buffer_self_depth(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{2, astranaut_macro,
+        {missing_macro_formatter, macro_pass_depth}}]),
     ok.
 
 test_macro_pass_attribute_buffer_total_depth(Config) ->
@@ -327,7 +340,9 @@ test_macro_pass_attribute_buffer_total_depth(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{2, astranaut_macro,
+        {missing_macro_formatter, macro_pass_depth}}]),
     ok.
 
 test_macro_pass_export_helper_unlocked(Config) ->
@@ -336,7 +351,7 @@ test_macro_pass_export_helper_unlocked(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assert(
        lists:any(
@@ -353,6 +368,11 @@ test_macro_pass_export_helper_unlocked(Config) ->
             (_) ->
                  false
          end, Errors)),
+    ?assertEqual(
+       [{4, astranaut_macro,
+         {missing_macro_formatter,
+          macro_pass_export_helper_unlocked_test}}],
+       Warnings),
     ok.
 
 test_macro_pass_local_environment_mutation_errors(Config) ->
@@ -360,15 +380,21 @@ test_macro_pass_local_environment_mutation_errors(Config) ->
                macro_pass_local_import_error_test, Config),
     Forms2 = astranaut_test_lib:test_module_forms(
                macro_pass_local_macro_error_test, Config),
+    {[], [{_WarningFile1, Warnings1}]} =
+        astranaut_test_lib:realize_with_baseline(
+          astranaut_test_lib:get_baseline(yep, Forms1),
+          astranaut_return:run_error(
+            astranaut_test_lib:compile_test_forms(Forms1))),
     ?assertEqual(
-       {[], []},
-       astranaut_test_lib:realize_with_baseline(
-         astranaut_test_lib:get_baseline(yep, Forms1),
-         astranaut_return:run_error(
-           astranaut_test_lib:compile_test_forms(Forms1)))),
+       [{1, astranaut_macro,
+         {missing_macro_formatter, macro_pass_local_import_error_test}}],
+       Warnings1),
     {[{_File,
        [{3, astranaut_macro,
-         {undefined_macro, generated_local, 0}}]}], []} =
+         {undefined_macro, generated_local, 0}}]}],
+     [{_WarningFile2,
+       [{1, astranaut_macro,
+         {missing_macro_formatter, macro_pass_local_macro_error_test}}]}]} =
         astranaut_test_lib:realize_with_baseline(
           astranaut_test_lib:get_baseline(yep, Forms2),
           astranaut_return:run_error(
@@ -383,7 +409,9 @@ test_macro_pass_locked_snapshot_mutation_error(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{1, astranaut_macro,
+        {missing_macro_formatter, macro_pass_locked_helper_error_test}}]),
     ok.
 
 test_local_macro_compile_does_not_wait_for_source_module_lock(_Config) ->
@@ -410,7 +438,17 @@ test_local_macro_compile_does_not_wait_for_source_module_lock(_Config) ->
           end),
     try
         receive
-            {compile_return, Return} -> ?assert(is_list(Return))
+            {compile_return, {warning, Forms, Warnings}} ->
+                ?assert(is_list(Forms)),
+                ?assertEqual(
+                   [{"macro_local_unique_compile_test.erl",
+                     [{2, astranaut_lib,
+                       {astranaut_macro,
+                        {missing_macro_formatter,
+                         macro_local_unique_compile_test}}}]}],
+                   Warnings);
+            {compile_return, Return} ->
+                ?assert(is_list(Return))
         after 5000 ->
             error(local_macro_compile_waited_for_source_module_lock)
         end
@@ -421,21 +459,24 @@ test_local_macro_compile_does_not_wait_for_source_module_lock(_Config) ->
     end,
     ok.
 
-assert_macro_pass_error(Module, Config, MatchError) ->
+assert_macro_pass_error(Module, Config, MatchError, ExpectedWarnings) ->
     Forms = astranaut_test_lib:test_module_forms(Module, Config),
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], WarningFiles} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    Warnings = lists:append([FileWarnings || {_WarningFile, FileWarnings} <-
+                                                     WarningFiles]),
     ?assert(
        lists:any(
          fun({_Line, astranaut_macro, Error}) ->
                  MatchError(Error);
             (_) ->
                  false
-         end, Errors)),
-    astranaut_test_lib:assert_formatted_messages(Errors).
+      end, Errors)),
+    ?assertEqual(ExpectedWarnings, Warnings),
+    astranaut_test_lib:assert_formatted_messages(Errors ++ Warnings).
 
 local_macro_lifecycle_forms(Module, Value) ->
     File = atom_to_list(Module) ++ ".erl",

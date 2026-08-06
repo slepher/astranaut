@@ -74,10 +74,12 @@ init(#{module := Module}) ->
 
 handle_form(
   {attribute, Pos, local_macro, Attr} = Form,
-  #{source_view := SourceView,
+  #{module := SourceModule,
+    source_view := SourceView,
     compile_opts := CompileOpts,
     macro_environment := MacroEnvironment} = Context,
   State) ->
+    FormatterDetected = maps:is_key(formatter_info, State),
     ClauseMap = function_clauses_map(SourceView, #{}),
     do([ return ||
            {FAs, Options} <-
@@ -89,6 +91,8 @@ handle_form(
            WorkflowContext = #{source_view => SourceView,
                                compile_opts => CompileOpts,
                                formatter_info => FormatterInfo},
+           maybe_missing_formatter_warning(
+             FormatterDetected, FormatterInfo, SourceModule),
            State2 <- prepare_declaration(
                        FAs,
                        WorkflowContext,
@@ -101,6 +105,13 @@ handle_form(
                                maps:put(Form, {Pos, FAs},
                                         Declarations)}})
        ]).
+
+maybe_missing_formatter_warning(true, _FormatterInfo, _SourceModule) ->
+    astranaut_return:return(ok);
+maybe_missing_formatter_warning(false, #{protocol := present}, _SourceModule) ->
+    astranaut_return:return(ok);
+maybe_missing_formatter_warning(false, #{protocol := missing}, SourceModule) ->
+    astranaut_return:warning({missing_macro_formatter, SourceModule}).
 
 register_return(FAs, Options, SourceView, MacroEnvironment, State) ->
     case register(FAs, Options, SourceView, MacroEnvironment, State) of

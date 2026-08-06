@@ -87,7 +87,7 @@ test_uniform_macro_override_error(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
        [{2, astranaut_macro,
@@ -97,6 +97,10 @@ test_uniform_macro_override_error(Config) ->
           #{macro_module := macro_uniform_override_error_test,
             function := same_name, arity := 1}}}],
        Errors),
+    ?assertEqual(
+       [{2, astranaut_macro,
+         {missing_macro_formatter, macro_uniform_override_error_test}}],
+       Warnings),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -106,7 +110,7 @@ test_uniform_import_override_error(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
        [{2, astranaut_macro,
@@ -115,6 +119,10 @@ test_uniform_import_override_error(Config) ->
           #{macro_module := macro_uniform_a, function := to_a, arity := 1},
           #{macro_module := macro_uniform_b, function := to_b, arity := 1}}}],
        Errors),
+    ?assertEqual(
+       [{-4, astranaut_macro,
+         {missing_macro_formatter, macro_uniform_b}}],
+       Warnings),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -144,7 +152,10 @@ test_uniform_external_after_local_error(Config) ->
               true;
          (_) ->
               false
-      end),
+      end,
+      [{2, astranaut_macro,
+        {missing_macro_formatter,
+         macro_uniform_external_after_local_error_test}}]),
     ok.
 
 test_uniform_macro_error(Config) ->
@@ -153,7 +164,7 @@ test_uniform_macro_error(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
        [{3, macro_uniform_a,
@@ -162,6 +173,10 @@ test_uniform_macro_error(Config) ->
            [{atom, _, b},
             {tuple, _, [{atom, _, from_b}, {atom, _, ok}]}]}}}],
        Errors),
+    ?assertEqual(
+       [{-2, astranaut_macro,
+         {missing_macro_formatter, macro_uniform_b}}],
+       Warnings),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
@@ -204,7 +219,7 @@ test_uniform_local_macro_invalid_return(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
        [{3, astranaut_macro,
@@ -216,7 +231,11 @@ test_uniform_local_macro_invalid_return(Config) ->
             reason := invalid_node,
             expected_role := expression}}}],
        Errors),
-    astranaut_test_lib:assert_formatted_messages(Errors),
+    ?assertEqual(
+       [{-2, astranaut_macro,
+         {missing_macro_formatter, macro_uniform_invalid_local_return_test}}],
+       Warnings),
+    astranaut_test_lib:assert_formatted_messages(Errors ++ Warnings),
     ok.
 
 test_macro_validator_slot_errors(Config) ->
@@ -286,7 +305,7 @@ test_uniform_macro_max_depth(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     ?assertMatch(
        [{3, astranaut_macro,
@@ -294,16 +313,22 @@ test_uniform_macro_max_depth(Config) ->
           {macro_uniform_a, recurse_a},
           [{integer, _, 12}]}}],
        Errors),
+    ?assertEqual(
+       [{-2, astranaut_macro,
+         {missing_macro_formatter, macro_uniform_b}}],
+       Warnings),
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
 
-assert_macro_error(Module, Config, MatchError) ->
+assert_macro_error(Module, Config, MatchError, ExpectedWarnings) ->
     Forms = astranaut_test_lib:test_module_forms(Module, Config),
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{_File, Errors}], WarningFiles} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    Warnings = lists:append([FileWarnings || {_WarningFile, FileWarnings} <-
+                                                     WarningFiles]),
     ?assert(
        lists:any(
          fun({_Line, astranaut_macro, Error}) ->
@@ -311,4 +336,5 @@ assert_macro_error(Module, Config, MatchError) ->
             (_) ->
                  false
          end, Errors)),
-    astranaut_test_lib:assert_formatted_messages(Errors).
+    ?assertEqual(ExpectedWarnings, Warnings),
+    astranaut_test_lib:assert_formatted_messages(Errors ++ Warnings).

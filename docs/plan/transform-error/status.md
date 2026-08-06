@@ -18,11 +18,11 @@
 
 ## Progress
 
-- Current task: Task 1 — atomic `to_compiler` adapter and pure `/1` protocol migration
-- Current phase: handoff
-- Latest completed boundary: Task 1 committed as `ae32f6c` after independent verification and Sol Code Review 2 passed
-- Exact next action: execute the recorded continuity decision by reusing Sol for Task 2 planning after confirming the current repository packet
-- Blocker: none
+- Current task: Task 2 — missing macro formatter warning and final acceptance
+- Current phase: committing
+- Latest completed boundary: accepted Task 2 implementation/test/fixture paths and workflow artifacts are staged; cached scope and diff check passed
+- Exact next action: commit the staged Task 2 change set with subject `Warn on missing macro formatters`, then record the hash and final Goal status
+- Blocker: none; dialyzer baseline exception remains recorded and must match exactly in independent verification
 
 ## Active task evidence
 

@@ -75,6 +75,10 @@ format_error({non_exported_formatter, Module}) ->
 format_error({unloaded_formatter_module, Module}) ->
     io_lib:format(
       "formatter module ~p could not be loaded.", [Module]);
+format_error({missing_macro_formatter, Module}) ->
+    io_lib:format(
+      "macro provider ~p does not export format_error/1; using astranaut_macro formatter.",
+      [Module]);
 format_error(invalid_macro_attribute) ->
     io_lib:format("invalid attribute macro call: macro not found", []);
 format_error({max_macro_expansion_depth_exceeded,

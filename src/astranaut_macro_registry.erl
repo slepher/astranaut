@@ -41,6 +41,7 @@
         #{module := module(),
           file := file:filename(),
           global_macro_opts := map(),
+          missing_formatters := ordsets:ordset(module()),
           module_macro_maps := map(),
           macro_map := macro_map(),
           effective_macro_map := macro_map(),
@@ -58,6 +59,7 @@ new(Module, File, GlobalMacroOpts) ->
     #{module => Module,
       file => File,
       global_macro_opts => GlobalMacroOpts,
+      missing_formatters => ordsets:new(),
       module_macro_maps => #{},
       macro_map => #{},
       effective_macro_map => #{},
@@ -82,14 +84,15 @@ macro_definition_validator() ->
 -spec apply_directive(term(), state()) ->
           astranaut_return:struct({keep | consume, state()}).
 apply_directive(
-  {attribute, _Pos, import_macro, _Attr} = Form,
+  {attribute, _Pos, import_macro, ProviderModule} = Form,
   #{global_macro_opts := GlobalMacroOpts,
     module := Module,
     file := File,
     macro_map := MacroMap,
-    effective_macro_map := EffectiveMacroMap} = State) ->
+    effective_macro_map := EffectiveMacroMap,
+    missing_formatters := MissingFormatters} = State) ->
     case import_macro_form(GlobalMacroOpts, Form) of
-        {ok, ModuleMacroMap} ->
+        {ok, ModuleMacroMap, FormatterProtocol} ->
             Effective = effective_module_macro_maps(
                           File, Module, ModuleMacroMap),
             NewMap = uniform_imported_macro_map(Effective),
@@ -100,11 +103,20 @@ apply_directive(
                    ModuleMacroMaps = maps:merge(
                                        maps:get(module_macro_maps, State),
                                        Effective),
+                   MissingFormatters1 = note_missing_formatter(
+                                           FormatterProtocol,
+                                           ProviderModule,
+                                           MissingFormatters),
+                   State1 = set_effective_macro_map(
+                              EffectiveMerged,
+                              State#{module_macro_maps => ModuleMacroMaps,
+                                     macro_map => Merged,
+                                     missing_formatters =>
+                                         MissingFormatters1}),
+                   maybe_missing_formatter_warning(
+                     FormatterProtocol, ProviderModule, MissingFormatters),
                    return({consume,
-                           set_effective_macro_map(
-                             EffectiveMerged,
-                             State#{module_macro_maps => ModuleMacroMaps,
-                                    macro_map => Merged})})
+                           State1})
                ]);
         {error, Error} ->
             astranaut_return:error_fail(Error)
@@ -359,8 +371,10 @@ import_macro_form(
         {file, _} ->
             Macros = analyze_module_macros(Module),
             Exports = Module:module_info(exports),
-            GlobalMacroOpts1 = formatter_opts(
-                                 Module, Exports, GlobalMacroOpts),
+            {GlobalMacroOpts1, FormatterProtocol} = formatter_opts(
+                                                     Module,
+                                                     Exports,
+                                                     GlobalMacroOpts),
             Macros1 =
                 maps:fold(
                   fun({Function, Arity}, MacroOptions, Acc) ->
@@ -375,7 +389,7 @@ import_macro_form(
                                              arity => Arity},
                           maps:put({Function, Arity}, MacroOptions2, Acc)
                   end, #{}, Macros),
-            {ok, #{Module => Macros1}};
+            {ok, #{Module => Macros1}, FormatterProtocol};
         false ->
             {error, {import_macro_failed, Module}}
     end;
@@ -386,8 +400,22 @@ import_macro_form(
 
 formatter_opts(Module, Functions, MacroOpts) ->
     case lists:member({format_error, 1}, Functions) of
-        true -> MacroOpts#{formatter => Module};
-        false -> MacroOpts#{formatter => astranaut_macro}
+        true -> {MacroOpts#{formatter => Module}, present};
+        false -> {MacroOpts#{formatter => astranaut_macro}, missing}
+    end.
+
+note_missing_formatter(present, _Module, MissingFormatters) ->
+    MissingFormatters;
+note_missing_formatter(missing, Module, MissingFormatters) ->
+    ordsets:add_element(Module, MissingFormatters).
+
+maybe_missing_formatter_warning(present, _Module, _MissingFormatters) ->
+    astranaut_return:return(ok);
+maybe_missing_formatter_warning(missing, Module, MissingFormatters) ->
+    case ordsets:is_element(Module, MissingFormatters) of
+        true -> astranaut_return:return(ok);
+        false ->
+            astranaut_return:warning({missing_macro_formatter, Module})
     end.
 
 is_loaded(Module) ->
