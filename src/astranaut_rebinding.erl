@@ -11,7 +11,7 @@
 -include("do.hrl").
 
 %% API
--export([parse_transform/2, format_error/1]).
+-export([parse_transform/2, format_error/1, format_error/2]).
 
 -record(rebinding_options, {global_options, fun_options}).
 %%%===================================================================
@@ -31,11 +31,19 @@ parse_transform(Forms, _Options) ->
            ]),
     astranaut_return:to_compiler(Return).
 
-format_error(Message) ->
-    case io_lib:deep_char_list(Message) of
-        true -> Message;
-        _    -> io_lib:write(Message)
-    end.
+-spec format_error(term()) -> term().
+format_error(Error) ->
+    format_error(Error, #{}).
+
+-spec format_error(term(), map()) -> term().
+format_error(Error, Options) ->
+    astranaut_lib:format_error(
+      Error, Options, fun format_error_1/1,
+      fun astranaut:format_error/2).
+
+-spec format_error_1(term()) -> term().
+format_error_1({invalid_rebinding_fun, _Function} = Error) ->
+    io_lib:write(Error).
 %%%===================================================================
 %%% load options
 %%%===================================================================
