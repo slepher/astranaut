@@ -17,7 +17,8 @@ init_per_suite(Config0) ->
     astranaut_test_lib:load_data_modules(
       Config, [macro_example, macro_uniform_a, macro_uniform_b,
                macro_missing_formatter_provider,
-               macro_only_v2_formatter_provider]).
+               macro_only_v2_formatter_provider,
+               macro_error_external_provider]).
 
 end_per_suite(_Config) ->
     ok.
@@ -39,7 +40,8 @@ all() ->
      test_macro_invalid_attr_errors,
      test_use_macro_errors,
      test_macro_format_error_predefined_errors,
-     test_macro_sibling_errors].
+     test_macro_sibling_errors,
+     test_macro_external_error_ownership].
 
 test_macro_with_warnings(Config) ->
     Forms = astranaut_test_lib:test_module_forms(
@@ -77,8 +79,10 @@ test_macro_with_error(Config) ->
     Baseline = astranaut_test_lib:get_baseline(yep, Forms),
     Return = astranaut_test_lib:compile_test_forms(Forms),
     ErrorStruct = astranaut_return:run_error(Return),
-    {[{_File, Errors}], [{_WarningFile, Warnings}]} =
+    {[{ErrorFile, Errors}], [{WarningFile, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertEqual("macro_with_error.erl", filename:basename(ErrorFile)),
+    ?assertEqual("macro_with_error.erl", filename:basename(WarningFile)),
     [{2, astranaut_macro,
       {invalid_import_macro_attr, {invalid_macro_tuple}}},
      {3, astranaut_macro,
@@ -93,8 +97,11 @@ test_macro_with_error(Config) ->
       {undefined_macro, undefined_macro_2, 0}},
      {9, astranaut_macro,
       {undefined_macro, undefined_macro_3, 0}},
-     {13, Local,
-      {macro_exception, _MFA, [], _StackTrace}},
+     {13, astranaut_macro,
+      {macro_exception,
+       #{function := exception_error, arity := 0, local := true} = ExceptionMFA,
+       [],
+       {error, foo, ExceptionStackTrace}}},
      {16, Local, bar},
      {27, astranaut_macro,
        {max_macro_expansion_depth_exceeded,
@@ -104,6 +111,9 @@ test_macro_with_error(Config) ->
        [{10, astranaut_macro,
          {missing_macro_formatter, macro_example}}],
        Warnings),
+    ?assertEqual(#{function => exception_error, arity => 0, local => true},
+                 ExceptionMFA),
+    ?assert(is_list(ExceptionStackTrace)),
     assert_local_macro_module(macro_with_error, Local),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
@@ -427,51 +437,57 @@ test_macro_sibling_errors(Config) ->
               macro_sibling_errors_test, Config),
     ErrorStruct = astranaut_return:run_error(
                     astranaut_test_lib:compile_test_forms(Forms)),
-    {[{_File, Errors}], []} =
+    {[{File, Errors}], []} =
         astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
-    ?assertEqual(3, length(Errors)),
-    ?assert(
-       lists:any(
-         fun({_Pos, _Formatter,
-              {macro_exception,
-               #{function := raise_macro}, [], _Exception}}) ->
-                 true;
-            ({_Pos, astranaut_macro,
-              {local_macro_diagnostic, _Local,
-               {macro_exception,
-                #{function := raise_macro}, [], _Exception}, _Message}}) ->
-                 true;
-            (_) ->
-                 false
-         end, Errors)),
-    ?assert(
-       lists:any(
-         fun({_Pos, _Formatter, sibling_return_error}) ->
-                 true;
-            ({_Pos, astranaut_macro,
-              {local_macro_diagnostic, _Local,
-               sibling_return_error, _Message}}) ->
-                 true;
-            (_) ->
-                 false
-         end, Errors)),
-    ?assert(
-       lists:any(
-         fun({_Pos, astranaut_macro,
-              {invalid_macro_return,
-               #{current_macro :=
-                     #{mfa :=
-                           #{function := invalid_return_macro}}}}}) ->
-                 true;
-            (_) ->
-                 false
-         end, Errors)),
-    Local = sibling_local_formatter(Errors),
+    ?assertEqual("macro_sibling_errors_test.erl", filename:basename(File)),
+    [{18, astranaut_macro,
+      {invalid_macro_return,
+       #{current_macro :=
+             #{mfa :=
+                   #{function := invalid_return_macro, arity := 0}}} =
+           InvalidReturnDetail}},
+     {18, astranaut_macro,
+      {macro_exception,
+       #{function := raise_macro, arity := 0, local := true} = ExceptionMFA,
+       [],
+       {error, sibling_exception, ExceptionStackTrace}}},
+     {18, Local, sibling_return_error}] = Errors,
+    ?assertEqual(#{function => raise_macro, arity => 0, local => true},
+                 ExceptionMFA),
+    ?assert(is_list(ExceptionStackTrace)),
+    ?assertMatch(#{current_macro := _}, InvalidReturnDetail),
     Exports = Local:module_info(exports),
     ?assert(lists:member({format_error, 1}, Exports)),
     ?assertEqual(io_lib:write(sibling_return_error),
                  Local:format_error(sibling_return_error)),
     astranaut_test_lib:assert_formatted_messages(Errors),
+    ok.
+
+test_macro_external_error_ownership(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(
+              macro_error_external_test, Config),
+    Baseline = astranaut_test_lib:get_baseline(yep, Forms),
+    ErrorStruct = astranaut_return:run_error(
+                    astranaut_test_lib:compile_test_forms(Forms)),
+    {[{ErrorFile, Errors}], [{WarningFile, Warnings}]} =
+        astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
+    ?assertEqual("macro_error_external_test.erl",
+                 filename:basename(ErrorFile)),
+    ?assertEqual("macro_error_external_test.erl",
+                 filename:basename(WarningFile)),
+    [{5, astranaut_macro,
+      {macro_exception,
+       #{module := macro_error_external_provider,
+         function := raise, arity := 0} = ExceptionMFA,
+       [],
+       {error, external_macro_exception, ExceptionStackTrace}}},
+     {6, macro_error_external_provider, external_return_error}] = Errors,
+    [{7, macro_error_external_provider, external_return_warning}] = Warnings,
+    ?assertEqual(#{module => macro_error_external_provider,
+                   function => raise, arity => 0}, ExceptionMFA),
+    ?assert(is_list(ExceptionStackTrace)),
+    astranaut_test_lib:assert_formatted_messages(Errors),
+    astranaut_test_lib:assert_formatted_messages(Warnings),
     ok.
 
 assert_macro_format_error(Error) ->
@@ -483,26 +499,3 @@ assert_local_macro_module(SourceModule, LocalModule) ->
     Prefix = atom_to_list(SourceModule) ++ "__local_macro__",
     ?assert(lists:prefix(Prefix, atom_to_list(LocalModule))),
     ?assertMatch({file, _}, code:is_loaded(LocalModule)).
-
-sibling_local_formatter(Errors) ->
-    Prefix = atom_to_list(macro_sibling_errors_test) ++ "__local_macro__",
-    Candidates =
-        lists:flatmap(
-          fun({_Pos, Formatter, _Error}) when is_atom(Formatter) ->
-                  case lists:prefix(Prefix, atom_to_list(Formatter)) of
-                      true -> [Formatter];
-                      false -> []
-                  end;
-             ({_Pos, astranaut_macro,
-               {local_macro_diagnostic, Local, _Error, _Message}}) ->
-                  [Local];
-             (_) ->
-                  []
-          end, Errors),
-    case Candidates of
-        [Local | _] ->
-            assert_local_macro_module(macro_sibling_errors_test, Local),
-            Local;
-        [] ->
-            ct:fail({missing_sibling_local_formatter, Errors})
-    end.

@@ -587,7 +587,8 @@ recover_macro_call(Macro, Monad) ->
       end).
 
 invoke_macro_function(
-  #{module := Module, function := Function, arguments := Arguments} = Macro) ->
+  #{pos := Pos, module := Module, function := Function,
+    arguments := Arguments} = Macro) ->
     try erlang:apply(Module, Function, Arguments) of
         Return ->
             astranaut_traverse:scoped_state(
@@ -604,7 +605,8 @@ invoke_macro_function(
                   end, Stacktrace),
             Error = macro_exception(
                       Arguments, Class, Exception, StackTraces1, Macro),
-            astranaut_traverse:fail(Error)
+            astranaut_traverse:update_pos(
+              Pos, astranaut_macro, astranaut_traverse:fail(Error))
     end.
 
 process_macro_return(Return, Macro, Opts) ->

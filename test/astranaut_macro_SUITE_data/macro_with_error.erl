@@ -16,9 +16,7 @@
 -export([format_error/1]).
 
 format_error(bar) ->
-    "oops, bar";
-format_error({macro_exception, _, _, _} = MacroError) ->
-    astranaut_macro:format_error(MacroError).
+    "oops, bar".
 
 -baseline(yep).
 

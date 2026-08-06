@@ -1,37 +1,71 @@
 # Task 1 Code Review — Round 1
 
-Verdict: `passed`
+Verdict: `changes_required`
 
 ## Findings
 
-No material findings remain.
+### P1 — Frozen sibling-order contract disagrees with the real implementation evidence
 
-## Evidence
+The Task 1 contract requires the local sibling fixture to preserve diagnostics in
+“source sibling order” as:
 
-### Facts
+1. framework-owned `macro_exception`;
+2. generated-local `sibling_return_error`;
+3. framework-owned `invalid_macro_return`.
 
-- The real task diff modifies exactly the four frozen OpenSpec paths. Its final text matches the Task 1 edit map, including the sole required final correction at `openspec/changes/macro-error/specs/macro-error-ownership/spec.md:82`: the system MUST remove the existing `astranaut_struct:format_error/1` facade.
-- Framework ownership remains fixed at reason production (`spec.md:5-22`), while successful user error/warning computations retain the descriptor registry formatter (`spec.md:25-45`). The catch-branch boundary is explicit and does not extend the framework formatter over successful computations (`design.md:33-53`; `tasks.md:9`).
-- The documents prohibit formatter proxy/fallback ownership inference and retain pure domain `format_error/1` callbacks with `astranaut_lib:format_error/1,2` as the shared adapter (`spec.md:47-73`; `design.md:57-61`). This agrees with the committed transform-error contract (`openspec/changes/transform-error/specs/transform-error-formatting/spec.md:26-83,128-141`) and implementation (`src/astranaut_lib.erl:612-632`).
-- Struct ownership remains coherent: the non-owning `astranaut_struct` `/1` facade is removed, registry fallback selects `astranaut_macro`, and `astranaut_struct_transformer` retains its own pure `/1` domain callback (`spec.md:75-89`; `design.md:63-71`).
-- Diagnostic reason, position, file, exception payload, classification, sibling order/count, AST result, and recovery invariants remain normative (`spec.md:91-108`). The later documentation target is consistently the Macro sections of both `README.md` and `README.zh.md` (`design.md:82-87`; `tasks.md:13-17`).
-- The only non-task tracked diff is the pre-existing repository-local workflow skill correction. Its added gate freezes accepted end state, paths, invariants, forbidden alternatives, self-tests, and stop conditions; returns unresolved choices to Sol; limits dispatcher action to completeness checks; and requires exact final-state/edit maps for specification rewrites (`.codex/skills/local-workflow/SKILL.md:218-236`). This conforms to `task-1-code-review-1-skill-change-spec.md` without weakening role or verification boundaries.
-- Coding-worker evidence satisfies its contract: one exact ownership-spec replacement; strict OpenSpec validation exited 0; forbidden residual search exited 1 with empty output; positive terminology search, scoped diff check, diff-name check, and status check exited as expected; no staging or commit occurred.
-- Independent-runner evidence satisfies its contract: all eight commands completed without edits; initial/final status was identical; strict validation exited 0; forbidden search exited 1 empty; positive search exited 0 with 37 matching lines; scoped diff check exited 0; names were exactly the four owned OpenSpec files; stat was 59 insertions and 34 deletions; no artifacts were produced.
-- Current status scope is clean for this workflow boundary: the repository-local skill, the four owned OpenSpec files, and the untracked `docs/plan/macro-error/` initiative directory are the only reported paths. No product source, tests, README, unrelated OpenSpec, staged content, or deletion is present.
+This is frozen in `docs/plan/macro-error/task-1.md:123-125` and repeated by the
+implementation step at `:179-181`. The real test diff instead asserts the established
+traversal order at `test/astranaut_macro_error_SUITE.erl:444-454`:
 
-### Inference
+1. `invalid_macro_return`;
+2. `macro_exception`;
+3. generated-local `sibling_return_error`.
 
-The actual four-file specification patch is executable against the committed formatter adapter and preserves all frozen ownership, adapter, scope, and diagnostic invariants. Both required evidence layers are complete and gating-successful, so Task 1 is ready for dispatcher-owned explicit staging and commit.
+The coding worker and independent runner both report the macro-error suite passing,
+so the implementation evidence establishes the latter order. The source fixture
+places the three sibling calls inside one quoted tuple, and no production change in
+this task changes traversal ordering. Reordering production diagnostics to satisfy
+the contract would violate the task’s preservation invariant and expand scope.
 
-### Assumptions and Unresolved Questions
+Smallest valid correction: revise the Sol-owned Task 1 contract before accepting the
+task so it freezes preservation of the established diagnostic order and names the
+observed sequence `invalid_macro_return`, `macro_exception`, then
+`sibling_return_error`. Do not change product code or weaken the test to accept
+multiple orders. After the contract correction, rerun the coding self-test packet
+and obtain a fresh independent runner packet against the final contract before
+review resumes.
 
-None.
+## Review evidence
 
-## Continuity Recommendation
+- Production diff is limited to the existing `invoke_macro_function/1` catch branch:
+  `src/astranaut_macro_expander.erl:589-610`. It binds only the catch-produced
+  failure through `astranaut_traverse:update_pos(Pos, astranaut_macro, ...)` and
+  leaves the outer descriptor formatter boundary unchanged.
+- The two existing fixture changes remove only `macro_exception` proxy clauses;
+  `bar` and `sibling_return_error` remain direct domain clauses
+  (`test/astranaut_macro_SUITE_data/macro_with_error.erl:16-20` and
+  `macro_sibling_errors_test.erl:9-14`).
+- The two declared external fixtures are present and cover an external exception,
+  returned error, and returned warning
+  (`test/astranaut_macro_SUITE_data/macro_error_external_provider.erl:9-25`,
+  `macro_error_external_test.erl:8-17`).
+- The external assertions distinguish `astranaut_macro` for the exception from
+  `macro_error_external_provider` for returned diagnostics
+  (`test/astranaut_macro_error_SUITE.erl:466-488`).
+- Coding evidence is complete mechanically: compile exit 0, macro-error CT 18
+  passed, macro-local CT 41 passed, and diff check exit 0 after the contract
+  whitespace correction.
+- Independent runner evidence is complete mechanically: all listed commands exited
+  0, both suites passed with 18 and 41 tests, no command timed out or was
+  interrupted, and the targeted scope contains the four tracked Task 1 files plus
+  the two declared untracked fixtures.
+- No additional implementation, scope, proxy, or capability-reuse finding remains
+  from the supplied patch and evidence. The contract mismatch above is the sole
+  blocking finding.
 
-Next Task: `task-2`
+## Routing decision
 
-Next Sol: `reuse`
-
-Reason: Task 2 directly implements the production-point ownership boundary frozen by Task 1; retaining the specification and adapter context reduces reinterpretation risk.
+Do not route product rework yet. First apply the exact contract correction described
+under P1, then route the unchanged six-path implementation to the coding worker to
+rerun its complete Coding Self-Tests, followed by a fresh independent runner. Request
+the next Sol review only after both evidence layers are complete.

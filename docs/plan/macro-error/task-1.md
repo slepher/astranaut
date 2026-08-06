@@ -1,185 +1,288 @@
-# Task 1 Contract — Freeze macro-error OpenSpec on the committed formatter adapter
+# Task 1 Contract — Macro exception formatter ownership
 
-## Objective
+## Goal and objective
 
 Goal: `macro-error`.
 
-Complete the interrupted specification-only reconciliation by applying the frozen edit map below to exactly four macro-error OpenSpec files. The coding worker performs no design, reconciliation, requirement selection, or prose invention. Product implementation, tests, and README edits belong to later tasks.
+Implement macro exception formatter ownership at the invocation boundary and add
+focused local/external regression coverage. The accepted end state is:
 
-## Decisive Evidence
+- the catch branch that constructs `macro_exception` records it with
+  `astranaut_macro` at production;
+- a successfully invoked macro's returned error/warning computation continues to
+  receive the descriptor/provider or generated-local formatter;
+- `invalid_macro_return` and every other framework reason remain owned by
+  `astranaut_macro`;
+- exception class/reason/stack payload/MFA/arguments, position, file,
+  error/warning classification, diagnostic order/count, AST results, and failed-call
+  sibling recovery are unchanged; and
+- only fixture clauses whose sole purpose is forwarding `macro_exception` are
+  removed. Real user-domain formatter clauses remain.
 
-Facts:
+The later `astranaut_struct` universal fallback and `astranaut_lib` API change are
+explicitly out of scope and are not reopened by this task.
 
-- The committed transform-error capability makes `astranaut_lib:format_error/1,2` the compiler adapter and shared fallback, while domain formatters expose only pure `format_error/1` clauses (`openspec/changes/transform-error/specs/transform-error-formatting/spec.md:26-83`).
-- That capability removed `dispatch_error/3`, public `format_default_error/2`, domain `format_error/2`, options, and `default => throw`; adapter-scope `error:function_clause` falls back without stack inspection or rethrow (`openspec/changes/transform-error/specs/transform-error-formatting/spec.md:28-50,128-141`; `openspec/changes/transform-error/design.md:46-87`).
-- Current production code implements that adapter as `astranaut_lib:format_error/1,2`, catches adapter-scope `error:function_clause`, and keeps default formatting private (`src/astranaut_lib.erl:612-632`).
-- `astranaut_struct` actually exports and defines only the forwarding `format_error/1` facade (`src/astranaut_struct.erl:18-76`); there is no `astranaut_struct:format_error/2` facade to remove.
-- The maintained future documentation targets are the `# Macro` sections in `README.md` and `README.zh.md`, not a standalone `macro_error.md`.
-- The interrupted worker changed exactly the four owned OpenSpec files. Its current text already removes the stale protocol, preserves ownership-at-production, identifies the real `/1` facade, and names both README targets, except that `specs/macro-error-ownership/spec.md:82` still phrases facade removal as a deferred implementation note instead of the required normative final state.
+## Decisive evidence and approach
 
-Inference:
+Current source establishes the narrow implementation boundary:
 
-- The smallest coherent final patch is to preserve the current partial edits exactly and make one exact normative correction in the ownership spec. Rewriting any other accepted prose would add coding-worker discretion without changing the required capability.
+- `expand_macro_with/3` currently applies the descriptor formatter around
+  `invoke_macro_function/1` (`src/astranaut_macro_expander.erl:561-580`).
+- `invoke_macro_function/1` catches `Class:Exception:Stacktrace`, builds
+  `macro_exception`, and returns `astranaut_traverse:fail(Error)` without a
+  formatter (`src/astranaut_macro_expander.erl:589-608`). Its `Macro` map includes
+  `pos`, so the catch branch can call
+  `astranaut_traverse:update_pos(Pos, astranaut_macro, fail(Error))` directly.
+- `astranaut_traverse:update_pos/3` binds a formatter only to pending diagnostics
+  (`src/astranaut_traverse.erl:394-417`), so this catch-local binding does not
+  overwrite successful user-returned computations handled by the outer descriptor
+  boundary.
+- `process_macro_return/3` remains outside this catch and already produces
+  `invalid_macro_return` under the framework traversal boundary
+  (`src/astranaut_macro_expander.erl:610-648`).
+- Existing local coverage uses `macro_with_error` for an exception and a deliberate
+  returned error (`test/astranaut_macro_SUITE_data/macro_with_error.erl:28-47`), and
+  `macro_sibling_errors_test` covers exception, deliberate returned error, invalid
+  return, and sibling recovery (`:16-32`). Both currently contain exception-only
+  proxy clauses (`macro_with_error.erl:20-21`; `macro_sibling_errors_test.erl:13-14`).
+- Existing external formatter coverage (`macro_uniform_a`) has deliberate returned
+  errors but no external exception case, and it is not an owned Task 1 fixture
+  (`test/astranaut_macro_SUITE_data/macro_uniform_a.erl:9-13,53-57`). Therefore the
+  two new external fixtures listed below are required to prove both external paths
+  without editing an unrelated fixture.
+- The selected macro-error inputs require framework ownership at production,
+  successful user-computation ownership, preserved exception payload/recovery, and
+  removal of formatter proxies (`openspec/changes/macro-error/design.md:35-67`;
+  `openspec/changes/macro-error/specs/macro-error-ownership/spec.md:1-96,118-131`).
+  Their struct-facade conflict is later-task scope and is not touched here.
+- `lessons.md:7-27,69-96,132-145` requires correct traverse/return separation,
+  monadic state threading, and preservation of scoped traversal state. The fix must
+  use the existing traversal API and must not manually construct formatted
+  diagnostics.
 
-Unresolved questions: none.
+Approach: add `Pos` to the existing `invoke_macro_function/1` pattern, wrap only its
+catch-produced failure with `update_pos(Pos, astranaut_macro, ...)`, then tighten the
+existing local assertions and add one external provider/consumer pair. Do not move
+the outer formatter boundary or route by reason shape.
 
-## Fixed Decisions and Invariants
+## Exact owned paths and modules
 
-- Macro diagnostic ownership is fixed at reason production and stored in the internal diagnostic. It is never inferred from reason shape or selected during final formatting.
-- Macro registration, import, parsing, expansion, exception wrapping, recursion-limit, and return-validation reasons remain owned by `astranaut_macro`.
-- Error and warning computations deliberately returned by a successfully invoked user macro remain owned by the descriptor's registry formatter.
-- The catch branch that produces `macro_exception` explicitly selects `astranaut_macro`; its formatter override must not cover successful user-returned computations.
-- Providers without `format_error/1` continue to use `astranaut_macro`; transform-error's existing missing-formatter warning behavior is unchanged and is not redesigned here.
-- Domain formatters are pure direct `format_error/1` clauses. They do not call the shared adapter, contain a generic catch-all, proxy another formatter, or expose a domain `/2` API.
-- The only `/2` retained in this specification is the current shared adapter `astranaut_lib:format_error/2`. No operative requirement for `dispatch_error/3`, public `format_default_error/2`, domain `format_error/2`, formatter options, throw mode, nested-stack inspection, or `function_clause` rethrow may remain.
-- Adapter-scope unknown-reason and `error:function_clause` behavior is inherited unchanged from the committed transform-error capability; macro-error adds no fallback behavior.
-- `astranaut_struct` has one actual forwarding facade, `format_error/1`, and the capability requires its later removal. `astranaut_struct_transformer:format_error/1` remains the owner of struct-transform reasons.
-- `README.md` and `README.zh.md` are later documentation targets. They are not edited by this task. No `macro_error.md` or `macro-error.md` target exists.
-- Reason terms, positions, files, error/warning classification, MFA, arguments, stack payload, sibling order/count, AST results, and failed-call recovery remain unchanged.
+The coding worker owns exactly these implementation/test paths:
 
-## Exact Final State and Edit Map
+- `src/astranaut_macro_expander.erl` — catch-local formatter binding only.
+- `test/astranaut_macro_error_SUITE.erl` — local/external test registration,
+  assertions, and helpers for this behavior only.
+- `test/astranaut_macro_SUITE_data/macro_with_error.erl` — remove its
+  `macro_exception` proxy; preserve `format_error(bar)` and existing macro bodies.
+- `test/astranaut_macro_SUITE_data/macro_sibling_errors_test.erl` — remove its
+  `macro_exception` proxy; preserve `format_error(sibling_return_error)` and all
+  sibling macro bodies.
+- `test/astranaut_macro_SUITE_data/macro_error_external_provider.erl` — **required
+  new fixture**. It exports `format_error/1`, exports external macros
+  `raise/0`, `return_error/0`, and `return_warning/0`, raises
+  `external_macro_exception` from `raise/0`, returns
+  `{error, external_return_error}` from `return_error/0`, and returns a quoted AST
+  with `external_return_warning` from `return_warning/0`. Its direct formatter
+  clauses cover only `external_return_error` and `external_return_warning`.
+- `test/astranaut_macro_SUITE_data/macro_error_external_test.erl` — **required new
+  fixture**. It imports `macro_error_external_provider`, invokes `raise/0`,
+  `return_error/0`, and `return_warning/0` as ordered sibling calls in `run/0`, and
+  has the existing baseline marker so diagnostic positions can be checked.
 
-The current worktree versions of the four owned documents are the editing baseline. “Accept verbatim” means the coding worker must leave that current text byte-for-byte unchanged. The only authorized content edit beyond the existing partial patch is the exact replacement specified below.
+No other path is owned. In particular, do not edit any OpenSpec file, README,
+`src/astranaut_struct.erl`, `src/astranaut_lib.erl`, registry module, local-generation
+module, `status.md`, skill file, dependency, generated source, or workflow artifact.
 
-### `openspec/changes/macro-error/proposal.md`
+## Frozen behavior and invariants
 
-Accepted final state: accept the entire current worktree file verbatim.
+1. The only production change is equivalent to:
 
-- `## Why`: accept the dependency paragraph naming the committed transform-error capability, `astranaut_lib:format_error/1,2`, and pure domain `format_error/1` clauses.
-- `## What Changes`: accept ownership at diagnostic recording, framework ownership, successful user-computation ownership, the actual `/1` struct facade, and inherited fallback mechanics.
-- `## Capabilities`: accept unchanged.
-- `## Impact`: accept the current adapter/fallback dependency, facade migration statement, and diagnostic-preservation statement.
-- Required corrections: none.
-- Must not remain or be reintroduced: `astranaut_macro:format_error/2` proxy guidance; operative `dispatch_error/3`; public `format_default_error/2`; domain `/2`; throw/rethrow semantics; `astranaut_struct:format_error/1,2`.
+   ```erlang
+   invoke_macro_function(
+     #{pos := Pos, module := Module, function := Function,
+       arguments := Arguments} = Macro) ->
+       ...
+       catch
+           Class:Exception:Stacktrace ->
+               ...
+               Error = macro_exception(...),
+               astranaut_traverse:update_pos(
+                 Pos, astranaut_macro, astranaut_traverse:fail(Error))
+       end.
+   ```
 
-### `openspec/changes/macro-error/design.md`
+   Preserve the existing stack trimming, `macro_exception/5` payload construction,
+   and `recover_macro_call/2` path exactly.
 
-Accepted final state: accept the entire current worktree file verbatim.
+2. The outer `update_pos(Pos, Formatter, invoke_macro_function(Macro))` remains in
+   place. Successful returned computations are never preformatted by the catch fix.
 
-- `## Context`: accept the registry boundary, current exception-ownership defect, existing invalid-return boundary, and transform-error adapter dependency.
-- `## Goals / Non-Goals`: accept all current bullets, including production-point ownership, successful-computation inheritance, pure `/1`, adapter reuse, and explicit non-redesign boundaries.
-- `## Decisions`: accept all current subsections and their present text: catch-branch formatter override; registry formatter as user-domain protocol; no formatter fallback chain; removal of the actual `/1` struct facade; continued struct-transformer ownership.
-- `## Risks / Trade-offs`: accept all current bullets verbatim.
-- `## Migration Plan`: accept the six current ordered steps, including later updates to both README macro sections and later product verification.
-- `## Open Questions`: remain `无。`.
-- Required corrections: none.
-- Must not remain or be reintroduced: the old strict-dispatch design; public/default formatter APIs; domain `/2`; options or throw mode as supported behavior; nested-stack distinction or rethrow; another formatter fallback chain; `/1,2` struct-facade wording; `macro_error.md`.
+3. Local exception diagnostics are raw tuples whose formatter is `astranaut_macro`
+   and whose reason remains `{macro_exception, MFA, Arguments, {Class, Reason,
+   Stack}}`; local deliberate returned `bar` remains owned by the generated local
+   formatter. The local sibling fixture must preserve the established traversal
+   order exactly: framework-owned `invalid_macro_return`, framework-owned
+   `macro_exception`, and generated-local `sibling_return_error`. The production
+   patch must not reorder diagnostics, and the test must assert this exact sequence.
 
-### `openspec/changes/macro-error/specs/macro-error-ownership/spec.md`
+4. External fixture assertions must prove one raw `macro_exception` with
+   formatter `astranaut_macro` and MFA for
+   `macro_error_external_provider:raise/0`, while the returned error and warning
+   retain formatter `macro_error_external_provider` and their exact user reasons.
+   Exception and returned diagnostics must remain in source order, with the
+   deliberate warning still collected after the error path.
 
-Accepted final state: accept every current worktree requirement and scenario verbatim except the one exact replacement below.
+5. Assertions must check the preserved positions against the fixture call sites,
+   exact error/warning classification, exact reason terms, MFA/function/arity,
+   arguments, and `{Class, Reason, Stack}` payload shape. Stack values may vary only
+   according to the existing runtime stack representation; the implementation must
+   not trim or remap them differently.
 
-- Preserve unchanged: framework ownership and its external exception, local exception, and invalid-return scenarios.
-- Preserve unchanged: successful user error/warning registry ownership and provider-without-formatter scenarios.
-- Preserve unchanged: ownership-not-inferred-by-fallback requirement and its domain-owned reason, adapter fallback, adapter `function_clause`, and no-framework-proxy scenarios.
-- Preserve unchanged: struct-transformer ownership and pure `/1` adapter boundary.
-- Preserve unchanged: all diagnostic content, payload, ordering, classification, and recovery requirements and scenarios.
-- Exact required correction in `#### Scenario: astranaut_struct 没有自身领域 reason`:
+6. Existing invalid-return ownership, final adapter-produced messages, returned AST
+   forms, failed-call recovery, sibling count/order, and file association remain
+   unchanged. Use raw internal diagnostics for identity assertions and the existing
+   `astranaut_test_lib:assert_formatted_messages/1` path for message safety.
 
-  Replace exactly:
+## Forbidden alternatives
 
-  ```text
-  - **THEN** 后续实现移除 `astranaut_struct` 现有的 `/1` facade
-  ```
+- Do not apply `astranaut_macro` to the whole invocation computation or move the
+  descriptor formatter boundary.
+- Do not format by inspecting `Reason`, retry another formatter, add a proxy,
+  fallback chain, generic formatter clause, `/2` formatter, or registry special case.
+- Do not change `macro_exception` reason shape, stack trimming, MFA construction,
+  arguments, recovery, or `astranaut_macro:format_error/1`.
+- Do not alter `invalid_macro_return` or any other framework reason path.
+- Do not modify `macro_uniform_a`; the dedicated external fixture is required.
+- Do not remove real domain clauses (`bar`, `sibling_return_error`) from fixtures.
+- Do not touch the later struct fallback/API decision or any of its paths.
+- Do not edit OpenSpec, README, status, skill, staging, commits, or generated output.
 
-  with exactly:
+## Ordered implementation steps
 
-  ```text
-  - **THEN** 系统 MUST 移除 `astranaut_struct` 现有的 `format_error/1` facade
-  ```
+1. Confirm the current diff has no pre-existing change in the six owned paths and
+   leave all existing unrelated workflow/OpenSpec changes untouched.
+2. In `src/astranaut_macro_expander.erl`, add `pos := Pos` to the existing
+   `invoke_macro_function/1` map pattern and replace only the catch branch's final
+   `astranaut_traverse:fail(Error)` with the explicit catch-local
+   `astranaut_traverse:update_pos(Pos, astranaut_macro,
+   astranaut_traverse:fail(Error))`. Preserve all surrounding logic verbatim.
+3. In `macro_with_error.erl`, remove only the two-line
+   `format_error({macro_exception, ...})` proxy clause. Keep the export, `bar` clause,
+   and all macro declarations/bodies.
+4. In `macro_sibling_errors_test.erl`, remove only the two-line
+   `format_error({macro_exception, ...})` proxy clause. Keep the export,
+   `sibling_return_error` clause, and all four local macro definitions.
+5. Add the exact external provider and consumer fixtures specified above. Register
+   the provider in `init_per_suite/1` and add one `all/0` case in
+   `astranaut_macro_error_SUITE.erl`.
+6. Tighten `test_macro_with_error` to require `astranaut_macro` for the local
+   exception and the generated local formatter for `bar`, including payload/MFA and
+   positions. Tighten `test_macro_sibling_errors` to require the three raw diagnostics
+   in the established traversal order `invalid_macro_return`, `macro_exception`,
+   `sibling_return_error`, with framework ownership for the first two and
+   generated-local ownership for the deliberate returned error; assert this exact
+   sequence and retain recovery/count assertions. The production patch must not
+   reorder diagnostics.
+7. Add the external test case to assert exception/provider ownership, exact reasons,
+   payload shape, positions, classification, order/count, returned-warning
+   collection, and formatted messages. Do not weaken assertions to accept a user
+   formatter for `macro_exception` or a `local_macro_diagnostic` proxy wrapper.
+8. Run the Coding Self-Tests below and report every raw result. Do not stage or
+   commit.
 
-- Keep the following existing `AND` line unchanged: `- **AND** registry 为其 macro descriptor 选择 \`astranaut_macro\``.
-- Must not remain or be reintroduced: “后续实现移除” as the requirement outcome; `astranaut_struct:format_error/1,2`; direct unknown-reason fallback inside a domain callback; generic catch-all; formatter proxy; old options/throw scenarios; nested helper-stack inspection or rethrow.
+## Stop conditions
 
-### `openspec/changes/macro-error/tasks.md`
+Stop and report exact evidence without choosing a design if:
 
-Accepted final state: accept the entire current worktree file verbatim.
+- `Macro` does not contain the required `pos` at the catch boundary, or the
+  catch-local `update_pos` would overwrite a successful returned computation;
+- the current `macro_exception/5` payload or recovery path requires modification;
+- any expected local/external raw diagnostic differs in formatter, reason, position,
+  classification, order/count, payload, or recovery;
+- the exact fixture API cannot be compiled using the existing macro fixture pattern;
+- a test requires changing a path outside the six owned paths;
+- any pre-existing change overlaps an owned path and cannot be attributed safely;
+- a proxy, fallback chain, reason dispatch, registry change, struct/API change, or
+  OpenSpec/README change appears necessary; or
+- Coding Self-Tests are missing, interrupted, stale, or failing. The worker reports
+  the command and evidence and makes no design choice.
 
-- Sections 1 and 2: accept the focused ownership assertions, production-point fix, removal of framework proxy clauses, and unchanged framework ownership audit.
-- Section 3: accept removal of the actual `/1` struct facade, preservation of struct-transformer ownership, and later updates to both `README.md` and `README.zh.md` macro sections.
-- Section 4: accept the later implementation verification checklist. Those commands describe later tasks and are not run in this specification-only task.
-- Required corrections: none.
-- Must not remain or be reintroduced: `astranaut_macro:format_error/2`; `astranaut_struct:format_error/1,2`; `macro_error.md`; any Task 1 instruction to edit product, tests, or README files.
+## Coding Self-Tests — `luna_coding_worker` only
 
-## No-Decision Rule
+Run after implementation and after every rework:
 
-The coding worker must apply only the single exact replacement above and preserve all other current text in the four files verbatim. It must not choose among alternate requirements, improve wording, translate terminology, reorder sections, add examples, normalize style, or invent migration prose. If the exact source line is absent, duplicated, or materially different, stop and report the observed line and diff; do not approximate the replacement.
+1. `rebar3 compile`
+2. `rebar3 ct --suite=test/astranaut_macro_error_SUITE.erl`
+3. `rebar3 ct --suite=test/astranaut_macro_local_SUITE.erl`
+4. `git diff --check`
 
-## Ownership, Permissions, and Forbidden Paths
+On Windows Codex sandbox, follow `AGENTS.md`: use direct escalated `rebar3 compile`
+and direct escalated suite commands rather than the sandbox wrapper. These commands
+belong to the coding worker; Sol does not run them.
 
-Owned paths, and the complete expected task change set:
+## Independent Verification — separate `luna_runner` only
 
-- `openspec/changes/macro-error/proposal.md`
-- `openspec/changes/macro-error/design.md`
-- `openspec/changes/macro-error/specs/macro-error-ownership/spec.md`
-- `openspec/changes/macro-error/tasks.md`
+Only after Coding Self-Tests pass, a separate runner with no child delegation repeats:
 
-No new files and no deletions are authorized.
+1. `rebar3 compile`
+2. `rebar3 ct --suite=test/astranaut_macro_error_SUITE.erl`
+3. `rebar3 ct --suite=test/astranaut_macro_local_SUITE.erl`
+4. `git diff --check`
+5. `git status --short`
+6. `git diff --name-only`
 
-Forbidden writes include all product source, tests, OpenSpec files outside the four owned paths, `README.md`, `README.zh.md`, `docs/plan/macro-error/**`, `status.md`, skill files, dependencies, generated output, staging, and commits. The coding worker must not delegate or spawn children. Existing changes to `.codex/skills/local-workflow/SKILL.md` and untracked `docs/plan/macro-error/` artifacts are preserved as pre-existing workflow evidence, are not worker-owned, and are not part of this task's expected commit.
+The runner returns raw command text, completion/interruption state, exit status, test
+counts, generated artifacts, and status/diff-name output. It performs no source or
+assertion audit and edits no file. Sol reviews the evidence packet only after it is
+complete.
 
-## Ordered Execution
+## Expected scope, deletions, and commit
 
-1. Confirm the exact old scenario line exists once in the current ownership spec.
-2. Apply the exact one-line replacement from the edit map.
-3. Make no other content edit.
-4. Run every Coding Self-Test exactly as listed below and return each command, exit status, and raw output.
-5. Stop without staging or committing.
+Expected tracked implementation modifications are exactly:
 
-## Stop Conditions
+- `src/astranaut_macro_expander.erl`
+- `test/astranaut_macro_error_SUITE.erl`
+- `test/astranaut_macro_SUITE_data/macro_with_error.erl`
+- `test/astranaut_macro_SUITE_data/macro_sibling_errors_test.erl`
 
-Stop immediately and report exact evidence if:
+Expected new untracked implementation fixtures, which the dispatcher may later add
+to the task commit after review, are exactly:
 
-- the exact replacement source line is absent, duplicated, or changed;
-- any accepted current partial text would need another correction to satisfy a fixed decision;
-- a requirement conflict or ambiguity requires choosing or inventing prose;
-- the committed transform-error capability or current adapter differs from the evidence above;
-- completing the edit requires any path outside the four owned files, any new file, or any deletion;
-- any product, test, README, workflow, skill, staging, commit, or unrelated OpenSpec change would be required;
-- strict validation cannot start, is interrupted, or fails for a reason that requires scope expansion;
-- approval, dependency installation, delegation, or external state is required.
+- `test/astranaut_macro_SUITE_data/macro_error_external_provider.erl`
+- `test/astranaut_macro_SUITE_data/macro_error_external_test.erl`
 
-## Coding Self-Tests
+No deletion is authorized. Existing deleted workflow artifacts and modified
+OpenSpec/plan/status/skill paths are pre-existing and remain outside this task. No
+other untracked path is permitted in the accepted task scope; ignored build output
+is not stageable task content.
 
-Run by the assigned coding worker. This specification-only task runs no test, build, compile, lint, CT, xref, dialyzer, or acceptance command.
+Proposed dispatcher commit subject: `Bind macro exceptions to astranaut_macro`.
 
-1. `openspec validate macro-error --strict`
-2. `rg -n 'dispatch_error/3|format_default_error/2|default[[:space:]]*=>[[:space:]]*throw|astranaut_(macro|struct|struct_transformer):format_error/2|macro_error\.md|macro-error\.md|保留.*stacktrace.*重新抛出|检查.*stack.*重新抛出' openspec/changes/macro-error`
-3. `rg -n 'astranaut_lib:format_error/1,2|format_error/1|astranaut_macro|astranaut_struct_transformer|README\.md|README\.zh\.md' openspec/changes/macro-error`
-4. `git diff --check -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-5. `git diff --name-only -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-6. `git diff --stat -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-7. `git status --short`
+## Completion criteria
 
-Expected results: command 1 exits 0; command 2 exits 1 with no matches; commands 3-7 exit 0. Command 5 lists exactly all four owned files. Command 7 may also show only the pre-existing workflow-gate skill change and untracked initiative directory described above. Any other path or exit is gating.
+Task 1 is complete only when:
 
-## Independent Verification
+- the production catch binds only catch-produced `macro_exception` to
+  `astranaut_macro` at its position;
+- local and external returned error/warning computations retain their generated-local
+  or provider formatter;
+- invalid return and other framework reasons remain `astranaut_macro`;
+- exact local/external payload, position, file, class, MFA, arguments, stack shape,
+  classification, sibling order/count, AST recovery, and failed-call recovery
+  assertions pass;
+- both exception-only fixture proxies are removed while real domain clauses remain;
+- both Coding Self-Tests and independent runner evidence pass;
+- Sol review reports `passed`; and
+- the dispatcher confirms exact scope, stages only these six implementation paths,
+  performs commit-scope checks, and commits with the proposed subject.
 
-Run later by a separate independent runner against the same worktree. The runner changes no file. No product test, build, compile, lint, CT, xref, dialyzer, or acceptance command is authorized for this task.
+## Workflow authority and next routing
 
-1. `git status --short`
-2. `git diff --check -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-3. `git diff --name-only -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-4. `git diff --stat -- openspec/changes/macro-error/proposal.md openspec/changes/macro-error/design.md openspec/changes/macro-error/specs/macro-error-ownership/spec.md openspec/changes/macro-error/tasks.md`
-5. `openspec validate macro-error --strict`
-6. `rg -n 'dispatch_error/3|format_default_error/2|default[[:space:]]*=>[[:space:]]*throw|astranaut_(macro|struct|struct_transformer):format_error/2|macro_error\.md|macro-error\.md|保留.*stacktrace.*重新抛出|检查.*stack.*重新抛出' openspec/changes/macro-error`
-7. `rg -n 'astranaut_lib:format_error/1,2|format_error/1|astranaut_macro|astranaut_struct_transformer|README\.md|README\.zh\.md' openspec/changes/macro-error`
-8. `git status --short`
+The coding worker owns implementation and Coding Self-Tests. The separate
+`luna_runner` owns Independent Verification. Sol remains read-only for source/tests,
+does not run commands, and writes no status, review, or implementation file during
+this task. The dispatcher owns attribution, status, staging, and commit operations.
 
-Expected results: commands 1-5 and 7-8 exit 0; command 6 exits 1 with no matches. Command 3 lists exactly all four owned files. Initial and final status are identical and contain no unexpected path.
-
-## Expected Scope, Commit, and Completion
-
-- Expected tracked task modifications: exactly the four owned macro-error OpenSpec files.
-- Permitted untracked paths: only the pre-existing `docs/plan/macro-error/` workflow artifacts; the coding worker does not modify them.
-- Authorized deletions: none.
-- Expected product, test, README, dependency, generated, staged, and committed changes by the coding worker: none.
-- Proposed dispatcher commit subject: `Align macro error specs with formatter adapter`.
-
-Completion requires the exact edit map, all fixed decisions and invariants, strict validation exit 0, forbidden residual search exit 1 with no matches, positive terminology search exit 0, clean diff check, exact four-file task scope, completed independent runner evidence, and a passed Sol review. Only the dispatcher may stage and commit afterward.
-
-## Continuity Recommendation After Pass
-
-- Next Task: `task-2`.
-- Next Sol: `reuse`.
-- Reason: Task 2 directly implements the production-point ownership boundary frozen here; retained source and specification context reduces reinterpretation risk.
+After a passed review and dispatcher commit: `Next Task: task-2`; `Next Sol: reuse`;
+reason: Task 2 directly consumes this task's formatter-at-production boundary and
+the same macro diagnostic evidence.

@@ -9,9 +9,7 @@
 -export([run/0, format_error/1]).
 
 format_error(sibling_return_error) ->
-    io_lib:write(sibling_return_error);
-format_error({macro_exception, _, _, _} = MacroError) ->
-    astranaut_macro:format_error(MacroError).
+    io_lib:write(sibling_return_error).
 
 -local_macro([generate_sibling_errors/0,
               raise_macro/0, return_error_macro/0, invalid_return_macro/0]).
