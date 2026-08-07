@@ -1,10 +1,10 @@
-{application, astranaut,
- [{description, "Erlang Ast traverse and macro."},
-  {vsn, "0.13.1"},
-  {registered, []},
-  {applications, [kernel, stdlib, compiler, syntax_tools]},
-  {env,[]},
-  {modules, []},
-  {licenses, ["MIT"]},
-  {links, [{"Github", "https://www.github.com/slepher/astranaut"}]}
- ]}.
+{application, astranaut, [
+    {description, "Erlang Ast traverse and macro."},
+    {vsn, "0.13.1"},
+    {registered, []},
+    {applications, [kernel, stdlib, compiler, syntax_tools]},
+    {env, []},
+    {modules, []},
+    {licenses, ["MIT"]},
+    {links, [{"Github", "https://www.github.com/slepher/astranaut"}]}
+]}.

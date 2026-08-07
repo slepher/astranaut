@@ -22,123 +22,156 @@
 %%%===================================================================
 
 -spec parse_transform(astranaut:forms(), [compile:option()]) ->
-          astranaut:parse_transform_return().
+    astranaut:parse_transform_return().
 parse_transform(Forms, Options) ->
     Module = astranaut_lib:analyze_forms_module(Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
     astranaut_return:to_compiler(
-      do([ return ||
-             GlobalMacroOpts0 <-
-                 astranaut_macro_registry:default_options(),
-             {AttributeForms, FunctionEnv} <-
-                 run_attribute_pass(
-                   Module, File, GlobalMacroOpts0, Forms, Options),
-             FunctionForms <-
-                 run_function_macro_pass(
-                   AttributeForms, FunctionEnv),
-             format_forms(
-               FunctionForms,
-               maps:get(global_macro_opts, FunctionEnv)),
-             return(FunctionForms)
-         ])).
+        do([
+            return
+         || GlobalMacroOpts0 <-
+                astranaut_macro_registry:default_options(),
+            {AttributeForms, FunctionEnv} <-
+                run_attribute_pass(
+                    Module, File, GlobalMacroOpts0, Forms, Options
+                ),
+            FunctionForms <-
+                run_function_macro_pass(
+                    AttributeForms, FunctionEnv
+                ),
+            format_forms(
+                FunctionForms,
+                maps:get(global_macro_opts, FunctionEnv)
+            ),
+            return(FunctionForms)
+        ])
+    ).
 
 -spec format_error(term()) -> term().
 format_error({import_macro_failed, Module}) ->
     io_lib:format(
-      "could not import macro from module ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.",
-      [Module]);
+        "could not import macro from module ~p, update compile file order in Makefile or add to erl_first_files in rebar.config to make it compile first.",
+        [Module]
+    );
 format_error({invalid_import_macro_attr, Macro}) ->
     io_lib:format(
-      "~p is not a valid module in -import_macro(~p). ",
-      [Macro, Macro]);
+        "~p is not a valid module in -import_macro(~p). ",
+        [Macro, Macro]
+    );
 format_error({unimported_macro_module, Module}) ->
     io_lib:format(
-      "-import_macro(~p). is required before use of -use_macro",
-      [Module]);
+        "-import_macro(~p). is required before use of -use_macro",
+        [Module]
+    );
 format_error({unexported_macro, Module, Function, Arity}) ->
     io_lib:format(
-      "unexported macro ~p:~p/~p.",
-      [Module, Function, Arity]);
+        "unexported macro ~p:~p/~p.",
+        [Module, Function, Arity]
+    );
 format_error({undefined_macro, Function, Arity}) ->
     io_lib:format("macro ~p/~p undefined.", [Function, Arity]);
 format_error({invalid_use_macro, Opts}) ->
     io_lib:format("invalid use macro ~p.", [Opts]);
 format_error({macro_override, MacroKey, ExistingMacro, OverridingMacro}) ->
     io_lib:format(
-      "macro ~p is already defined by ~p and cannot be overridden by ~p without force_override.",
-      [MacroKey,
-       format_macro_ref(ExistingMacro),
-       format_macro_ref(OverridingMacro)]);
+        "macro ~p is already defined by ~p and cannot be overridden by ~p without force_override.",
+        [
+            MacroKey,
+            format_macro_ref(ExistingMacro),
+            format_macro_ref(OverridingMacro)
+        ]
+    );
 format_error({non_exported_formatter, Module}) ->
     io_lib:format(
-      "format_error/1 is not exported from module ~p.", [Module]);
+        "format_error/1 is not exported from module ~p.", [Module]
+    );
 format_error({unloaded_formatter_module, Module}) ->
     io_lib:format(
-      "formatter module ~p could not be loaded.", [Module]);
+        "formatter module ~p could not be loaded.", [Module]
+    );
 format_error({missing_macro_formatter, Module}) ->
     io_lib:format(
-      "macro provider ~p does not export format_error/1; using astranaut_macro formatter.",
-      [Module]);
+        "macro provider ~p does not export format_error/1; using astranaut_macro formatter.",
+        [Module]
+    );
 format_error(invalid_macro_attribute) ->
     io_lib:format("invalid attribute macro call: macro not found", []);
-format_error({max_macro_expansion_depth_exceeded,
-              {MacroModule, Function}, Arguments}) ->
+format_error({max_macro_expansion_depth_exceeded, {MacroModule, Function}, Arguments}) ->
     io_lib:format(
-      "maximum macro expansion depth exceeded when applying macro ~p:~p with arguments ~p.",
-      [MacroModule, Function, Arguments]);
+        "maximum macro expansion depth exceeded when applying macro ~p:~p with arguments ~p.",
+        [MacroModule, Function, Arguments]
+    );
 format_error({max_macro_expansion_depth_exceeded, Function, Arguments}) ->
     io_lib:format(
-      "maximum macro expansion depth exceeded when applying macro ~p with arguments ~p.",
-      [Function, Arguments]);
+        "maximum macro expansion depth exceeded when applying macro ~p with arguments ~p.",
+        [Function, Arguments]
+    );
 format_error({macro_exception, MFA, Arguments, Exception}) ->
     io_lib:format(
-      "apply macro ~s ~p failed:~n~s",
-      [astranaut_macro_expander:format_mfa(MFA),
-       Arguments,
-       format_exception(Exception)]);
+        "apply macro ~s ~p failed:~n~s",
+        [
+            astranaut_macro_expander:format_mfa(MFA),
+            Arguments,
+            format_exception(Exception)
+        ]
+    );
 format_error({invalid_macro_return, Detail}) ->
     io_lib:format(
-      "macro ~s returned invalid AST: ~p",
-      [astranaut_macro_expander:format_mfa(
-         invalid_macro_return_mfa(Detail)),
-       Detail]);
+        "macro ~s returned invalid AST: ~p",
+        [
+            astranaut_macro_expander:format_mfa(
+                invalid_macro_return_mfa(Detail)
+            ),
+            Detail
+        ]
+    );
 format_error({invalid_closure_roots, Functions}) ->
     io_lib:format(
-      "closure_roots contains undefined functions: ~p", [Functions]);
+        "closure_roots contains undefined functions: ~p", [Functions]
+    );
 format_error({macro_capability_unavailable, Provider}) ->
     io_lib:format(
-      "requested macro capability ~p is unavailable", [Provider]);
+        "requested macro capability ~p is unavailable", [Provider]
+    );
 format_error({undefined_local_macro_retain, Functions}) ->
     io_lib:format(
-      "local_macro_retain contains undefined functions: ~p", [Functions]);
+        "local_macro_retain contains undefined functions: ~p", [Functions]
+    );
 format_error({ineffective_local_macro_retain, Functions}) ->
     io_lib:format(
-      "local_macro_retain has no effect for functions outside every local macro closure: ~p",
-      [Functions]);
+        "local_macro_retain has no effect for functions outside every local macro closure: ~p",
+        [Functions]
+    );
 format_error({duplicate_local_macro_declaration, Function}) ->
     io_lib:format(
-      "duplicate local macro declaration for ~p", [Function]);
+        "duplicate local macro declaration for ~p", [Function]
+    );
 format_error({conflicting_local_macro_closure_environment, FormId}) ->
     io_lib:format(
-      "local macro closure has conflicting expansion environments for ~p",
-      [FormId]);
+        "local macro closure has conflicting expansion environments for ~p",
+        [FormId]
+    );
 format_error({conflicting_local_macro_whitelist, FormId, Detail}) ->
     io_lib:format(
-      "local macro closure has conflicting whitelist for ~p: ~p",
-      [FormId, Detail]);
+        "local macro closure has conflicting whitelist for ~p: ~p",
+        [FormId, Detail]
+    );
 format_error({illegal_locked_form_mutation, Form}) ->
     io_lib:format(
-      "local macro expansion modified frozen form: ~p", [Form]);
+        "local macro expansion modified frozen form: ~p", [Form]
+    );
 format_error({local_macro_diagnostic, _Formatter, _Error, Message}) ->
     Message;
 format_error({illegal_macro_environment_mutation, Form}) ->
     io_lib:format(
-      "local macro expansion generated illegal macro environment form: ~p",
-      [Form]);
+        "local macro expansion generated illegal macro environment form: ~p",
+        [Form]
+    );
 format_error({illegal_local_macro_definition_mutation, Form}) ->
     io_lib:format(
-      "local macro expansion modified locked local macro snapshot form: ~p",
-      [Form]);
+        "local macro expansion modified locked local macro snapshot form: ~p",
+        [Form]
+    );
 format_error({invalid_attr, AttrName, Attr}) ->
     io_lib:format("invalid ~p macro attribute: ~p", [AttrName, Attr]);
 format_error({invalid_function_with_arity, Function}) ->
@@ -150,11 +183,13 @@ format_exception({Class, Reason, StackTrace}) ->
 -else.
 format_exception({Class, Reason, StackTrace}) ->
     io_lib:format(
-      "~p: ~p~nstacktrace:~n~p", [Class, Reason, StackTrace]).
+        "~p: ~p~nstacktrace:~n~p", [Class, Reason, StackTrace]
+    ).
 -endif.
 
 format_macro_ref(
-  #{macro_module := Module, function := Function, arity := Arity}) ->
+    #{macro_module := Module, function := Function, arity := Arity}
+) ->
     {Module, Function, Arity};
 format_macro_ref(Macro) ->
     Macro.
@@ -169,73 +204,99 @@ invalid_macro_return_mfa(#{current_macro := #{mfa := MFA}}) ->
 %%%===================================================================
 
 run_attribute_pass(
-  Module, File, GlobalMacroOpts0, Forms, CompileOpts) ->
-    do([ return ||
-           {ScannedForms, ScanState} <-
-               astranaut_macro_scan:run(
-                 Module, File, GlobalMacroOpts0, Forms, CompileOpts),
-           #{registry := Registry,
-             capability := Capability} = ScanState,
-           finalize_attribute_macro_pass(
-             File, Registry, Capability, ScannedForms, CompileOpts)
-       ]).
+    Module, File, GlobalMacroOpts0, Forms, CompileOpts
+) ->
+    do([
+        return
+     || {ScannedForms, ScanState} <-
+            astranaut_macro_scan:run(
+                Module, File, GlobalMacroOpts0, Forms, CompileOpts
+            ),
+        #{
+            registry := Registry,
+            capability := Capability
+        } = ScanState,
+        finalize_attribute_macro_pass(
+            File, Registry, Capability, ScannedForms, CompileOpts
+        )
+    ]).
 
 finalize_attribute_macro_pass(
-  _File, Registry, disabled, Forms, _CompileOpts) ->
-    do([ return ||
-           PreparedForms <-
-               astranaut_macro_registry:prepare_exports(Forms),
-           {AttributeForms, FunctionEnv0} =
-               prepare_function_environment(
-                 PreparedForms, Registry, ordsets:new()),
-           return({AttributeForms,
-                   FunctionEnv0#{capability => disabled}})
-       ]);
+    _File, Registry, disabled, Forms, _CompileOpts
+) ->
+    do([
+        return
+     || PreparedForms <-
+            astranaut_macro_registry:prepare_exports(Forms),
+        {AttributeForms, FunctionEnv0} =
+            prepare_function_environment(
+                PreparedForms, Registry, ordsets:new()
+            ),
+        return({AttributeForms, FunctionEnv0#{capability => disabled}})
+    ]);
 finalize_attribute_macro_pass(
-  File, Registry,
-  #{provider := Provider, state := ProviderState},
-  Forms, CompileOpts) ->
-    do([ return ||
-           Forms0 = apply(
-                      Provider, remove_declarations,
-                      [Forms, ProviderState]),
-           PreparedForms <-
-               astranaut_macro_registry:prepare_exports(Forms0),
-           {FinalForms, AdditionalCallers,
-            ProviderState1, Warnings} <-
-               apply(
-                 Provider, finish_attribute_pass,
-                 [PreparedForms, CompileOpts, ProviderState]),
-           {AttributeForms, FunctionEnv0} =
-               prepare_function_environment(
-                 FinalForms, Registry, AdditionalCallers),
-           FunctionEnv = FunctionEnv0#{
-                           capability =>
-                               #{provider => Provider,
-                                 state => ProviderState1}},
-           astranaut_return:then(
-             file_formatted_warnings(File, Warnings),
-             return({AttributeForms, FunctionEnv}))
-       ]).
+    File,
+    Registry,
+    #{provider := Provider, state := ProviderState},
+    Forms,
+    CompileOpts
+) ->
+    do([
+        return
+     || Forms0 = apply(
+            Provider,
+            remove_declarations,
+            [Forms, ProviderState]
+        ),
+        PreparedForms <-
+            astranaut_macro_registry:prepare_exports(Forms0),
+        {FinalForms, AdditionalCallers, ProviderState1, Warnings} <-
+            apply(
+                Provider,
+                finish_attribute_pass,
+                [PreparedForms, CompileOpts, ProviderState]
+            ),
+        {AttributeForms, FunctionEnv0} =
+            prepare_function_environment(
+                FinalForms, Registry, AdditionalCallers
+            ),
+        FunctionEnv = FunctionEnv0#{
+            capability =>
+                #{
+                    provider => Provider,
+                    state => ProviderState1
+                }
+        },
+        astranaut_return:then(
+            file_formatted_warnings(File, Warnings),
+            return({AttributeForms, FunctionEnv})
+        )
+    ]).
 
 prepare_function_environment(Forms, Registry, AdditionalCallers) ->
     MacroEnvironment =
         astranaut_macro_registry:final_macro_environment(
-          Forms, Registry),
+            Forms, Registry
+        ),
     MacroMap = maps:get(macro_map, MacroEnvironment),
     FunctionCallAnalysis =
         astranaut_macro_expander:function_call_analysis(
-          Forms, MacroMap, presence),
+            Forms, MacroMap, presence
+        ),
     DetectedCallers =
         astranaut_macro_expander:function_macro_callers(
-          FunctionCallAnalysis),
+            FunctionCallAnalysis
+        ),
     FunctionEnv =
-        #{macro_environment => MacroEnvironment,
-          function_call_analysis => FunctionCallAnalysis,
-          callers => ordsets:union(
-                       DetectedCallers, AdditionalCallers),
-          global_macro_opts =>
-              astranaut_macro_registry:global_macro_opts(Registry)},
+        #{
+            macro_environment => MacroEnvironment,
+            function_call_analysis => FunctionCallAnalysis,
+            callers => ordsets:union(
+                DetectedCallers, AdditionalCallers
+            ),
+            global_macro_opts =>
+                astranaut_macro_registry:global_macro_opts(Registry)
+        },
     {astranaut_forms:sort_forms(Forms), FunctionEnv}.
 
 file_formatted_warnings(File, Warnings) ->
@@ -248,49 +309,74 @@ file_formatted_warnings(File, Warnings) ->
 %%%===================================================================
 
 run_function_macro_pass(
-  Forms,
-  #{macro_environment := MacroEnvironment,
-    function_call_analysis := FunctionCallAnalysis,
-    callers := Callers,
-    capability := disabled}) ->
-    do([ return ||
-           Tasks = function_expansion_tasks(
-                     Callers, MacroEnvironment,
-                     FunctionCallAnalysis),
-           #{forms := ExpandedForms} <-
-               astranaut_macro_expander:expand_functions(Forms, Tasks),
-           return(ExpandedForms)
-       ]);
+    Forms,
+    #{
+        macro_environment := MacroEnvironment,
+        function_call_analysis := FunctionCallAnalysis,
+        callers := Callers,
+        capability := disabled
+    }
+) ->
+    do([
+        return
+     || Tasks = function_expansion_tasks(
+            Callers,
+            MacroEnvironment,
+            FunctionCallAnalysis
+        ),
+        #{forms := ExpandedForms} <-
+            astranaut_macro_expander:expand_functions(Forms, Tasks),
+        return(ExpandedForms)
+    ]);
 run_function_macro_pass(
-  Forms,
-  #{capability := #{provider := Provider,
-                    state := ProviderState}} = FunctionEnv) ->
-    do([ return ||
-           {ExpandedForms, _ProviderState1} <-
-               apply(Provider, run_function_pass,
-                     [Forms, FunctionEnv, ProviderState]),
-           return(ExpandedForms)
-       ]).
+    Forms,
+    #{
+        capability := #{
+            provider := Provider,
+            state := ProviderState
+        }
+    } = FunctionEnv
+) ->
+    do([
+        return
+     || {ExpandedForms, _ProviderState1} <-
+            apply(
+                Provider,
+                run_function_pass,
+                [Forms, FunctionEnv, ProviderState]
+            ),
+        return(ExpandedForms)
+    ]).
 
-function_expansion_tasks(Callers,
-                         #{macro_map := MacroMap},
-                         FunctionCallAnalysis) ->
+function_expansion_tasks(
+    Callers,
+    #{macro_map := MacroMap},
+    FunctionCallAnalysis
+) ->
     lists:foldl(
-      fun(FormId, Acc) ->
-              case maps:find(FormId, FunctionCallAnalysis) of
-                  {ok, #{form := Form,
-                         has_macro_call := HasMacroCall}} ->
-                      maps:put(
+        fun(FormId, Acc) ->
+            case maps:find(FormId, FunctionCallAnalysis) of
+                {ok, #{
+                    form := Form,
+                    has_macro_call := HasMacroCall
+                }} ->
+                    maps:put(
                         FormId,
-                        #{form => Form,
-                          macro_map => MacroMap,
-                          observation_control => disabled,
-                          has_macro_call => HasMacroCall},
-                        Acc);
-                  error ->
-                      Acc
-              end
-      end, #{}, Callers).
+                        #{
+                            form => Form,
+                            macro_map => MacroMap,
+                            observation_control => disabled,
+                            has_macro_call => HasMacroCall
+                        },
+                        Acc
+                    );
+                error ->
+                    Acc
+            end
+        end,
+        #{},
+        Callers
+    ).
 
 %%%===================================================================
 %%% Debug output
@@ -300,11 +386,14 @@ format_forms(Forms, Opts) ->
     case maps:get(debug_module, Opts, false) of
         true ->
             lists:map(
-              fun(Form) ->
-                      io:format(
+                fun(Form) ->
+                    io:format(
                         "~s~n",
-                        [astranaut_lib:ast_safe_to_string(Form)])
-              end, Forms);
+                        [astranaut_lib:ast_safe_to_string(Form)]
+                    )
+                end,
+                Forms
+            );
         false ->
             ok
     end,

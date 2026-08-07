@@ -6,27 +6,34 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [test_sort_forms,
-     test_insert_forms_original].
+    [
+        test_sort_forms,
+        test_insert_forms_original
+    ].
 
 test_sort_forms(_Config) ->
     Function = function(foo, {atom, 1, ok}),
     Forms = [Function, module_form(), eof_form()],
-    ?assertEqual([module_form(), Function, eof_form()],
-                 astranaut_forms:sort_forms(Forms)).
+    ?assertEqual(
+        [module_form(), Function, eof_form()],
+        astranaut_forms:sort_forms(Forms)
+    ).
 
 test_insert_forms_original(_Config) ->
     Original = function(foo, {atom, 1, original}),
     Replacement = function(foo, {call, 1, {atom, 1, '__original__'}, []}),
     Forms = astranaut_forms:insert_forms(
-              [Replacement], [module_form(), Original, eof_form()]),
+        [Replacement], [module_form(), Original, eof_form()]
+    ),
     ?assertMatch(
-       [{attribute, 1, module, example},
-        {function, 1, foo_1, 0, _},
-        {function, 1, foo, 0,
-         [{clause, 1, [], [], [{call, 1, {atom, 1, foo_1}, []}]}]},
-        {eof, 1}],
-       Forms).
+        [
+            {attribute, 1, module, example},
+            {function, 1, foo_1, 0, _},
+            {function, 1, foo, 0, [{clause, 1, [], [], [{call, 1, {atom, 1, foo_1}, []}]}]},
+            {eof, 1}
+        ],
+        Forms
+    ).
 
 module_form() ->
     {attribute, 1, module, example}.

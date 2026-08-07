@@ -14,15 +14,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
-
--record(uniplate_node_context, {node,
-                                withs = [],
-                                reduces = [],
-                                skip = false,
-                                up_attrs = [],
-                                entries = [],
-                                exits = []
-                               }).
+-record(uniplate_node_context, {
+    node,
+    withs = [],
+    reduces = [],
+    skip = false,
+    up_attrs = [],
+    entries = [],
+    exits = []
+}).
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -30,7 +30,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -42,7 +42,7 @@ suite() ->
 init_per_suite(Config) ->
     erlang:system_flag(backtrace_depth, 20),
     Forms = astranaut_test_lib:test_module_forms(sample_plus, Config),
-    [{forms, Forms}|Config].
+    [{forms, Forms} | Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -119,17 +119,28 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() -> 
-    [test_writer_or, test_map, test_map_attr,
-     test_reduce, test_reduce_attr, test_reduce_traverse_all,
-     test_mapfold_attr, test_f_return_list, test_all_return_list,
-     test_with_subtrees, test_af_with,
-     test_invalid_pre_transform_exception, test_invalid_post_transform_exception,
-     test_invalid_post_transform_context_exception,
-     test_invalid_post_transform_context_before_validation,
-     test_invalid_transform_maketree_exception,
-     test_invalid_node_exception, test_invalid_uniplate_subnode_exception,
-     test_invalid_transform_exception, test_invalid_subtree_transform_exception
+all() ->
+    [
+        test_writer_or,
+        test_map,
+        test_map_attr,
+        test_reduce,
+        test_reduce_attr,
+        test_reduce_traverse_all,
+        test_mapfold_attr,
+        test_f_return_list,
+        test_all_return_list,
+        test_with_subtrees,
+        test_af_with,
+        test_invalid_pre_transform_exception,
+        test_invalid_post_transform_exception,
+        test_invalid_post_transform_context_exception,
+        test_invalid_post_transform_context_before_validation,
+        test_invalid_transform_maketree_exception,
+        test_invalid_node_exception,
+        test_invalid_uniplate_subnode_exception,
+        test_invalid_transform_exception,
+        test_invalid_subtree_transform_exception
     ].
 
 %%--------------------------------------------------------------------
@@ -137,7 +148,7 @@ all() ->
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-my_test_case() -> 
+my_test_case() ->
     [].
 
 %%--------------------------------------------------------------------
@@ -160,10 +171,11 @@ test_writer_or(_Config) ->
     Writer = astranaut_monad:writer_writer(Return),
     WA =
         BindW(
-          ReturnW(1),
-          fun(A) ->
-                  Writer({A + 1, true})
-          end),
+            ReturnW(1),
+            fun(A) ->
+                Writer({A + 1, true})
+            end
+        ),
     ?assertEqual({2, true}, WA),
     Monad1 = reader,
     Bind1 = astranaut_monad:monad_bind(Monad1),
@@ -175,14 +187,16 @@ test_writer_or(_Config) ->
     Ask1 = astranaut_monad:writer_ask(Lift, astranaut_monad:monad_ask(Monad1)),
     WA1 =
         BindW1(
-          ReturnW1(1),
-          fun(A) ->
-                  BindW1(
+            ReturnW1(1),
+            fun(A) ->
+                BindW1(
                     Ask1(),
                     fun(B) ->
-                            Writer1({A + B, true})
-                    end)
-          end),
+                        Writer1({A + B, true})
+                    end
+                )
+            end
+        ),
     ?assertEqual({4, true}, WA1(3)),
     ok.
 
@@ -190,11 +204,15 @@ test_map(_Config) ->
     Ast = merl:quote("A + (B + C)"),
     Ast1 =
         astranaut:smap(
-          fun({var, _Pos, Varname}) ->
-                  {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
-             (Node) ->
-                  Node
-          end, Ast, #{traverse => pre, role => expression}),
+            fun
+                ({var, _Pos, Varname}) ->
+                    {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
+                (Node) ->
+                    Node
+            end,
+            Ast,
+            #{traverse => pre, role => expression}
+        ),
     Ast2 = merl:quote("A_1 + (B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -203,19 +221,29 @@ test_map_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Ast1 =
         astranaut:smap(
-          fun({var, _Pos, Varname}, #{pattern := true}) ->
-                  {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
-             (Node, #{}) ->
-                  case erl_syntax:type(Node) of
-                      match_expr ->
-                          astranaut_uniplate:with_subtrees(
-                            fun([MatchLeft, MatchRight]) ->
-                                    [MatchRight, astranaut_uniplate:up_attr(#{pattern => true}, MatchLeft)]
-                            end, fun lists:reverse/1, Node);
-                      _Type ->
-                          Node
-                  end
-          end, Ast, #{traverse => pre, role => expression}),
+            fun
+                ({var, _Pos, Varname}, #{pattern := true}) ->
+                    {var, _Pos, list_to_atom(atom_to_list(Varname) ++ "_1")};
+                (Node, #{}) ->
+                    case erl_syntax:type(Node) of
+                        match_expr ->
+                            astranaut_uniplate:with_subtrees(
+                                fun([MatchLeft, MatchRight]) ->
+                                    [
+                                        MatchRight,
+                                        astranaut_uniplate:up_attr(#{pattern => true}, MatchLeft)
+                                    ]
+                                end,
+                                fun lists:reverse/1,
+                                Node
+                            );
+                        _Type ->
+                            Node
+                    end
+            end,
+            Ast,
+            #{traverse => pre, role => expression}
+        ),
     Ast2 = merl:quote("E_1 = A + (D_1 = B + C)"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -224,11 +252,16 @@ test_reduce(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
-          fun({var, _Pos, Varname}, Acc) ->
-                  [Varname|Acc];
-             (_Node, Acc) ->
-                  Acc
-          end, [], Ast, #{traverse => pre}),
+            fun
+                ({var, _Pos, Varname}, Acc) ->
+                    [Varname | Acc];
+                (_Node, Acc) ->
+                    Acc
+            end,
+            [],
+            Ast,
+            #{traverse => pre}
+        ),
     ?assertEqual(['E', 'A', 'D', 'B', 'C'], lists:reverse(Acc1)),
     ok.
 
@@ -236,11 +269,16 @@ test_reduce_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
-          fun(#{node := {var, _Pos, Varname}, pattern := true}, Acc) ->
-                  [Varname|Acc];
-             (_Node, Acc) ->
-                  Acc
-          end, [], Ast, #{traverse => pre, uniplate => fun uniplate_node_attr/1}),
+            fun
+                (#{node := {var, _Pos, Varname}, pattern := true}, Acc) ->
+                    [Varname | Acc];
+                (_Node, Acc) ->
+                    Acc
+            end,
+            [],
+            Ast,
+            #{traverse => pre, uniplate => fun uniplate_node_attr/1}
+        ),
     ?assertEqual(['E', 'D'], lists:reverse(Acc1)),
     ok.
 
@@ -252,9 +290,11 @@ uniplate_node_attr(Node) ->
             {[MatchLefts, MatchRights], Context} = astranaut:uniplate(Node),
             MatchLefts1 =
                 lists:map(
-                  fun(MatchLeft) ->
-                          #{node => MatchLeft, pattern => true}
-                  end, MatchLefts),
+                    fun(MatchLeft) ->
+                        #{node => MatchLeft, pattern => true}
+                    end,
+                    MatchLefts
+                ),
             {[MatchLefts1, MatchRights], Context};
         _ ->
             astranaut:uniplate(Node)
@@ -264,15 +304,19 @@ test_reduce_traverse_all(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
-          fun(Node, Acc, #{step := Step}) ->
-                  case erl_syntax:type(Node) of
-                      match_expr ->
-                          {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
-                          [{Step, Var}|Acc];
-                      _ ->
-                          Acc
-                  end
-          end, [], Ast, #{traverse => all}),
+            fun(Node, Acc, #{step := Step}) ->
+                case erl_syntax:type(Node) of
+                    match_expr ->
+                        {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
+                        [{Step, Var} | Acc];
+                    _ ->
+                        Acc
+                end
+            end,
+            [],
+            Ast,
+            #{traverse => all}
+        ),
     ?assertEqual([{pre, 'E'}, {pre, 'D'}, {post, 'D'}, {post, 'E'}], lists:reverse(Acc1)),
     ok.
 
@@ -280,17 +324,22 @@ test_mapfold(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
         astranaut:smapfold(
-          fun({var, Pos, Varname}, Acc) ->
-                  {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
-             (Node, Acc) ->
-                  case erl_syntax:type(Node) of
-                      match_expr ->
-                          {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
-                          {Node, [Var|Acc]};
-                      _ ->
-                          {Node, Acc}
-                  end
-          end, [], Ast, #{traverse => post, role => expression}),
+            fun
+                ({var, Pos, Varname}, Acc) ->
+                    {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
+                (Node, Acc) ->
+                    case erl_syntax:type(Node) of
+                        match_expr ->
+                            {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
+                            {Node, [Var | Acc]};
+                        _ ->
+                            {Node, Acc}
+                    end
+            end,
+            [],
+            Ast,
+            #{traverse => post, role => expression}
+        ),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ?assertEqual(['D_1', 'E_1'], lists:reverse(Acc1)),
@@ -300,19 +349,24 @@ test_mapfold_attr(_Config) ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
         astranaut:smapfold(
-          fun({var, Pos, Varname}, Acc, #{step := pre}) ->
-                  {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
-             (Node, Acc, #{step := Step}) ->
-                  case erl_syntax:type(Node) of
-                      match_expr ->
-                          {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
-                          {Node, [{Step, Var}|Acc]};
-                      _ ->
-                          {Node, Acc}
-                  end;
-             (Node, Acc, #{})->
-                  {Node, Acc}
-          end, [], Ast, #{traverse => all, role => expression}),
+            fun
+                ({var, Pos, Varname}, Acc, #{step := pre}) ->
+                    {{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")}, Acc};
+                (Node, Acc, #{step := Step}) ->
+                    case erl_syntax:type(Node) of
+                        match_expr ->
+                            {var, _Pos, Var} = erl_syntax:match_expr_pattern(Node),
+                            {Node, [{Step, Var} | Acc]};
+                        _ ->
+                            {Node, Acc}
+                    end;
+                (Node, Acc, #{}) ->
+                    {Node, Acc}
+            end,
+            [],
+            Ast,
+            #{traverse => all, role => expression}
+        ),
     Ast2 = merl:quote("E_1 = A_1 + (D_1 = B_1 + C_1)"),
     ?assertEqual(Ast2, Ast1),
     ?assertEqual([{pre, 'E'}, {pre, 'D'}, {post, 'D_1'}, {post, 'E_1'}], lists:reverse(Acc1)),
@@ -322,12 +376,18 @@ test_f_return_list(_Config) ->
     Ast = merl:quote("hello(A, B, world(C))"),
     Ast1 =
         astranaut:smap(
-          fun({var, Pos, Varname}) ->
-                  [{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
-                   {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
-             (Node) ->
-                  Node
-          end, Ast, #{traverse => post, role => expression}),
+            fun
+                ({var, Pos, Varname}) ->
+                    [
+                        {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
+                        {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}
+                    ];
+                (Node) ->
+                    Node
+            end,
+            Ast,
+            #{traverse => post, role => expression}
+        ),
     Ast2 = merl:quote("hello(A_1, A_2, B_1, B_2, world(C_1, C_2))"),
     ?assertEqual(Ast2, Ast1),
     ok.
@@ -336,180 +396,285 @@ test_all_return_list(_Config) ->
     Ast = merl:quote("hello(A, B, world(C))"),
     Ast1 =
         astranaut:smap(
-          fun({var, Pos, Varname}) ->
-                  [{var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
-                   {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}];
-             (Node) ->
-                  Node
-          end, Ast, #{traverse => all, role => expression}),
-    Ast2 = merl:quote("hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"),
+            fun
+                ({var, Pos, Varname}) ->
+                    [
+                        {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_1")},
+                        {var, Pos, list_to_atom(atom_to_list(Varname) ++ "_2")}
+                    ];
+                (Node) ->
+                    Node
+            end,
+            Ast,
+            #{traverse => all, role => expression}
+        ),
+    Ast2 = merl:quote(
+        "hello(A_1_1, A_1_2, A_2_1, A_2_2, B_1_1, B_1_2, B_2_1, B_2_2, world(C_1_1, C_1_2, C_2_1, C_2_2))"
+    ),
     ?assertEqual(Ast2, Ast1),
     ok.
 
 test_with_subtrees(_Config) ->
     TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
     F =
-        fun(match_expr, Node, Variables, _Attr) ->
-                {astranaut_uniplate:with_subtrees(
-                   fun([Patterns, Expressions]) ->
-                           [astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
-                            astranaut_uniplate:with(
-                              fun(Variables1) ->
-                                      [before_pattern|Variables1]
-                              end,
-                              fun(Variables1) ->
-                                      [after_pattern|Variables1]
-                              end,
-                              astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns))]
-                   end, fun lists:reverse/1, Node), Variables};
-           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
-                {Var, [{pattern, VarName}|Variables]};
-           (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->
-                {Var, [{expression, VarName}|Variables]};
-           (_Type, Node, Variables, #{}) ->
+        fun
+            (match_expr, Node, Variables, _Attr) ->
+                {
+                    astranaut_uniplate:with_subtrees(
+                        fun([Patterns, Expressions]) ->
+                            [
+                                astranaut_uniplate:up_attr(#{match_pattern => false}, Expressions),
+                                astranaut_uniplate:with(
+                                    fun(Variables1) ->
+                                        [before_pattern | Variables1]
+                                    end,
+                                    fun(Variables1) ->
+                                        [after_pattern | Variables1]
+                                    end,
+                                    astranaut_uniplate:up_attr(#{match_pattern => true}, Patterns)
+                                )
+                            ]
+                        end,
+                        fun lists:reverse/1,
+                        Node
+                    ),
+                    Variables
+                };
+            (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := true}) ->
+                {Var, [{pattern, VarName} | Variables]};
+            (variable, {var, _Pos, VarName} = Var, Variables, #{match_pattern := false}) ->
+                {Var, [{expression, VarName} | Variables]};
+            (_Type, Node, Variables, #{}) ->
                 {Node, Variables}
         end,
     {TopNode1, State1} =
         astranaut:smapfold(
-          fun(Node, Acc, Attr) ->
-                  Type = erl_syntax:type(Node),
-                  F(Type, Node, Acc, Attr)
-          end, [], TopNode, #{traverse => pre}),
-    ?assertEqual([after_pattern, {pattern, 'D'}, before_pattern, {expression, 'C'}, after_pattern, {pattern, 'B'}, before_pattern, {expression, 'A'}], State1),
+            fun(Node, Acc, Attr) ->
+                Type = erl_syntax:type(Node),
+                F(Type, Node, Acc, Attr)
+            end,
+            [],
+            TopNode,
+            #{traverse => pre}
+        ),
+    ?assertEqual(
+        [
+            after_pattern,
+            {pattern, 'D'},
+            before_pattern,
+            {expression, 'C'},
+            after_pattern,
+            {pattern, 'B'},
+            before_pattern,
+            {expression, 'A'}
+        ],
+        State1
+    ),
     ?assertEqual(TopNode, TopNode1),
     ok.
 
 test_af_with(_Config) ->
     Datas1 = [[], [a, b], [c, d], []],
     Datas2 = astranaut_uniplate:with(g, h, Datas1),
-    ?assertEqual([[], [#uniplate_node_context{node = a, entries = [g]}, b],
-                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas2),
+    ?assertEqual(
+        [
+            [],
+            [#uniplate_node_context{node = a, entries = [g]}, b],
+            [c, #uniplate_node_context{node = d, exits = [h]}],
+            []
+        ],
+        Datas2
+    ),
     Datas3 = [[a, b], [c, d], []],
     Datas4 = astranaut_uniplate:with(g, h, Datas3),
 
-    ?assertEqual([[#uniplate_node_context{node = a, entries = [g]}, b],
-                  [c, #uniplate_node_context{node = d, exits = [h]}], []], Datas4),
-    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [astranaut_uniplate:skip([a, b]), [c, d], []]),
+    ?assertEqual(
+        [
+            [#uniplate_node_context{node = a, entries = [g]}, b],
+            [c, #uniplate_node_context{node = d, exits = [h]}],
+            []
+        ],
+        Datas4
+    ),
+    Datas5 = astranaut_uniplate:up_attr(#{name => data}, [
+        astranaut_uniplate:skip([a, b]), [c, d], []
+    ]),
     Datas6 = astranaut_uniplate:with(g, h, Datas5),
-    ?assertEqual([[#uniplate_node_context{node = a, entries = [g], skip = true},
-                   #uniplate_node_context{node = b, skip = true}],
-                  [#uniplate_node_context{node = c, up_attrs = [#{name => data}]},
-                   #uniplate_node_context{node = d, up_attrs = [#{name => data}], exits = [h]}], []], Datas6),
-                 ok.
+    ?assertEqual(
+        [
+            [
+                #uniplate_node_context{node = a, entries = [g], skip = true},
+                #uniplate_node_context{node = b, skip = true}
+            ],
+            [
+                #uniplate_node_context{node = c, up_attrs = [#{name => data}]},
+                #uniplate_node_context{node = d, up_attrs = [#{name => data}], exits = [h]}
+            ],
+            []
+        ],
+        Datas6
+    ),
+    ok.
 
 test_invalid_pre_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
-       astranaut:smap(
-         fun({var, _Pos, _Value}) ->
-                 invalid_node;
-            (Node) ->
-                 Node
-         end, Forms, #{})),
+        error,
+        {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value}) ->
+                    invalid_node;
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{}
+        )
+    ),
     ok.
 
 test_invalid_post_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_transform_normalization, _},
-       astranaut:smap(
-         fun({var, _Pos, _Value}) ->
-                 invalid_node;
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post, normalize => true})),
+        error,
+        {invalid_transform_normalization, _},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value}) ->
+                    invalid_node;
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => post, normalize => true}
+        )
+    ),
     ok.
 
 test_invalid_post_transform_context_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_post_transform_with_context, {var, _, _}, _},
-       astranaut:smap(
-         fun({var, _Pos, _Value} = Atom) ->
-                 astranaut_uniplate:skip(Atom);
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post})),
+        error,
+        {invalid_post_transform_with_context, {var, _, _}, _},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value} = Atom) ->
+                    astranaut_uniplate:skip(Atom);
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => post}
+        )
+    ),
     ok.
 
 test_invalid_post_transform_context_before_validation(Config) ->
     Forms = proplists:get_value(forms, Config),
     InvalidRoleNode = {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]},
     ?assertException(
-       error,
-       {invalid_post_transform_with_context, {var, _, _}, #uniplate_node_context{node = InvalidRoleNode}},
-       astranaut:smap(
-         fun({var, _Pos, _Value}) ->
-                 #uniplate_node_context{node = InvalidRoleNode};
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post, normalize => true})),
+        error,
+        {invalid_post_transform_with_context, {var, _, _}, #uniplate_node_context{
+            node = InvalidRoleNode
+        }},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value}) ->
+                    #uniplate_node_context{node = InvalidRoleNode};
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => post, normalize => true}
+        )
+    ),
     ok.
 
 test_invalid_transform_maketree_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
-       astranaut:smap(
-         fun({var, _Pos, _Value}) ->
-                 [];
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => post})),
+        error,
+        {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value}) ->
+                    [];
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => post}
+        )
+    ),
     ok.
 
 test_invalid_node_exception(_Config) ->
     ?assertException(
-       error,
-       {invalid_node, undefined, _},
-       astranaut:smap(
-         fun({var, _Pos, _Value}) ->
-                 [];
-            (Node) ->
-                 astranaut_uniplate:skip(Node)
-         end, undefined, #{traverse => post})),
+        error,
+        {invalid_node, undefined, _},
+        astranaut:smap(
+            fun
+                ({var, _Pos, _Value}) ->
+                    [];
+                (Node) ->
+                    astranaut_uniplate:skip(Node)
+            end,
+            undefined,
+            #{traverse => post}
+        )
+    ),
     ok.
 
 test_invalid_uniplate_subnode_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_uniplate_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
-       astranaut:smap(
-         fun(Node) ->
-                 Node
-         end, Forms, #{traverse => pre, uniplate => fun invalid_uniplate/1})),
+        error,
+        {invalid_uniplate_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
+        astranaut:smap(
+            fun(Node) ->
+                Node
+            end,
+            Forms,
+            #{traverse => pre, uniplate => fun invalid_uniplate/1}
+        )
+    ),
     ok.
 
 test_invalid_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_transform_normalization, _},
-       astranaut:smap(
-         fun({function, _Pos, _Name, _Arity, _Clauses}) ->
-                 invalid_node;
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => none, normalize => true})),
+        error,
+        {invalid_transform_normalization, _},
+        astranaut:smap(
+            fun
+                ({function, _Pos, _Name, _Arity, _Clauses}) ->
+                    invalid_node;
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => none, normalize => true}
+        )
+    ),
     ok.
 
 test_invalid_subtree_transform_exception(Config) ->
     Forms = proplists:get_value(forms, Config),
     ?assertException(
-       error,
-       {invalid_transform_normalization, _},
-       astranaut:smap(
-         fun({clause, _Pos, _Pattern, _Guard, _Expression}) ->
-                 invalid_clause;
-            (Node) ->
-                 Node
-         end, Forms, #{traverse => subtree, normalize => true})),
+        error,
+        {invalid_transform_normalization, _},
+        astranaut:smap(
+            fun
+                ({clause, _Pos, _Pattern, _Guard, _Expression}) ->
+                    invalid_clause;
+                (Node) ->
+                    Node
+            end,
+            Forms,
+            #{traverse => subtree, normalize => true}
+        )
+    ),
     ok.
 
 uniplate(Node) ->

@@ -18,17 +18,24 @@
 %%% API
 %%%===================================================================
 -spec parse_transform(astranaut:forms(), [compile:option()]) ->
-          astranaut:forms().
+    astranaut:forms().
 parse_transform(Forms, _Options) ->
     Return =
-        do([ return ||
-               RebindingOptions <- load_attributes(Forms),
-               astranaut_traverse:eval(
-                 astranaut_traverse:map_m(
-                   fun(Form) ->
-                           walk_form(Form, RebindingOptions)
-                   end, Forms), ?MODULE, #{}, #{})
-           ]),
+        do([
+            return
+         || RebindingOptions <- load_attributes(Forms),
+            astranaut_traverse:eval(
+                astranaut_traverse:map_m(
+                    fun(Form) ->
+                        walk_form(Form, RebindingOptions)
+                    end,
+                    Forms
+                ),
+                ?MODULE,
+                #{},
+                #{}
+            )
+        ]),
     astranaut_return:to_compiler(Return).
 
 -spec format_error(term()) -> term().
@@ -42,35 +49,46 @@ format_error({invalid_option_value, _Value} = GenericError) ->
 %%% load options
 %%%===================================================================
 load_attributes(Forms) ->
-    do([return ||
-           GlobalOptions <-
-               astranaut_lib:validate_attribute_option(rebinding_validator(), ?MODULE, rebinding_all, Forms),
-           FunOptions <-
-               astranaut_lib:with_attribute(
-                 fun(Attr, Acc) ->
-                         add_fun_options(Attr, Acc)
-                 end, #{}, Forms, rebinding_fun,
-                 #{formatter => ?MODULE, simplify_return => false}),
-           return(#rebinding_options{fun_options = FunOptions, global_options = GlobalOptions})
-       ]).
+    do([
+        return
+     || GlobalOptions <-
+            astranaut_lib:validate_attribute_option(
+                rebinding_validator(), ?MODULE, rebinding_all, Forms
+            ),
+        FunOptions <-
+            astranaut_lib:with_attribute(
+                fun(Attr, Acc) ->
+                    add_fun_options(Attr, Acc)
+                end,
+                #{},
+                Forms,
+                rebinding_fun,
+                #{formatter => ?MODULE, simplify_return => false}
+            ),
+        return(#rebinding_options{fun_options = FunOptions, global_options = GlobalOptions})
+    ]).
 
 add_fun_options(FName, Acc) when is_atom(FName) ->
     add_fun_options(FName, #{}, Acc);
 add_fun_options({FName, Arity}, Acc) when is_atom(FName), is_integer(Arity) ->
     add_fun_options({FName, Arity}, #{}, Acc);
 add_fun_options({Function, Options}, Acc) ->
-    do([ return ||
-           Options1 <- astranaut_lib:validate(rebinding_validator(), Options),
-           add_fun_options(Function, Options1, Acc)
-       ]);
+    do([
+        return
+     || Options1 <- astranaut_lib:validate(rebinding_validator(), Options),
+        add_fun_options(Function, Options1, Acc)
+    ]);
 add_fun_options(Function, Acc) ->
     add_fun_options(Function, #{}, Acc).
 
 add_fun_options(Functions, Options, Acc) when is_list(Functions) ->
     astranaut_return:foldl_m(
-      fun(Function, Acc1) ->
-              add_fun_options(Function, Options, Acc1)
-      end, Acc, Functions);
+        fun(Function, Acc1) ->
+            add_fun_options(Function, Options, Acc1)
+        end,
+        Acc,
+        Functions
+    );
 add_fun_options({FName, Arity}, Options, Acc) when is_atom(FName), is_integer(Arity) ->
     merge_fun_options({FName, Arity}, Options, Acc);
 add_fun_options(FName, Options, Acc) when is_atom(FName) ->
@@ -83,7 +101,12 @@ merge_fun_options(Function, Options, Acc) ->
     astranaut_return:return(maps:put(Function, maps:merge(FAcc, Options), Acc)).
 
 rebinding_validator() ->
-    #{clause_pinned => boolean, strict => boolean, debug => boolean, rebinding => [paired, {default, true}]}.
+    #{
+        clause_pinned => boolean,
+        strict => boolean,
+        debug => boolean,
+        rebinding => [paired, {default, true}]
+    }.
 
 rebinding_keys() ->
     [clause_pinned, strict].
@@ -95,20 +118,24 @@ walk_form({function, Pos, Name, Arity, Clauses} = Function, RebindingOptionsRec)
         {ok, RebindingOptions} ->
             ClausesM =
                 astranaut_traverse:map_m(
-                  fun(Clause) ->
-                          walk_function_clause(Clause, RebindingOptions)
-                  end, Clauses),
+                    fun(Clause) ->
+                        walk_function_clause(Clause, RebindingOptions)
+                    end,
+                    Clauses
+                ),
             astranaut_traverse:lift_m(
-              fun(Clauses1) ->
-                      Function1 = {function, Pos, Name, Arity, Clauses1},
-                      case maps:get(debug, RebindingOptions, false) of
-                          true ->
-                              io:format("~s~n", [astranaut_lib:ast_safe_to_string(Function1)]);
-                          false ->
-                              ok
-                      end,
-                      Function1
-              end, ClausesM);
+                fun(Clauses1) ->
+                    Function1 = {function, Pos, Name, Arity, Clauses1},
+                    case maps:get(debug, RebindingOptions, false) of
+                        true ->
+                            io:format("~s~n", [astranaut_lib:ast_safe_to_string(Function1)]);
+                        false ->
+                            ok
+                    end,
+                    Function1
+                end,
+                ClausesM
+            );
         error ->
             astranaut_traverse:return(Function)
     end;
@@ -124,7 +151,9 @@ match_rebinding(Name, Arity, RebindingOptionsRec) ->
             {ok, RebindingOptions}
     end.
 
-find_rebinding_options(Name, Arity, #rebinding_options{fun_options = FunOptions, global_options = GlobalOptions}) ->
+find_rebinding_options(Name, Arity, #rebinding_options{
+    fun_options = FunOptions, global_options = GlobalOptions
+}) ->
     case maps:find({Name, Arity}, FunOptions) of
         {ok, Options} ->
             Options;
@@ -139,148 +168,132 @@ find_rebinding_options(Name, Arity, #rebinding_options{fun_options = FunOptions,
 
 walk_function_clause(Clause, RebindingOptions) ->
     astranaut_traverse:local(
-      fun(Attr) -> Attr#{node => form, parent => fun_expr} end,
-      do([ traverse ||
-             astranaut_traverse:put(new_context()),
-             astranaut:map_m(
-               fun(Node) ->
-                       do([traverse ||
-                              Attr <- astranaut_traverse:ask(),
-                              Context <- astranaut_traverse:get(),
-                              NodeType = astranaut_syntax:type(Node),
-                              Attr1 = maps:merge(Attr, maps:with(rebinding_keys(), RebindingOptions)),
-                              astranaut_traverse:astranaut_traverse(walk_node(NodeType, Node, Context, Attr1))
-                          ])
-             end, Clause, #{traverse => pre, role => clause, normalize => true})
-         ])).
+        fun(Attr) -> Attr#{node => form, parent => fun_expr} end,
+        do([
+            traverse
+         || astranaut_traverse:put(new_context()),
+            astranaut:map_m(
+                fun(Node) ->
+                    do([
+                        traverse
+                     || Attr <- astranaut_traverse:ask(),
+                        Context <- astranaut_traverse:get(),
+                        NodeType = astranaut_syntax:type(Node),
+                        Attr1 = maps:merge(Attr, maps:with(rebinding_keys(), RebindingOptions)),
+                        astranaut_traverse:astranaut_traverse(
+                            walk_node(NodeType, Node, Context, Attr1)
+                        )
+                    ])
+                end,
+                Clause,
+                #{traverse => pre, role => clause, normalize => true}
+            )
+        ])
+    ).
 
 %% the + pin operator will be replaced with ^ pin operator after this pull request merged.
 %% https://github.com/erlang/otp/pull/2951
-walk_node(prefix_expr, {op, _Pos1, '+', {var, _Pos3, _Varname} = Var},
-          #{pattern := PatternType} = Context, #{node := pattern})
-  when PatternType =:= match_left; PatternType =:= clause_match ->
+walk_node(
+    prefix_expr,
+    {op, _Pos1, '+', {var, _Pos3, _Varname} = Var},
+    #{pattern := PatternType} = Context,
+    #{node := pattern}
+) when
+    PatternType =:= match_left; PatternType =:= clause_match
+->
     Var1 = rename_var(Var, Context),
     astranaut:walk_return(#{return => Var1});
-
 %% rename var if current node is expression.
 walk_node(variable, Var, #{} = Context, #{node := expression}) ->
     to_walk_return(Var, rename_var(Var, Context));
-
 %% rename var if current node is guard.
 walk_node(variable, Var, #{} = Context, #{node := guard}) ->
     to_walk_return(Var, rename_var(Var, Context));
-
 %% rename var if current node is clause match pattern.
 walk_node(variable, Var, #{pattern := clause_match} = Context, #{clause_pinned := true}) ->
     to_walk_return(Var, rename_var(Var, Context));
-
 %% rename var if current node is clause match pattern.
 walk_node(variable, Var, #{pattern := clause_match} = Context, #{}) ->
     to_walk_return(Var, rebind_var(Var, Context));
-
 %% rebind var if current node is function pattern.
 walk_node(variable, Var, #{pattern := function_clause} = Context, #{node := pattern}) ->
     to_walk_return(Var, rebind_var(Var, Context));
-
 %% rebind var if current node is match pattern.
 walk_node(variable, Var, #{pattern := match_left} = Context, #{node := pattern}) ->
     to_walk_return(Var, rebind_var(Var, Context));
-
 %% rebind var if current node is comprehension_generate pattern.
 walk_node(variable, Var, #{pattern := comprehension_generate} = Context, #{node := pattern}) ->
     to_walk_return(Var, rebind_var(Var, Context));
-
 walk_node(Type, Node, _Context, Attr) ->
     Node1 = walk_node_1(Type, Node, Attr),
     astranaut:walk_return(
-      astranaut_uniplate:up_attr(
-        #{parent => Type},
-        astranaut_uniplate:with_subtrees(
-        fun(Subtrees) ->
-                astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
-        end, Node1))).
+        astranaut_uniplate:up_attr(
+            #{parent => Type},
+            astranaut_uniplate:with_subtrees(
+                fun(Subtrees) ->
+                    astranaut_syntax:subtrees_pge(Type, Subtrees, Attr)
+                end,
+                Node1
+            )
+        )
+    ).
 
 walk_node_1(infix_expr, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 %% walk function call
 walk_node_1(application, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 walk_node_1(tuple, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 walk_node_1(list, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 walk_node_1(map_expr, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 walk_node_1(record_expr, Expr, #{node := expression, strict := true}) ->
     walk_scope_group_expression(Expr);
-
 %% walk comprehension
 walk_node_1(list_comp, ListComp, #{}) ->
     walk_comprehension(ListComp);
-
 walk_node_1(map_comp, MapComp, #{}) ->
     walk_comprehension(MapComp);
-
 walk_node_1(binary_comp, BinaryComp, #{}) ->
     walk_binary_comprehension(BinaryComp);
-
 %% walk comprehension generate
 walk_node_1(generator, ListGenerator, #{}) ->
     walk_generator(ListGenerator);
-
 walk_node_1(strict_generator, ListGenerator, #{}) ->
     walk_generator(ListGenerator);
-
 walk_node_1(binary_generator, BinaryGenerator, #{}) ->
     walk_generator(BinaryGenerator);
-
 walk_node_1(strict_binary_generator, BinaryGenerator, #{}) ->
     walk_generator(BinaryGenerator);
-
 walk_node_1(map_generator, MapGenerator, #{}) ->
     walk_generator(MapGenerator);
-
 walk_node_1(strict_map_generator, MapGenerator, #{}) ->
     walk_generator(MapGenerator);
-
 %% walk match
-walk_node_1(match_expr, Match,  #{node := expression}) ->
+walk_node_1(match_expr, Match, #{node := expression}) ->
     walk_match(Match);
-
-walk_node_1(maybe_match_expr, MaybeMatch,  #{node := expression}) ->
+walk_node_1(maybe_match_expr, MaybeMatch, #{node := expression}) ->
     walk_match(MaybeMatch);
-
 %% walk function clause and other clauses
 walk_node_1(clause, Clause, #{} = Attr) ->
     walk_clause(Clause, Attr);
-
 %% walk named fun
 walk_node_1(named_fun_expr, NamedFun, #{}) ->
     walk_named_fun(NamedFun);
-
 walk_node_1(case_expr, Case, #{}) ->
     walk_clause_parent_expression(Case);
-
 walk_node_1(if_expr, If, #{}) ->
     walk_clause_parent_expression(If);
-
 walk_node_1(receive_expr, Receive, #{}) ->
     walk_clause_parent_expression(Receive);
-
 walk_node_1(try_expr, Try, #{}) ->
     walk_clause_parent_expression(Try);
-
 walk_node_1(catch_expr, Catch, #{}) ->
     walk_clause_parent_expression(Catch);
-
 walk_node_1(maybe_expr, Maybe, #{}) ->
     walk_maybe(Maybe);
-
 walk_node_1(_NodeType, Node, #{}) ->
     Node.
 
@@ -323,10 +336,10 @@ walk_binary_comprehension(BinaryComprehension) ->
 walk_generator(Generator) ->
     Sequence =
         fun([Patterns, Expressions]) ->
-                Patterns1 = with_comprehension_generate_pattern(Patterns),
-                Expressions1 = with_shadowed(Expressions),
-                %% walk expression first
-                [Expressions1, Patterns1]
+            Patterns1 = with_comprehension_generate_pattern(Patterns),
+            Expressions1 = with_shadowed(Expressions),
+            %% walk expression first
+            [Expressions1, Patterns1]
         end,
     Reduce = fun lists:reverse/1,
     astranaut_uniplate:with_subtrees(Sequence, Reduce, Generator).
@@ -334,9 +347,9 @@ walk_generator(Generator) ->
 walk_match(Match) ->
     Sequence =
         fun([Patterns, Expressions]) ->
-                Patterns1 = with_match_left_pattern(Patterns),
-                %% walk expression first
-                [Expressions, Patterns1]
+            Patterns1 = with_match_left_pattern(Patterns),
+            %% walk expression first
+            [Expressions, Patterns1]
         end,
     Reduce = fun lists:reverse/1,
     astranaut_uniplate:with_subtrees(Sequence, Reduce, Match).
@@ -345,10 +358,11 @@ walk_clause(Clause, #{parent := Parent}) ->
     ScopeType = clause_scope_type(Parent),
     PatternType = scope_type_pattern(ScopeType),
     Sequence =
-        fun([Patterns, Guards, Expressions]) ->
+        fun
+            ([Patterns, Guards, Expressions]) ->
                 Patterns1 = with_scope_type(PatternType, Patterns),
                 with_scope_type(ScopeType, [Patterns1, Guards, Expressions]);
-           ([Patterns, Expressions]) ->
+            ([Patterns, Expressions]) ->
                 Patterns1 = with_scope_type(PatternType, Patterns),
                 with_scope_type(ScopeType, [Patterns1, Expressions])
         end,
@@ -357,19 +371,19 @@ walk_clause(Clause, #{parent := Parent}) ->
 %% Function Name in named fun should also be pattern and whole scope is shadowed.
 walk_named_fun(NamedFun) ->
     Sequence =
-        fun([NameTree|RestTrees]) ->
-                NameTree1 = with_function_clause_pattern(NameTree),
-                with_shadowed([NameTree1|RestTrees])
+        fun([NameTree | RestTrees]) ->
+            NameTree1 = with_function_clause_pattern(NameTree),
+            with_shadowed([NameTree1 | RestTrees])
         end,
     astranaut_uniplate:with_subtrees(Sequence, NamedFun).
 
 walk_maybe(Maybe) ->
     Sequence =
-        fun([MaybeBody|Elses]) ->
+        fun([MaybeBody | Elses]) ->
             %% treat maybe body as shadowed_leaky scope like clause scope
             MaybeBody1 = with_shadowed_leaky(MaybeBody),
             %% walk expression first
-            [MaybeBody1|Elses]
+            [MaybeBody1 | Elses]
         end,
     walk_clause_parent_expression(astranaut_uniplate:with_subtrees(Sequence, Maybe)).
 
@@ -402,17 +416,21 @@ sequence_scope_group_subtrees(Subtrees) ->
     with_scope_group(Subtrees).
 
 sequence_scope_group_with_argument(Subtreess) ->
-    sequence_scope_group_subtrees(lists:map(fun(Subtrees) -> lists:map(fun with_argument/1, Subtrees) end, Subtreess)).
+    sequence_scope_group_subtrees(
+        lists:map(fun(Subtrees) -> lists:map(fun with_argument/1, Subtrees) end, Subtreess)
+    ).
 
 new_context() ->
-    #{local_varnames   => ordsets:new(),
-      local_renames     => maps:new(),
-      global_varnames   => ordsets:new(),
-      global_renames    => maps:new(),
-      pattern_varnames  => ordsets:new(),
-      varnames_stack    => [],
-      renames_stack     => [],
-      scope_group_stack => []}.
+    #{
+        local_varnames => ordsets:new(),
+        local_renames => maps:new(),
+        global_varnames => ordsets:new(),
+        global_renames => maps:new(),
+        pattern_varnames => ordsets:new(),
+        varnames_stack => [],
+        renames_stack => [],
+        scope_group_stack => []
+    }.
 
 with_scope_group(NodeM) ->
     with_scope_type(scope_group, NodeM).
@@ -436,17 +454,22 @@ with_comprehension_generate_pattern(NodeM) ->
     with_scope_type(comprehension_generate, NodeM).
 
 with_scope_type(ScopeType, Trees) ->
-    astranaut_uniplate:with(fun(Context) -> entry_scope_type(ScopeType, Context) end,
-                            fun(Context) -> exit_scope_type(ScopeType, Context) end,
-                            Trees).
+    astranaut_uniplate:with(
+        fun(Context) -> entry_scope_type(ScopeType, Context) end,
+        fun(Context) -> exit_scope_type(ScopeType, Context) end,
+        Trees
+    ).
 
-rebind_var(Var,
-           #{global_varnames   := GlobalVarnames,
-             local_varnames    := LocalVarnames,
-             global_renames    := GlobalRenameMap,
-             local_renames     := LocalRenameMap,
-             pattern_varnames  := PatternVarnames
-            } = Context) ->
+rebind_var(
+    Var,
+    #{
+        global_varnames := GlobalVarnames,
+        local_varnames := LocalVarnames,
+        global_renames := GlobalRenameMap,
+        local_renames := LocalRenameMap,
+        pattern_varnames := PatternVarnames
+    } = Context
+) ->
     Varname = erl_syntax:variable_name(Var),
     Pos = erl_syntax:get_pos(Var),
     case ordsets:is_element(Varname, PatternVarnames) of
@@ -466,19 +489,21 @@ rebind_var(Var,
                     GlobalRenameMap1 = maps:put(Varname, Varname1, GlobalRenameMap),
                     LocalRenameMap1 = maps:put(Varname, Varname1, LocalRenameMap),
 
-                    Context2 = Context1#{global_varnames  => GlobalVarnames1,
-                                         local_varnames   => LocalVarnames1,
-                                         global_renames   => GlobalRenameMap1,
-                                         local_renames    => LocalRenameMap1,
-                                         pattern_varnames => PatternVarnames1
-                                        },
+                    Context2 = Context1#{
+                        global_varnames => GlobalVarnames1,
+                        local_varnames => LocalVarnames1,
+                        global_renames => GlobalRenameMap1,
+                        local_renames => LocalRenameMap1,
+                        pattern_varnames => PatternVarnames1
+                    },
                     {Var1, Context2};
                 false ->
                     GlobalVarnames1 = ordsets:add_element(Varname, GlobalVarnames),
                     LocalVarnames1 = ordsets:add_element(Varname, LocalVarnames),
-                    Context2 = Context1#{global_varnames => GlobalVarnames1,
-                                         local_varnames => LocalVarnames1
-                                        },
+                    Context2 = Context1#{
+                        global_varnames => GlobalVarnames1,
+                        local_varnames => LocalVarnames1
+                    },
                     {Var, Context2}
             end
     end.
@@ -520,46 +545,60 @@ exit_scope_type(ScopeType, Context) ->
     exit_pattern(ScopeType, Context).
 
 entry_scope_group(#{scope_group_stack := ScopeStack} = Context) ->
-    ScokeStack1 = [{ordsets:new(), maps:new()}|ScopeStack],
+    ScokeStack1 = [{ordsets:new(), maps:new()} | ScopeStack],
     Context#{scope_group_stack => ScokeStack1}.
 
-exit_scope_group(#{local_varnames    := LocalVarnames,
-                   local_renames     := LocalRenames,
-                   global_varnames   := GlobalVarnames,
-                   global_renames    := GlobalRenames,
-                   scope_group_stack := [{ScopeVarnames, ScopeRenames}|ScopeStack]} = Context) ->
+exit_scope_group(
+    #{
+        local_varnames := LocalVarnames,
+        local_renames := LocalRenames,
+        global_varnames := GlobalVarnames,
+        global_renames := GlobalRenames,
+        scope_group_stack := [{ScopeVarnames, ScopeRenames} | ScopeStack]
+    } = Context
+) ->
     LocalVarnames1 = ordsets:union(LocalVarnames, ScopeVarnames),
     LocalRenames1 = maps:merge(LocalRenames, ScopeRenames),
     GlobalVarnames1 = ordsets:union(GlobalVarnames, ScopeVarnames),
     GlobalRenames1 = maps:merge(GlobalRenames, ScopeRenames),
-    Context#{local_varnames    => LocalVarnames1,
-             local_renames     => LocalRenames1,
-             global_varnames   => GlobalVarnames1,
-             global_renames    => GlobalRenames1,
-             scope_group_stack => ScopeStack}.
+    Context#{
+        local_varnames => LocalVarnames1,
+        local_renames => LocalRenames1,
+        global_varnames => GlobalVarnames1,
+        global_renames => GlobalRenames1,
+        scope_group_stack => ScopeStack
+    }.
 
 entry_nonfun_clause(Context) ->
     Context1 = push_varname_stack(Context),
     push_rename_stack(Context1).
 
-exit_nonfun_clause(#{local_varnames    := LocalVarnames,
-                     scope_group_stack := [{ScopeVarnames, ScopeRenames}|ScopeGroupStack]} = Context) ->
+exit_nonfun_clause(
+    #{
+        local_varnames := LocalVarnames,
+        scope_group_stack := [{ScopeVarnames, ScopeRenames} | ScopeGroupStack]
+    } = Context
+) ->
     Context1 = pop_varname_stack(Context),
     Context2 = pop_rename_stack(Context1),
     ScopeVarnames1 = ordsets:union(ScopeVarnames, LocalVarnames),
-    ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames}|ScopeGroupStack],
+    ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames} | ScopeGroupStack],
     Context2#{scope_group_stack => ScopeGroupStack1}.
 
 entry_argument(Context) ->
     push_rename_stack(Context).
 
-exit_argument(#{local_varnames    := LocalVarnames,
-                local_renames     := LocalRenames,
-                scope_group_stack := [{ScopeVarnames, ScopeRenames}|ScopeGroupStack]} = Context) ->
+exit_argument(
+    #{
+        local_varnames := LocalVarnames,
+        local_renames := LocalRenames,
+        scope_group_stack := [{ScopeVarnames, ScopeRenames} | ScopeGroupStack]
+    } = Context
+) ->
     Context1 = pop_rename_stack(Context),
     ScopeVarnames1 = ordsets:union(ScopeVarnames, LocalVarnames),
     ScopeRenames1 = maps:merge(ScopeRenames, LocalRenames),
-    ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames1}|ScopeGroupStack],
+    ScopeGroupStack1 = [{ScopeVarnames1, ScopeRenames1} | ScopeGroupStack],
     Context1#{scope_group_stack => ScopeGroupStack1}.
 
 entry_shadowed(Context) ->
@@ -598,36 +637,56 @@ new_variable_name(Variable, Variables, N) ->
 add_suffix(Variable, N) ->
     list_to_atom(atom_to_list(Variable) ++ "_" ++ integer_to_list(N)).
 
-push_varname_stack(#{local_varnames := LocalVarnames, 
-                     varnames_stack := VarnamesStack} = Context) ->
+push_varname_stack(
+    #{
+        local_varnames := LocalVarnames,
+        varnames_stack := VarnamesStack
+    } = Context
+) ->
     LocalVarnames1 = ordsets:new(),
-    VarnamesStack1 = [LocalVarnames|VarnamesStack],
-    Context#{local_varnames => LocalVarnames1, 
-             varnames_stack => VarnamesStack1}.
+    VarnamesStack1 = [LocalVarnames | VarnamesStack],
+    Context#{
+        local_varnames => LocalVarnames1,
+        varnames_stack => VarnamesStack1
+    }.
 
-pop_varname_stack(#{varnames_stack := [LocalVarnames|ParentVarnameStack] = VarnameStack} = Context) ->
+pop_varname_stack(
+    #{varnames_stack := [LocalVarnames | ParentVarnameStack] = VarnameStack} = Context
+) ->
     GlobalVarnames = ordsets:union(VarnameStack),
-    Context#{local_varnames  => LocalVarnames,
-             global_varnames => GlobalVarnames,
-             varnames_stack  => ParentVarnameStack}.
+    Context#{
+        local_varnames => LocalVarnames,
+        global_varnames => GlobalVarnames,
+        varnames_stack => ParentVarnameStack
+    }.
 
-push_rename_stack(#{local_renames := LocalRenames,
-                    renames_stack := RenameStack
-                   } = Context) ->
+push_rename_stack(
+    #{
+        local_renames := LocalRenames,
+        renames_stack := RenameStack
+    } = Context
+) ->
     LocalRenames1 = maps:new(),
-    RenameStack1 = [LocalRenames|RenameStack],
-    Context#{local_renames => LocalRenames1,
-             renames_stack => RenameStack1}.
+    RenameStack1 = [LocalRenames | RenameStack],
+    Context#{
+        local_renames => LocalRenames1,
+        renames_stack => RenameStack1
+    }.
 
-pop_rename_stack(#{renames_stack := [LocalRenames|ParentRenamesStack]} = Context) ->
+pop_rename_stack(#{renames_stack := [LocalRenames | ParentRenamesStack]} = Context) ->
     GlobalRenames =
         lists:foldl(
-          fun(Renames, Acc) ->
-                  maps:merge(Renames, Acc)
-          end, LocalRenames, ParentRenamesStack),
-    Context#{local_renames  => LocalRenames,
-             global_renames => GlobalRenames,
-             renames_stack  => ParentRenamesStack}.
+            fun(Renames, Acc) ->
+                maps:merge(Renames, Acc)
+            end,
+            LocalRenames,
+            ParentRenamesStack
+        ),
+    Context#{
+        local_renames => LocalRenames,
+        global_renames => GlobalRenames,
+        renames_stack => ParentRenamesStack
+    }.
 
 scope_type_pattern(shadowed) ->
     function_clause;

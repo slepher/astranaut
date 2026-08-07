@@ -18,6 +18,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check formatting
+        run: rebar3 fmt --check
+
       - name: Compile
         run: rebar3 compile
 

@@ -11,22 +11,37 @@
 -include("compile_opts.hrl").
 -include_lib("eunit/include/eunit.hrl").
 %% API
--export([get_baseline/2, realize_with_baseline/2, test_module_forms/2,
-         compile_test_module/2, compile_test_forms/1, load_data_modules/2,
-         with_suite_data_dir/2]).
+-export([
+    get_baseline/2,
+    realize_with_baseline/2,
+    test_module_forms/2,
+    compile_test_module/2,
+    compile_test_forms/1,
+    load_data_modules/2,
+    with_suite_data_dir/2
+]).
 -export([assert_formatted_messages/1]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 get_baseline(Mark, Forms) ->
-    case astranaut_return:run(
-           astranaut_lib:with_attribute(
-             fun(Mark1, _Acc, #{pos := Pos}) when Mark =:= Mark1 ->
-                     Pos;
-                (_Mark2, Acc, #{}) ->
-                     Acc
-             end, undefined, Forms, baseline, #{formatter => ?MODULE})) of
+    case
+        astranaut_return:run(
+            astranaut_lib:with_attribute(
+                fun
+                    (Mark1, _Acc, #{pos := Pos}) when Mark =:= Mark1 ->
+                        Pos;
+                    (_Mark2, Acc, #{}) ->
+                        Acc
+                end,
+                undefined,
+                Forms,
+                baseline,
+                #{formatter => ?MODULE}
+            )
+        )
+    of
         {just, undefined} ->
             Msg = io_lib:format("attribute -baseline(~p) expected", [Mark]),
             io:format("~s", [Msg]),
@@ -40,30 +55,35 @@ get_baseline(Mark, Forms) ->
 realize_with_baseline(Baseline, ErrorStruct) ->
     ErrorStruct1 =
         astranaut_error:with_all_formatted_failure(
-            fun({Pos, Formatter, Error}) when is_integer(Pos) ->
+            fun
+                ({Pos, Formatter, Error}) when is_integer(Pos) ->
                     {Pos - Baseline, Formatter, Error};
-               ({{Line, _Column}, Formatter, Error}) when is_integer(Line) ->
+                ({{Line, _Column}, Formatter, Error}) when is_integer(Line) ->
                     {Line - Baseline, Formatter, Error};
-               (Error) ->
+                (Error) ->
                     Error
-            end, ErrorStruct),
+            end,
+            ErrorStruct
+        ),
     {Errors, Warnings} = astranaut_error:realize(ErrorStruct1),
-    {unwrap_compiler_diagnostics(Errors),
-     unwrap_compiler_diagnostics(Warnings)}.
+    {unwrap_compiler_diagnostics(Errors), unwrap_compiler_diagnostics(Warnings)}.
 
 compile_test_module(Module, Config) ->
     DataDir = configured_data_dir(Config),
     Forms = test_module_forms(Module, DataDir, Config),
     Opts = compile_opts(),
-    Outfile = filename:join(filename:dirname(filename:absname(DataDir)), atom_to_list(Module) ++ ".beam"),
+    Outfile = filename:join(
+        filename:dirname(filename:absname(DataDir)), atom_to_list(Module) ++ ".beam"
+    ),
     file:delete(Outfile),
     astranaut_return:bind(
-      astranaut_lib:load_forms(Forms, Opts),
-      fun({Mod, Binary}) ->
-              %% write beam file to make edts works.
-              ok = file:write_file(Outfile, Binary, []),
-              astranaut_return:return(Mod)
-      end).
+        astranaut_lib:load_forms(Forms, Opts),
+        fun({Mod, Binary}) ->
+            %% write beam file to make edts works.
+            ok = file:write_file(Outfile, Binary, []),
+            astranaut_return:return(Mod)
+        end
+    ).
 
 compile_test_forms(Forms) ->
     Opts = compile_opts(),
@@ -91,28 +111,39 @@ test_module_forms(Module, DataDir, _Config) ->
 
 load_data_modules(Config, TestModules) ->
     lists:foreach(
-      fun(TestModule) ->
-              Return = compile_test_module(TestModule, Config),
-              astranaut_return:with_error(
+        fun(TestModule) ->
+            Return = compile_test_module(TestModule, Config),
+            astranaut_return:with_error(
                 fun(Error) ->
-                        ?assertEqual(#{}, maps:without([warnings, formatted_warnings, file_warnings],
-                                                       astranaut_error:printable(Error))),
-                        Error
-                end, Return)
-      end, TestModules),
+                    ?assertEqual(
+                        #{},
+                        maps:without(
+                            [warnings, formatted_warnings, file_warnings],
+                            astranaut_error:printable(Error)
+                        )
+                    ),
+                    Error
+                end,
+                Return
+            )
+        end,
+        TestModules
+    ),
     Config.
 
 with_suite_data_dir(Config, Suite) ->
     CurrentDataDir = proplists:get_value(data_dir, Config),
     SuiteDataDir =
         filename:join(
-          filename:dirname(filename:absname(CurrentDataDir)),
-          atom_to_list(Suite) ++ "_data"),
+            filename:dirname(filename:absname(CurrentDataDir)),
+            atom_to_list(Suite) ++ "_data"
+        ),
     [{fixture_data_dir, SuiteDataDir} | Config].
 
 configured_data_dir(Config) ->
     proplists:get_value(
-      fixture_data_dir, Config, proplists:get_value(data_dir, Config)).
+        fixture_data_dir, Config, proplists:get_value(data_dir, Config)
+    ).
 
 assert_formatted_messages(Messages) ->
     lists:foreach(fun assert_formatted_message/1, Messages).
@@ -121,11 +152,14 @@ assert_formatted_message({_Line, Formatter, Error}) ->
     case formatter_protocol(Formatter) of
         present ->
             assert_formatter_result(
-              Formatter, Error,
-              fun() ->
-                      astranaut_lib:format_error(
-                        Error, fun Formatter:format_error/1)
-              end);
+                Formatter,
+                Error,
+                fun() ->
+                    astranaut_lib:format_error(
+                        Error, fun Formatter:format_error/1
+                    )
+                end
+            );
         {invalid, Reason} ->
             ct:fail({invalid_formatter_protocol, Formatter, Reason})
     end.
@@ -152,8 +186,7 @@ assert_formatter_result(Formatter, Error, FormatterFun) ->
                 {ok, FormattedMessage}
         catch
             Class:Reason:Stacktrace ->
-                {error, {format_error_not_covered,
-                         Formatter, Error, Class, Reason, Stacktrace}}
+                {error, {format_error_not_covered, Formatter, Error, Class, Reason, Stacktrace}}
         end,
     case Result of
         {ok, Message} ->
@@ -176,12 +209,17 @@ assert_formatted_message_result(Formatter, Error, Message) ->
     end.
 
 unwrap_compiler_diagnostics(FileDiagnostics) ->
-    [{File, [unwrap_compiler_diagnostic(Diagnostic) ||
-             Diagnostic <- Diagnostics]} ||
-        {File, Diagnostics} <- FileDiagnostics].
+    [
+        {File, [
+            unwrap_compiler_diagnostic(Diagnostic)
+         || Diagnostic <- Diagnostics
+        ]}
+     || {File, Diagnostics} <- FileDiagnostics
+    ].
 
 unwrap_compiler_diagnostic(
-  {Pos, astranaut_lib, {Formatter, Reason}}) ->
+    {Pos, astranaut_lib, {Formatter, Reason}}
+) ->
     {Pos, Formatter, Reason};
 unwrap_compiler_diagnostic(Diagnostic) ->
     Diagnostic.

@@ -13,11 +13,15 @@
 -include("astranaut_struct_name.hrl").
 
 -export_macro({[from_record/2, to_record/2], []}).
--export_macro({[from_map/3, update/3, from_other_record/4], [{inject_attrs, astranaut_struct_def}]}).
+-export_macro(
+    {[from_map/3, update/3, from_other_record/4], [{inject_attrs, astranaut_struct_def}]}
+).
 
 %% API
 -export([to_map/2]).
--export([from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5, from_other_record_impl/7]).
+-export([
+    from_record_impl/3, to_record_impl/3, update_impl/5, from_map_impl/5, from_other_record_impl/7
+]).
 -export([format_error/1]).
 %%%===================================================================
 %%% API
@@ -44,19 +48,22 @@ from_other_record(RecordName, StructName, Record, #{} = Attrs) ->
     #{fields := FieldsAbs, enforce_keys := EnforceKeysAbs, inits := InitAbs} =
         struct_attributes(StructName, Attrs),
     quote(
-      astranaut_struct:from_other_record_impl(
-        unquote(RecordName),
-        record_info(fields, unquote(RecordName)),
-        unquote(Record),
-        unquote(StructName),
-        unquote(FieldsAbs), unquote(EnforceKeysAbs),
-        unquote(InitAbs))).
+        astranaut_struct:from_other_record_impl(
+            unquote(RecordName),
+            record_info(fields, unquote(RecordName)),
+            unquote(Record),
+            unquote(StructName),
+            unquote(FieldsAbs),
+            unquote(EnforceKeysAbs),
+            unquote(InitAbs)
+        )
+    ).
 
 from_record_impl(RecordName, RecordFields, Record) when is_tuple(Record) ->
     StructSize = length(RecordFields) + 1,
     case tuple_size(Record) of
         StructSize ->
-            maps:from_list(lists:zip(['__struct__'|RecordFields], tuple_to_list(Record)));
+            maps:from_list(lists:zip(['__struct__' | RecordFields], tuple_to_list(Record)));
         _ ->
             exit({invalid_record, RecordName, Record})
     end;
@@ -65,12 +72,17 @@ from_record_impl(RecordName, _RecordFields, Record) ->
 
 to_record_impl(RecordName, RecordFields, #{'__struct__' := RecordName} = Struct) ->
     list_to_tuple(
-      lists:reverse(
-        lists:foldl(
-          fun(RecordField, Acc) ->
-                  FieldValue = maps:get(RecordField, Struct, undefined),
-                  [FieldValue|Acc]
-          end, [RecordName], RecordFields)));
+        lists:reverse(
+            lists:foldl(
+                fun(RecordField, Acc) ->
+                    FieldValue = maps:get(RecordField, Struct, undefined),
+                    [FieldValue | Acc]
+                end,
+                [RecordName],
+                RecordFields
+            )
+        )
+    );
 to_record_impl(RecordName, _RecordFields, Struct) ->
     exit({invalid_struct, RecordName, Struct}).
 
@@ -80,31 +92,38 @@ from_map_impl(StructName, Fields, EnforceKeys, StructFieldInits, #{} = Map) ->
     case MissingKeys of
         [] ->
             lists:foldl(
-              fun(Field, Acc) ->
-                      case maps:find(Field, Map) of
-                          {ok, Value} ->
-                              maps:put(Field, Value, Acc);
-                          error ->
-                              case maps:find(Field, StructFieldInits) of
-                                  {ok, Init} ->
-                                      maps:put(Field, Init, Acc);
-                                  error ->
-                                      Acc
-                              end
-                      end
-              end, #{'__struct__' => StructName}, Fields);
+                fun(Field, Acc) ->
+                    case maps:find(Field, Map) of
+                        {ok, Value} ->
+                            maps:put(Field, Value, Acc);
+                        error ->
+                            case maps:find(Field, StructFieldInits) of
+                                {ok, Init} ->
+                                    maps:put(Field, Init, Acc);
+                                error ->
+                                    Acc
+                            end
+                    end
+                end,
+                #{'__struct__' => StructName},
+                Fields
+            );
         _ ->
             exit({missing_enforce_keys, StructName, MissingKeys})
     end;
 from_map_impl(_StructName, _Fields, _EnforceKeys, _StructFieldInits, Map) ->
     exit({invalid_map, Map}).
 
-update_impl(StructName, Fields, EnforceKeys, StructFieldInits, #{'__struct__' := StructName} = Struct) ->
+update_impl(
+    StructName, Fields, EnforceKeys, StructFieldInits, #{'__struct__' := StructName} = Struct
+) ->
     from_map_impl(StructName, Fields, EnforceKeys, StructFieldInits, Struct);
 update_impl(StructName, _Fields, _EnforceKeys, _StructFieldInits, Struct) ->
     exit({invalid_struct, StructName, Struct}).
 
-from_other_record_impl(RecordName, RecordFields, Record, StructName, StructFields, EnforceKeys, StructInits) ->
+from_other_record_impl(
+    RecordName, RecordFields, Record, StructName, StructFields, EnforceKeys, StructInits
+) ->
     Map = from_record_impl(RecordName, RecordFields, Record),
     from_map_impl(StructName, StructFields, EnforceKeys, StructInits, Map).
 %%--------------------------------------------------------------------
@@ -127,23 +146,37 @@ init_structs(StructName, AstranautStructDefs) ->
 struct_init_abs(Line, StructInits) ->
     Fields =
         lists:reverse(
-          maps:fold(
-            fun(Name, Value, Acc) ->
-                    [{map_field_assoc, Line, {atom, Line, Name}, Value}|Acc]
-            end, [], StructInits)),
+            maps:fold(
+                fun(Name, Value, Acc) ->
+                    [{map_field_assoc, Line, {atom, Line, Name}, Value} | Acc]
+                end,
+                [],
+                StructInits
+            )
+        ),
     {map, Line, Fields}.
 
 do_record_function(FunctionName, {atom, _Line, _RecordName} = RecordName, Record) ->
-    quote(astranaut_struct:(unquote(FunctionName))(
-            unquote(RecordName), record_info(fields, unquote(RecordName)), unquote(Record)));
+    quote(
+        astranaut_struct:(unquote(FunctionName))(
+            unquote(RecordName), record_info(fields, unquote(RecordName)), unquote(Record)
+        )
+    );
 do_record_function(_FunctionName, RecordName, _Record) ->
     exit({literal_atom_record_name_expected, RecordName}).
 
 do_struct_function(FunctionName, StructName, Struct, Opts) ->
     #{fields := FieldsAbs, enforce_keys := EnforceKeysAbs, inits := InitAbs} =
         struct_attributes(StructName, Opts),
-    quote(astranaut_struct:(unquote(FunctionName))(
-            unquote(StructName), unquote(FieldsAbs), unquote(EnforceKeysAbs), unquote(InitAbs), unquote(Struct))).
+    quote(
+        astranaut_struct:(unquote(FunctionName))(
+            unquote(StructName),
+            unquote(FieldsAbs),
+            unquote(EnforceKeysAbs),
+            unquote(InitAbs),
+            unquote(Struct)
+        )
+    ).
 
 struct_attributes({atom, Line, StructName}, #{astranaut_struct_def := StructDefs}) ->
     case init_structs(StructName, StructDefs) of
@@ -153,7 +186,9 @@ struct_attributes({atom, Line, StructName}, #{astranaut_struct_def := StructDefs
             EnforceKeys = astranaut_struct_record:enforce_keys(StructDef),
             InitAbs = struct_init_abs(Line, InitValue),
             FieldsAbs = astranaut_lib:replace_pos(astranaut_lib:abstract_form(Fields), Line),
-            EnforceKeysAbs = astranaut_lib:replace_pos(astranaut_lib:abstract_form(EnforceKeys), Line),
+            EnforceKeysAbs = astranaut_lib:replace_pos(
+                astranaut_lib:abstract_form(EnforceKeys), Line
+            ),
             #{fields => FieldsAbs, enforce_keys => EnforceKeysAbs, inits => InitAbs};
         {error, Reason} ->
             exit(Reason)

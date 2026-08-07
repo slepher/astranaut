@@ -14,12 +14,16 @@
 
 -type struct(A) :: astranaut_return_ok(A) | astranaut_return_fail().
 
--type astranaut_return_ok(A) :: #{?STRUCT_KEY := ?RETURN_OK,
-                               return := A,
-                               error := astranaut_error:struct()}.
+-type astranaut_return_ok(A) :: #{
+    ?STRUCT_KEY := ?RETURN_OK,
+    return := A,
+    error := astranaut_error:struct()
+}.
 
--type astranaut_return_fail() :: #{?STRUCT_KEY := ?RETURN_FAIL,
-                                error := astranaut_error:struct()}.
+-type astranaut_return_fail() :: #{
+    ?STRUCT_KEY := ?RETURN_FAIL,
+    error := astranaut_error:struct()
+}.
 
 -compile({no_auto_import, [error/1]}).
 
@@ -84,8 +88,9 @@ run(#{?STRUCT_KEY := ?RETURN_FAIL}) ->
     nothing.
 
 -spec run_error(struct(_A)) -> astranaut_error:struct().
-run_error(#{?STRUCT_KEY := StructKey, error := Error})
-  when (StructKey =:= ?RETURN_OK); (StructKey =:= ?RETURN_FAIL) ->
+run_error(#{?STRUCT_KEY := StructKey, error := Error}) when
+    (StructKey =:= ?RETURN_OK); (StructKey =:= ?RETURN_FAIL)
+->
     Error.
 
 -spec lift_m(fun((A) -> B), struct(A)) -> struct(B).
@@ -93,14 +98,18 @@ lift_m(F, X) ->
     bind(X, fun(A) -> return(F(A)) end).
 
 -spec map_m(fun((A) -> struct(B)), [struct(A)]) -> struct(B).
-map_m(F, [X|Xs]) ->
-    bind(F(X),
-         fun(A) ->
-                 bind(map_m(F, Xs),
-                      fun(As) ->
-                              return([A|As])
-                      end)
-         end);
+map_m(F, [X | Xs]) ->
+    bind(
+        F(X),
+        fun(A) ->
+            bind(
+                map_m(F, Xs),
+                fun(As) ->
+                    return([A | As])
+                end
+            )
+        end
+    );
 map_m(_F, []) ->
     return([]).
 
@@ -109,12 +118,13 @@ sequence_m(Xs) ->
     map_m(fun(A) -> A end, Xs).
 
 -spec foldl_m(fun((A, S) -> struct(S)), S, [A]) -> struct(S).
-foldl_m(F, Acc, [X|Xs]) ->
+foldl_m(F, Acc, [X | Xs]) ->
     bind(
-      F(X, Acc),
-      fun(Acc1) ->
-              foldl_m(F, Acc1, Xs)
-      end);
+        F(X, Acc),
+        fun(Acc1) ->
+            foldl_m(F, Acc1, Xs)
+        end
+    );
 foldl_m(_F, Acc, []) ->
     return(Acc).
 
@@ -144,20 +154,28 @@ from_return(#{?STRUCT_KEY := ?RETURN_FAIL} = MA) ->
 from_return(_) ->
     error.
 
-from_walk_return(#{?STRUCT_KEY := ?WALK_RETURN, return := Return, errors := Errors, warnings := Warnings}) ->
+from_walk_return(#{
+    ?STRUCT_KEY := ?WALK_RETURN, return := Return, errors := Errors, warnings := Warnings
+}) ->
     {ok,
-     astranaut_return:then(
-       astranaut_return:then(
-         astranaut_return:warnings(Warnings),
-         astranaut_return:errors(Errors)),
-       astranaut_return:return(Return))};
+        astranaut_return:then(
+            astranaut_return:then(
+                astranaut_return:warnings(Warnings),
+                astranaut_return:errors(Errors)
+            ),
+            astranaut_return:return(Return)
+        )};
 from_walk_return(_) ->
     error.
 
 to_monad(A) ->
     concrete(
-      A, [fun from_return/1, fun from_walk_return/1,
-          fun from_compiler_1/1]).
+        A, [
+            fun from_return/1,
+            fun from_walk_return/1,
+            fun from_compiler_1/1
+        ]
+    ).
 
 concrete(A, Converters) ->
     case try_concrete(A, Converters) of
@@ -174,7 +192,7 @@ try_concrete(_A, []) ->
     error.
 
 -spec to_compiler(struct(astranaut:forms())) ->
-                         astranaut:parse_transform_return().
+    astranaut:parse_transform_return().
 to_compiler(#{?STRUCT_KEY := ?RETURN_OK, return := Forms, error := Error}) ->
     case astranaut_error:realize(Error) of
         {[], []} ->
@@ -189,8 +207,10 @@ to_compiler(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error}) ->
     {error, compiler_diagnostics(Errors), compiler_diagnostics(Warnings)}.
 
 compiler_diagnostics(FileErrors) ->
-    [{File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]} ||
-        {File, Diagnostics} <- FileErrors].
+    [
+        {File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]}
+     || {File, Diagnostics} <- FileErrors
+    ].
 
 compiler_diagnostic({Pos, Formatter, Reason}) ->
     {Pos, astranaut_lib, {Formatter, Reason}}.
@@ -204,7 +224,7 @@ simplify(#{?STRUCT_KEY := ?RETURN_OK, return := Return, error := Error}) ->
             exit(astranaut_error:printable(Error))
     end;
 simplify(#{?STRUCT_KEY := ?RETURN_FAIL, error := Error}) ->
-     exit(astranaut_error:printable(Error)).
+    exit(astranaut_error:printable(Error)).
 
 -spec fail_on_error(struct(A)) -> struct(A).
 fail_on_error(#{?STRUCT_KEY := ?RETURN_OK, error := Error} = Return) ->
@@ -234,7 +254,7 @@ with_error(F, #{?STRUCT_KEY := ?RETURN_OK, error := Error} = MA) ->
     Error1 = F(Error),
     MA#{error => Error1};
 with_error(F, #{?STRUCT_KEY := ?RETURN_FAIL, error := Error} = MA) ->
-    Error1 = F(Error), 
+    Error1 = F(Error),
     MA#{error => Error1}.
 
 error(Error) ->
@@ -268,7 +288,7 @@ formatted_warning({Pos, Formatter, Warning}) ->
     formatted_warning(Pos, Formatter, Warning).
 
 formatted_warning(Pos, Formatter, Warning) ->
-   formatted_warnings([{Pos, Formatter, Warning}]).
+    formatted_warnings([{Pos, Formatter, Warning}]).
 
 formatted_warnings(Warnings) ->
     ErrorStruct = astranaut_error:new(),

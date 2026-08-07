@@ -16,15 +16,16 @@
 -export_type([compiler_error/0]).
 -export_type([compile_file/0]).
 
--type struct() :: #{'__struct__' => ?MODULE,
-                    file => compile_file(),
-                    errors => endo(term()),
-                    warnings => endo(term()),
-                    formatted_errors => endo(erl_parse:error_info()),
-                    formatted_warnings => endo(erl_parse:error_info()),
-                    file_errors => #{file:filename() => endo(erl_parse:error_info())},
-                    file_warnings => #{file:filename() => endo(erl_parse:error_info())}
-                   }.
+-type struct() :: #{
+    '__struct__' => ?MODULE,
+    file => compile_file(),
+    errors => endo(term()),
+    warnings => endo(term()),
+    formatted_errors => endo(erl_parse:error_info()),
+    formatted_warnings => endo(erl_parse:error_info()),
+    file_errors => #{file:filename() => endo(erl_parse:error_info())},
+    file_warnings => #{file:filename() => endo(erl_parse:error_info())}
+}.
 
 -type compile_file() :: file:filename() | undefined | eof.
 -type compiler_error() :: [{file:filename(), [erl_parse:error_info()]}].
@@ -52,7 +53,9 @@
 -export([with_formatted_base/2, with_file_formatted/2]).
 
 -export([new_error/1, new_errors/1, new_warning/1, new_warnings/1]).
--export([new_formatted_error/1, new_formatted_errors/1, new_formatted_warning/1, new_formatted_warnings/1]).
+-export([
+    new_formatted_error/1, new_formatted_errors/1, new_formatted_warning/1, new_formatted_warnings/1
+]).
 %% append errors to astranaut_error:struct().
 -export([append_ews/3, append_error/2, append_warning/2, append_errors/2, append_warnings/2]).
 -export([append_formatted_errors/2, append_formatted_warnings/2]).
@@ -70,23 +73,40 @@ new() ->
 -spec new(compile_file()) -> struct().
 %% @doc initialize struct() with File.
 new(File) ->
-    #{?STRUCT_KEY => ?MODULE, file => File,
-      errors => endo_empty(), warnings => endo_empty(),
-      formatted_errors => endo_empty(), formatted_warnings => endo_empty(),
-      file_errors => #{}, file_warnings => #{}}.
+    #{
+        ?STRUCT_KEY => ?MODULE,
+        file => File,
+        errors => endo_empty(),
+        warnings => endo_empty(),
+        formatted_errors => endo_empty(),
+        formatted_warnings => endo_empty(),
+        file_errors => #{},
+        file_warnings => #{}
+    }.
 
 -spec update_pos(erl_anno:location(), module(), struct()) -> struct().
 %% @doc update struct with pos number and formatter, this will convert all errors and warnings to formatted_errors and formatted_warnings.
-update_pos(Pos, Formatter, #{?STRUCT_KEY := ?MODULE,
-                               errors := Errors0, warnings := Warnings0,
-                               formatted_errors := FormattedErrors0,
-                               formatted_warnings := FormattedWarnings0} = Struct) ->
+update_pos(
+    Pos,
+    Formatter,
+    #{
+        ?STRUCT_KEY := ?MODULE,
+        errors := Errors0,
+        warnings := Warnings0,
+        formatted_errors := FormattedErrors0,
+        formatted_warnings := FormattedWarnings0
+    } = Struct
+) ->
     FormattedErrors1 = format_errors(Pos, Formatter, Errors0),
     FormattedWarnings1 = format_errors(Pos, Formatter, Warnings0),
     FormattedErrors2 = endo_append(FormattedErrors0, FormattedErrors1),
     FormattedWarnings2 = endo_append(FormattedWarnings0, FormattedWarnings1),
-    Struct#{formatted_errors => FormattedErrors2, formatted_warnings => FormattedWarnings2,
-            errors => endo_empty(), warnings => endo_empty()}.
+    Struct#{
+        formatted_errors => FormattedErrors2,
+        formatted_warnings => FormattedWarnings2,
+        errors => endo_empty(),
+        warnings => endo_empty()
+    }.
 
 -spec update_file(compile_file() | eof, struct()) -> struct().
 %% @doc update struct file, if file changed, will convert all formatted_errors and formatted_warnings to file_errors and file_warnings with file before, then update file.
@@ -108,22 +128,31 @@ no_pending(#{?STRUCT_KEY := ?ERROR_STATE, errors := Errors, warnings := Warnings
 
 -spec is_empty(struct()) -> boolean().
 %% @doc check if all errors and warnings is empty, include formatted_* and file_*.
-is_empty(#{?STRUCT_KEY := ?ERROR_STATE,
-           errors := Errors, warnings := Warnings,
-           formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings,
-           file_errors := FErrors, file_warnings := FWarnings}) 
-  when (map_size(FErrors) =:= 0) and (map_size(FWarnings) =:= 0) ->
-    endo_is_empty(Errors) and endo_is_empty(Warnings)
-    and endo_is_empty(FormattedErrors) and endo_is_empty(FormattedWarnings);
+is_empty(#{
+    ?STRUCT_KEY := ?ERROR_STATE,
+    errors := Errors,
+    warnings := Warnings,
+    formatted_errors := FormattedErrors,
+    formatted_warnings := FormattedWarnings,
+    file_errors := FErrors,
+    file_warnings := FWarnings
+}) when
+    (map_size(FErrors) =:= 0) and (map_size(FWarnings) =:= 0)
+->
+    endo_is_empty(Errors) and endo_is_empty(Warnings) and
+        endo_is_empty(FormattedErrors) and endo_is_empty(FormattedWarnings);
 is_empty(_ErrorState) ->
     false.
 
 -spec is_empty_error(struct()) -> boolean().
 %% @doc check if errors, formatted_errors, file_errors is empty.
-is_empty_error(#{errors := Errors,
-                 formatted_errors := FormattedErrors,
-                 file_errors := FErrors})
-  when (map_size(FErrors) =:= 0) ->
+is_empty_error(#{
+    errors := Errors,
+    formatted_errors := FormattedErrors,
+    file_errors := FErrors
+}) when
+    (map_size(FErrors) =:= 0)
+->
     endo_is_empty(Errors) and endo_is_empty(FormattedErrors);
 is_empty_error(_Struct) ->
     false.
@@ -135,25 +164,31 @@ realize(#{?STRUCT_KEY := ?MODULE, file_errors := FileErrors, file_warnings := Fi
 
 printable(#{?STRUCT_KEY := ?MODULE} = Struct) ->
     maps:fold(
-        fun(Key, FileErrors, Acc) when (Key =:= file_errors) or (Key =:= file_warnings) ->
-            case maps:size(FileErrors) of
-                0 ->
-                    Acc;
-                _ ->
-                    FileErrors1 = maps:map(fun(_Key, Value) -> endo_run(Value) end, FileErrors),
-                    maps:put(Key, FileErrors1, Acc)
-            end;
-           (Key, Errors, Acc) when (Key =:= formatted_errors) or (Key =:= formatted_warnings)
-                                   or (Key =:= errors) or (Key =:= warnings) ->
-               case endo_is_empty(Errors) of
+        fun
+            (Key, FileErrors, Acc) when (Key =:= file_errors) or (Key =:= file_warnings) ->
+                case maps:size(FileErrors) of
+                    0 ->
+                        Acc;
+                    _ ->
+                        FileErrors1 = maps:map(fun(_Key, Value) -> endo_run(Value) end, FileErrors),
+                        maps:put(Key, FileErrors1, Acc)
+                end;
+            (Key, Errors, Acc) when
+                (Key =:= formatted_errors) or (Key =:= formatted_warnings) or
+                    (Key =:= errors) or (Key =:= warnings)
+            ->
+                case endo_is_empty(Errors) of
                     true ->
-                       Acc;
+                        Acc;
                     false ->
                         maps:put(Key, endo_run(Errors), Acc)
                 end;
-           (_Key, _Value, Acc) ->
-               Acc
-        end, #{}, Struct).
+            (_Key, _Value, Acc) ->
+                Acc
+        end,
+        #{},
+        Struct
+    ).
 
 -spec merge(struct(), struct()) -> struct().
 %% @doc merge two astranaut_error struct into one, first update file of Struct1 to file of Struct2, then merge all errors.
@@ -192,27 +227,27 @@ formatted_warnings(#{formatted_warnings := Warnings}) ->
 -spec file_errors(struct()) -> compiler_error().
 %% @doc get file_errors.
 file_errors(#{file_errors := FileErrors}) ->
-   realize_errors(FileErrors).
+    realize_errors(FileErrors).
 
--spec file_warnings(Struct::struct()) -> compiler_error().
+-spec file_warnings(Struct :: struct()) -> compiler_error().
 %% @doc get file_warnings.
 file_warnings(#{file_warnings := FileWarnings}) ->
     realize_errors(FileWarnings).
 
 with_error(Fun, Struct) ->
-   with_key(Fun, errors, fun endo_map/2, Struct).
+    with_key(Fun, errors, fun endo_map/2, Struct).
 
 with_warning(Fun, Struct) ->
-   with_key(Fun, warnings, fun endo_map/2, Struct).
+    with_key(Fun, warnings, fun endo_map/2, Struct).
 
 with_failure(Fun, Struct) ->
-   sequence_withs(Fun, [fun with_error/2, fun with_warning/2], Struct).
+    sequence_withs(Fun, [fun with_error/2, fun with_warning/2], Struct).
 
 with_formatted_error(Fun, Struct) ->
-   with_key(Fun, formatted_errors, fun endo_map/2, Struct).
+    with_key(Fun, formatted_errors, fun endo_map/2, Struct).
 
 with_formatted_warning(Fun, Struct) ->
-   with_key(Fun, formatted_warnings, fun endo_map/2, Struct).
+    with_key(Fun, formatted_warnings, fun endo_map/2, Struct).
 
 with_formatted_failure(Fun, Struct) ->
     sequence_withs(Fun, [fun with_formatted_error/2, fun with_formatted_warning/2], Struct).
@@ -224,14 +259,17 @@ with_formatted_base_warning(Fun, Struct) ->
     with_key(Fun, formatted_warnings, fun with_formatted_base/2, Struct).
 
 with_formatted_base_failure(Fun, Struct) ->
-    sequence_withs(Fun, [fun with_formatted_base_error/2, fun with_formatted_base_warning/2], Struct).
+    sequence_withs(
+        Fun, [fun with_formatted_base_error/2, fun with_formatted_base_warning/2], Struct
+    ).
 
 with_formatted(Fun, {Pos, Formatter, Error}) ->
     {Pos, Formatter, Fun(Error)}.
 
 with_formatted_base(Fun, FormattedErrors) ->
     nested_withs(
-      Fun, [fun with_formatted/2, fun endo_map/2], FormattedErrors).
+        Fun, [fun with_formatted/2, fun endo_map/2], FormattedErrors
+    ).
 
 with_file_errors(Fun, Struct) ->
     with_key(Fun, file_errors, fun with_file/2, Struct).
@@ -249,7 +287,9 @@ with_file_formatted_warning(Fun, Struct) ->
     with_key(Fun, file_warnings, fun with_file_formatted/2, Struct).
 
 with_file_formatted_failure(Fun, Struct) ->
-    sequence_withs(Fun, [fun with_file_formatted_error/2, fun with_file_formatted_warning/2], Struct).
+    sequence_withs(
+        Fun, [fun with_file_formatted_error/2, fun with_file_formatted_warning/2], Struct
+    ).
 
 with_file_base_error(Fun, Struct) ->
     with_key(Fun, file_errors, fun with_file_base/2, Struct).
@@ -265,18 +305,25 @@ with_file(Fun, FileErrors) ->
 
 with_file_formatted(Fun, FileErrors) ->
     nested_withs(
-      Fun, [fun endo_map/2, fun with_map_value/2], FileErrors).
+        Fun, [fun endo_map/2, fun with_map_value/2], FileErrors
+    ).
 
 with_file_base(Fun, FileErrors) ->
     nested_withs(
-      Fun, [fun with_formatted/2, fun with_file_formatted/2], FileErrors).
+        Fun, [fun with_formatted/2, fun with_file_formatted/2], FileErrors
+    ).
 
 with_all_error(Fun, Struct) ->
-    sequence_withs(Fun, [fun with_error/2, fun with_formatted_base_error/2, fun with_file_base_error/2], Struct).
+    sequence_withs(
+        Fun, [fun with_error/2, fun with_formatted_base_error/2, fun with_file_base_error/2], Struct
+    ).
 
 with_all_warning(Fun, Struct) ->
     sequence_withs(
-      Fun, [fun with_warning/2, fun with_formatted_base_warning/2, fun with_file_base_warning/2], Struct).
+        Fun,
+        [fun with_warning/2, fun with_formatted_base_warning/2, fun with_file_base_warning/2],
+        Struct
+    ).
 
 with_all_failure(Fun, Struct) ->
     sequence_withs(Fun, [fun with_all_error/2, fun with_all_warning/2], Struct).
@@ -294,7 +341,9 @@ with_map_value(Fun, Map) ->
     maps:map(
         fun(_Key, Value) ->
             Fun(Value)
-        end, Map).
+        end,
+        Map
+    ).
 
 with_key(Fun, Key, With, #{?STRUCT_KEY := ?MODULE} = Struct) ->
     Errors = maps:get(Key, Struct),
@@ -380,7 +429,6 @@ append_file_warnings(FileWarnings, #{file_warnings := FileWarnings1} = Struct) -
     FileWarnings3 = merge_file_errors(FileWarnings1, FileWarnings2),
     Struct#{file_warnings => FileWarnings3}.
 
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -395,22 +443,30 @@ update_file(undefined, eof, #{formatted_errors := Errors, formatted_warnings := 
         false ->
             erlang:error({match_eof_without_file, Struct})
     end;
-update_file(File0, File1, #{?STRUCT_KEY := ?ERROR_STATE,
-                            formatted_errors := Errors,
-                            formatted_warnings := Warnings,
-                            file_errors := ErrorsWithFile,
-                            file_warnings := WarningsWithFile} = Struct) ->
+update_file(
+    File0,
+    File1,
+    #{
+        ?STRUCT_KEY := ?ERROR_STATE,
+        formatted_errors := Errors,
+        formatted_warnings := Warnings,
+        file_errors := ErrorsWithFile,
+        file_warnings := WarningsWithFile
+    } = Struct
+) ->
     case File0 =:= File1 of
         true ->
             Struct#{file => File1};
         false ->
             ErrorsWithFile1 = add_file_errors(File0, Errors, ErrorsWithFile),
             WarningsWithFile1 = add_file_errors(File0, Warnings, WarningsWithFile),
-            Struct#{formatted_errors => endo_empty(),
-                    formatted_warnings => endo_empty(),
-                    file_errors => ErrorsWithFile1, 
-                    file_warnings => WarningsWithFile1,
-                    file => File1}
+            Struct#{
+                formatted_errors => endo_empty(),
+                formatted_warnings => endo_empty(),
+                file_errors => ErrorsWithFile1,
+                file_warnings => WarningsWithFile1,
+                file => File1
+            }
     end.
 
 merge_file(#{file := undefined} = Struct, #{file := File}) ->
@@ -420,13 +476,17 @@ merge_file(#{} = Struct, #{file := undefined}) ->
 merge_file(#{file := File1} = Struct, #{file := File2}) ->
     update_file(File1, File2, Struct).
 
-merge_file_ews(#{file_errors := FileErrors1, file_warnings := FileWarnings1} = Struct,
-               #{file_errors := FileErrors2, file_warnings := FileWarnings2}) ->
+merge_file_ews(
+    #{file_errors := FileErrors1, file_warnings := FileWarnings1} = Struct,
+    #{file_errors := FileErrors2, file_warnings := FileWarnings2}
+) ->
     FileErrors3 = merge_file_errors(FileErrors1, FileErrors2),
     FileWarnings3 = merge_file_errors(FileWarnings1, FileWarnings2),
     Struct#{file_errors => FileErrors3, file_warnings => FileWarnings3}.
 
-merge_formatted_ews(#{} = Struct1, #{formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings}) ->
+merge_formatted_ews(#{} = Struct1, #{
+    formatted_errors := FormattedErrors, formatted_warnings := FormattedWarnings
+}) ->
     Struct2 = append_formatted_errors(FormattedErrors, Struct1),
     Struct3 = append_formatted_warnings(FormattedWarnings, Struct2),
     Struct3.
@@ -436,11 +496,14 @@ merge_ews(#{} = Struct1, #{errors := Errors, warnings := Warnings}) ->
 
 merge_file_errors(ErrorsWithFile1, ErrorsWithFile2) ->
     maps:fold(
-      fun(File, Errors, ErrorsWithFileAcc) ->
-              add_file_errors(File, Errors, ErrorsWithFileAcc)
-      end, ErrorsWithFile1, ErrorsWithFile2).
+        fun(File, Errors, ErrorsWithFileAcc) ->
+            add_file_errors(File, Errors, ErrorsWithFileAcc)
+        end,
+        ErrorsWithFile1,
+        ErrorsWithFile2
+    ).
 
- add_file_errors(File, Errors1, ErrorsWithFile) ->
+add_file_errors(File, Errors1, ErrorsWithFile) ->
     case endo_is_empty(Errors1) of
         true ->
             ErrorsWithFile;
@@ -461,10 +524,13 @@ format_errors(Pos, Formatter, Errors) ->
 
 from_compiler_errors(CompilerFileErrors) ->
     maps:from_list(
-      lists:map(
-        fun({File, Errors}) ->
+        lists:map(
+            fun({File, Errors}) ->
                 {File, endo(Errors)}
-        end, CompilerFileErrors)).
+            end,
+            CompilerFileErrors
+        )
+    ).
 
 -spec endo_empty() -> endo(_A).
 endo_empty() ->
@@ -526,7 +592,10 @@ sequence_withs(Fun, Withs, Data) ->
 nested_withs(Fun, Withs, Data) ->
     FinalWith =
         lists:foldl(
-          fun(With, FunAcc) ->
-                  fun(Data1) -> With(FunAcc, Data1) end
-          end, Fun, Withs),
+            fun(With, FunAcc) ->
+                fun(Data1) -> With(FunAcc, Data1) end
+            end,
+            Fun,
+            Withs
+        ),
     FinalWith(Data).

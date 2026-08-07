@@ -11,35 +11,59 @@
 -include("otp_vsn.hrl").
 
 -type form() :: erl_parse:abstract_form().
--type node_role() :: expression | pattern | guard | form | type | clause |
-                     name | type_param | attribute_body | binary_size |
-                     map_field | binary_field.
--type validator() :: {role, node_role()} |
-                     {slot, atom(), atom(), node_role()}.
+-type node_role() ::
+    expression
+    | pattern
+    | guard
+    | form
+    | type
+    | clause
+    | name
+    | type_param
+    | attribute_body
+    | binary_size
+    | map_field
+    | binary_field.
+-type validator() ::
+    {role, node_role()}
+    | {slot, atom(), atom(), node_role()}.
 -type validation_opts() ::
-        #{attr => map(),
-          forms => [form()],
-          record_defs => [form()],
-          otp_vsn => integer(),
-          fail => raise | collect}.
+    #{
+        attr => map(),
+        forms => [form()],
+        record_defs => [form()],
+        otp_vsn => integer(),
+        fail => raise | collect
+    }.
 -type validation_error() :: map().
 -type child_spec() ::
-        #{slot := atom(),
-          role := node_role(),
-          validator := validator(),
-          subtrees := term(),
-          group_mode := nodes | groups,
-          attr := map()}.
+    #{
+        slot := atom(),
+        role := node_role(),
+        validator := validator(),
+        subtrees := term(),
+        group_mode := nodes | groups,
+        attr := map()
+    }.
 
--export_type([node_role/0, validator/0, validation_opts/0,
-              validation_error/0, child_spec/0]).
+-export_type([
+    node_role/0,
+    validator/0,
+    validation_opts/0,
+    validation_error/0,
+    child_spec/0
+]).
 
 %% API
 -export([type/1, otp_vsn/0, get_pos/1, set_pos/2, is_pos/1, is_leaf/1]).
 -export([subtrees/1, update_tree/2, revert/1]).
 -export([subtrees_pge/3]).
--export([validate_node/2, validate_node/3, normalize/2, normalize/3,
-         child_specs/3, node_roles/1]).
+-export([
+    validate_node/2, validate_node/3,
+    normalize/2, normalize/3,
+    child_specs/3,
+    node_roles/1
+]).
 
 -spec type(term()) -> atom().
 %% ERLANG AST SEMANTICS
@@ -129,16 +153,19 @@ is_leaf(Node) ->
 %% local and let every ordinary node fall through to erl_syntax:subtrees/1.
 %% Scope: supported OTP releases 21-29. Regression coverage lives in
 %% astranaut_syntax_SUITE's type/spec attribute tests.
-subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when Name =:= type; Name =:= opaque ->
+subtrees({attribute, Pos, Name, {TypeName, TypeBody, TypeParams}}) when
+    Name =:= type; Name =:= opaque
+->
     NameTree = name_arity_tree(Name, Pos),
     TypeNameTree = name_arity_tree(TypeName, Pos),
-    [[NameTree], [TypeNameTree, TypeBody|TypeParams]];
+    [[NameTree], [TypeNameTree, TypeBody | TypeParams]];
 subtrees({attribute, Pos, Name, {MFA, Specs}}) when Name =:= spec; Name =:= callback ->
     NameTree = name_arity_tree(Name, Pos),
     MFATree = mfa_tree(MFA, Pos),
-    [[NameTree], [MFATree|Specs]];
-subtrees({attribute, _Pos, Name, Body})
-  when Name =:= type; Name =:= opaque; Name =:= spec; Name =:= callback ->
+    [[NameTree], [MFATree | Specs]];
+subtrees({attribute, _Pos, Name, Body}) when
+    Name =:= type; Name =:= opaque; Name =:= spec; Name =:= callback
+->
     erlang:error({invalid_attribute_body, Name, Body});
 %% ASTRANAUT OTP ADAPTER: delegate raw record-field nodes through their
 %% OTP syntax-tree wrappers; child grouping remains owned by erl_syntax.
@@ -162,7 +189,12 @@ typed_record_field_tree({typed_record_field, Field, FieldType}) ->
     erl_syntax:set_pos(Tree, erl_syntax:get_pos(FieldTree)).
 
 mfa_tree(MFA, Pos) ->
-    erl_syntax:set_pos(erl_syntax:tuple(lists:map(fun(Element) -> name_arity_tree(Element, Pos) end, tuple_to_list(MFA))), Pos).
+    erl_syntax:set_pos(
+        erl_syntax:tuple(
+            lists:map(fun(Element) -> name_arity_tree(Element, Pos) end, tuple_to_list(MFA))
+        ),
+        Pos
+    ).
 
 name_arity_tree(Name, Pos) when is_atom(Name) ->
     erl_syntax:set_pos(erl_syntax:atom(Name), Pos);
@@ -174,14 +206,19 @@ name_arity_tree(Arity, Pos) when is_integer(Arity) ->
 %% return the standard abstract-format tuple expected by callbacks.
 update_tree({record_field, _Pos, _Name} = Node, Subtrees) ->
     revert_record_field(
-      erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees)));
+        erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees))
+    );
 update_tree({record_field, _Pos, _Name, _Value} = Node, Subtrees) ->
     revert_record_field(
-      erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees)));
+        erl_syntax:update_tree(record_field_tree(Node), otp_subtrees(Subtrees))
+    );
 update_tree({typed_record_field, _Field, _FieldType} = Node, Subtrees) ->
     revert_typed_record_field(
-      erl_syntax:update_tree(typed_record_field_tree(Node),
-                             otp_subtrees(Subtrees)));
+        erl_syntax:update_tree(
+            typed_record_field_tree(Node),
+            otp_subtrees(Subtrees)
+        )
+    );
 update_tree(Node, Subtrees) ->
     %% OTP AUTHORITY: reconstruction is deliberately not schema-generated.
     erl_syntax:update_tree(Node, otp_subtrees(Subtrees)).
@@ -239,14 +276,15 @@ revert_record_field(Node) ->
     end.
 
 revert_typed_record_field(Node) ->
-    {typed_record_field,
-     revert(erl_syntax:typed_record_field_body(Node)),
-     revert(erl_syntax:typed_record_field_type(Node))}.
+    {typed_record_field, revert(erl_syntax:typed_record_field_body(Node)),
+        revert(erl_syntax:typed_record_field_type(Node))}.
 
-revert_attribute(Name, [TypeNameTree, TypeTree|TypeParamTrees], Pos, _Node) when Name =:= type; Name =:= opaque ->
+revert_attribute(Name, [TypeNameTree, TypeTree | TypeParamTrees], Pos, _Node) when
+    Name =:= type; Name =:= opaque
+->
     TypeName = erl_syntax:atom_value(TypeNameTree),
     {attribute, Pos, Name, {TypeName, TypeTree, TypeParamTrees}};
-revert_attribute(Name, [MFATree|SpecTrees], Pos, _Node) when Name =:= spec; Name =:= callback ->
+revert_attribute(Name, [MFATree | SpecTrees], Pos, _Node) when Name =:= spec; Name =:= callback ->
     MFA = mfa_value(MFATree),
     {attribute, Pos, Name, {MFA, SpecTrees}};
 revert_attribute(_Name, _Subtrees, _Pos, Node) ->
@@ -255,11 +293,14 @@ revert_attribute(_Name, _Subtrees, _Pos, Node) ->
 mfa_value(MFATree) ->
     tuple = erl_syntax:type(MFATree),
     list_to_tuple(
-      lists:map(
-        fun(MFA) -> 
+        lists:map(
+            fun(MFA) ->
                 Type = erl_syntax:type(MFA),
-                name_arity_value(Type, MFA) 
-        end, erl_syntax:tuple_elements(MFATree))).
+                name_arity_value(Type, MFA)
+            end,
+            erl_syntax:tuple_elements(MFATree)
+        )
+    ).
 
 name_arity_value(atom, NameTree) ->
     erl_syntax:atom_value(NameTree);
@@ -274,26 +315,32 @@ subtrees_pge(Type, Subtrees, Attr) ->
 %% syntax validation functions
 %%===================================================================
 -spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator()) ->
-          ok | {error, validation_error()}.
+    ok | {error, validation_error()}.
 validate_node(NodeOrNodes, Validator) ->
     validate_node(NodeOrNodes, Validator, #{}).
 
--spec validate_node(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator(),
-                    validation_opts()) -> ok | {error, validation_error()}.
+-spec validate_node(
+    erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()],
+    validator(),
+    validation_opts()
+) -> ok | {error, validation_error()}.
 validate_node(NodeOrNodes, Validator, Opts) ->
     Env = validation_env(Opts),
     validate_node(NodeOrNodes, Validator, root, Env, []).
 
 -spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator()) ->
-          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} |
-          {error, validation_error()}.
+    {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]}
+    | {error, validation_error()}.
 normalize(NodeOrNodes, Validator) ->
     normalize(NodeOrNodes, Validator, #{}).
 
--spec normalize(erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()], validator(),
-                validation_opts()) ->
-          {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]} |
-          {error, validation_error()}.
+-spec normalize(
+    erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()],
+    validator(),
+    validation_opts()
+) ->
+    {ok, erl_syntax:syntaxTree() | [erl_syntax:syntaxTree()]}
+    | {error, validation_error()}.
 normalize(NodeOrNodes, Validator, Opts) ->
     Attr = validation_attr(Opts, validator_role(Validator)),
     Env = validation_env(Opts),
@@ -315,8 +362,10 @@ slot_role(Role) ->
     lists:member(Role, [name, type_param, attribute_body, binary_size, map_field, binary_field]).
 
 validation_env(Opts) ->
-    #{forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
-      otp_vsn => normalize_otp_vsn(maps:get(otp_vsn, Opts, otp_vsn()))}.
+    #{
+        forms => maps:get(record_defs, Opts, maps:get(forms, Opts, [])),
+        otp_vsn => normalize_otp_vsn(maps:get(otp_vsn, Opts, otp_vsn()))
+    }.
 
 normalize_otp_vsn(OtpVsn) when is_integer(OtpVsn) -> OtpVsn;
 normalize_otp_vsn(OtpVsn) -> erlang:error({invalid_otp_vsn, OtpVsn}).
@@ -338,21 +387,41 @@ validate_node_info(Node, Validator, Slot, Env, Path) ->
             OtpVsn = maps:get(otp_vsn, Env, otp_vsn()),
             case role_allowed(Validator, Type, Node, Env) of
                 false ->
-                    {error, invalid_role_error(
-                              Validator, ExpectedRole, Slot,
-                              Type, Pos, Node, Path)};
+                    {error,
+                        invalid_role_error(
+                            Validator,
+                            ExpectedRole,
+                            Slot,
+                            Type,
+                            Pos,
+                            Node,
+                            Path
+                        )};
                 true ->
-                    case syntax_child_layout(
-                           Type, Subtrees, ExpectedRole, OtpVsn) of
-                        {ok, _Layout} -> {ok, NodeInfo};
+                    case
+                        syntax_child_layout(
+                            Type, Subtrees, ExpectedRole, OtpVsn
+                        )
+                    of
+                        {ok, _Layout} ->
+                            {ok, NodeInfo};
                         {error, Reason} ->
-                            {error, invalid_node_error(
-                                      Validator, ExpectedRole, Slot, Node,
-                                      {error, Reason}, Path)}
+                            {error,
+                                invalid_node_error(
+                                    Validator,
+                                    ExpectedRole,
+                                    Slot,
+                                    Node,
+                                    {error, Reason},
+                                    Path
+                                )}
                     end
             end;
         {error, Exception} ->
-            {error, invalid_node_error(Validator, validator_role(Validator), Slot, Node, Exception, Path)}
+            {error,
+                invalid_node_error(
+                    Validator, validator_role(Validator), Slot, Node, Exception, Path
+                )}
     end.
 
 normalize([], _Validator, _Slot, _Attr, _Env, _Path) ->
@@ -378,43 +447,59 @@ normalize_node(Node, {ok, Type, Pos, Subtrees}, Validator, Slot, Attr, Env, Path
             {error, add_parent_error(Type, Pos, Error)}
     end.
 
-normalize_node_list([Node|Nodes], Validator, Slot, Attr, Env, Path, Index, Acc) ->
+normalize_node_list([Node | Nodes], Validator, Slot, Attr, Env, Path, Index, Acc) ->
     Path1 = Path ++ [path_item(Slot, Index, Validator, Node)],
     case normalize(Node, Validator, Slot, Attr, Env, Path1) of
         {ok, Node1} ->
-            normalize_node_list(Nodes, Validator, Slot, Attr, Env, Path, Index + 1, [Node1|Acc]);
+            normalize_node_list(Nodes, Validator, Slot, Attr, Env, Path, Index + 1, [Node1 | Acc]);
         {error, Error} ->
             {error, Error}
     end;
 normalize_node_list([], _Validator, _Slot, _Attr, _Env, _Path, _Index, Acc) ->
     {ok, lists:reverse(Acc)}.
 
-normalize_child_specs([#{slot := Slot, validator := Validator,
-                         subtrees := Subtrees, attr := Attr} = Spec|Specs],
-                      Env, Path, Acc) ->
+normalize_child_specs(
+    [
+        #{
+            slot := Slot,
+            validator := Validator,
+            subtrees := Subtrees,
+            attr := Attr
+        } = Spec
+        | Specs
+    ],
+    Env,
+    Path,
+    Acc
+) ->
     case normalize_child_subtrees(Subtrees, Validator, Slot, Attr, Env, Path, 1, []) of
         {ok, Subtrees1} ->
             Spec1 = Spec#{subtrees => Subtrees1},
-            normalize_child_specs(Specs, Env, Path, [Spec1|Acc]);
+            normalize_child_specs(Specs, Env, Path, [Spec1 | Acc]);
         {error, Error} ->
             {error, Error}
     end;
 normalize_child_specs([], _Env, _Path, Acc) ->
     {ok, lists:reverse(Acc)}.
 
-normalize_child_subtrees([Subtree|Subtrees], Validator, Slot, Attr, Env, Path, Index, Acc)
-  when is_list(Subtree) ->
+normalize_child_subtrees([Subtree | Subtrees], Validator, Slot, Attr, Env, Path, Index, Acc) when
+    is_list(Subtree)
+->
     case normalize_child_subtrees(Subtree, Validator, Slot, Attr, Env, Path, 1, []) of
         {ok, Subtree1} ->
-            normalize_child_subtrees(Subtrees, Validator, Slot, Attr, Env, Path, Index + 1, [Subtree1|Acc]);
+            normalize_child_subtrees(Subtrees, Validator, Slot, Attr, Env, Path, Index + 1, [
+                Subtree1 | Acc
+            ]);
         {error, Error} ->
             {error, Error}
     end;
-normalize_child_subtrees([Node|Nodes], Validator, Slot, Attr, Env, Path, Index, Acc) ->
+normalize_child_subtrees([Node | Nodes], Validator, Slot, Attr, Env, Path, Index, Acc) ->
     Path1 = Path ++ [path_item(Slot, Index, Validator, Node)],
     case normalize(Node, Validator, Slot, Attr, Env, Path1) of
         {ok, Node1} ->
-            normalize_child_subtrees(Nodes, Validator, Slot, Attr, Env, Path, Index + 1, [Node1|Acc]);
+            normalize_child_subtrees(Nodes, Validator, Slot, Attr, Env, Path, Index + 1, [
+                Node1 | Acc
+            ]);
         {error, Error} ->
             {error, Error}
     end;
@@ -433,8 +518,15 @@ normalize_rebuild_node(Node, Validator, Slot, Type, Pos, Specs, Env, Path) ->
         end
     catch
         Class:Reason ->
-            {error, invalid_node_error(Validator, validator_role(Validator), Slot,
-                                       Node, {Class, Reason}, Path)}
+            {error,
+                invalid_node_error(
+                    Validator,
+                    validator_role(Validator),
+                    Slot,
+                    Node,
+                    {Class, Reason},
+                    Path
+                )}
     end.
 
 normalize_revert_node(Node, Validator, Slot, Type, Pos, Env, Path) ->
@@ -448,11 +540,18 @@ normalize_revert_node(Node, Validator, Slot, Type, Pos, Env, Path) ->
         end
     catch
         Class:Reason ->
-            {error, invalid_node_error(Validator, validator_role(Validator), Slot,
-                                       Node, {Class, Reason}, Path)}
+            {error,
+                invalid_node_error(
+                    Validator,
+                    validator_role(Validator),
+                    Slot,
+                    Node,
+                    {Class, Reason},
+                    Path
+                )}
     end.
 
-validate_node_list([Node|Nodes], Validator, Slot, Env, Path, Index) ->
+validate_node_list([Node | Nodes], Validator, Slot, Env, Path, Index) ->
     Path1 = Path ++ [path_item(Slot, Index, Validator, Node)],
     case validate_node(Node, Validator, Slot, Env, Path1) of
         ok ->
@@ -493,8 +592,9 @@ node_type_info(Node) ->
             node_type_info_1(Node1)
     end.
 
-unwrap_node_context({uniplate_node_context, Node, _Withs, _Reduces, _Skip,
-                     _UpAttrs, _Entries, _Exits}) ->
+unwrap_node_context(
+    {uniplate_node_context, Node, _Withs, _Reduces, _Skip, _UpAttrs, _Entries, _Exits}
+) ->
     Node;
 unwrap_node_context(Node) ->
     Node.
@@ -519,27 +619,35 @@ add_parent_error(ParentType, ParentPos, Error) ->
     end.
 
 invalid_role_error(Validator, ExpectedRole, Slot, Type, Pos, Node, Path) ->
-    #{reason => invalid_role,
-      validator => Validator,
-      expected_role => ExpectedRole,
-      slot => Slot,
-      actual_type => Type,
-      pos => Pos,
-      node => Node,
-      path => Path}.
+    #{
+        reason => invalid_role,
+        validator => Validator,
+        expected_role => ExpectedRole,
+        slot => Slot,
+        actual_type => Type,
+        pos => Pos,
+        node => Node,
+        path => Path
+    }.
 
 invalid_node_error(Validator, ExpectedRole, Slot, Node, Exception, Path) ->
-    #{reason => invalid_node,
-      validator => Validator,
-      expected_role => ExpectedRole,
-      slot => Slot,
-      node => Node,
-      exception => Exception,
-      path => Path}.
+    #{
+        reason => invalid_node,
+        validator => Validator,
+        expected_role => ExpectedRole,
+        slot => Slot,
+        node => Node,
+        exception => Exception,
+        path => Path
+    }.
 
 path_item(Slot, Index, Validator, Node) ->
-    Item0 = #{slot => Slot, index => Index, validator => Validator,
-              expected_role => validator_role(Validator)},
+    Item0 = #{
+        slot => Slot,
+        index => Index,
+        validator => Validator,
+        expected_role => validator_role(Validator)
+    },
     case node_type_info(Node) of
         {ok, Type, Pos} ->
             Item0#{type => Type, pos => Pos};
@@ -555,15 +663,18 @@ role_allowed(Validator, Type, Node, Env) ->
 syntax_allowed(Validator, Type, Node, Env) ->
     OtpVsn = maps:get(otp_vsn, Env, otp_vsn()),
     astranaut_syntax_schema:format_available(
-      Type, unwrap_node_context(Node), OtpVsn) andalso
+        Type, unwrap_node_context(Node), OtpVsn
+    ) andalso
         case Validator of
             {slot, ParentType, Slot, _Role} ->
-                ChildNode = case unwrap_node_context(Node) of
-                                default -> default;
-                                Node1 -> revert(Node1)
-                            end,
+                ChildNode =
+                    case unwrap_node_context(Node) of
+                        default -> default;
+                        Node1 -> revert(Node1)
+                    end,
                 astranaut_syntax_schema:slot_available(
-                  ParentType, Slot, Type, ChildNode, OtpVsn);
+                    ParentType, Slot, Type, ChildNode, OtpVsn
+                );
             {role, _Role} ->
                 true
         end.
@@ -610,12 +721,20 @@ node_roles(Type) ->
 -spec child_specs(atom(), [[erl_syntax:syntaxTree()]], map()) -> [child_spec()].
 child_specs(Type, Subtrees, Attr) ->
     ParentRole = maps:get(node, Attr, expression),
-    case syntax_child_layout(Type, Subtrees, ParentRole,
-                             normalize_otp_vsn(otp_vsn())) of
+    case
+        syntax_child_layout(
+            Type,
+            Subtrees,
+            ParentRole,
+            normalize_otp_vsn(otp_vsn())
+        )
+    of
         {ok, Children} ->
             Attr1 = child_specs_attr(Type, Subtrees, Attr),
-            [child_spec(Type, Slot, Role, ChildSubtrees, GroupMode, Attr1)
-             || {Slot, Role, ChildSubtrees, GroupMode} <- Children];
+            [
+                child_spec(Type, Slot, Role, ChildSubtrees, GroupMode, Attr1)
+             || {Slot, Role, ChildSubtrees, GroupMode} <- Children
+            ];
         {error, Reason} ->
             erlang:error(Reason)
     end.
@@ -623,8 +742,9 @@ child_specs(Type, Subtrees, Attr) ->
 %% ASTRANAUT TRAVERSAL SPECIAL CASE
 %% Some Astranaut form traversal paths expose only a function's clauses after
 %% handling its name separately. This is not an erl_syntax:subtrees/1 layout.
-syntax_child_layout(function, [Clauses], _ParentRole, _OtpVsn)
-  when is_list(Clauses) ->
+syntax_child_layout(function, [Clauses], _ParentRole, _OtpVsn) when
+    is_list(Clauses)
+->
     {ok, [{clauses, clause, Clauses, nodes}]};
 %% ASTRANAUT OTP SPECIAL CASE
 %% erl_syntax:subtrees/1 returns [] for an empty structured map_expr.
@@ -642,12 +762,14 @@ child_specs_attr(_Type, _Subtrees, Attr) ->
 
 child_spec(ParentType, Slot, Role, Subtrees, GroupMode, Attr) ->
     Validator = {slot, ParentType, Slot, Role},
-    #{slot => Slot,
-      role => Role,
-      validator => Validator,
-      subtrees => Subtrees,
-      group_mode => GroupMode,
-      attr => (child_attr(Role, Attr))#{validator => Validator}}.
+    #{
+        slot => Slot,
+        role => Role,
+        validator => Validator,
+        subtrees => Subtrees,
+        group_mode => GroupMode,
+        attr => (child_attr(Role, Attr))#{validator => Validator}
+    }.
 
 child_attr(Role, Attr) ->
     case node_role(Role) of
@@ -655,8 +777,10 @@ child_attr(Role, Attr) ->
             Attr#{node => Role};
         false ->
             case Role of
-                StructuralRole when StructuralRole =:= map_field;
-                                         StructuralRole =:= binary_field ->
+                StructuralRole when
+                    StructuralRole =:= map_field;
+                    StructuralRole =:= binary_field
+                ->
                     Attr;
                 _ ->
                     case slot_role(Role) of
@@ -672,10 +796,16 @@ child_specs_annotated_subtrees(Specs) ->
 child_specs_plain_subtrees(Specs) ->
     build_child_specs_subtrees(Specs, fun(_Spec, Nodes) -> Nodes end).
 
-build_child_specs_subtrees([#{validator := {slot, attribute, name, name}} = NameSpec|BodySpecs], Wrap) ->
+build_child_specs_subtrees(
+    [#{validator := {slot, attribute, name, name}} = NameSpec | BodySpecs], Wrap
+) ->
     [NameSubtrees] = build_child_spec_subtreess(NameSpec, Wrap),
-    BodySubtrees = lists:append(lists:map(fun(Spec) -> attribute_child_spec_subtrees(Spec, Wrap) end,
-                                          BodySpecs)),
+    BodySubtrees = lists:append(
+        lists:map(
+            fun(Spec) -> attribute_child_spec_subtrees(Spec, Wrap) end,
+            BodySpecs
+        )
+    ),
     [NameSubtrees, BodySubtrees];
 build_child_specs_subtrees(Specs, Wrap) ->
     lists:append(lists:map(fun(Spec) -> build_child_spec_subtreess(Spec, Wrap) end, Specs)).
@@ -691,6 +821,8 @@ build_child_spec_subtreess(#{subtrees := Subtrees} = Spec, Wrap) ->
 validator_node(#{attr := Attr}, Nodes) ->
     ChildAttr = maps:with([node, validator], Attr),
     astranaut_uniplate:up_attr(
-      fun(ParentAttr) ->
-              maps:merge(maps:without([node, validator], ParentAttr), ChildAttr)
-      end, Nodes).
+        fun(ParentAttr) ->
+            maps:merge(maps:without([node, validator], ParentAttr), ChildAttr)
+        end,
+        Nodes
+    ).

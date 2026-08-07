@@ -14,23 +14,25 @@
 -type uniplate(A) :: fun((A) -> {[[A]], fun(([[A]]) -> A)}).
 
 -type monad(M, A) :: astranaut_monad:monad(M, A).
--type monad_opts(M) :: #{bind := astranaut_monad:monad_bind(M),
-                         return := astranaut_monad:monad_return(M),
-                         ask => astranaut_monad:monad_ask(M),
-                         local => astranaut_monad:monad_local(M),
-                         state => astranaut_monad:monad_state(M),
-                         writer_updated => astranaut_monad:monad_writer(M),
-                         listen_updated => astranaut_monad:monad_listen(M)
-                        }.
+-type monad_opts(M) :: #{
+    bind := astranaut_monad:monad_bind(M),
+    return := astranaut_monad:monad_return(M),
+    ask => astranaut_monad:monad_ask(M),
+    local => astranaut_monad:monad_local(M),
+    state => astranaut_monad:monad_state(M),
+    writer_updated => astranaut_monad:monad_writer(M),
+    listen_updated => astranaut_monad:monad_listen(M)
+}.
 
--record(uniplate_node_context, {node,
-                                withs = [],
-                                reduces = [],
-                                skip = false,
-                                up_attrs = [],
-                                entries = [],
-                                exits = []
-                               }).
+-record(uniplate_node_context, {
+    node,
+    withs = [],
+    reduces = [],
+    skip = false,
+    up_attrs = [],
+    entries = [],
+    exits = []
+}).
 
 -type traverse_style() :: pre | post | all | subtree | none.
 -type validate_style() :: false | input | output | both.
@@ -49,10 +51,18 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec map_m(fun((N) -> monad(M, N)), N, uniplate(N), M | monad_opts(M),
-            #{traverse => traverse_style(), static => boolean(),
-              validate => boolean() | validate_style(),
-              validate_opts => map()}) -> monad(M, N).
+-spec map_m(
+    fun((N) -> monad(M, N)),
+    N,
+    uniplate(N),
+    M | monad_opts(M),
+    #{
+        traverse => traverse_style(),
+        static => boolean(),
+        validate => boolean() | validate_style(),
+        validate_opts => map()
+    }
+) -> monad(M, N).
 %% @doc traverse node with user defined monad.
 map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
     MonadOpts = monad_opts(Monad),
@@ -60,23 +70,29 @@ map_m(F, Node, Uniplate, Monad, Opts) when is_atom(Monad); is_tuple(Monad) ->
 map_m(F, Node, Uniplate, #{} = MonadOpts, Opts) ->
     Static = maps:get(static, Opts, false),
     Validate = validate_style(Opts),
-    Opts1 = maps:merge(#{traverse => pre, validate => Validate},
-                       maps:with([traverse, attr, validate_opts], Opts)),
+    Opts1 = maps:merge(
+        #{traverse => pre, validate => Validate},
+        maps:with([traverse, attr, validate_opts], Opts)
+    ),
     UniplateContext = uniplate_context(Uniplate),
     with_writer_updated(
-      fun(MonadOpts1) ->
-              map_m_1(F, Node, UniplateContext, MonadOpts1, Opts1)
-      end, MonadOpts, Static).
+        fun(MonadOpts1) ->
+            map_m_1(F, Node, UniplateContext, MonadOpts1, Opts1)
+        end,
+        MonadOpts,
+        Static
+    ).
 
 -spec uniplate_context(uniplate(A)) -> uniplate(A).
 uniplate_context(Uniplate) ->
-    fun(#uniplate_node_context{node = Node, withs = Withs, reduces = Reduces}) ->
+    fun
+        (#uniplate_node_context{node = Node, withs = Withs, reduces = Reduces}) ->
             {Subtrees, MakeTree} = Uniplate(Node),
             Subtrees1 = apply_functions(Withs, Subtrees),
             {Subtrees1, fun(Subtrees2) ->
-                                MakeTree(apply_functions(lists:reverse(Reduces), Subtrees2))
-                        end};
-       (Node) ->
+                MakeTree(apply_functions(lists:reverse(Reduces), Subtrees2))
+            end};
+        (Node) ->
             Uniplate(Node)
     end.
 
@@ -86,8 +102,11 @@ with_writer_updated(Fun, #{bind := Bind, return := Return} = Opts, true) ->
     IdentityLift = fun(A) -> A end,
     IgnoreUpdatedWriter = fun({A, _Updated}) -> Return(A) end,
     ListenNeverUpdated = fun(MA) -> Bind(MA, fun(A) -> Return({A, false}) end) end,
-    Opts1 = Opts#{writer_updated => IgnoreUpdatedWriter, listen_updated => ListenNeverUpdated,
-                  writer_updated_lift => IdentityLift},
+    Opts1 = Opts#{
+        writer_updated => IgnoreUpdatedWriter,
+        listen_updated => ListenNeverUpdated,
+        writer_updated_lift => IdentityLift
+    },
     Fun(Opts1);
 with_writer_updated(Fun, #{writer_updated := _Writer, listen_updated := _Listen} = Opts, false) ->
     %% if monad already a monad writer, it is not have to lift it
@@ -101,9 +120,13 @@ with_writer_updated(Fun, #{bind := Bind, return := Return} = MonadOpts, false) -
     NodeUpdated = Fun(LiftedOpts),
     %% remove the lifted writer monad transformer.
     astranaut_monad:lift_m(
-      fun({Node1, _Updated}) ->
-              Node1
-      end, NodeUpdated, Bind, Return).
+        fun({Node1, _Updated}) ->
+            Node1
+        end,
+        NodeUpdated,
+        Bind,
+        Return
+    ).
 
 monad_opts(Monad) ->
     Bind = astranaut_monad:monad_bind(Monad),
@@ -116,17 +139,24 @@ monad_opts(Monad) ->
     FailOnError = astranaut_monad:monad_fail_on_error(Monad),
     CatchOnError = astranaut_monad:monad_catch_on_error(Monad),
     Fail = validation_fail_handler(Monad),
-    MOpts = #{bind => Bind, return => Return,
-              ask => Ask, local => Local,
-              state => State,
-              writer_updated => Writer, listen_updated => Listen,
-              fail_on_error => FailOnError, catch_on_error => CatchOnError,
-              fail => Fail
-             },
+    MOpts = #{
+        bind => Bind,
+        return => Return,
+        ask => Ask,
+        local => Local,
+        state => State,
+        writer_updated => Writer,
+        listen_updated => Listen,
+        fail_on_error => FailOnError,
+        catch_on_error => CatchOnError,
+        fail => Fail
+    },
     maps:filter(
-      fun(_Key, Value) ->
-              Value =/= undefined
-      end, MOpts).
+        fun(_Key, Value) ->
+            Value =/= undefined
+        end,
+        MOpts
+    ).
 
 lifted_writer_updated_opts(#{bind := Bind, return := Return} = MOpts) ->
     Mempty = astranaut_monad:mempty('or'),
@@ -137,16 +167,24 @@ lifted_writer_updated_opts(#{bind := Bind, return := Return} = MOpts) ->
     Writer = astranaut_monad:writer_writer(Return),
     Listen = astranaut_monad:writer_listen(Bind, Return),
     maps:map(
-      fun(ask, Ask) ->
-              astranaut_monad:writer_ask(Lift, Ask);
-         (local, Local) ->
-              astranaut_monad:writer_local(Local);
-         (state, State) ->
-              astranaut_monad:writer_state(Lift, State);
-         (_Key, Value) ->
-              Value
-      end, MOpts#{listen_updated => Listen, writer_updated => Writer,
-                  writer_updated_lift => Lift, bind => BindW, return => ReturnW}).
+        fun
+            (ask, Ask) ->
+                astranaut_monad:writer_ask(Lift, Ask);
+            (local, Local) ->
+                astranaut_monad:writer_local(Local);
+            (state, State) ->
+                astranaut_monad:writer_state(Lift, State);
+            (_Key, Value) ->
+                Value
+        end,
+        MOpts#{
+            listen_updated => Listen,
+            writer_updated => Writer,
+            writer_updated_lift => Lift,
+            bind => BindW,
+            return => ReturnW
+        }
+    ).
 
 validation_fail_handler(traverse) ->
     fun astranaut_traverse:fail/1;
@@ -156,11 +194,18 @@ validation_fail_handler(_Monad) ->
 map_m_1(F, Nodes, Uniplate, #{bind := Bind, return := Return} = MOpts, Opts) when is_list(Nodes) ->
     %% list maybe returned when traverse one node, map_m_flatten is required.
     astranaut_monad:map_m_flatten(
-      fun(Node) ->
-              maybe_catch_on_error(
+        fun(Node) ->
+            maybe_catch_on_error(
                 map_m_2(F, Node, Uniplate, MOpts, Opts),
-                fun() -> Return([]) end, MOpts, Opts)
-      end, Nodes, Bind, Return);
+                fun() -> Return([]) end,
+                MOpts,
+                Opts
+            )
+        end,
+        Nodes,
+        Bind,
+        Return
+    );
 map_m_1(F, Node, Uniplate, MOpts, Opts) ->
     map_m_2(F, Node, Uniplate, MOpts, Opts).
 
@@ -190,68 +235,121 @@ traversal_node(Node) ->
                     Type = erl_syntax:type(Node1),
                     case astranaut_syntax_schema:traverse_transparent(Type) of
                         true -> transparent;
-                        false -> erlang:error({unclassified_syntax_tree_projection,
-                                               Type, Node1})
+                        false -> erlang:error({unclassified_syntax_tree_projection, Type, Node1})
                     end
             end
     end.
 
-map_m_2_transparent(_F, Node, _Uniplate, #{return := Return},
-                    #{traverse := none}) ->
+map_m_2_transparent(
+    _F,
+    Node,
+    _Uniplate,
+    #{return := Return},
+    #{traverse := none}
+) ->
     Return(Node);
 map_m_2_transparent(F, Node, Uniplate, MOpts, Opts) ->
     descend_m_1(
-      fun(SubNode) ->
-              sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
-      end, Node, Node, Uniplate, MOpts, Opts).
+        fun(SubNode) ->
+            sub_apply(F, SubNode, Uniplate, MOpts, Opts#{parent => Node})
+        end,
+        Node,
+        Node,
+        Uniplate,
+        MOpts,
+        Opts
+    ).
 
 map_m_2_callback(F, Node, _Uniplate, MOpts, #{traverse := none} = Opts) ->
     validate_input_node(
-      Node,
-      fun(Node1) ->
-              updated_node_apply(F, Node1, MOpts, validate_node,
-                                 invalid_transform, Opts)
-      end, MOpts, Opts);
+        Node,
+        fun(Node1) ->
+            updated_node_apply(
+                F,
+                Node1,
+                MOpts,
+                validate_node,
+                invalid_transform,
+                Opts
+            )
+        end,
+        MOpts,
+        Opts
+    );
 map_m_2_callback(F, Node, Uniplate, #{bind := Bind} = MOpts, Opts) ->
     %% Node is simple node
     %% NodeContext1 is node with context
     %% SubNode is sub_node without context
     %% Node1 is node without context
     validate_input_node(
-      Node,
-      fun(InputNode) ->
-              Bind(
+        Node,
+        fun(InputNode) ->
+            Bind(
                 apply_traverse_step(F, InputNode, pre, Uniplate, MOpts, Opts),
                 %% F(Node) -> [Node] | Node
                 %% returned value is node or list of node, use map_m_if_list to mapover nodes
                 fun(NodeOrNodes) ->
-                        map_m_if_list(
-                          %% after pre_apply, NodeContext1 is node with context
-                          fun(NodeContext1) ->
-                                  Bind(
-                                    descend_m_1(
-                                      fun(SubNode) ->
-                                              %% add parent to subtree incase of exception raised
-                                              sub_apply(F, SubNode, Uniplate, MOpts,
-                                                        Opts#{parent => InputNode})
-                                      end, InputNode, NodeContext1, Uniplate, MOpts, Opts),
-                                    fun(Node1) ->
-                                            apply_traverse_step(F, Node1, post,
-                                                                Uniplate, MOpts, Opts)
-                                    end)
-                          end, NodeOrNodes, MOpts)
-                end)
-      end, MOpts, Opts).
+                    map_m_if_list(
+                        %% after pre_apply, NodeContext1 is node with context
+                        fun(NodeContext1) ->
+                            Bind(
+                                descend_m_1(
+                                    fun(SubNode) ->
+                                        %% add parent to subtree incase of exception raised
+                                        sub_apply(
+                                            F,
+                                            SubNode,
+                                            Uniplate,
+                                            MOpts,
+                                            Opts#{parent => InputNode}
+                                        )
+                                    end,
+                                    InputNode,
+                                    NodeContext1,
+                                    Uniplate,
+                                    MOpts,
+                                    Opts
+                                ),
+                                fun(Node1) ->
+                                    apply_traverse_step(
+                                        F,
+                                        Node1,
+                                        post,
+                                        Uniplate,
+                                        MOpts,
+                                        Opts
+                                    )
+                                end
+                            )
+                        end,
+                        NodeOrNodes,
+                        MOpts
+                    )
+                end
+            )
+        end,
+        MOpts,
+        Opts
+    ).
 
 sub_apply(F, Node, Uniplate, MOpts, #{traverse := subtree} = Opts) ->
     case traversal_node(Node) of
         {callback, CallbackNode} ->
             validate_input_node(
-              CallbackNode,
-              fun(Node1) ->
-                      updated_node_apply(F, Node1, MOpts, validate_node,
-                                         invalid_subtree_transform, Opts)
-              end, MOpts, Opts);
+                CallbackNode,
+                fun(Node1) ->
+                    updated_node_apply(
+                        F,
+                        Node1,
+                        MOpts,
+                        validate_node,
+                        invalid_subtree_transform,
+                        Opts
+                    )
+                end,
+                MOpts,
+                Opts
+            );
         transparent ->
             map_m_2_transparent(F, Node, Uniplate, MOpts, Opts)
     end;
@@ -260,20 +358,39 @@ sub_apply(F, Node, Uniplate, MOpts, Opts) ->
 
 descend_m_1(F, Node, NodeContext, Uniplate, #{} = MOpts, #{} = Opts) ->
     context_apply(
-      %% apply entries, exits, up_attrs, skip in NodeContext
-      NodeContext,
-      %% NodeContext1 is node context without 'entrie's, 'exit's, 'up_attr's, 'skip', but with 'with's, 'reduce's
-      %% 'with' is the context of how to generate node context in subtrees
-      %% 'reduce' is the context of how to make tree by subtree
-      fun(NodeContext1) ->
-              descend_m_2(
+        %% apply entries, exits, up_attrs, skip in NodeContext
+        NodeContext,
+        %% NodeContext1 is node context without 'entrie's, 'exit's, 'up_attr's, 'skip', but with 'with's, 'reduce's
+        %% 'with' is the context of how to generate node context in subtrees
+        %% 'reduce' is the context of how to make tree by subtree
+        fun(NodeContext1) ->
+            descend_m_2(
                 %% for uniplate_context/1, subtrees of NodeContext1 is also a node with context
                 fun(SubtreeContext) ->
-                        context_apply(SubtreeContext, fun(SubtreeContext1) -> F(context_node(SubtreeContext1)) end, MOpts)
-                end, Node, NodeContext1, Uniplate, MOpts, Opts)
-      end, MOpts).
+                    context_apply(
+                        SubtreeContext,
+                        fun(SubtreeContext1) -> F(context_node(SubtreeContext1)) end,
+                        MOpts
+                    )
+                end,
+                Node,
+                NodeContext1,
+                Uniplate,
+                MOpts,
+                Opts
+            )
+        end,
+        MOpts
+    ).
 
-descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, listen_updated := ListenUpdated} = MOpts, Opts) ->
+descend_m_2(
+    F,
+    Node,
+    NodeContext,
+    Uniplate,
+    #{bind := Bind, return := Return, listen_updated := ListenUpdated} = MOpts,
+    Opts
+) ->
     %% it's not wise to generate subtrees twice,
     %% validate_pre_transform chould be done here.
     case uniplate(Uniplate, Node, NodeContext, Opts, invalid_pre_transform) of
@@ -281,25 +398,29 @@ descend_m_2(F, Node, NodeContext, Uniplate, #{bind := Bind, return := Return, li
             Return(context_node(NodeContext));
         {Subtreess0, MakeTree} ->
             Bind(
-              annotate_child_subtreess(context_node(NodeContext), Subtreess0, MOpts),
-              fun(Subtreess) ->
-                      Bind(
-              ListenUpdated(map_m_subtreess(F, Subtreess, MOpts, Opts)),
-              fun({Subtrees1, true}) ->
-                              Return(make_tree(MakeTree, Node, Subtreess0, Subtrees1));
-                 ({_Subtrees1, false}) ->
-                      %% context should be removed if node is not updated.
-                      Return(context_node(NodeContext))
-                      end)
-              end)
+                annotate_child_subtreess(context_node(NodeContext), Subtreess0, MOpts),
+                fun(Subtreess) ->
+                    Bind(
+                        ListenUpdated(map_m_subtreess(F, Subtreess, MOpts, Opts)),
+                        fun
+                            ({Subtrees1, true}) ->
+                                Return(make_tree(MakeTree, Node, Subtreess0, Subtrees1));
+                            ({_Subtrees1, false}) ->
+                                %% context should be removed if node is not updated.
+                                Return(context_node(NodeContext))
+                        end
+                    )
+                end
+            )
     end.
 
 annotate_child_subtreess(Node, Subtreess, #{bind := Bind, return := Return, ask := Ask}) ->
     Bind(
-      Ask(),
-      fun(Attr) ->
-              Return(annotate_child_subtreess_1(Node, Subtreess, Attr))
-      end);
+        Ask(),
+        fun(Attr) ->
+            Return(annotate_child_subtreess_1(Node, Subtreess, Attr))
+        end
+    );
 annotate_child_subtreess(_Node, Subtreess, #{return := Return}) ->
     Return(Subtreess).
 
@@ -319,7 +440,7 @@ annotate_child_subtreess_1(Node, Subtreess, Attr) ->
 
 has_node_context(#uniplate_node_context{}) ->
     true;
-has_node_context([H|T]) ->
+has_node_context([H | T]) ->
     has_node_context(H) orelse has_node_context(T);
 has_node_context([]) ->
     false;
@@ -329,13 +450,22 @@ has_node_context(_Node) ->
 map_m_subtreess(F, Subtreess, #{bind := Bind, return := Return} = MOpts, Opts) ->
     SubtreessM =
         astranaut_monad:map_m(
-          fun(Subtrees) ->
-                  astranaut_monad:map_m_flatten(
+            fun(Subtrees) ->
+                astranaut_monad:map_m_flatten(
                     fun(Subtree) ->
-                            maybe_catch_on_error(
-                              F(Subtree), fun() -> Return([]) end, MOpts, Opts)
-                    end, Subtrees, Bind, Return)
-          end, Subtreess, Bind, Return),
+                        maybe_catch_on_error(
+                            F(Subtree), fun() -> Return([]) end, MOpts, Opts
+                        )
+                    end,
+                    Subtrees,
+                    Bind,
+                    Return
+                )
+            end,
+            Subtreess,
+            Bind,
+            Return
+        ),
     case validation_fail(Opts) of
         collect -> SubtreessM;
         raise -> fail_on_error(SubtreessM, MOpts)
@@ -368,10 +498,14 @@ uniplate(Uniplate, Node, NodeContext1, Opts, ExceptionType) ->
                 Node ->
                     case maps:find(parent, Opts) of
                         {ok, Parent} ->
-                            erlang:raise(EType, {invalid_uniplate_subnode, Parent, Node, Exception}, Stacktrace);
+                            erlang:raise(
+                                EType,
+                                {invalid_uniplate_subnode, Parent, Node, Exception},
+                                Stacktrace
+                            );
                         error ->
                             erlang:raise(EType, {invalid_node, Node, Exception}, Stacktrace)
-                        end;
+                    end;
                 Node1 ->
                     erlang:raise(EType, {ExceptionType, Node, Node1, Exception}, Stacktrace)
             end
@@ -384,7 +518,11 @@ make_tree(MakeTree, Node, Subtrees, Subtrees1) ->
             Node1
     catch
         EType:Exception:Stacktrace ->
-            erlang:raise(EType, {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception}, Stacktrace)
+            erlang:raise(
+                EType,
+                {invalid_transform_maketree, Node, Subtrees, Subtrees1, Exception},
+                Stacktrace
+            )
     end.
 
 map_m_if_list(AFB, Nodes, #{bind := Bind, return := Return}) when is_list(Nodes) ->
@@ -403,60 +541,83 @@ apply_traverse_step(F, Node, Step, Uniplate, MOpts, #{traverse := all} = Opts) -
 apply_traverse_step(_F, Node, _Step, _Uniplate, #{return := Return}, #{}) ->
     Return(Node).
 
-updated_node_apply(F, Node1, #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind} = MOpts,
-                   ValidateScope, ContextExceptionType, Opts) ->
+updated_node_apply(
+    F,
+    Node1,
+    #{writer_updated_lift := Lift, writer_updated := WriterUpdated, bind := Bind} = MOpts,
+    ValidateScope,
+    ContextExceptionType,
+    Opts
+) ->
     Bind(
-      Lift(F(Node1)),
-      fun(Node2) ->
-              {Node3, Updated} = updated_node(Node1, Node2),
-              reject_node_context_return(Node1, Node3, ContextExceptionType),
-              Bind(
+        Lift(F(Node1)),
+        fun(Node2) ->
+            {Node3, Updated} = updated_node(Node1, Node2),
+            reject_node_context_return(Node1, Node3, ContextExceptionType),
+            Bind(
                 validate_output_node(Node3, Updated, MOpts, ValidateScope, Opts),
                 fun(Node4) ->
-                        WriterUpdated({Node4, Updated})
-                end)
-      end).
+                    WriterUpdated({Node4, Updated})
+                end
+            )
+        end
+    ).
 
-validate_input_node(Node, Continue, #{bind := Bind, return := Return} = MOpts,
-                    #{validate := Validate} = Opts)
-  when Validate =:= input; Validate =:= both ->
+validate_input_node(
+    Node,
+    Continue,
+    #{bind := Bind, return := Return} = MOpts,
+    #{validate := Validate} = Opts
+) when
+    Validate =:= input; Validate =:= both
+->
     %% Catch only the validation computation.  Returning the continuation
     %% keeps validation failure in the monadic fail channel without using a
     %% tagged node result to decide whether traversal should continue.
     Bind(
-      catch_validation_error(
-        Bind(validate_node(Node, MOpts, validate_node, Opts),
-             fun(Node1) -> Return(fun() -> Continue(Node1) end) end),
-        fun() -> Return(fun() -> Return(Node) end) end,
-        MOpts, Opts),
-      fun(Next) -> Next() end);
+        catch_validation_error(
+            Bind(
+                validate_node(Node, MOpts, validate_node, Opts),
+                fun(Node1) -> Return(fun() -> Continue(Node1) end) end
+            ),
+            fun() -> Return(fun() -> Return(Node) end) end,
+            MOpts,
+            Opts
+        ),
+        fun(Next) -> Next() end
+    );
 validate_input_node(Node, Continue, _MOpts, _Opts) ->
     Continue(Node).
 
 validate_output_node(Node, false, #{return := Return}, _ValidateScope, _Opts) ->
     Return(Node);
-validate_output_node(Node, true, MOpts, ValidateScope, #{validate := Validate} = Opts)
-  when Validate =:= output; Validate =:= both ->
+validate_output_node(Node, true, MOpts, ValidateScope, #{validate := Validate} = Opts) when
+    Validate =:= output; Validate =:= both
+->
     Return = maps:get(return, MOpts),
     Fallback =
         fun() ->
-                case maps:get(traverse, Opts, none) of
-                    pre -> Return(skip(Node));
-                    _ -> Return(Node)
-                end
+            case maps:get(traverse, Opts, none) of
+                pre -> Return(skip(Node));
+                _ -> Return(Node)
+            end
         end,
     catch_validation_error(
-      validate_node(Node, MOpts, ValidateScope, Opts),
-      Fallback, MOpts, Opts);
+        validate_node(Node, MOpts, ValidateScope, Opts),
+        Fallback,
+        MOpts,
+        Opts
+    );
 validate_output_node(Node, true, #{return := Return}, _ValidateScope, _Opts) ->
     Return(Node).
 
 validate_node(Node, #{bind := Bind, ask := Ask} = MOpts, ValidateScope, Opts) ->
     Bind(
-      Ask(),
-      fun(Attr0) ->
-              validate_node_1(Node, Attr0, MOpts, ValidateScope, Opts)
-      end);
+        Ask(),
+        fun(Attr0) ->
+            validate_node_1(Node, Attr0, MOpts, ValidateScope, Opts)
+        end
+    );
 validate_node(Node, MOpts, ValidateScope, Opts) ->
     validate_node_1(Node, #{}, MOpts, ValidateScope, Opts).
 
@@ -522,7 +683,9 @@ validation_fail(Opts) ->
 reject_node_context_return(_Node, _NodeOrNodes, none) ->
     ok;
 reject_node_context_return(Node, Nodes, ContextExceptionType) when is_list(Nodes) ->
-    lists:foreach(fun(Node1) -> reject_node_context_return(Node, Node1, ContextExceptionType) end, Nodes);
+    lists:foreach(
+        fun(Node1) -> reject_node_context_return(Node, Node1, ContextExceptionType) end, Nodes
+    );
 reject_node_context_return(Node, Node1, ContextExceptionType) ->
     case Node1 of
         #uniplate_node_context{} ->
@@ -537,9 +700,15 @@ reject_node_context_return(Node, Node1, ContextExceptionType) ->
 %%%===================================================================
 context_apply(#uniplate_node_context{node = Node, skip = true}, _F, #{return := Return}) ->
     Return(Node);
-context_apply(#uniplate_node_context{entries = Entries, exits = Exits, up_attrs = UpAttrs} = Context1, F, MOpts) ->
+context_apply(
+    #uniplate_node_context{entries = Entries, exits = Exits, up_attrs = UpAttrs} = Context1,
+    F,
+    MOpts
+) ->
     %% remove context after applied
-    Context2 = Context1#uniplate_node_context{entries = [], exits = [], up_attrs = [], skip = false},
+    Context2 = Context1#uniplate_node_context{
+        entries = [], exits = [], up_attrs = [], skip = false
+    },
     context_up_attrs(context_state_changes(F(Context2), Entries, Exits, MOpts), UpAttrs, MOpts);
 context_apply(Node, F, #{}) ->
     F(Node).
@@ -555,34 +724,36 @@ context_state_changes(MA, [], [], #{}) ->
     MA;
 context_state_changes(MA, Entries, Exits, #{bind := Bind, state := State}) ->
     Bind(
-      State(fun(S0) -> {ok, apply_modifies(Entries, S0)} end),
-      fun(ok) ->
-              Bind(
+        State(fun(S0) -> {ok, apply_modifies(Entries, S0)} end),
+        fun(ok) ->
+            Bind(
                 MA,
                 fun(A) ->
-                        State(fun(S1) -> {A, apply_modifies(lists:reverse(Exits), S1)} end)
-                end)
-      end);
+                    State(fun(S1) -> {A, apply_modifies(lists:reverse(Exits), S1)} end)
+                end
+            )
+        end
+    );
 context_state_changes(MA, _Entries, _Exits, #{}) ->
     MA.
 
 apply_up_attrs([], Attr) ->
     Attr;
-apply_up_attrs([Attr1|T], Attr) when is_map(Attr1) ->
+apply_up_attrs([Attr1 | T], Attr) when is_map(Attr1) ->
     apply_up_attrs(T, maps:merge(Attr, Attr1));
-apply_up_attrs([UpAttr|T], Attr) when is_function(UpAttr, 1) ->
+apply_up_attrs([UpAttr | T], Attr) when is_function(UpAttr, 1) ->
     apply_up_attrs(T, UpAttr(Attr)).
 
 apply_modifies([], S) ->
     S;
-apply_modifies([Modify|T], S) when is_function(Modify, 1) ->
+apply_modifies([Modify | T], S) when is_function(Modify, 1) ->
     apply_modifies(T, Modify(S));
-apply_modifies([S1|T], S) when not is_function(S) ->
+apply_modifies([S1 | T], S) when not is_function(S) ->
     apply_modifies(T, S1).
 
 apply_functions([], Value) ->
     Value;
-apply_functions([F|T], Value) when is_function(F, 1) ->
+apply_functions([F | T], Value) when is_function(F, 1) ->
     apply_functions(T, F(Value)).
 
 updated_node(Node1, #uniplate_node_context{node = Node1} = NodeContext2) ->
@@ -600,74 +771,93 @@ context_node(Node) ->
 %%%===================================================================
 %%% Apply node with context series functions.
 %%%===================================================================
--spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) -> node_context(Node).
+-spec with_subtrees(with_nodes(Node), reduce_nodes(Node) | node_context(Node)) ->
+    node_context(Node).
 with_subtrees(With, #uniplate_node_context{withs = Withs} = Node) ->
-    Node#uniplate_node_context{withs = [With|Withs]};
+    Node#uniplate_node_context{withs = [With | Withs]};
 with_subtrees(With, Node) ->
     with_subtrees(With, #uniplate_node_context{node = Node}).
 
 -spec with_subtrees(with_nodes(Node), reduce_nodes(Node), node_context(Node)) -> node_context(Node).
 with_subtrees(With, Reduce, #uniplate_node_context{reduces = Reduces} = Node) ->
-    with_subtrees(With, Node#uniplate_node_context{reduces = [Reduce|Reduces]});
+    with_subtrees(With, Node#uniplate_node_context{reduces = [Reduce | Reduces]});
 with_subtrees(With, Reduce, Node) ->
     with_subtrees(With, Reduce, #uniplate_node_context{node = Node}).
 
 -spec skip(maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
 skip(Trees) ->
     every_tree(
-      fun(#uniplate_node_context{} = Context) ->
-              Context#uniplate_node_context{skip = true};
-         (Node) ->
-              #uniplate_node_context{node = Node, skip = true}
-      end, Trees).
+        fun
+            (#uniplate_node_context{} = Context) ->
+                Context#uniplate_node_context{skip = true};
+            (Node) ->
+                #uniplate_node_context{node = Node, skip = true}
+        end,
+        Trees
+    ).
 
--spec up_attr(fun((map()) -> map()) | map(), maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
+-spec up_attr(fun((map()) -> map()) | map(), maybe_list(node_context(Node))) ->
+    maybe_list(node_context(Node)).
 up_attr(Attr, Trees) ->
     every_tree(
-      fun(#uniplate_node_context{skip = true} = Context) ->
-              Context;
-         (#uniplate_node_context{up_attrs = UpAttrs} = Context) ->
-              UpAttrs1 = compose_up_attr(Attr, UpAttrs),
-              Context#uniplate_node_context{up_attrs = UpAttrs1};
-         (Node) ->
-              #uniplate_node_context{node = Node, up_attrs = [Attr]}
-      end, Trees).
+        fun
+            (#uniplate_node_context{skip = true} = Context) ->
+                Context;
+            (#uniplate_node_context{up_attrs = UpAttrs} = Context) ->
+                UpAttrs1 = compose_up_attr(Attr, UpAttrs),
+                Context#uniplate_node_context{up_attrs = UpAttrs1};
+            (Node) ->
+                #uniplate_node_context{node = Node, up_attrs = [Attr]}
+        end,
+        Trees
+    ).
 
 compose_up_attr(Attr, []) ->
     [Attr];
-compose_up_attr(Attr0, [Attr1|T]) when is_map(Attr0), is_map(Attr1) ->
-    [maps:merge(Attr0, Attr1)|T];
-compose_up_attr(Attr0, [Attr1|T]) ->
-    [Attr0, Attr1|T].
+compose_up_attr(Attr0, [Attr1 | T]) when is_map(Attr0), is_map(Attr1) ->
+    [maps:merge(Attr0, Attr1) | T];
+compose_up_attr(Attr0, [Attr1 | T]) ->
+    [Attr0, Attr1 | T].
 
--spec with(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
+-spec with(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) ->
+    maybe_list(node_context(Node)).
 with(Entry, Exit, Trees) ->
     with_exit(Exit, with_entry(Entry, Trees)).
 
--spec with_each(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) -> maybe_list(node_context(Node)).
+-spec with_each(fun((S) -> S) | S, fun((S) -> S) | S, maybe_list(node_context(Node))) ->
+    maybe_list(node_context(Node)).
 with_each(Entry, Exit, Trees) ->
     every_tree(
-      fun(#uniplate_node_context{entries = Entries, exits = Exits} = Context) ->
-              Context#uniplate_node_context{entries = [Entry|Entries], exits = [Exit|Exits]};
-         (Node) ->
-              #uniplate_node_context{node = Node, entries = [Entry], exits = [Exit]}
-      end, Trees).
+        fun
+            (#uniplate_node_context{entries = Entries, exits = Exits} = Context) ->
+                Context#uniplate_node_context{entries = [Entry | Entries], exits = [Exit | Exits]};
+            (Node) ->
+                #uniplate_node_context{node = Node, entries = [Entry], exits = [Exit]}
+        end,
+        Trees
+    ).
 
 with_entry(Entry, Trees) ->
     left_trees(
-      fun(#uniplate_node_context{entries = Entries} = Context) ->
-              Context#uniplate_node_context{entries = [Entry|Entries]};
-         (Node) ->
-              #uniplate_node_context{node = Node, entries = [Entry]}
-      end, Trees).
+        fun
+            (#uniplate_node_context{entries = Entries} = Context) ->
+                Context#uniplate_node_context{entries = [Entry | Entries]};
+            (Node) ->
+                #uniplate_node_context{node = Node, entries = [Entry]}
+        end,
+        Trees
+    ).
 
 with_exit(Exit, Trees) ->
     right_trees(
-      fun(#uniplate_node_context{exits = Exits} = Context) ->
-              Context#uniplate_node_context{exits = [Exit|Exits]};
-         (Node) ->
-              #uniplate_node_context{node = Node, exits = [Exit]}
-      end, Trees).
+        fun
+            (#uniplate_node_context{exits = Exits} = Context) ->
+                Context#uniplate_node_context{exits = [Exit | Exits]};
+            (Node) ->
+                #uniplate_node_context{node = Node, exits = [Exit]}
+        end,
+        Trees
+    ).
 
 every_tree(F, Trees) when is_list(Trees) ->
     lists:map(fun(Tree) -> every_tree(F, Tree) end, Trees);
@@ -677,23 +867,23 @@ every_tree(F, Tree) ->
 clamp_trees(Left, Right, Trees) ->
     left_trees(Left, right_trees(Right, Trees)).
 
-left_trees(F, [[]|T]) ->
-    [[]|left_trees(F, T)];
-left_trees(F, [Head|T]) ->
-    [left_trees(F, Head)|T];
+left_trees(F, [[] | T]) ->
+    [[] | left_trees(F, T)];
+left_trees(F, [Head | T]) ->
+    [left_trees(F, Head) | T];
 left_trees(_F, []) ->
     [];
 left_trees(F, Tree) ->
     F(Tree).
 
-right_trees(F, [Head|_T] = Trees) when is_list(Head) ->
+right_trees(F, [Head | _T] = Trees) when is_list(Head) ->
     lists:reverse(right_trees_1(F, lists:reverse(Trees)));
 right_trees(F, Trees) when is_list(Trees) ->
     lists:reverse(left_trees(F, lists:reverse(Trees)));
 right_trees(F, Tree) ->
     left_trees(F, Tree).
 
-right_trees_1(F, [[]|T]) ->
-    [[]|right_trees_1(F, T)];
-right_trees_1(F, [Head|T]) when is_list(Head) ->
-    [right_trees(F, Head)|T].
+right_trees_1(F, [[] | T]) ->
+    [[] | right_trees_1(F, T)];
+right_trees_1(F, [Head | T]) when is_list(Head) ->
+    [right_trees(F, Head) | T].

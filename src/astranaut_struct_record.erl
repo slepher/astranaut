@@ -17,15 +17,17 @@
 -export([mandatory_field/2, auto_fill/1, set_auto_fill/2]).
 -export([filled_init_values/1, update_init_values/1, update_enforce_keys/2]).
 
--record(record_def, {name :: atom(),
-                     module :: module(),
-                     line :: erl_anno:location(),
-                     fields = [] :: fields(),
-                     init_values = maps:new() :: init_values(),
-                     types = maps:new() :: types(),
-                     enforce_keys = [] :: enforce_keys(),
-                     auto_fill = true :: boolean(),
-                     warnings = [] :: warnings()}).
+-record(record_def, {
+    name :: atom(),
+    module :: module(),
+    line :: erl_anno:location(),
+    fields = [] :: fields(),
+    init_values = maps:new() :: init_values(),
+    types = maps:new() :: types(),
+    enforce_keys = [] :: enforce_keys(),
+    auto_fill = true :: boolean(),
+    warnings = [] :: warnings()
+}).
 
 -type fields() :: [atom()].
 -type init_values() :: #{atom() => term()}.
@@ -38,7 +40,7 @@
 %%% API
 %%%===================================================================
 -spec record_def(module(), {atom(), [term()]}, erl_anno:location()) ->
-          #record_def{}.
+    #record_def{}.
 record_def(Module, {RecordName, Fields}, Line) ->
     RecordDef = #record_def{module = Module, line = Line, name = RecordName},
     add_fields(Fields, RecordDef).
@@ -71,20 +73,23 @@ auto_fill(#record_def{auto_fill = AutoFill}) ->
     AutoFill.
 
 -spec set_auto_fill(boolean(), #record_def{}) -> #record_def{}.
-set_auto_fill(AutoFill, #record_def{} = RefordDef) when is_boolean(AutoFill)  ->
+set_auto_fill(AutoFill, #record_def{} = RefordDef) when is_boolean(AutoFill) ->
     RefordDef#record_def{auto_fill = AutoFill}.
 
 -spec filled_init_values(#record_def{}) -> init_values().
 filled_init_values(#record_def{fields = Fields, init_values = InitValues, auto_fill = true}) ->
     lists:foldl(
-      fun(Field, Acc) ->
-              case maps:find(Field, InitValues) of
-                  {ok, InitValue} ->
-                      maps:put(Field, InitValue, Acc);
-                  error ->
-                      maps:put(Field, {atom, 0, undefined}, Acc)
-              end
-      end, maps:new(), Fields);
+        fun(Field, Acc) ->
+            case maps:find(Field, InitValues) of
+                {ok, InitValue} ->
+                    maps:put(Field, InitValue, Acc);
+                error ->
+                    maps:put(Field, {atom, 0, undefined}, Acc)
+            end
+        end,
+        maps:new(),
+        Fields
+    );
 filled_init_values(#record_def{} = RecordDef) ->
     init_values(RecordDef).
 
@@ -93,9 +98,12 @@ update_init_values(#record_def{} = RecordDef) ->
     InitValues1 = filled_init_values(RecordDef),
     RecordDef#record_def{init_values = InitValues1}.
 
--spec update_enforce_keys([atom()],#record_def{}) -> #record_def{}.
-update_enforce_keys(EnforceKeys,
-                    #record_def{name = Name, fields = Fields, init_values = InitValues, warnings = Warnings} = RecordDef) ->
+-spec update_enforce_keys([atom()], #record_def{}) -> #record_def{}.
+update_enforce_keys(
+    EnforceKeys,
+    #record_def{name = Name, fields = Fields, init_values = InitValues, warnings = Warnings} =
+        RecordDef
+) ->
     UndefinedKeys = EnforceKeys -- Fields,
     case UndefinedKeys of
         [] ->
@@ -117,15 +125,18 @@ update_enforce_keys(EnforceKeys,
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-add_fields([{typed_record_field, RecordField, TypeForm}|T], RecordDef) ->
-    RecordDef = 
+add_fields([{typed_record_field, RecordField, TypeForm} | T], RecordDef) ->
+    RecordDef =
         add_detyped_field(
-          fun(Name, #record_def{types = Types} = RecordDef0) ->
-                  Types = Types#{Name => TypeForm},
-                  RecordDef0#record_def{types = Types}
-          end, RecordField, RecordDef),
+            fun(Name, #record_def{types = Types} = RecordDef0) ->
+                Types = Types#{Name => TypeForm},
+                RecordDef0#record_def{types = Types}
+            end,
+            RecordField,
+            RecordDef
+        ),
     add_fields(T, RecordDef);
-add_fields([RecordField|T], RecordDef) ->
+add_fields([RecordField | T], RecordDef) ->
     RecordDef = add_detyped_field(undefined, RecordField, RecordDef),
     add_fields(T, RecordDef);
 add_fields([], #record_def{fields = Fields, warnings = Warnings} = RecordDef) ->
@@ -154,7 +165,7 @@ detyped_record_field(Other) ->
     {error, {Line, {unsupported_record_field, Other}}}.
 
 add_field_def(#{name := Name} = FieldDef, #record_def{fields = Fields} = RecordDef) ->
-    Fields = [Name|Fields],
+    Fields = [Name | Fields],
     RecordDef = RecordDef#record_def{fields = Fields},
     add_field_init(FieldDef, RecordDef).
 
@@ -165,4 +176,4 @@ add_field_init(#{}, RecordDef) ->
     RecordDef.
 
 add_warning({Line, Reason}, #record_def{module = Module, warnings = Warnings} = RecordDef) ->
-    RecordDef#record_def{warnings = [{Line, Module, Reason}|Warnings]}.
+    RecordDef#record_def{warnings = [{Line, Module, Reason} | Warnings]}.

@@ -22,7 +22,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -34,17 +34,22 @@ suite() ->
 init_per_suite(Config) ->
     erlang:system_flag(backtrace_depth, 20),
     Config1 = astranaut_test_lib:load_data_modules(
-                Config, [sample_transformer_1, sample_transformer_only_v2]),
+        Config, [sample_transformer_1, sample_transformer_only_v2]
+    ),
     Forms = astranaut_test_lib:test_module_forms(sample_1, Config1),
     Forms1 = astranaut_test_lib:test_module_forms(sample_expressions, Config1),
     Expressions =
         lists:foldl(
-          fun({function, _Pos, Name, _Arity, [{clause, _Pos1, _Pattern, [], Expressions}]}, Acc) ->
-                  maps:put(Name, Expressions, Acc);
-             (_Form, Acc) ->
-                  Acc
-          end, #{}, Forms1),
-    [{forms, Forms}, {expressions, Expressions}|Config1].
+            fun
+                ({function, _Pos, Name, _Arity, [{clause, _Pos1, _Pattern, [], Expressions}]}, Acc) ->
+                    maps:put(Name, Expressions, Acc);
+                (_Form, Acc) ->
+                    Acc
+            end,
+            #{},
+            Forms1
+        ),
+    [{forms, Forms}, {expressions, Expressions} | Config1].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -125,28 +130,47 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [test_simple_map, test_traverse_m_error,
-     test_uniplate_reduce, test_reduce, test_map_with_state_node,
-     test_state_mapping_wrappers, test_mapfold_invalid_return,
-     test_map_with_state, test_map_spec, test_map_type,
-     test_reduce_attr, test_with_formatter, 
-     test_options, test_validator, test_validator_failure_contracts,
-     test_invalid_validator_return_format,
-     test_format_error_unknown_default, test_format_error_character_list_fallback,
-     test_format_error_known_match,
-     test_to_compiler_adapter,
-     test_formatter_protocol,
-     test_format_error_shared_match,
-     test_format_error_shared_fallback,
-     test_format_error_shared_nested_function_clause,
-     test_format_error_shared_remote_fun,
-     test_format_error_shared_other_exception,
-     test_with_attribute, test_forms_with_attribute,
-     test_traverse_m_updated, test_map_m_preserves_form_order,
-     test_map_forms, test_sequence_nodes,
-     test_continue_sequence_children, test_record, test_typed_record_field,
-     test_map, test_if_expr, test_case_expr, test_try_catch_expr,
-     test_subtree_callback_without_tree
+    [
+        test_simple_map,
+        test_traverse_m_error,
+        test_uniplate_reduce,
+        test_reduce,
+        test_map_with_state_node,
+        test_state_mapping_wrappers,
+        test_mapfold_invalid_return,
+        test_map_with_state,
+        test_map_spec,
+        test_map_type,
+        test_reduce_attr,
+        test_with_formatter,
+        test_options,
+        test_validator,
+        test_validator_failure_contracts,
+        test_invalid_validator_return_format,
+        test_format_error_unknown_default,
+        test_format_error_character_list_fallback,
+        test_format_error_known_match,
+        test_to_compiler_adapter,
+        test_formatter_protocol,
+        test_format_error_shared_match,
+        test_format_error_shared_fallback,
+        test_format_error_shared_nested_function_clause,
+        test_format_error_shared_remote_fun,
+        test_format_error_shared_other_exception,
+        test_with_attribute,
+        test_forms_with_attribute,
+        test_traverse_m_updated,
+        test_map_m_preserves_form_order,
+        test_map_forms,
+        test_sequence_nodes,
+        test_continue_sequence_children,
+        test_record,
+        test_typed_record_field,
+        test_map,
+        test_if_expr,
+        test_case_expr,
+        test_try_catch_expr,
+        test_subtree_callback_without_tree
     ].
 
 %%--------------------------------------------------------------------
@@ -168,14 +192,18 @@ test_simple_map(_Config) ->
     Node0 = {atom, 1, ok},
     Monad =
         astranaut:map_m(
-          fun(Node) ->
-                  astranaut_traverse:return(Node)
-          end, Node0, #{traverse => pre, role => expression}),
+            fun(Node) ->
+                astranaut_traverse:return(Node)
+            end,
+            Node0,
+            #{traverse => pre, role => expression}
+        ),
     astranaut_traverse:bind(
-      astranaut_traverse:listen_updated(Monad),
-      fun(Updated) ->
-              ?assertEqual(false, Updated)
-      end),
+        astranaut_traverse:listen_updated(Monad),
+        fun(Updated) ->
+            ?assertEqual(false, Updated)
+        end
+    ),
     Return = astranaut_return:simplify(astranaut_traverse:eval(Monad, astranaut, #{}, ok)),
     ?assertEqual(Node0, Return),
     ok.
@@ -189,23 +217,36 @@ test_traverse_m_error(_Config) ->
     M6 = astranaut_traverse:eof(),
     Ms = astranaut_traverse:sequence_m([M1, M2, M3, M4, M5, M6]),
     ErrorStruct = astranaut_return:run_error(astranaut_traverse:eval(Ms, astranaut_1, #{}, ok)),
-    ?assertEqual(#{file_errors =>
-                       #{"file0" =>
-                             [{10,astranaut,error_0},
-                              {10,astranaut,error_1}],
-                         "file1" => [{10,astranaut,error_2}]}},
-                 astranaut_error:printable(ErrorStruct)),
+    ?assertEqual(
+        #{
+            file_errors =>
+                #{
+                    "file0" =>
+                        [
+                            {10, astranaut, error_0},
+                            {10, astranaut, error_1}
+                        ],
+                    "file1" => [{10, astranaut, error_2}]
+                }
+        },
+        astranaut_error:printable(ErrorStruct)
+    ),
     ok.
 
 test_uniplate_reduce(Config) ->
     Forms = proplists:get_value(forms, Config),
     Return =
         astranaut:sreduce(
-          fun({atom, _Pos, mark_1}, Acc) ->
-                  Acc + 1;
-             (_Node, Acc) ->
-                  Acc
-          end, 0, Forms, #{}),
+            fun
+                ({atom, _Pos, mark_1}, Acc) ->
+                    Acc + 1;
+                (_Node, Acc) ->
+                    Acc
+            end,
+            0,
+            Forms,
+            #{}
+        ),
     ?assertEqual(1, Return),
     ok.
 
@@ -215,25 +256,38 @@ test_reduce(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     Return =
         astranaut:reduce(
-          fun({atom, _Pos, mark_1}, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1});
-             ({atom, _Pos, mark_error_1}, _Acc, #{}) ->
-                  {error, mark_error_1};
-             (_Node, Acc, #{}) ->
-                  Acc
-          end, 0, Forms, #{formatter => ?MODULE}),
+            fun
+                ({atom, _Pos, mark_1}, Acc, #{}) ->
+                    astranaut:walk_return(#{warning => mark_1, state => Acc + 1});
+                ({atom, _Pos, mark_error_1}, _Acc, #{}) ->
+                    {error, mark_error_1};
+                (_Node, Acc, #{}) ->
+                    Acc
+            end,
+            0,
+            Forms,
+            #{formatter => ?MODULE}
+        ),
     ErrorStruct = astranaut_return:run_error(Return),
-    io:format("get printable errors ~p~n", [ astranaut_error:printable(ErrorStruct)]),
-    ?assertEqual(#{}, maps:without([file_errors, file_warnings], astranaut_error:printable(ErrorStruct))),
+    io:format("get printable errors ~p~n", [astranaut_error:printable(ErrorStruct)]),
+    ?assertEqual(
+        #{}, maps:without([file_errors, file_warnings], astranaut_error:printable(ErrorStruct))
+    ),
     {FileErrors, FileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
-    ?assertMatch({[{File, [{2, ?MODULE, mark_error_1}]}], [{File, [{5, ?MODULE, mark_1}]}]},
-                 {FileErrors, FileWarnings}),
-    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Error}
-                                                  || {_File, Errors} <- FileErrors,
-                                                     {Line, Formatter, Error} <- Errors]),
-    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
-                                                  || {_File, Warnings} <- FileWarnings,
-                                                     {Line, Formatter, Warning} <- Warnings]),
+    ?assertMatch(
+        {[{File, [{2, ?MODULE, mark_error_1}]}], [{File, [{5, ?MODULE, mark_1}]}]},
+        {FileErrors, FileWarnings}
+    ),
+    astranaut_test_lib:assert_formatted_messages([
+        {Line, Formatter, Error}
+     || {_File, Errors} <- FileErrors,
+        {Line, Formatter, Error} <- Errors
+    ]),
+    astranaut_test_lib:assert_formatted_messages([
+        {Line, Formatter, Warning}
+     || {_File, Warnings} <- FileWarnings,
+        {Line, Formatter, Warning} <- Warnings
+    ]),
     ?assertEqual({just, 1}, astranaut_return:run(Return)),
     ok.
 
@@ -241,12 +295,17 @@ test_map_with_state_node(_Config) ->
     NodeA = {match, 10, {var, 10, 'A'}, {atom, 10, a}},
     {Return, _} =
         astranaut:smapfold(
-          fun({var, Pos, 'A'}, Acc, #{}) ->
-                  Node1 = {var, Pos, 'B'},
-                  {Node1, Acc + 1};
-             (Node, Acc, #{}) ->
-                  {Node, Acc}
-          end, 0, NodeA, #{role => expression}),
+            fun
+                ({var, Pos, 'A'}, Acc, #{}) ->
+                    Node1 = {var, Pos, 'B'},
+                    {Node1, Acc + 1};
+                (Node, Acc, #{}) ->
+                    {Node, Acc}
+            end,
+            0,
+            NodeA,
+            #{role => expression}
+        ),
     ?assertEqual({match, 10, {var, 10, 'B'}, {atom, 10, a}}, Return),
     ok.
 
@@ -254,29 +313,38 @@ test_state_mapping_wrappers(_Config) ->
     Node0 = {atom, 10, old_value},
     Node1 = {atom, 10, new_value},
     Mapper =
-        fun({atom, Pos, old_value}, State) ->
+        fun
+            ({atom, Pos, old_value}, State) ->
                 {{atom, Pos, new_value}, State + 1};
-           (Node, State) ->
+            (Node, State) ->
                 {Node, State}
         end,
     Opts = #{traverse => pre, role => expression},
     ?assertEqual(
-       Node1,
-       astranaut:smap_with_state(Mapper, 0, Node0, Opts)),
+        Node1,
+        astranaut:smap_with_state(Mapper, 0, Node0, Opts)
+    ),
     ?assertEqual(
-       {just, Node1},
-       astranaut_return:run(
-         astranaut:map_with_state(Mapper, 0, Node0, Opts))),
+        {just, Node1},
+        astranaut_return:run(
+            astranaut:map_with_state(Mapper, 0, Node0, Opts)
+        )
+    ),
     ok.
 
 test_mapfold_invalid_return(_Config) ->
     Node = {atom, 10, value},
     ?assertError(
-       {invalid_mapfold_return, invalid, Node},
-       astranaut:mapfold(
-         fun(_Node, _State) ->
-                 invalid
-         end, 0, Node, #{traverse => pre, role => expression})),
+        {invalid_mapfold_return, invalid, Node},
+        astranaut:mapfold(
+            fun(_Node, _State) ->
+                invalid
+            end,
+            0,
+            Node,
+            #{traverse => pre, role => expression}
+        )
+    ),
     ok.
 
 test_map_with_state(Config) ->
@@ -285,40 +353,54 @@ test_map_with_state(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
         astranaut:mapfold(
-          fun({atom, _Pos, mark_1} = Node, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_1, state => Acc + 1, return => Node});
-             ({atom, _Pos, mark_error_1}, Acc, #{}) ->
-                  {{atom, _Pos, mark_error_2}, Acc};
-             (Node, Acc, #{}) ->
-                  {Node, Acc}
-          end, 0, Forms, #{formatter => ?MODULE, traverse => pre, simplify_return => false}),
+            fun
+                ({atom, _Pos, mark_1} = Node, Acc, #{}) ->
+                    astranaut:walk_return(#{warning => mark_1, state => Acc + 1, return => Node});
+                ({atom, _Pos, mark_error_1}, Acc, #{}) ->
+                    {{atom, _Pos, mark_error_2}, Acc};
+                (Node, Acc, #{}) ->
+                    {Node, Acc}
+            end,
+            0,
+            Forms,
+            #{formatter => ?MODULE, traverse => pre, simplify_return => false}
+        ),
     FileWarnings = [{File, [{5, ?MODULE, mark_1}]}],
     #{'__struct__' := ?RETURN_OK, error := Error, return := _Return} = ReturnM,
     {[], ActualFileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, Error),
     ?assertMatch(FileWarnings, ActualFileWarnings),
-    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
-                                                  || {_File, Warnings} <- ActualFileWarnings,
-                                                     {Line, Formatter, Warning} <- Warnings]),
+    astranaut_test_lib:assert_formatted_messages([
+        {Line, Formatter, Warning}
+     || {_File, Warnings} <- ActualFileWarnings,
+        {Line, Formatter, Warning} <- Warnings
+    ]),
     ok.
 
 test_map_spec(_Config) ->
-    Nodes = {attribute,56,spec,
-             {{test_ok,0},[{type,56,'fun',[{type,56,product,[]},{atom,56,ok}]}]}},
+    Nodes =
+        {attribute, 56, spec,
+            {{test_ok, 0}, [{type, 56, 'fun', [{type, 56, product, []}, {atom, 56, ok}]}]}},
     Nodes1 =
         astranaut:smap(
-          fun(Node, #{}) ->
-                  Node
-          end, Nodes, #{traverse => post}),
+            fun(Node, #{}) ->
+                Node
+            end,
+            Nodes,
+            #{traverse => post}
+        ),
     ?assertEqual(Nodes, Nodes1),
     ok.
 
 test_map_type(_Config) ->
-    Nodes = {attribute,21,type,{test,{type,21,record,[{atom,21,test}]},[{var, 21, 'A'}]}},
+    Nodes = {attribute, 21, type, {test, {type, 21, record, [{atom, 21, test}]}, [{var, 21, 'A'}]}},
     Nodes1 =
         astranaut:smap(
-          fun(Node) ->
-                  Node
-          end, Nodes, #{traverse => post}),
+            fun(Node) ->
+                Node
+            end,
+            Nodes,
+            #{traverse => post}
+        ),
     ?assertEqual(Nodes, Nodes1),
     ok.
 
@@ -328,36 +410,49 @@ test_reduce_attr(Config) ->
     File = astranaut_lib:analyze_forms_file(Forms),
     ReturnM =
         astranaut:reduce(
-          fun({attribute, _Pos, mark, mark_0}, Acc, #{}) ->
-                  astranaut:walk_return(#{warning => mark_0, state => Acc + 1});
-             ({attribute, _Pos, mark, mark_error_0}, _Acc, #{}) ->
-                  {error, mark_error_0};
-             (_Node, Acc, #{}) ->
-                  Acc
-          end, 0, Forms, #{formatter => ?MODULE, traverse => none}),
+            fun
+                ({attribute, _Pos, mark, mark_0}, Acc, #{}) ->
+                    astranaut:walk_return(#{warning => mark_0, state => Acc + 1});
+                ({attribute, _Pos, mark, mark_error_0}, _Acc, #{}) ->
+                    {error, mark_error_0};
+                (_Node, Acc, #{}) ->
+                    Acc
+            end,
+            0,
+            Forms,
+            #{formatter => ?MODULE, traverse => none}
+        ),
     #{'__struct__' := ?RETURN_OK, error := Error} = ReturnM,
     io:format("get printable errors ~p~n", [astranaut_error:printable(Error)]),
     FileWarnings = [{File, [{2, ?MODULE, mark_0}]}],
     FileErrors = [{File, [{1, ?MODULE, mark_error_0}]}],
-    {ActualFileErrors, ActualFileWarnings} = astranaut_test_lib:realize_with_baseline(Baseline, Error),
+    {ActualFileErrors, ActualFileWarnings} = astranaut_test_lib:realize_with_baseline(
+        Baseline, Error
+    ),
     ?assertMatch({FileErrors, FileWarnings}, {ActualFileErrors, ActualFileWarnings}),
-    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Error1}
-                                                  || {_File, Errors} <- ActualFileErrors,
-                                                     {Line, Formatter, Error1} <- Errors]),
-    astranaut_test_lib:assert_formatted_messages([{Line, Formatter, Warning}
-                                                  || {_File, Warnings} <- ActualFileWarnings,
-                                                     {Line, Formatter, Warning} <- Warnings]),
+    astranaut_test_lib:assert_formatted_messages([
+        {Line, Formatter, Error1}
+     || {_File, Errors} <- ActualFileErrors,
+        {Line, Formatter, Error1} <- Errors
+    ]),
+    astranaut_test_lib:assert_formatted_messages([
+        {Line, Formatter, Warning}
+     || {_File, Warnings} <- ActualFileWarnings,
+        {Line, Formatter, Warning} <- Warnings
+    ]),
     ok.
 
 test_with_formatter(_Config) ->
     MA =
         astranaut_traverse:with_formatter(
-          sample_transformer_1,
-          astranaut_traverse:update_pos(
-            10,
-            astranaut_traverse:astranaut_traverse(
-              astranaut:walk_return(#{return => 10, error => error_0})
-             ))),
+            sample_transformer_1,
+            astranaut_traverse:update_pos(
+                10,
+                astranaut_traverse:astranaut_traverse(
+                    astranaut:walk_return(#{return => 10, error => error_0})
+                )
+            )
+        ),
     #{error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, ok),
     FormattedErrors = astranaut_error:formatted_errors(Error),
     ?assertMatch([{10, sample_transformer_1, error_0}], FormattedErrors),
@@ -374,14 +469,15 @@ test_options(_Config) ->
     ok.
 
 test_validator(_Config) ->
-    Validator = #{a => boolean,
-                  b => {list_of, atom},
-                  c => fun is_boolean/1,
-                  d => {default, 10},
-                  f => [boolean, {default_key, g}],
-                  g => [boolean, {default, false}]
-                 },
-    Validated = astranaut_lib:validate(Validator, [a, {b,[c,d]}, {b, c, d}, e]),
+    Validator = #{
+        a => boolean,
+        b => {list_of, atom},
+        c => fun is_boolean/1,
+        d => {default, 10},
+        f => [boolean, {default_key, g}],
+        g => [boolean, {default, false}]
+    },
+    Validated = astranaut_lib:validate(Validator, [a, {b, [c, d]}, {b, c, d}, e]),
     Return = #{a => true, b => [c, d], d => 10, f => false, g => false},
     Warnings = [{invalid_option_value, {b, c, d}}, {unexpected_option_keys, [e]}],
     ?assertMatch(Warnings, astranaut_error:warnings(astranaut_return:run_error(Validated))),
@@ -393,242 +489,310 @@ test_validator_failure_contracts(_Config) ->
     InvalidReturnValidator = fun(_Value) -> bad_return end,
     FailureCases =
         [
-         {unknown_validator, ok,
-          {invalid_validator, unknown_validator}},
-         {InvalidReturnValidator, ok,
-          {invalid_validator_return, InvalidReturnValidator, bad_return}},
-         {uinteger, -1,
-          {invalid_value, uinteger}},
-         {{one_of, [one, two]}, three,
-          {invalid_value, {one_of, [one, two]}}},
-         {{one_of, not_a_list}, one,
-          {invalid_validator_arg, {one_of, not_a_list}}},
-         {{list_of, atom}, [one, 2],
-          {invalid_value, atom}},
-         {{list_of, atom}, not_a_list,
-          {invalid_value, {list_of, atom}}},
-         {paired, not_boolean,
-          {invalid_value, paired}},
-         {{paired, 42}, true,
-          {invalid_validator_arg, {paired, 42}}},
-         {{'or', [integer, boolean]}, atom_value,
-          {all_validator_failed, [integer, boolean]}}
+            {unknown_validator, ok, {invalid_validator, unknown_validator}},
+            {InvalidReturnValidator, ok,
+                {invalid_validator_return, InvalidReturnValidator, bad_return}},
+            {uinteger, -1, {invalid_value, uinteger}},
+            {{one_of, [one, two]}, three, {invalid_value, {one_of, [one, two]}}},
+            {{one_of, not_a_list}, one, {invalid_validator_arg, {one_of, not_a_list}}},
+            {{list_of, atom}, [one, 2], {invalid_value, atom}},
+            {{list_of, atom}, not_a_list, {invalid_value, {list_of, atom}}},
+            {paired, not_boolean, {invalid_value, paired}},
+            {{paired, 42}, true, {invalid_validator_arg, {paired, 42}}},
+            {{'or', [integer, boolean]}, atom_value, {all_validator_failed, [integer, boolean]}}
         ],
     lists:foreach(
-      fun({Validator, Value, ExpectedReason}) ->
-              Return = astranaut_lib:validate(#{value => Validator},
-                                              [{value, Value}]),
-              ?assertEqual({just, #{}},
-                           astranaut_return:run(Return)),
-              ?assertEqual(
-                 [{validate_key_failure, ExpectedReason, value, Value}],
-                 astranaut_error:errors(
-                   astranaut_return:run_error(Return)))
-      end, FailureCases),
+        fun({Validator, Value, ExpectedReason}) ->
+            Return = astranaut_lib:validate(
+                #{value => Validator},
+                [{value, Value}]
+            ),
+            ?assertEqual(
+                {just, #{}},
+                astranaut_return:run(Return)
+            ),
+            ?assertEqual(
+                [{validate_key_failure, ExpectedReason, value, Value}],
+                astranaut_error:errors(
+                    astranaut_return:run_error(Return)
+                )
+            )
+        end,
+        FailureCases
+    ),
 
     Required = astranaut_lib:validate(#{value => required}, []),
     ?assertEqual(
-       [{validate_key_failure, required, value, undefined}],
-       astranaut_error:errors(astranaut_return:run_error(Required))),
+        [{validate_key_failure, required, value, undefined}],
+        astranaut_error:errors(astranaut_return:run_error(Required))
+    ),
 
     InvalidReverse =
-        astranaut_lib:validate(#{value => paired},
-                               [{no_value, not_boolean}]),
+        astranaut_lib:validate(
+            #{value => paired},
+            [{no_value, not_boolean}]
+        ),
     ?assertEqual(
-       [{validate_key_failure, {invalid_value, paired}, value, undefined}],
-       astranaut_error:errors(
-         astranaut_return:run_error(InvalidReverse))),
+        [{validate_key_failure, {invalid_value, paired}, value, undefined}],
+        astranaut_error:errors(
+            astranaut_return:run_error(InvalidReverse)
+        )
+    ),
     ?assertEqual(
-       {just, #{value => false}},
-       astranaut_return:run(
-         astranaut_lib:validate(#{value => paired}, [no_value]))),
+        {just, #{value => false}},
+        astranaut_return:run(
+            astranaut_lib:validate(#{value => paired}, [no_value])
+        )
+    ),
     ?assertEqual(
-       {just, #{value => true}},
-       astranaut_return:run(
-         astranaut_lib:validate(
-           #{value => {'or', [integer, boolean]}},
-           [{value, true}]))),
+        {just, #{value => true}},
+        astranaut_return:run(
+            astranaut_lib:validate(
+                #{value => {'or', [integer, boolean]}},
+                [{value, true}]
+            )
+        )
+    ),
 
     KeepWarning = fun(_Value) -> {warning, kept_value_warning} end,
     ChangeWarning =
         fun(_Value) ->
-                {warning, normalized, normalized_value_warning}
+            {warning, normalized, normalized_value_warning}
         end,
     KeepWarned =
         astranaut_lib:validate(
-          #{keep => KeepWarning}, [{keep, original}]),
+            #{keep => KeepWarning}, [{keep, original}]
+        ),
     ?assertEqual(
-       {just, #{keep => original}},
-       astranaut_return:run(KeepWarned)),
+        {just, #{keep => original}},
+        astranaut_return:run(KeepWarned)
+    ),
     ?assertEqual(
-       [{validate_key_failure, kept_value_warning, keep, original}],
-       astranaut_error:warnings(
-         astranaut_return:run_error(KeepWarned))),
+        [{validate_key_failure, kept_value_warning, keep, original}],
+        astranaut_error:warnings(
+            astranaut_return:run_error(KeepWarned)
+        )
+    ),
     ChangeWarned =
         astranaut_lib:validate(
-          #{change => ChangeWarning}, [{change, original}]),
+            #{change => ChangeWarning}, [{change, original}]
+        ),
     ?assertEqual(
-       {just, #{change => normalized}},
-       astranaut_return:run(ChangeWarned)),
+        {just, #{change => normalized}},
+        astranaut_return:run(ChangeWarned)
+    ),
     ?assertEqual(
-       [{validate_key_failure, normalized_value_warning,
-         change, original}],
-       astranaut_error:warnings(
-         astranaut_return:run_error(ChangeWarned))),
+        [{validate_key_failure, normalized_value_warning, change, original}],
+        astranaut_error:warnings(
+            astranaut_return:run_error(ChangeWarned)
+        )
+    ),
 
     ?assertException(
-       exit, {deps_key_not_exists, missing},
-       astranaut_lib:validate(
-         #{value => {default_key, missing}}, [])),
+        exit,
+        {deps_key_not_exists, missing},
+        astranaut_lib:validate(
+            #{value => {default_key, missing}}, []
+        )
+    ),
     ?assertException(
-       exit, {cycle_deps_detected, _},
-       astranaut_lib:validate(
-         #{first => {default_key, second},
-           second => {default_key, first}}, [])),
+        exit,
+        {cycle_deps_detected, _},
+        astranaut_lib:validate(
+            #{
+                first => {default_key, second},
+                second => {default_key, first}
+            },
+            []
+        )
+    ),
     ok.
 
 test_invalid_validator_return_format(_Config) ->
     Message =
         astranaut:format_error(
-          {validate_key_failure,
-           {invalid_validator_return, my_validator, bad_return},
-           my_key, my_value}),
+            {validate_key_failure, {invalid_validator_return, my_validator, bad_return}, my_key,
+                my_value}
+        ),
     ?assertEqual(
-       "validator my_validator for option key my_key returns a invalid_value bad_return",
-       lists:flatten(Message)),
+        "validator my_validator for option key my_key returns a invalid_value bad_return",
+        lists:flatten(Message)
+    ),
     ok.
 
 test_format_error_unknown_default(_Config) ->
     Unknown = {unknown_format_error, [term]},
     ?assertException(error, function_clause, astranaut:format_error(Unknown)),
     ?assertEqual(
-       io_lib:write(Unknown),
-       astranaut_lib:format_default_error(Unknown)),
+        io_lib:write(Unknown),
+        astranaut_lib:format_default_error(Unknown)
+    ),
     ?assertEqual(
-       io_lib:write(Unknown),
-       astranaut_lib:format_error(Unknown, fun astranaut:format_error/1)),
-    ?assertEqual(io_lib:write(Unknown),
-                 astranaut_lib:format_error({astranaut, Unknown})),
+        io_lib:write(Unknown),
+        astranaut_lib:format_error(Unknown, fun astranaut:format_error/1)
+    ),
+    ?assertEqual(
+        io_lib:write(Unknown),
+        astranaut_lib:format_error({astranaut, Unknown})
+    ),
     ok.
 
 test_format_error_character_list_fallback(_Config) ->
     Formatted = ["already ", ["formatted"]],
     ?assertEqual(
-       Formatted,
-       astranaut_lib:format_default_error(Formatted)),
+        Formatted,
+        astranaut_lib:format_default_error(Formatted)
+    ),
     ?assertEqual(
-       Formatted,
-       astranaut_lib:format_error(
-         Formatted, fun shared_dispatch_no_match/1)),
+        Formatted,
+        astranaut_lib:format_error(
+            Formatted, fun shared_dispatch_no_match/1
+        )
+    ),
     ok.
 
 test_format_error_known_match(_Config) ->
     Error =
-        {validate_key_failure,
-         {invalid_validator_return, my_validator, bad_return},
-         my_key, my_value},
+        {validate_key_failure, {invalid_validator_return, my_validator, bad_return}, my_key,
+            my_value},
     Message = astranaut:format_error(Error),
     ?assertEqual(
-       "validator my_validator for option key my_key returns a invalid_value bad_return",
-       lists:flatten(Message)),
+        "validator my_validator for option key my_key returns a invalid_value bad_return",
+        lists:flatten(Message)
+    ),
     ok.
 
 test_to_compiler_adapter(_Config) ->
-    Errors = [{"a.erl", [{3, astranaut, error_a},
-                          {5, astranaut_quote, error_b}]},
-              {"b.erl", [{2, astranaut_macro, error_c}]}],
-    Warnings = [{"a.erl", [{4, astranaut, warning_a}]},
-                {"b.erl", [{6, astranaut_quote, warning_b}]}],
+    Errors = [
+        {"a.erl", [
+            {3, astranaut, error_a},
+            {5, astranaut_quote, error_b}
+        ]},
+        {"b.erl", [{2, astranaut_macro, error_c}]}
+    ],
+    Warnings = [
+        {"a.erl", [{4, astranaut, warning_a}]},
+        {"b.erl", [{6, astranaut_quote, warning_b}]}
+    ],
     ErrorStruct =
         astranaut_error:append_file_errors(
-          Errors,
-          astranaut_error:append_file_warnings(Warnings, astranaut_error:new())),
+            Errors,
+            astranaut_error:append_file_warnings(Warnings, astranaut_error:new())
+        ),
     ?assertEqual({Errors, Warnings}, astranaut_error:realize(ErrorStruct)),
     WrappedErrors = compiler_diagnostics(Errors),
     WrappedWarnings = compiler_diagnostics(Warnings),
     ?assertEqual(
-       {error, WrappedErrors, WrappedWarnings},
-       astranaut_return:to_compiler(astranaut_return:fail(ErrorStruct))),
+        {error, WrappedErrors, WrappedWarnings},
+        astranaut_return:to_compiler(astranaut_return:fail(ErrorStruct))
+    ),
     ?assertEqual(
-       {error, WrappedErrors, WrappedWarnings},
-       astranaut_return:to_compiler(
-         astranaut_return:ok([form], ErrorStruct))),
+        {error, WrappedErrors, WrappedWarnings},
+        astranaut_return:to_compiler(
+            astranaut_return:ok([form], ErrorStruct)
+        )
+    ),
     WarningStruct = astranaut_error:append_file_warnings(
-                      Warnings, astranaut_error:new()),
+        Warnings, astranaut_error:new()
+    ),
     ?assertEqual(
-       {warning, [form], WrappedWarnings},
-       astranaut_return:to_compiler(
-         astranaut_return:ok([form], WarningStruct))),
+        {warning, [form], WrappedWarnings},
+        astranaut_return:to_compiler(
+            astranaut_return:ok([form], WarningStruct)
+        )
+    ),
     ok.
 
 compiler_diagnostics(FileDiagnostics) ->
-    [{File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]} ||
-        {File, Diagnostics} <- FileDiagnostics].
+    [
+        {File, [compiler_diagnostic(Diagnostic) || Diagnostic <- Diagnostics]}
+     || {File, Diagnostics} <- FileDiagnostics
+    ].
 
 compiler_diagnostic({Pos, Formatter, Reason}) ->
     {Pos, astranaut_lib, {Formatter, Reason}}.
 
 test_formatter_protocol(_Config) ->
     astranaut_test_lib:assert_formatted_messages(
-      [{1, astranaut, {invalid_option_value, bad}}]),
+        [{1, astranaut, {invalid_option_value, bad}}]
+    ),
     astranaut_test_lib:assert_formatted_messages(
-      [{1, sample_transformer_1, error_0}]),
+        [{1, sample_transformer_1, error_0}]
+    ),
     assert_invalid_formatter(sample_transformer_only_v2),
     assert_invalid_formatter(astranaut_test_lib),
     ok.
 
 test_format_error_shared_match(_Config) ->
     ?assertEqual(
-       matched,
-       astranaut_lib:format_error(
-         dispatch_match, fun shared_dispatch_match/1)),
+        matched,
+        astranaut_lib:format_error(
+            dispatch_match, fun shared_dispatch_match/1
+        )
+    ),
     ok.
 
 test_format_error_shared_fallback(_Config) ->
     Error = dispatch_fallback,
     ?assertEqual(
-       io_lib:write(Error),
-       astranaut_lib:format_default_error(Error)),
+        io_lib:write(Error),
+        astranaut_lib:format_default_error(Error)
+    ),
     ?assertEqual(
-       io_lib:write(Error),
-       astranaut_lib:format_error(
-         Error, fun shared_dispatch_no_match/1)),
+        io_lib:write(Error),
+        astranaut_lib:format_error(
+            Error, fun shared_dispatch_no_match/1
+        )
+    ),
     ok.
 
 test_format_error_shared_nested_function_clause(_Config) ->
     ?assertEqual(
-       io_lib:write(dispatch_nested),
-       astranaut_lib:format_error(
-         dispatch_nested, fun shared_dispatch_nested/1)),
+        io_lib:write(dispatch_nested),
+        astranaut_lib:format_error(
+            dispatch_nested, fun shared_dispatch_nested/1
+        )
+    ),
     ok.
 
 test_format_error_shared_remote_fun(_Config) ->
     FormatterModule = astranaut,
     Error = {invalid_option_value, bad},
     ?assertEqual(
-       astranaut:format_error(Error),
-       astranaut_lib:format_error(
-         Error, fun FormatterModule:format_error/1)),
+        astranaut:format_error(Error),
+        astranaut_lib:format_error(
+            Error, fun FormatterModule:format_error/1
+        )
+    ),
     ?assertEqual(
-       io_lib:write(unknown_remote_error),
-       astranaut_lib:format_error(
-         unknown_remote_error, fun FormatterModule:format_error/1)),
+        io_lib:write(unknown_remote_error),
+        astranaut_lib:format_error(
+            unknown_remote_error, fun FormatterModule:format_error/1
+        )
+    ),
     ok.
 
 test_format_error_shared_other_exception(_Config) ->
-    try astranaut_lib:format_error(
-          shared_dispatch_other_exception,
-          fun shared_dispatch_other_exception/1) of
+    try
+        astranaut_lib:format_error(
+            shared_dispatch_other_exception,
+            fun shared_dispatch_other_exception/1
+        )
+    of
         _ ->
             ?assert(false)
     catch
         error:shared_dispatch_non_function:Stacktrace ->
             ?assert(
-               lists:any(
-                 fun({?MODULE, shared_dispatch_other_exception, _, _}) -> true;
-                    ({?MODULE, shared_dispatch_other_exception, _}) -> true;
-                    (_) -> false
-                 end, Stacktrace))
+                lists:any(
+                    fun
+                        ({?MODULE, shared_dispatch_other_exception, _, _}) -> true;
+                        ({?MODULE, shared_dispatch_other_exception, _}) -> true;
+                        (_) -> false
+                    end,
+                    Stacktrace
+                )
+            )
     end,
     ok.
 
@@ -654,37 +818,55 @@ assert_invalid_formatter(Formatter) ->
     catch
         exit:{test_case_failed, Reason} ->
             ?assertEqual(
-               {invalid_formatter_protocol, Formatter, missing_format_error_1},
-               Reason)
+                {invalid_formatter_protocol, Formatter, missing_format_error_1},
+                Reason
+            )
     end.
-
 
 test_with_attribute(Config) ->
     Forms = proplists:get_value(forms, Config),
     Marks =
         astranaut_return:run(
-          astranaut_lib:with_attribute(
-            fun(Attr, Acc) ->
-                    [Attr|Acc]
-            end, [], Forms, mark, #{})),
+            astranaut_lib:with_attribute(
+                fun(Attr, Acc) ->
+                    [Attr | Acc]
+                end,
+                [],
+                Forms,
+                mark,
+                #{}
+            )
+        ),
     ?assertEqual({just, [mark_0, mark_error_0]}, Marks).
 
 test_forms_with_attribute(Config) ->
     Forms = proplists:get_value(forms, Config),
     {just, {Forms1, Marks}} =
         astranaut_return:run(
-          astranaut_lib:forms_with_attribute(
-            fun(Attr, Acc, #{pos := Pos}) ->
+            astranaut_lib:forms_with_attribute(
+                fun(Attr, Acc, #{pos := Pos}) ->
                     Node = astranaut_lib:gen_attribute_node(mark_1, Pos, Attr),
-                    {[Node], [Attr|Acc]}
-            end, [], Forms, mark, #{})),
+                    {[Node], [Attr | Acc]}
+                end,
+                [],
+                Forms,
+                mark,
+                #{}
+            )
+        ),
     ?assertEqual([mark_0, mark_error_0], Marks),
     {just, Marks1} =
         astranaut_return:run(
-          astranaut_lib:with_attribute(
-            fun(Attr, Acc) ->
-                    [Attr|Acc]
-            end, [], Forms1, mark_1, #{})),
+            astranaut_lib:with_attribute(
+                fun(Attr, Acc) ->
+                    [Attr | Acc]
+                end,
+                [],
+                Forms1,
+                mark_1,
+                #{}
+            )
+        ),
     ?assertEqual([mark_0, mark_error_0], Marks1),
     ok.
 
@@ -692,52 +874,74 @@ test_traverse_m_updated(Config) ->
     Forms = proplists:get_value(forms, Config),
     TraverseM =
         astranaut:map_m(
-          fun(Node) ->
-                  astranaut_traverse:return(Node)
-          end, Forms, #{traverse => post}),
+            fun(Node) ->
+                astranaut_traverse:return(Node)
+            end,
+            Forms,
+            #{traverse => post}
+        ),
     TraverseM1 =
         astranaut_traverse:lift_m(
-          fun({Return, Updated}) ->
-                  ?assertEqual({Return, false}, {Forms, Updated}),
-                  Return
-          end, astranaut_traverse:listen_updated(TraverseM)),
+            fun({Return, Updated}) ->
+                ?assertEqual({Return, false}, {Forms, Updated}),
+                Return
+            end,
+            astranaut_traverse:listen_updated(TraverseM)
+        ),
     astranaut_traverse:eval(TraverseM1, astranaut, #{}, #{}).
 
 test_map_m_preserves_form_order(_Config) ->
-    Forms = [astranaut_lib:gen_function(test, ?Q(["fun() -> ok end"])),
-             {attribute, 1, custom, value}],
+    Forms = [
+        astranaut_lib:gen_function(test, ?Q(["fun() -> ok end"])),
+        {attribute, 1, custom, value}
+    ],
     Identity = fun(Form) -> astranaut_traverse:return(Form) end,
     Forms1 = astranaut_return:simplify(
-               astranaut_traverse:eval(
-                 astranaut:map_m(
-                   Identity, Forms, #{traverse => none}),
-                 astranaut, #{}, ok)),
+        astranaut_traverse:eval(
+            astranaut:map_m(
+                Identity, Forms, #{traverse => none}
+            ),
+            astranaut,
+            #{},
+            ok
+        )
+    ),
     ?assertEqual(Forms, Forms1),
     ok.
 
 test_map_forms(Config) ->
     Forms = astranaut_test_lib:test_module_forms(sample_2, Config),
-    Forms1M = 
+    Forms1M =
         astranaut:map_m_forms(
-          fun({attribute, _Pos, mark, mark_01}) ->
-                  astranaut_traverse:return(
-                    astranaut_lib:gen_function(
-                      test,
-                      ?Q(["fun(ok_1) ->",
-                          "   ok_1;"
-                          "(Other) ->",
-                          "   '__original__'(Other)",
-                          "end"])));
-             (Node) ->
-                  astranaut_traverse:return(Node)
-          end, Forms, #{traverse => none}),
+            fun
+                ({attribute, _Pos, mark, mark_01}) ->
+                    astranaut_traverse:return(
+                        astranaut_lib:gen_function(
+                            test,
+                            ?Q([
+                                "fun(ok_1) ->",
+                                "   ok_1;"
+                                "(Other) ->",
+                                "   '__original__'(Other)",
+                                "end"
+                            ])
+                        )
+                    );
+                (Node) ->
+                    astranaut_traverse:return(Node)
+            end,
+            Forms,
+            #{traverse => none}
+        ),
     Forms1 = astranaut_return:simplify(astranaut_traverse:eval(Forms1M, astranaut, #{}, ok)),
     io:format("~s~n", [astranaut_lib:ast_to_string(Forms1)]),
     Result = astranaut_test_lib:compile_test_forms(Forms1),
     astranaut_return:with_error(
-      fun(ErrorState) ->
-              ?assertEqual(#{}, astranaut_error:printable(ErrorState))
-      end, Result),
+        fun(ErrorState) ->
+            ?assertEqual(#{}, astranaut_error:printable(ErrorState))
+        end,
+        Result
+    ),
     Value1 = sample_2:test(ok_1),
     Value2 = sample_2:test(ok_2),
     Value3 = sample_2:test(ok_3),
@@ -748,73 +952,106 @@ test_map_forms(Config) ->
 test_sequence_nodes(_Config) ->
     Nodes = [{atom, 1, a}, {atom, 1, b}, {atom, 1, c}, {atom, 1, d}],
     NodeMs = lists:map(
-               fun({_Type, _Pos, a} = Node) ->
-                       astranaut_traverse:return(Node);
-                  ({_Type, _Pos, b} = Node) ->
-                       astranaut_traverse:return([Node, Node]);
-                  ({_Type, _Pos, c}) ->
-                       astranaut_traverse:then(
-                         astranaut_traverse:error({invalid, c}),
-                         astranaut_traverse:return([]));
-                  ({_Type, _Pos, d} = Node) ->
-                       astranaut_traverse:then(
-                         astranaut_traverse:warning({suspecious, d}),
-                         astranaut_traverse:return(Node))
-               end, Nodes),
+        fun
+            ({_Type, _Pos, a} = Node) ->
+                astranaut_traverse:return(Node);
+            ({_Type, _Pos, b} = Node) ->
+                astranaut_traverse:return([Node, Node]);
+            ({_Type, _Pos, c}) ->
+                astranaut_traverse:then(
+                    astranaut_traverse:error({invalid, c}),
+                    astranaut_traverse:return([])
+                );
+            ({_Type, _Pos, d} = Node) ->
+                astranaut_traverse:then(
+                    astranaut_traverse:warning({suspecious, d}),
+                    astranaut_traverse:return(Node)
+                )
+        end,
+        Nodes
+    ),
     NodesM = astranaut_traverse:sequence_m(NodeMs),
     Return = astranaut_traverse:eval(NodesM, astranaut, #{}, ok),
     astranaut_return:with_error(
-      fun(ErrorStruct) ->
-              ?assertEqual(#{errors => [{invalid, c}], warnings => [{suspecious, d}]}, astranaut_error:printable(ErrorStruct))
-      end, Return),
-    ?assertEqual({just, [{atom, 1, a}, [{atom, 1, b}, {atom, 1, b}], [], {atom, 1, d}]}, astranaut_return:run(Return)),
+        fun(ErrorStruct) ->
+            ?assertEqual(
+                #{errors => [{invalid, c}], warnings => [{suspecious, d}]},
+                astranaut_error:printable(ErrorStruct)
+            )
+        end,
+        Return
+    ),
+    ?assertEqual(
+        {just, [{atom, 1, a}, [{atom, 1, b}, {atom, 1, b}], [], {atom, 1, d}]},
+        astranaut_return:run(Return)
+    ),
     ok.
 
 test_continue_sequence_children(_Config) ->
-    TopNode = {tuple, 1, [{match, 1, {var, 1, 'Var'}, {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}}, {atom, 1, c}]},
+    TopNode =
+        {tuple, 1, [
+            {match, 1, {var, 1, 'Var'}, {tuple, 1, [{atom, 1, a}, {atom, 1, b}]}}, {atom, 1, c}
+        ]},
     Monad =
         astranaut:map_m(
-          fun({match, _Pos, _Left, _Right} = Match) ->
-                  Sequence = fun lists:reverse/1,
-                  Reduce = fun lists:reverse/1,
-                  astranaut_traverse:return(astranaut_uniplate:with_subtrees(Sequence, Reduce, Match));
-             ({atom, _Pos, AtomValue} = Atom) ->
-                  astranaut_traverse:then(
-                    astranaut_traverse:modify(
-                      fun(Acc) ->
-                              [AtomValue|Acc]
-                      end),
-                    astranaut_traverse:return(Atom));
-             ({var, _Pos, VarName} = Var) ->
-                  astranaut_traverse:then(
-                    astranaut_traverse:modify(
-                      fun(Acc) ->
-                              [VarName|Acc]
-                      end),
-                    astranaut_traverse:return(Var));
-             (Node) ->
-                  astranaut_traverse:return(Node)
-          end, TopNode, #{traverse => pre, role => expression}),
+            fun
+                ({match, _Pos, _Left, _Right} = Match) ->
+                    Sequence = fun lists:reverse/1,
+                    Reduce = fun lists:reverse/1,
+                    astranaut_traverse:return(
+                        astranaut_uniplate:with_subtrees(Sequence, Reduce, Match)
+                    );
+                ({atom, _Pos, AtomValue} = Atom) ->
+                    astranaut_traverse:then(
+                        astranaut_traverse:modify(
+                            fun(Acc) ->
+                                [AtomValue | Acc]
+                            end
+                        ),
+                        astranaut_traverse:return(Atom)
+                    );
+                ({var, _Pos, VarName} = Var) ->
+                    astranaut_traverse:then(
+                        astranaut_traverse:modify(
+                            fun(Acc) ->
+                                [VarName | Acc]
+                            end
+                        ),
+                        astranaut_traverse:return(Var)
+                    );
+                (Node) ->
+                    astranaut_traverse:return(Node)
+            end,
+            TopNode,
+            #{traverse => pre, role => expression}
+        ),
     Monad1 =
         astranaut:map_m(
-          fun({atom, _Pos, AtomValue} = Atom) ->
-                  astranaut_traverse:then(
-                    astranaut_traverse:modify(
-                      fun(Acc) ->
-                              [AtomValue|Acc]
-                      end),
-                    astranaut_traverse:return(Atom));
-             ({var, _Pos, VarName} = Var) ->
-                  astranaut_traverse:then(
-                    astranaut_traverse:modify(
-                      fun(Acc) ->
-                              [VarName|Acc]
-                      end),
-                    astranaut_traverse:return(Var));
-
-             (Node) ->
-                  astranaut_traverse:return(Node)
-          end, TopNode, #{traverse => pre, role => expression}),
+            fun
+                ({atom, _Pos, AtomValue} = Atom) ->
+                    astranaut_traverse:then(
+                        astranaut_traverse:modify(
+                            fun(Acc) ->
+                                [AtomValue | Acc]
+                            end
+                        ),
+                        astranaut_traverse:return(Atom)
+                    );
+                ({var, _Pos, VarName} = Var) ->
+                    astranaut_traverse:then(
+                        astranaut_traverse:modify(
+                            fun(Acc) ->
+                                [VarName | Acc]
+                            end
+                        ),
+                        astranaut_traverse:return(Var)
+                    );
+                (Node) ->
+                    astranaut_traverse:return(Node)
+            end,
+            TopNode,
+            #{traverse => pre, role => expression}
+        ),
     Return = astranaut_traverse:exec(Monad, astranaut, #{}, []),
     Return1 = astranaut_traverse:exec(Monad1, astranaut, #{}, []),
     ?assertEqual({just, [c, 'Var', b, a]}, astranaut_return:run(Return)),
@@ -826,10 +1063,22 @@ test_record(Config) ->
     Records = maps:get(record, Expressions),
     {match, _, _, Record1} = lists:nth(1, Records),
     Record1_0 = astranaut_lib:replace_pos(Record1, 0),
-    ?assertEqual({record,0, test, [{record_field, 0, {atom,0,a},{integer,0,1}}, {record_field, 0, {atom,0,b},{integer,0,2}}]}, Record1_0),
+    ?assertEqual(
+        {record, 0, test, [
+            {record_field, 0, {atom, 0, a}, {integer, 0, 1}},
+            {record_field, 0, {atom, 0, b}, {integer, 0, 2}}
+        ]},
+        Record1_0
+    ),
     {match, _, _, Record2} = lists:nth(2, Records),
     Record2_0 = astranaut_lib:replace_pos(Record2, 0),
-    ?assertEqual({record,0, {var,0,'A'}, test, [{record_field, 0, {atom,0,a},{integer,0,2}}, {record_field, 0, {atom,0,b},{integer,0,3}}]}, Record2_0),
+    ?assertEqual(
+        {record, 0, {var, 0, 'A'}, test, [
+            {record_field, 0, {atom, 0, a}, {integer, 0, 2}},
+            {record_field, 0, {atom, 0, b}, {integer, 0, 3}}
+        ]},
+        Record2_0
+    ),
     {match, _, _, Record3} = lists:nth(3, Records),
     Record3_0 = astranaut_lib:replace_pos(Record3, 0),
     ?assertEqual({record_index, 0, test, {atom, 0, a}}, Record3_0),
@@ -840,15 +1089,12 @@ test_record(Config) ->
 
 test_typed_record_field(_Config) ->
     TypedField =
-        {typed_record_field,
-         {record_field, 1, {atom, 1, field}},
-         {type, 1, integer, []}},
+        {typed_record_field, {record_field, 1, {atom, 1, field}}, {type, 1, integer, []}},
     check_node_without_tree(TypedField),
     ?assertEqual(
-       {typed_record_field,
-        {record_field, 0, {atom, 0, field}},
-        {type, 0, integer, []}},
-       astranaut_lib:replace_pos(TypedField, 0)),
+        {typed_record_field, {record_field, 0, {atom, 0, field}}, {type, 0, integer, []}},
+        astranaut_lib:replace_pos(TypedField, 0)
+    ),
     ok.
 
 test_map(Config) ->
@@ -856,7 +1102,13 @@ test_map(Config) ->
     Maps = maps:get(map, Expressions),
     {match, _, _, Map1} = lists:nth(1, Maps),
     Map1_0 = astranaut_lib:replace_pos(Map1, 0),
-    ?assertEqual({map, 0 ,[{map_field_assoc, 0, {atom, 0, a}, {integer, 0, 1}}, {map_field_assoc, 0, {atom, 0, b}, {integer, 0, 2}}] }, Map1_0),
+    ?assertEqual(
+        {map, 0, [
+            {map_field_assoc, 0, {atom, 0, a}, {integer, 0, 1}},
+            {map_field_assoc, 0, {atom, 0, b}, {integer, 0, 2}}
+        ]},
+        Map1_0
+    ),
     ok.
 
 test_if_expr(Config) ->
@@ -882,33 +1134,40 @@ test_try_catch_expr(Config) ->
 
 test_subtree_callback_without_tree(_Config) ->
     Clause =
-        {clause, 1, [],
-         [[{op, 1, '>', {integer, 1, 2}, {integer, 1, 1}}]],
-         [{atom, 1, ok}]},
+        {clause, 1, [], [[{op, 1, '>', {integer, 1, 2}, {integer, 1, 1}}]], [{atom, 1, ok}]},
     ?assertEqual(
-       Clause,
-       astranaut:smap(
-         fun(Node) ->
-                 case element(1, Node) of
-                     tree -> exit({unexpected_tree_node, Node});
-                     _ -> Node
-                 end
-         end, Clause, #{traverse => subtree, role => clause})),
+        Clause,
+        astranaut:smap(
+            fun(Node) ->
+                case element(1, Node) of
+                    tree -> exit({unexpected_tree_node, Node});
+                    _ -> Node
+                end
+            end,
+            Clause,
+            #{traverse => subtree, role => clause}
+        )
+    ),
     ok.
 
 check_node_without_tree(TopAst) ->
     astranaut:mapfold(
-      fun(Node, [Parent|T], #{step := pre}) ->
-              case element(1, Node) of
-                  tree ->
-                      exit({unexpected_tree_node, Node, Parent});
-                  _ ->
-                      {Node, [Node, Parent|T]}
-              end;
-         (Node, [], #{step := pre}) ->
-              {Node, [Node]};
-         (Node, [Node|T], #{step := post}) ->
-              {Node, T};
-         (Leaf, State, #{step := leaf}) ->
-              {Leaf, State}
-      end, [], TopAst, #{traverse => all}).
+        fun
+            (Node, [Parent | T], #{step := pre}) ->
+                case element(1, Node) of
+                    tree ->
+                        exit({unexpected_tree_node, Node, Parent});
+                    _ ->
+                        {Node, [Node, Parent | T]}
+                end;
+            (Node, [], #{step := pre}) ->
+                {Node, [Node]};
+            (Node, [Node | T], #{step := post}) ->
+                {Node, T};
+            (Leaf, State, #{step := leaf}) ->
+                {Leaf, State}
+        end,
+        [],
+        TopAst,
+        #{traverse => all}
+    ).

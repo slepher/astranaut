@@ -53,9 +53,12 @@ to_option_map({Key, Val}) when is_atom(Key) ->
     #{Key => Val};
 to_option_map(List) when is_list(List) ->
     lists:foldl(
-      fun(Item, Acc) ->
-              maps:merge(Acc, to_option_map(Item))
-      end, #{}, List);
+        fun(Item, Acc) ->
+            maps:merge(Acc, to_option_map(Item))
+        end,
+        #{},
+        List
+    );
 to_option_map(_) ->
     #{}.
 
@@ -79,35 +82,44 @@ silent_warning(#{}) ->
 compile_transformers(Forms, MetaOpts) ->
     AttrTransformers =
         lists:foldl(
-          fun({attribute, _Line, compile, {parse_transform, ?MODULE}}, Acc) ->
-                  Acc;
-             ({attribute, _Line, compile, {parse_transform, Transformer}}, Acc) when is_atom(Transformer) ->
-                  [Transformer|Acc];
-             (_Node, Acc) ->
-                  Acc
-          end, [], Forms),
+            fun
+                ({attribute, _Line, compile, {parse_transform, ?MODULE}}, Acc) ->
+                    Acc;
+                ({attribute, _Line, compile, {parse_transform, Transformer}}, Acc) when
+                    is_atom(Transformer)
+                ->
+                    [Transformer | Acc];
+                (_Node, Acc) ->
+                    Acc
+            end,
+            [],
+            Forms
+        ),
     ExtraTransformers = maps:get(transformers, MetaOpts, []),
     unique(lists:reverse(AttrTransformers) ++ ExtraTransformers).
 
 unique(List) ->
     unique(List, []).
 
-unique([H|T], Acc) ->
+unique([H | T], Acc) ->
     case lists:member(H, Acc) of
         true ->
             unique(T, Acc);
         false ->
-            unique(T, [H|Acc])
+            unique(T, [H | Acc])
     end;
 unique([], Acc) ->
     lists:reverse(Acc).
 
 apply_transformers(File, Transformers, Forms, Opts) ->
     lists:foldl(
-      fun(Transformer, {FormsAcc, ErrorsAcc, WarningsAcc}) ->
-              {Forms1, Errors1, Warnings1} = apply_transformer(File, Transformer, FormsAcc, Opts),
-              {Forms1, ErrorsAcc ++ Errors1, WarningsAcc ++ Warnings1}
-      end, {Forms, [], []}, Transformers).
+        fun(Transformer, {FormsAcc, ErrorsAcc, WarningsAcc}) ->
+            {Forms1, Errors1, Warnings1} = apply_transformer(File, Transformer, FormsAcc, Opts),
+            {Forms1, ErrorsAcc ++ Errors1, WarningsAcc ++ Warnings1}
+        end,
+        {Forms, [], []},
+        Transformers
+    ).
 
 apply_transformer(File, Transformer, Forms, Opts) ->
     try Transformer:parse_transform(Forms, Opts) of
@@ -132,7 +144,13 @@ apply_transformer(File, Transformer, Forms, Opts) ->
 compile_check(Forms, Opts) ->
     Opts1 =
         [return_errors, return_warnings] ++
-        [Opt || Opt <- Opts, not is_parse_transform_opt(Opt), Opt =/= report_errors, Opt =/= report_warnings],
+            [
+                Opt
+             || Opt <- Opts,
+                not is_parse_transform_opt(Opt),
+                Opt =/= report_errors,
+                Opt =/= report_warnings
+            ],
     case compile:forms(Forms, Opts1) of
         {ok, _Module, _Binary, Warnings} ->
             {[], Warnings};
@@ -149,11 +167,14 @@ is_parse_transform_opt(_) ->
 
 strip_parse_transform_attrs(Forms) ->
     lists:filter(
-      fun({attribute, _Line, compile, {parse_transform, _}}) ->
-              false;
-         (_Node) ->
-              true
-      end, Forms).
+        fun
+            ({attribute, _Line, compile, {parse_transform, _}}) ->
+                false;
+            (_Node) ->
+                true
+        end,
+        Forms
+    ).
 
 %%%===================================================================
 %%% forms/meta output
@@ -164,8 +185,8 @@ append_meta_forms(FormsForModule, FormsValue, ErrorsValue, WarningsValue, MetaOp
     WarningsExport = maps:get(warnings_export, MetaOpts, warnings),
     MetaForms =
         meta_fun_forms(FormsExport, FormsValue) ++
-        meta_fun_forms(ErrorsExport, ErrorsValue) ++
-        meta_fun_forms(WarningsExport, WarningsValue),
+            meta_fun_forms(ErrorsExport, ErrorsValue) ++
+            meta_fun_forms(WarningsExport, WarningsValue),
     astranaut_forms:insert_forms(MetaForms, strip_parse_transform_attrs(FormsForModule)).
 
 meta_fun_forms(MetaFun, Value) when is_atom(MetaFun) ->
@@ -176,20 +197,26 @@ meta_fun_forms(_, _) ->
 base_forms(OrigForms) ->
     FileAttrs =
         lists:filter(
-          fun({attribute, _Pos, file, _}) -> true;
-             (_) -> false
-          end, OrigForms),
+            fun
+                ({attribute, _Pos, file, _}) -> true;
+                (_) -> false
+            end,
+            OrigForms
+        ),
     ModuleAttrs =
         lists:filter(
-          fun({attribute, _Pos, module, _}) -> true;
-             (_) -> false
-          end, OrigForms),
+            fun
+                ({attribute, _Pos, module, _}) -> true;
+                (_) -> false
+            end,
+            OrigForms
+        ),
     Eof = last_eof(OrigForms),
     lists:append([FileAttrs, ModuleAttrs, [Eof]]).
 
 last_eof(Forms) ->
     case lists:reverse(Forms) of
-        [{eof, _} = Eof|_T] ->
+        [{eof, _} = Eof | _T] ->
             Eof;
         _ ->
             {eof, 0}

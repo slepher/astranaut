@@ -17,7 +17,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -36,7 +36,6 @@ init_per_suite(Config) ->
 %%--------------------------------------------------------------------
 end_per_suite(_Config) ->
     ok.
-
 
 %%--------------------------------------------------------------------
 %% @spec init_per_group(GroupName, Config0) ->
@@ -105,18 +104,20 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() -> 
-    [disable_tco,
-     disable_tco_nested_control_flow,
-     disable_tco_transform_contract,
-     disable_tco_nested_control_flow_transform_contract].
+all() ->
+    [
+        disable_tco,
+        disable_tco_nested_control_flow,
+        disable_tco_transform_contract,
+        disable_tco_nested_control_flow_transform_contract
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-disable_tco() -> 
+disable_tco() ->
     [].
 
 %%--------------------------------------------------------------------
@@ -128,12 +129,14 @@ disable_tco() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-disable_tco(_Config) -> 
+disable_tco(_Config) ->
     try
         disable_tco_example:f(1)
     catch
         _:_:Stacktrace ->
-            ?assertEqual([{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(Stacktrace))
+            ?assertEqual(
+                [{s, [1]}, {g, 2}, {'-f/1-fun-0-', 2}, {f, 1}], extract_stacktrace(Stacktrace)
+            )
     end.
 
 disable_tco_nested_control_flow(_Config) ->
@@ -142,208 +145,228 @@ disable_tco_nested_control_flow(_Config) ->
     catch
         _:_:Stacktrace ->
             ?assertEqual(
-               [{s, [1]},
-                {nested_helper, 1},
-                {nested_control_flow, 1}],
-               extract_stacktrace(Stacktrace))
+                [
+                    {s, [1]},
+                    {nested_helper, 1},
+                    {nested_control_flow, 1}
+                ],
+                extract_stacktrace(Stacktrace)
+            )
     end.
 
 disable_tco_transform_contract(_Config) ->
     SelfCall = {call, 2, {atom, 2, self_call}, []},
     SelfFunction =
-        {function, 2, self_call, 0,
-         [{clause, 2, [], [], [SelfCall]}]},
+        {function, 2, self_call, 0, [{clause, 2, [], [], [SelfCall]}]},
     RemoteCall =
-        {call, 3,
-         {remote, 3, {atom, 3, erlang}, {atom, 3, error}},
-         [{atom, 3, expected}]},
+        {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [{atom, 3, expected}]},
     RemoteFunction =
-        {function, 3, remote_call, 0,
-         [{clause, 3, [], [], [RemoteCall]}]},
+        {function, 3, remote_call, 0, [{clause, 3, [], [], [RemoteCall]}]},
     LocalCall = {call, 4, {atom, 4, helper}, []},
     LocalFunction =
-        {function, 4, local_call, 0,
-         [{clause, 4, [], [], [LocalCall]}]},
+        {function, 4, local_call, 0, [{clause, 4, [], [], [LocalCall]}]},
     PlainExpression = {atom, 5, plain},
     PlainFunction =
-        {function, 5, plain_expression, 0,
-         [{clause, 5, [], [], [PlainExpression]}]},
+        {function, 5, plain_expression, 0, [{clause, 5, [], [], [PlainExpression]}]},
     MultiHead = {integer, 6, 1},
     MultiTail = {call, 6, {atom, 6, helper}, []},
     MultiFunction =
-        {function, 6, multiple_expressions, 0,
-         [{clause, 6, [], [], [MultiHead, MultiTail]}]},
+        {function, 6, multiple_expressions, 0, [{clause, 6, [], [], [MultiHead, MultiTail]}]},
     CollisionCall =
-        {call, 7,
-         {remote, 7, {atom, 7, erlang}, {atom, 7, error}},
-         [{atom, 7, collision}]},
+        {call, 7, {remote, 7, {atom, 7, erlang}, {atom, 7, error}}, [{atom, 7, collision}]},
     CollisionFunction =
-        {function, 7, variable_collision, 3,
-         [{clause, 7,
-           [{var, 7, 'Class0'},
-            {var, 7, 'Exception0'},
-            {var, 7, 'StackTrace0'}],
-           [], [CollisionCall]}]},
+        {function, 7, variable_collision, 3, [
+            {clause, 7,
+                [
+                    {var, 7, 'Class0'},
+                    {var, 7, 'Exception0'},
+                    {var, 7, 'StackTrace0'}
+                ],
+                [], [CollisionCall]}
+        ]},
     AnonymousCall = {call, 8, {atom, 8, helper}, []},
     AnonymousFun =
-        {'fun', 8,
-         {clauses, [{clause, 8, [], [], [AnonymousCall]}]}},
+        {'fun', 8, {clauses, [{clause, 8, [], [], [AnonymousCall]}]}},
     AnonymousFunction =
-        {function, 8, anonymous_fun, 0,
-         [{clause, 8, [], [], [AnonymousFun]}]},
+        {function, 8, anonymous_fun, 0, [{clause, 8, [], [], [AnonymousFun]}]},
     NamedCall = {call, 9, {atom, 9, helper}, []},
     NamedFun =
-        {named_fun, 9, 'Loop',
-         [{clause, 9, [], [], [NamedCall]}]},
+        {named_fun, 9, 'Loop', [{clause, 9, [], [], [NamedCall]}]},
     NamedFunction =
-        {function, 9, named_fun, 0,
-         [{clause, 9, [], [], [NamedFun]}]},
-    [SelfFunction,
-     TransformedRemoteFunction,
-     TransformedLocalFunction,
-     PlainFunction,
-     TransformedMultiFunction,
-     TransformedCollisionFunction,
-     TransformedAnonymousFunction,
-     TransformedNamedFunction] =
+        {function, 9, named_fun, 0, [{clause, 9, [], [], [NamedFun]}]},
+    [
+        SelfFunction,
+        TransformedRemoteFunction,
+        TransformedLocalFunction,
+        PlainFunction,
+        TransformedMultiFunction,
+        TransformedCollisionFunction,
+        TransformedAnonymousFunction,
+        TransformedNamedFunction
+    ] =
         astranaut_disable_tco:parse_transform(
-          [SelfFunction,
-           RemoteFunction,
-           LocalFunction,
-           PlainFunction,
-           MultiFunction,
-           CollisionFunction,
-           AnonymousFunction,
-           NamedFunction], []),
-    {function, 3, remote_call, 0,
-     [{clause, 3, [], [], [TransformedRemoteCall]}]} =
+            [
+                SelfFunction,
+                RemoteFunction,
+                LocalFunction,
+                PlainFunction,
+                MultiFunction,
+                CollisionFunction,
+                AnonymousFunction,
+                NamedFunction
+            ],
+            []
+        ),
+    {function, 3, remote_call, 0, [{clause, 3, [], [], [TransformedRemoteCall]}]} =
         TransformedRemoteFunction,
     ?assertMatch(
-       {'try', _, _, _, _, _},
-       TransformedRemoteCall),
-    {function, 4, local_call, 0,
-     [{clause, 4, [], [], [TransformedLocalCall]}]} =
+        {'try', _, _, _, _, _},
+        TransformedRemoteCall
+    ),
+    {function, 4, local_call, 0, [{clause, 4, [], [], [TransformedLocalCall]}]} =
         TransformedLocalFunction,
     ?assertMatch(
-       {'try', _, _, _, _, _},
-       TransformedLocalCall),
-    {function, 6, multiple_expressions, 0,
-     [{clause, 6, [], [], [MultiHead, TransformedMultiTail]}]} =
+        {'try', _, _, _, _, _},
+        TransformedLocalCall
+    ),
+    {function, 6, multiple_expressions, 0, [{clause, 6, [], [], [MultiHead, TransformedMultiTail]}]} =
         TransformedMultiFunction,
     ?assertMatch(
-       {'try', _, _, _, _, _},
-       TransformedMultiTail),
-    {function, 7, variable_collision, 3,
-     [{clause, 7, _, [], [TransformedCollisionCall]}]} =
+        {'try', _, _, _, _, _},
+        TransformedMultiTail
+    ),
+    {function, 7, variable_collision, 3, [{clause, 7, _, [], [TransformedCollisionCall]}]} =
         TransformedCollisionFunction,
     CollisionVariables = variable_names(TransformedCollisionCall),
     ?assert(
-       lists:any(
-         fun(Name) -> variable_has_prefix("Class", Name) end,
-         CollisionVariables)),
+        lists:any(
+            fun(Name) -> variable_has_prefix("Class", Name) end,
+            CollisionVariables
+        )
+    ),
     ?assert(
-       lists:any(
-         fun(Name) -> variable_has_prefix("Exception", Name) end,
-         CollisionVariables)),
+        lists:any(
+            fun(Name) -> variable_has_prefix("Exception", Name) end,
+            CollisionVariables
+        )
+    ),
     ?assertEqual(
-       [],
-       [Name ||
-           Name <- ['Class0', 'Exception0', 'StackTrace0'],
-           lists:member(Name, CollisionVariables)]),
-    {function, 8, anonymous_fun, 0,
-     [{clause, 8, [], [],
-       [{'fun', 8,
-         {clauses,
-          [{clause, 8, [], [], [TransformedAnonymousCall]}]}}]}]} =
+        [],
+        [
+            Name
+         || Name <- ['Class0', 'Exception0', 'StackTrace0'],
+            lists:member(Name, CollisionVariables)
+        ]
+    ),
+    {function, 8, anonymous_fun, 0, [
+        {clause, 8, [], [], [
+            {'fun', 8, {clauses, [{clause, 8, [], [], [TransformedAnonymousCall]}]}}
+        ]}
+    ]} =
         TransformedAnonymousFunction,
     ?assertMatch(
-       {'try', _, _, _, _, _},
-       TransformedAnonymousCall),
-    {function, 9, named_fun, 0,
-     [{clause, 9, [], [],
-       [{named_fun, 9, 'Loop',
-         [{clause, 9, [], [], [TransformedNamedCall]}]}]}]} =
+        {'try', _, _, _, _, _},
+        TransformedAnonymousCall
+    ),
+    {function, 9, named_fun, 0, [
+        {clause, 9, [], [], [{named_fun, 9, 'Loop', [{clause, 9, [], [], [TransformedNamedCall]}]}]}
+    ]} =
         TransformedNamedFunction,
     ?assertMatch(
-       {'try', _, _, _, _, _},
-       TransformedNamedCall),
+        {'try', _, _, _, _, _},
+        TransformedNamedCall
+    ),
     ok.
 
 disable_tco_nested_control_flow_transform_contract(_Config) ->
     NestedFunction =
         parse_form(
-          "nested(X) -> "
-          "case X of "
-          "first -> before(), if true -> begin target() end end; "
-          "self -> nested(X) "
-          "end."),
+            "nested(X) -> "
+            "case X of "
+            "first -> before(), if true -> begin target() end end; "
+            "self -> nested(X) "
+            "end."
+        ),
     MutualA =
         parse_form(
-          "mutual_a(X) -> "
-          "case X of stop -> ok; _ -> mutual_b(X) end."),
+            "mutual_a(X) -> "
+            "case X of stop -> ok; _ -> mutual_b(X) end."
+        ),
     MutualB =
         parse_form(
-          "mutual_b(X) -> "
-          "if X =:= stop -> ok; true -> mutual_a(X) end."),
+            "mutual_b(X) -> "
+            "if X =:= stop -> ok; true -> mutual_a(X) end."
+        ),
     ReceiveFunction =
         parse_form(
-          "receive_control() -> "
-          "receive go -> target() after 0 -> timeout() end."),
+            "receive_control() -> "
+            "receive go -> target() after 0 -> timeout() end."
+        ),
     BooleanFunction =
         parse_form(
-          "boolean_control(X) -> X andalso target()."),
+            "boolean_control(X) -> X andalso target()."
+        ),
     TryFunction =
         parse_form(
-          "try_control() -> "
-          "try source() of "
-          "X -> target(X) "
-          "catch _:_ -> recover() "
-          "end."),
-    [TransformedNested,
-     TransformedMutualA,
-     TransformedMutualB,
-     TransformedReceive,
-     TransformedBoolean,
-     TransformedTry] =
+            "try_control() -> "
+            "try source() of "
+            "X -> target(X) "
+            "catch _:_ -> recover() "
+            "end."
+        ),
+    [
+        TransformedNested,
+        TransformedMutualA,
+        TransformedMutualB,
+        TransformedReceive,
+        TransformedBoolean,
+        TransformedTry
+    ] =
         astranaut_disable_tco:parse_transform(
-          [NestedFunction,
-           MutualA,
-           MutualB,
-           ReceiveFunction,
-           BooleanFunction,
-           TryFunction], []),
-    {function, _, nested, 1,
-     [{clause, _, _, _,
-       [{'case', _, _,
-         [{clause, _, [{atom, _, first}], _,
-           [BeforeCall,
-            {'if', _,
-             [{clause, _, _, _, [{block, _, [NestedTailCall]}]}]}]},
-          {clause, _, [{atom, _, self}], _, [SelfCall]}]}]}]} =
+            [
+                NestedFunction,
+                MutualA,
+                MutualB,
+                ReceiveFunction,
+                BooleanFunction,
+                TryFunction
+            ],
+            []
+        ),
+    {function, _, nested, 1, [
+        {clause, _, _, _, [
+            {'case', _, _, [
+                {clause, _, [{atom, _, first}], _, [
+                    BeforeCall,
+                    {'if', _, [{clause, _, _, _, [{block, _, [NestedTailCall]}]}]}
+                ]},
+                {clause, _, [{atom, _, self}], _, [SelfCall]}
+            ]}
+        ]}
+    ]} =
         TransformedNested,
     ?assertMatch({call, _, {atom, _, before}, []}, BeforeCall),
     ?assertMatch({'try', _, _, _, _, _}, NestedTailCall),
     ?assertMatch({call, _, {atom, _, nested}, [_]}, SelfCall),
     ?assertEqual(MutualA, TransformedMutualA),
     ?assertEqual(MutualB, TransformedMutualB),
-    {function, _, receive_control, 0,
-     [{clause, _, _, _,
-       [{'receive', _,
-         [{clause, _, _, _, [ReceiveTailCall]}],
-         _, [TimeoutTailCall]}]}]} =
+    {function, _, receive_control, 0, [
+        {clause, _, _, _, [
+            {'receive', _, [{clause, _, _, _, [ReceiveTailCall]}], _, [TimeoutTailCall]}
+        ]}
+    ]} =
         TransformedReceive,
     ?assertMatch({'try', _, _, _, _, _}, ReceiveTailCall),
     ?assertMatch({'try', _, _, _, _, _}, TimeoutTailCall),
-    {function, _, boolean_control, 1,
-     [{clause, _, _, _,
-       [{op, _, 'andalso', _, BooleanTailCall}]}]} =
+    {function, _, boolean_control, 1, [{clause, _, _, _, [{op, _, 'andalso', _, BooleanTailCall}]}]} =
         TransformedBoolean,
     ?assertMatch({'try', _, _, _, _, _}, BooleanTailCall),
-    {function, _, try_control, 0,
-     [{clause, _, _, _,
-       [{'try', _, [ProtectedCall],
-         [{clause, _, _, _, [TryTailCall]}],
-         [{clause, _, _, _, [CatchTailCall]}], []}]}]} =
+    {function, _, try_control, 0, [
+        {clause, _, _, _, [
+            {'try', _, [ProtectedCall], [{clause, _, _, _, [TryTailCall]}],
+                [{clause, _, _, _, [CatchTailCall]}], []}
+        ]}
+    ]} =
         TransformedTry,
     ?assertMatch({call, _, {atom, _, source}, []}, ProtectedCall),
     ?assertMatch({'try', _, _, _, _, _}, TryTailCall),
@@ -352,18 +375,23 @@ disable_tco_nested_control_flow_transform_contract(_Config) ->
 
 extract_stacktrace(StackTrace) ->
     lists:reverse(
-      lists:foldl(
-        fun({disable_tco_example, Function, Arity, _Attrs}, Acc) ->
-                [{Function, Arity}|Acc];
-           (_, Acc) ->
-                Acc
-        end, [], StackTrace)).
+        lists:foldl(
+            fun
+                ({disable_tco_example, Function, Arity, _Attrs}, Acc) ->
+                    [{Function, Arity} | Acc];
+                (_, Acc) ->
+                    Acc
+            end,
+            [],
+            StackTrace
+        )
+    ).
 
 variable_names({var, _Pos, Name}) ->
     [Name];
 variable_names(Tuple) when is_tuple(Tuple) ->
     variable_names(tuple_to_list(Tuple));
-variable_names([Head|Tail]) ->
+variable_names([Head | Tail]) ->
     variable_names(Head) ++ variable_names(Tail);
 variable_names(_) ->
     [].
@@ -375,4 +403,3 @@ parse_form(Source) ->
     {ok, Tokens, _EndLocation} = erl_scan:string(Source),
     {ok, Form} = erl_parse:parse_form(Tokens),
     Form.
-    

@@ -23,7 +23,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -110,7 +110,7 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() -> 
+all() ->
     [test_state_1, test_state_2, test_state_3, test_state_4, test_state_5, test_state_6].
 
 %%--------------------------------------------------------------------
@@ -118,7 +118,7 @@ all() ->
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-test_merge_1() -> 
+test_merge_1() ->
     [].
 
 %%--------------------------------------------------------------------
@@ -135,7 +135,9 @@ test_state_1(_Config) ->
     Errors = [error_0],
     Warnings = [],
     State = astranaut_error:append_error(error_0, Init),
-    ?assertEqual({Errors, Warnings}, {astranaut_error:errors(State), astranaut_error:warnings(State)}),
+    ?assertEqual({Errors, Warnings}, {
+        astranaut_error:errors(State), astranaut_error:warnings(State)
+    }),
     ok.
 
 test_state_2(_Config) ->
@@ -154,7 +156,9 @@ test_state_3(_Config) ->
     State = astranaut_error:append_error(error_0, State),
     State = astranaut_error:append_error(error_1, State),
     State = astranaut_error:append_warning(warning_2, State),
-    ?assertEqual({Errors, Warnings}, {astranaut_error:errors(State), astranaut_error:warnings(State)}),
+    ?assertEqual({Errors, Warnings}, {
+        astranaut_error:errors(State), astranaut_error:warnings(State)
+    }),
     ok.
 
 test_state_4(_Config) ->
@@ -171,21 +175,24 @@ test_state_4(_Config) ->
     State = astranaut_error:update_pos(20, ?MODULE, State),
     State = astranaut_error:append_warning(warning_2, State),
     State = astranaut_error:update_pos(25, ?MODULE, State),
-    ?assertEqual({Errors, Warnings}, {astranaut_error:formatted_errors(State), 
-                                      astranaut_error:formatted_warnings(State)}),
+    ?assertEqual({Errors, Warnings}, {
+        astranaut_error:formatted_errors(State), astranaut_error:formatted_warnings(State)
+    }),
     ok.
 
 test_state_5(_Config) ->
     State = astranaut_error:new(),
     Errors = [{?FILE, [{10, ?MODULE, error_0}, {20, ?MODULE, error_1}]}],
-    Warnings = [{?FILE, [{5, ?MODULE, warning_0}, {15, ?MODULE, warning_1}, {25, ?MODULE, warning_2}]}],
+    Warnings = [
+        {?FILE, [{5, ?MODULE, warning_0}, {15, ?MODULE, warning_1}, {25, ?MODULE, warning_2}]}
+    ],
     State = astranaut_error:append_warnings([warning_0], State),
     State = astranaut_error:update_pos(5, ?MODULE, State),
     State = astranaut_error:append_errors([error_0], State),
     State = astranaut_error:update_pos(10, ?MODULE, State),
     State = astranaut_error:append_warnings([warning_1], State),
     State = astranaut_error:update_pos(15, ?MODULE, State),
-    State = astranaut_error:update_file(?FILE,  State),
+    State = astranaut_error:update_file(?FILE, State),
     State = astranaut_error:append_errors([error_1], State),
     State = astranaut_error:update_pos(20, ?MODULE, State),
     State = astranaut_error:append_warnings([warning_2], State),
@@ -197,9 +204,17 @@ test_state_5(_Config) ->
 test_state_6(_Config) ->
     State = astranaut_error:new(),
     File2 = ?FILE ++ "_2",
-    Errors = maps:to_list(#{?FILE =>[{5, ?MODULE, error_0}, {10, ?MODULE, error_1}], File2 => [{20, ?MODULE, error_2}]}),
-    Warnings = [{?FILE, [{5, ?MODULE, warning_0}, {15, ?MODULE, warning_1}, 
-                         {25, ?MODULE, warning_2}, {30, ?MODULE, warning_3}]}],
+    Errors = maps:to_list(#{
+        ?FILE => [{5, ?MODULE, error_0}, {10, ?MODULE, error_1}], File2 => [{20, ?MODULE, error_2}]
+    }),
+    Warnings = [
+        {?FILE, [
+            {5, ?MODULE, warning_0},
+            {15, ?MODULE, warning_1},
+            {25, ?MODULE, warning_2},
+            {30, ?MODULE, warning_3}
+        ]}
+    ],
     State = astranaut_error:append_warning(warning_0, State),
     State = astranaut_error:append_error(error_0, State),
     State = astranaut_error:update_pos(5, ?MODULE, State),
@@ -208,7 +223,7 @@ test_state_6(_Config) ->
     State = astranaut_error:update_file(?FILE, State),
     State = astranaut_error:append_warning(warning_1, State),
     State = astranaut_error:update_pos(15, ?MODULE, State),
-    State = astranaut_error:update_file(File2,  State),
+    State = astranaut_error:update_file(File2, State),
     State = astranaut_error:append_error(error_2, State),
     State = astranaut_error:update_pos(20, ?MODULE, State),
     State = astranaut_error:update_file(?FILE, State),

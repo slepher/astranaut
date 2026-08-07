@@ -12,16 +12,38 @@
 
 -include("astranaut_struct_name.hrl").
 
--export([replace_pos/2, replace_pos_zero/2, abstract_form/1, abstract_form/2,
-         original_forms/2, parse_file/2, load_forms/2, reload_forms/2, compile_forms/2,
-         with_module_lock/2, reload_binary/2,
-         analyze_module_attributes/2, analyze_forms_attributes/1, analyze_forms_attributes/2, analyze_forms_file/1,
-         analyze_forms_module/1, analyze_transform_file_pos/2,
-         ast_safe_to_string/1, ast_to_string/1, relative_path/1,
-         gen_attribute_node/3, gen_exports/2, gen_exported_function/2, gen_function/2, merge_clauses/1,
-         with_attribute/5, forms_with_attribute/5,
-         option_map/1, validate/2, validate_attribute_option/4,
-         format_error/1, format_error/2, format_default_error/1]).
+-export([
+    replace_pos/2,
+    replace_pos_zero/2,
+    abstract_form/1, abstract_form/2,
+    original_forms/2,
+    parse_file/2,
+    load_forms/2,
+    reload_forms/2,
+    compile_forms/2,
+    with_module_lock/2,
+    reload_binary/2,
+    analyze_module_attributes/2,
+    analyze_forms_attributes/1, analyze_forms_attributes/2,
+    analyze_forms_file/1,
+    analyze_forms_module/1,
+    analyze_transform_file_pos/2,
+    ast_safe_to_string/1,
+    ast_to_string/1,
+    relative_path/1,
+    gen_attribute_node/3,
+    gen_exports/2,
+    gen_exported_function/2,
+    gen_function/2,
+    merge_clauses/1,
+    with_attribute/5,
+    forms_with_attribute/5,
+    option_map/1,
+    validate/2,
+    validate_attribute_option/4,
+    format_error/1, format_error/2,
+    format_default_error/1
+]).
 
 -type options() :: option() | [option()] | option_map().
 -type option() :: atom() | {atom(), term()}.
@@ -29,22 +51,52 @@
 -type formatter_fun() :: fun((term()) -> term()).
 -type validators() :: validator() | [validator()].
 -type validator() :: internal_validator() | validator_fun().
--type validator_attrs() :: #{key := atom(), data := option_map(),
-                             validated_data := option_map(), is_key := boolean()}.
--type validator_fun() :: fun((term()) -> validator_fun_return()) |
-                         fun((term(), validator_attrs()) -> validator_fun_return()) |
-                         fun((term(), IsEmpty::boolean(), validator_attrs()) -> validator_fun_return()).
--type validator_fun_return() :: {ok, Value::term()} | {error, Reason::term()} | true | false | {warning, Reason::term()} | {warning, Value::term(), Reason::term()} | astranaut_return:struct(Value::term()).
--type internal_validator() :: boolean | atom | integer | uinteger | number | binary |
-                              {'or', [validator()]} | {list_of, validator()} |
-                              {one_of, [term()]} | required |
-                              {default, Default::term()} |
-                              {default_key, DefaultKey::atom()} |
-                              paired | {paired, PairedKey::atom()} | any.
+-type validator_attrs() :: #{
+    key := atom(),
+    data := option_map(),
+    validated_data := option_map(),
+    is_key := boolean()
+}.
+-type validator_fun() ::
+    fun((term()) -> validator_fun_return())
+    | fun((term(), validator_attrs()) -> validator_fun_return())
+    | fun((term(), IsEmpty :: boolean(), validator_attrs()) -> validator_fun_return()).
+-type validator_fun_return() ::
+    {ok, Value :: term()}
+    | {error, Reason :: term()}
+    | true
+    | false
+    | {warning, Reason :: term()}
+    | {warning, Value :: term(), Reason :: term()}
+    | astranaut_return:struct(Value :: term()).
+-type internal_validator() ::
+    boolean
+    | atom
+    | integer
+    | uinteger
+    | number
+    | binary
+    | {'or', [validator()]}
+    | {list_of, validator()}
+    | {one_of, [term()]}
+    | required
+    | {default, Default :: term()}
+    | {default_key, DefaultKey :: atom()}
+    | paired
+    | {paired, PairedKey :: atom()}
+    | any.
 
--export_type([options/0, option/0, option_map/0, validators/0,
-              validator/0, validator_attrs/0, validator_fun/0,
-              validator_fun_return/0, internal_validator/0]).
+-export_type([
+    options/0,
+    option/0,
+    option_map/0,
+    validators/0,
+    validator/0,
+    validator_attrs/0,
+    validator_fun/0,
+    validator_fun_return/0,
+    internal_validator/0
+]).
 
 -spec replace_pos(astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
 %% @doc replace pos attribute of subtrees to Pos.
@@ -58,24 +110,32 @@ replace_pos_zero(Ast, 0) ->
     Ast;
 replace_pos_zero(Ast, Pos) ->
     replace_pos_cond(
-      fun(0) -> true;
-         (_) -> false
-      end, Ast, Pos).
+        fun
+            (0) -> true;
+            (_) -> false
+        end,
+        Ast,
+        Pos
+    ).
 
--spec replace_pos_cond(fun((any()) -> boolean()), astranaut:trees(), erl_anno:location()) -> astranaut:trees() | no_return().
+-spec replace_pos_cond(fun((any()) -> boolean()), astranaut:trees(), erl_anno:location()) ->
+    astranaut:trees() | no_return().
 replace_pos_cond(Cond, Ast, Pos) ->
     case astranaut_syntax:is_pos(Pos) of
         true ->
             astranaut:smap(
                 fun(Node) ->
-                        Pos0 = astranaut_syntax:get_pos(Node),
-                        case Cond(Pos0) of
-                            true ->
-                                astranaut_syntax:set_pos(Node, Pos);
-                            false ->
-                                Node
-                        end
-                end, Ast, #{normalize => false});
+                    Pos0 = astranaut_syntax:get_pos(Node),
+                    case Cond(Pos0) of
+                        true ->
+                            astranaut_syntax:set_pos(Node, Pos);
+                        false ->
+                            Node
+                    end
+                end,
+                Ast,
+                #{normalize => false}
+            );
         false ->
             exit({invalid_pos, Pos})
     end.
@@ -97,29 +157,32 @@ abstract_form(Term, Pos) ->
     replace_pos(abstract_form(Term), Pos).
 
 -spec original_forms(astranaut:forms(), [compile:option()]) ->
-          astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
+    astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
 %% @doc get original froms before all parse transform compile flags removed by read file attribute in forms and re-parse it.
 original_forms(Forms, Opts) ->
     File = analyze_forms_file(Forms),
     parse_file(File, Opts).
 
 -spec parse_file(file:filename(), [compile:option()]) ->
-          astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
+    astranaut:forms() | {error, astranaut_error:compiler_error(), []}.
 %% @doc get forms from file with compile opts.
 parse_file(File, Opts) ->
     Dir = filename:dirname(File),
     SourceName0 = proplists:get_value(source, Opts, File),
-    SourceName = case lists:member(deterministic, Opts) of
-                     true -> filename:basename(SourceName0);
-                     false -> SourceName0
-                 end,
-    EppOpts = [{includes,[".",Dir|inc_paths(Opts)]},
-               {source_name, SourceName},
-               {macros,pre_defs(Opts)},
-               {default_encoding, utf8},
-               extra],
+    SourceName =
+        case lists:member(deterministic, Opts) of
+            true -> filename:basename(SourceName0);
+            false -> SourceName0
+        end,
+    EppOpts = [
+        {includes, [".", Dir | inc_paths(Opts)]},
+        {source_name, SourceName},
+        {macros, pre_defs(Opts)},
+        {default_encoding, utf8},
+        extra
+    ],
     case epp:parse_file(File, eppopts_add_location(Opts, EppOpts)) of
-	{ok, Forms, Extra} ->
+        {ok, Forms, Extra} ->
             Encoding = proplists:get_value(encoding, Extra, none),
             case find_invalid_unicode(Forms, File) of
                 none ->
@@ -127,15 +190,15 @@ parse_file(File, Opts) ->
                 {invalid_unicode, File, Pos} ->
                     case Encoding of
                         none ->
-                            Es = [{File,[{Pos, compile, reparsing_invalid_unicode}]}],
+                            Es = [{File, [{Pos, compile, reparsing_invalid_unicode}]}],
                             {error, Es, []};
                         _ ->
                             Forms
                     end
             end;
-	{error,E} ->
-	    Es = [{File,[{none,compile,{epp,E}}]}],
-	    {error, Es, []}
+        {error, E} ->
+            Es = [{File, [{none, compile, {epp, E}}]}],
+            {error, Es, []}
     end.
 
 -include("otp_vsn.hrl").
@@ -144,31 +207,33 @@ parse_file(File, Opts) ->
 -if(?ASTRANAUT_OTP_VSN_GE(24)).
 eppopts_add_location(Opts, EppOpts) ->
     WithColumns = proplists:get_value(error_location, Opts, column) =:= column,
-    StartLocation = case WithColumns of
-                        true ->
-                            {1,1};
-                        false ->
-                            1
-                    end,
-    [{location, StartLocation}|EppOpts].
+    StartLocation =
+        case WithColumns of
+            true ->
+                {1, 1};
+            false ->
+                1
+        end,
+    [{location, StartLocation} | EppOpts].
 -else.
 eppopts_add_location(_Opts, EppOpts) ->
     EppOpts.
 -endif.
 
-find_invalid_unicode([H|T], File0) ->
+find_invalid_unicode([H | T], File0) ->
     case H of
-        {attribute,_,file,{File,_}} ->
+        {attribute, _, file, {File, _}} ->
             find_invalid_unicode(T, File);
-        {error,{Pos,file_io_server,invalid_unicode}} ->
-            {invalid_unicode,File0,Pos};
+        {error, {Pos, file_io_server, invalid_unicode}} ->
+            {invalid_unicode, File0, Pos};
         _Other ->
             find_invalid_unicode(T, File0)
     end;
-find_invalid_unicode([], _) -> none.    
+find_invalid_unicode([], _) ->
+    none.
 
--spec compile_forms(astranaut:forms(), [compile:option()|without_warnings]) ->
-          astranaut_return:struct({module(), binary()}).
+-spec compile_forms(astranaut:forms(), [compile:option() | without_warnings]) ->
+    astranaut_return:struct({module(), binary()}).
 %% @doc compile forms with compile opts. The extra option `without_warnings'
 %% suppresses returned and reported warnings, which is useful for temporarily
 %% compiling generated forms at compile time.
@@ -193,18 +258,19 @@ compile_forms(Forms, Opts) ->
 %% @doc load forms as compiled module.
 load_forms(Forms, Opts) ->
     astranaut_return:bind(
-      compile_forms(Forms, ensure_compile_option(binary, Opts)),
-      fun({Mod, Binary}) ->
-              case code:load_binary(Mod, [], Binary) of
-                  {module, Mod} ->
-                      astranaut_return:return({Mod, Binary});
-                  {error, What} ->
-                      astranaut_return:error_fail(What)
-              end
-      end).
+        compile_forms(Forms, ensure_compile_option(binary, Opts)),
+        fun({Mod, Binary}) ->
+            case code:load_binary(Mod, [], Binary) of
+                {module, Mod} ->
+                    astranaut_return:return({Mod, Binary});
+                {error, What} ->
+                    astranaut_return:error_fail(What)
+            end
+        end
+    ).
 
 -spec reload_forms(astranaut:forms(), [compile:option()]) ->
-          astranaut_return:struct({module(), binary()}).
+    astranaut_return:struct({module(), binary()}).
 %% @doc Compile forms and safely replace the loaded module. The replacement
 %% uses a per-module lock and `code:soft_purge/1'; it fails with
 %% `{module_in_use, Module}' while old code is still executing.
@@ -214,21 +280,27 @@ reload_forms(Forms, Opts) ->
             astranaut_return:error_fail(module_attribute_not_found);
         Module ->
             with_module_lock(
-              Module,
-              fun() ->
-                      astranaut_return:bind(
+                Module,
+                fun() ->
+                    astranaut_return:bind(
                         compile_forms(
-                          Forms, ensure_compile_option(binary, Opts)),
-                        fun({CompiledModule, Binary})
-                              when CompiledModule =:= Module ->
+                            Forms, ensure_compile_option(binary, Opts)
+                        ),
+                        fun
+                            ({CompiledModule, Binary}) when
+                                CompiledModule =:= Module
+                            ->
                                 loader_return(
-                                  reload_binary(Module, Binary));
-                           ({CompiledModule, _Binary}) ->
+                                    reload_binary(Module, Binary)
+                                );
+                            ({CompiledModule, _Binary}) ->
                                 astranaut_return:error_fail(
-                                  {unexpected_compiled_module,
-                                   Module, CompiledModule})
-                        end)
-              end)
+                                    {unexpected_compiled_module, Module, CompiledModule}
+                                )
+                        end
+                    )
+                end
+            )
     end.
 
 ensure_compile_option(Option, Opts) ->
@@ -244,12 +316,13 @@ loader_return({error, Reason}) ->
 
 -spec with_module_lock(module(), fun(() -> Result)) -> Result.
 %% @doc Serialize work associated with a generated or reloadable module.
-with_module_lock(Module, Fun)
-  when is_atom(Module), is_function(Fun, 0) ->
+with_module_lock(Module, Fun) when
+    is_atom(Module), is_function(Fun, 0)
+->
     global:trans({{?MODULE, Module}, self()}, Fun).
 
 -spec reload_binary(module(), binary()) ->
-          {ok, {module(), binary()}} | {error, term()}.
+    {ok, {module(), binary()}} | {error, term()}.
 %% @doc Safely replace a compiled module binary without force-purging code.
 %% The caller should use `with_module_lock/2' when replacement can race.
 reload_binary(Module, Binary) ->
@@ -270,15 +343,16 @@ load_binary(Module, Binary) ->
     end.
 
 inc_paths(Opts) ->
-    [ P || {i,P} <- Opts, is_list(P) ].
+    [P || {i, P} <- Opts, is_list(P)].
 
-pre_defs([{d,M,V}|Opts]) ->
-    [{M,V}|pre_defs(Opts)];
-pre_defs([{d,M}|Opts]) ->
-    [M|pre_defs(Opts)];
-pre_defs([_|Opts]) ->
+pre_defs([{d, M, V} | Opts]) ->
+    [{M, V} | pre_defs(Opts)];
+pre_defs([{d, M} | Opts]) ->
+    [M | pre_defs(Opts)];
+pre_defs([_ | Opts]) ->
     pre_defs(Opts);
-pre_defs([]) -> [].
+pre_defs([]) ->
+    [].
 
 -spec analyze_module_attributes(atom(), module()) -> [term()].
 %% @doc attributes with specific name by module name.
@@ -286,49 +360,64 @@ pre_defs([]) -> [].
 analyze_module_attributes(AttributeName, Module) ->
     Attributes = Module:module_info(attributes),
     lists:reverse(
-      lists:foldl(
-        fun({Attr, Value}, Acc) when Attr =:= AttributeName ->
-                [Value|Acc];
-           (_Other, Acc) ->
-                Acc
-        end, [], Attributes)).
+        lists:foldl(
+            fun
+                ({Attr, Value}, Acc) when Attr =:= AttributeName ->
+                    [Value | Acc];
+                (_Other, Acc) ->
+                    Acc
+            end,
+            [],
+            Attributes
+        )
+    ).
 
 -spec analyze_forms_attributes(astranaut:forms()) -> [term()] | no_return().
 %% @doc attributes with specific name of Analyzed Forms.
 %% @see erl_syntax_lib:analyze_forms/1.
 analyze_forms_attributes(Forms) ->
     lists:reverse(
-      lists:foldl(
-        fun({attribute, _, Attr, AttrValue}, Acc) ->
-                [{Attr, AttrValue}|Acc];
-           (_Form, Acc) ->
-                Acc
-        end, [], Forms)).
-      %% with_attribute(
-      %%   fun(Attr, Acc) ->
-      %%           [Attr|Acc]
-      %%   end, [], Forms, AttributeName, #{simplify_return => true})).
+        lists:foldl(
+            fun
+                ({attribute, _, Attr, AttrValue}, Acc) ->
+                    [{Attr, AttrValue} | Acc];
+                (_Form, Acc) ->
+                    Acc
+            end,
+            [],
+            Forms
+        )
+    ).
+%% with_attribute(
+%%   fun(Attr, Acc) ->
+%%           [Attr|Acc]
+%%   end, [], Forms, AttributeName, #{simplify_return => true})).
 
 -spec analyze_forms_attributes(atom(), astranaut:forms()) -> [term()] | no_return().
 %% @doc attributes with specific name of Analyzed Forms.
 %% @see erl_syntax_lib:analyze_forms/1.
 analyze_forms_attributes(AttributeName, Forms) ->
     lists:reverse(
-      lists:foldl(
-        fun({attribute, _, Attr, AttrValue}, Acc) when Attr =:= AttributeName ->
-                [AttrValue|Acc];
-           (_Form, Acc) ->
-                Acc
-        end, [], Forms)).
-      %% with_attribute(
-      %%   fun(Attr, Acc) ->
-      %%           [Attr|Acc]
-      %%   end, [], Forms, AttributeName, #{simplify_return => true})).
+        lists:foldl(
+            fun
+                ({attribute, _, Attr, AttrValue}, Acc) when Attr =:= AttributeName ->
+                    [AttrValue | Acc];
+                (_Form, Acc) ->
+                    Acc
+            end,
+            [],
+            Forms
+        )
+    ).
+%% with_attribute(
+%%   fun(Attr, Acc) ->
+%%           [Attr|Acc]
+%%   end, [], Forms, AttributeName, #{simplify_return => true})).
 
 -spec analyze_forms_file(astranaut:forms()) -> string() | undefined.
 %% @doc file in attribute of Analyzed Forms.
 %% @see erl_syntax_lib:analyze_forms/1.
-analyze_forms_file([Form|Forms]) ->
+analyze_forms_file([Form | Forms]) ->
     case erl_syntax:type(Form) of
         attribute ->
             case erl_syntax_lib:analyze_attribute(Form) of
@@ -351,12 +440,12 @@ analyze_forms_module(Forms) ->
     proplists:get_value(module, Analyzed).
 
 -spec analyze_transform_file_pos(module(), astranaut:forms()) ->
-          {file:filename() | undefined, erl_anno:location()}.
+    {file:filename() | undefined, erl_anno:location()}.
 %% @doc transformer and it's pos number of Analyzed Forms.
 analyze_transform_file_pos(Transformer, Forms) ->
     analyze_transform_file_pos(Transformer, Forms, undefined).
 
-analyze_transform_file_pos(Transformer, [Form|Forms], Filename) ->
+analyze_transform_file_pos(Transformer, [Form | Forms], Filename) ->
     case erl_syntax:type(Form) of
         attribute ->
             case erl_syntax_lib:analyze_attribute(Form) of
@@ -369,7 +458,8 @@ analyze_transform_file_pos(Transformer, [Form|Forms], Filename) ->
                             {Filename, Pos};
                         false ->
                             analyze_transform_file_pos(
-                              Transformer, Forms, Filename)
+                                Transformer, Forms, Filename
+                            )
                     end;
                 _ ->
                     analyze_transform_file_pos(Transformer, Forms, Filename)
@@ -384,12 +474,15 @@ has_parse_transform(Transformer, {parse_transform, Transformer}) ->
     true;
 has_parse_transform(Transformer, {compile, CompileOptions}) ->
     has_parse_transform(Transformer, CompileOptions);
-has_parse_transform(Transformer, CompileOptions)
-  when is_list(CompileOptions) ->
+has_parse_transform(Transformer, CompileOptions) when
+    is_list(CompileOptions)
+->
     lists:any(
-      fun(CompileOption) ->
-              has_parse_transform(Transformer, CompileOption)
-      end, CompileOptions);
+        fun(CompileOption) ->
+            has_parse_transform(Transformer, CompileOption)
+        end,
+        CompileOptions
+    );
 has_parse_transform(_Transformer, _CompileOptions) ->
     false.
 
@@ -397,7 +490,7 @@ has_parse_transform(_Transformer, _CompileOptions) ->
 %% @doc convert ast to printable string, does not raise exception when ast is invalid.
 %% @see ast_to_string/1.
 ast_safe_to_string(Form) ->
-    try 
+    try
         ast_to_string(Form)
     catch
         _:Exception ->
@@ -454,21 +547,27 @@ gen_exported_function(Name, Fun) ->
     [gen_exports([FunctionFa], Pos), Function].
 
 %% =====================================================================
--spec gen_function(atom(), erl_parse:abstract_expr() | [erl_parse:abstract_clause()] | erl_parse:abstract_clause()) ->
-                          astranaut:form().
+-spec gen_function(
+    atom(), erl_parse:abstract_expr() | [erl_parse:abstract_clause()] | erl_parse:abstract_clause()
+) ->
+    astranaut:form().
 %% @doc generate function by name and `erl_parse' node of anonymous function or clauses or expressions.
 gen_function(Name, {'fun', Pos, {clauses, Clauses}}) ->
     gen_function(Name, Pos, Clauses);
 gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
-    Clauses1 = 
+    Clauses1 =
         astranaut:smap(
-          fun({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 =:= FunName2 ->
-                  {atom, FunNamePos, FunName2};
-             (Node, _Attr) ->
-                  Node
-          end, Clauses, #{traverse => post}),
+            fun
+                ({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 =:= FunName2 ->
+                    {atom, FunNamePos, FunName2};
+                (Node, _Attr) ->
+                    Node
+            end,
+            Clauses,
+            #{traverse => post}
+        ),
     gen_function(Name, Pos, Clauses1);
-gen_function(Name, [Clause|_T] = Forms) ->
+gen_function(Name, [Clause | _T] = Forms) ->
     case erl_syntax:type(Clause) of
         clause ->
             Pos = astranaut_syntax:get_pos(Clause),
@@ -487,17 +586,20 @@ gen_function(Name, Pos, Clauses) when is_list(Clauses) ->
 function_fa({function, _Pos, Name, Arity, _Clauses}) ->
     {Name, Arity}.
 
-clause_arity([{clause, _Pos, Patterns, _Guards, _Body}|_T]) ->
+clause_arity([{clause, _Pos, Patterns, _Guards, _Body} | _T]) ->
     length(Patterns).
 
 -spec merge_clauses([erl_syntax:syntaxTree()]) -> erl_syntax:syntaxTree().
-merge_clauses([{'fun', Pos, {clauses, _}}|_T] = Nodes) ->
+merge_clauses([{'fun', Pos, {clauses, _}} | _T] = Nodes) ->
     NClauses =
         lists:flatten(
-          lists:map(
-            fun({'fun', _, {clauses, FClauses}}) ->
+            lists:map(
+                fun({'fun', _, {clauses, FClauses}}) ->
                     FClauses
-            end, Nodes)),
+                end,
+                Nodes
+            )
+        ),
     {'fun', Pos, {clauses, NClauses}}.
 
 %% it's strange to generate export attribute node by erl_syntax so hard
@@ -508,66 +610,103 @@ merge_clauses([{'fun', Pos, {clauses, _}}|_T] = Nodes) ->
 gen_exports(Exports, Pos) when is_list(Exports) ->
     gen_attribute_node(export, Pos, Exports).
 
--spec with_attribute(fun((term(), State) -> astranaut_return:struct(State) | State),
-                     State, astranaut:forms(), atom(),
-                     #{simplify_return := false, formatter => module(),
-                       term() => term()}) ->
-                            astranaut_return:struct(State);
-                    (fun((term(), State) -> astranaut_return:struct(State) | State),
-                     State, astranaut:forms(), atom(),
-                     #{simplify_return => true, formatter => module(),
-                       term() => term()}) ->
-                            State | no_return().
+-spec with_attribute
+    (
+        fun((term(), State) -> astranaut_return:struct(State) | State),
+        State,
+        astranaut:forms(),
+        atom(),
+        #{
+            simplify_return := false,
+            formatter => module(),
+            term() => term()
+        }
+    ) ->
+        astranaut_return:struct(State);
+    (
+        fun((term(), State) -> astranaut_return:struct(State) | State),
+        State,
+        astranaut:forms(),
+        atom(),
+        #{
+            simplify_return => true,
+            formatter => module(),
+            term() => term()
+        }
+    ) ->
+        State | no_return().
 %% @doc visit every attribute which names Attr and accum result to Init<br/>
 %% returns astranaut_return:struct(State) if simplify_return is false<br/>
 %% returns State if simplify_return is not provided or true
 %% @end
 with_attribute(F, Init, Forms, Attr, Opts) ->
     astranaut:reduce(
-      fun({attribute, Pos, Attr1, AttrValue}, Acc) when Attr1 =:= Attr ->
-              values_apply_fun_m(F, AttrValue, Acc, #{pos => Pos});
-         (_Node, Acc) ->
-              Acc
-      end, Init, Forms, Opts#{traverse => none}).
+        fun
+            ({attribute, Pos, Attr1, AttrValue}, Acc) when Attr1 =:= Attr ->
+                values_apply_fun_m(F, AttrValue, Acc, #{pos => Pos});
+            (_Node, Acc) ->
+                Acc
+        end,
+        Init,
+        Forms,
+        Opts#{traverse => none}
+    ).
 
 -spec forms_with_attribute(WalkFun, State, Forms, atom(), Opts) ->
-                                  astranaut_return:struct(Forms)
-                                      when WalkFun :: fun((term(), State) -> astranaut_return:struct(FormsState) | FormsState) |
-                                                      fun((term(), State, #{pos := erl_anno:location()}) ->
-                                                                 astranaut_return:struct(FormsState) | FormsState),
-                                           FormsState :: {Forms, State},
-                                           Forms :: astranaut:forms(),
-                                           Opts :: #{formatter => module(),
-                                                     term() => term()}.
+    astranaut_return:struct(Forms)
+when
+    WalkFun ::
+        fun((term(), State) -> astranaut_return:struct(FormsState) | FormsState)
+        | fun(
+            (term(), State, #{pos := erl_anno:location()}) ->
+                astranaut_return:struct(FormsState) | FormsState
+        ),
+    FormsState :: {Forms, State},
+    Forms :: astranaut:forms(),
+    Opts :: #{
+        formatter => module(),
+        term() => term()
+    }.
 %% @doc visit every attribute which names Attr and accum result to Init, append forms generated Attribute.
 forms_with_attribute(F, Init, Forms, Attr, Opts) ->
     F1 = fun(Value, {NodesAcc, StateAcc}, Attr1) ->
-                 astranaut_return:bind(
-                   values_apply_fun_m(F, Value, StateAcc, Attr1),
-                   fun({Nodes, State}) ->
-                           astranaut_return:return({Nodes ++ NodesAcc, State})
-                   end)
-         end,
+        astranaut_return:bind(
+            values_apply_fun_m(F, Value, StateAcc, Attr1),
+            fun({Nodes, State}) ->
+                astranaut_return:return({Nodes ++ NodesAcc, State})
+            end
+        )
+    end,
     astranaut:mapfold(
-      fun({attribute, Pos, Attr1, AttrValue} = Node, Acc) when Attr1 =:= Attr ->
-              astranaut_return:bind(
-                values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Pos}),
-                fun({[], Acc1}) ->
-                        astranaut_return:return({Node, Acc1});
-                   ({Nodes, Acc1}) ->
-                        astranaut_return:return({[Node|Nodes], Acc1})
-                end);
-         (Node, Acc) ->
-              astranaut_return:return({Node, Acc})
-      end, Init, Forms, Opts#{traverse => none}).
+        fun
+            ({attribute, Pos, Attr1, AttrValue} = Node, Acc) when Attr1 =:= Attr ->
+                astranaut_return:bind(
+                    values_apply_fun_m(F1, AttrValue, {[], Acc}, #{pos => Pos}),
+                    fun
+                        ({[], Acc1}) ->
+                            astranaut_return:return({Node, Acc1});
+                        ({Nodes, Acc1}) ->
+                            astranaut_return:return({[Node | Nodes], Acc1})
+                    end
+                );
+            (Node, Acc) ->
+                astranaut_return:return({Node, Acc})
+        end,
+        Init,
+        Forms,
+        Opts#{traverse => none}
+    ).
 
 values_apply_fun_m(F, AttrValues, Acc, Opts) when is_list(AttrValues) ->
     case maps:get(deep_attr, Opts, true) of
         true ->
             astranaut_return:foldl_m(
-              fun(AttrValue, Acc1) ->
-                      values_apply_fun_m(F, AttrValue, Acc1, Opts)
-              end, Acc, AttrValues);
+                fun(AttrValue, Acc1) ->
+                    values_apply_fun_m(F, AttrValue, Acc1, Opts)
+                end,
+                Acc,
+                AttrValues
+            );
         false ->
             value_apply_fun_m(F, AttrValues, Acc, Opts)
     end;
@@ -597,13 +736,17 @@ option_map({Key, Value}) when is_atom(Key) ->
     option_map([{Key, Value}]);
 option_map(OptionList) when is_list(OptionList) ->
     astranaut_return:foldl_m(
-      fun({Key, Value}, Acc) when is_atom(Key) ->
-              astranaut_return:return(maps:put(Key, Value, Acc));
-         (Key, Acc) when is_atom(Key) ->
-              astranaut_return:return(maps:put(Key, true, Acc));
-         (Value, Acc) ->
-              astranaut_return:warning_ok({invalid_option_value, Value}, Acc)
-      end, maps:new(), OptionList);
+        fun
+            ({Key, Value}, Acc) when is_atom(Key) ->
+                astranaut_return:return(maps:put(Key, Value, Acc));
+            (Key, Acc) when is_atom(Key) ->
+                astranaut_return:return(maps:put(Key, true, Acc));
+            (Value, Acc) ->
+                astranaut_return:warning_ok({invalid_option_value, Value}, Acc)
+        end,
+        maps:new(),
+        OptionList
+    );
 option_map(Options) when is_map(Options) ->
     option_map(maps:to_list(Options));
 option_map(Options) ->
@@ -634,38 +777,54 @@ format_default_error(Error) ->
 validate_attribute_option(Validator, ParseTransformer, Attribute, Forms) ->
     {MapValidator, DefaultValidator} = split_default_validator(Validator),
     astranaut_return:bind(
-      with_attribute(
-        fun(AttributeOpts, Acc) ->
-                astranaut_return:lift_m(fun(AttributeOpts1) -> maps:merge(Acc, AttributeOpts1) end,
-                                     validate(MapValidator, AttributeOpts))
-        end, maps:new(), Forms, Attribute, #{formatter => ParseTransformer}),
-      fun(MergedOptions) ->
-              Return = validate(DefaultValidator, MergedOptions),
-              {File, Pos} = analyze_transform_file_pos(ParseTransformer, Forms),
-              astranaut_return:with_error(
+        with_attribute(
+            fun(AttributeOpts, Acc) ->
+                astranaut_return:lift_m(
+                    fun(AttributeOpts1) -> maps:merge(Acc, AttributeOpts1) end,
+                    validate(MapValidator, AttributeOpts)
+                )
+            end,
+            maps:new(),
+            Forms,
+            Attribute,
+            #{formatter => ParseTransformer}
+        ),
+        fun(MergedOptions) ->
+            Return = validate(DefaultValidator, MergedOptions),
+            {File, Pos} = analyze_transform_file_pos(ParseTransformer, Forms),
+            astranaut_return:with_error(
                 fun(ErrorState) ->
-                        ErrorState1 = astranaut_error:update_pos(Pos, ParseTransformer, ErrorState),
-                        astranaut_error:update_file(File, ErrorState1)
-                end, Return)
-      end).
+                    ErrorState1 = astranaut_error:update_pos(Pos, ParseTransformer, ErrorState),
+                    astranaut_error:update_file(File, ErrorState1)
+                end,
+                Return
+            )
+        end
+    ).
 
 split_default_validator(Validator) ->
     maps:fold(
-      fun(Key, KeyValidator, {MapValidatorAcc, DefaultValidatorAcc}) ->
-              {KeyMapValidators, KeyDefaultValidators} =
-                  lists:foldl(
+        fun(Key, KeyValidator, {MapValidatorAcc, DefaultValidatorAcc}) ->
+            {KeyMapValidators, KeyDefaultValidators} =
+                lists:foldl(
                     fun(ValidatorListItem, {KeyMapValidatorAcc, KeyDefaultValidatorAcc}) ->
-                            case match_default_validator(ValidatorListItem) of
-                                true ->
-                                    {KeyMapValidatorAcc, [ValidatorListItem|KeyDefaultValidatorAcc]};
-                                false ->
-                                    {[ValidatorListItem|KeyMapValidatorAcc], KeyDefaultValidatorAcc}
-                            end
-                    end, {[], []}, validator_list(KeyValidator)),
-              MapValidatorAcc1 = put_validator(Key, KeyMapValidators, MapValidatorAcc),
-              DefaultValidatorAcc1 = put_validator(Key, KeyDefaultValidators, DefaultValidatorAcc),
-              {MapValidatorAcc1, DefaultValidatorAcc1}
-      end, {maps:new(), maps:new()}, Validator).
+                        case match_default_validator(ValidatorListItem) of
+                            true ->
+                                {KeyMapValidatorAcc, [ValidatorListItem | KeyDefaultValidatorAcc]};
+                            false ->
+                                {[ValidatorListItem | KeyMapValidatorAcc], KeyDefaultValidatorAcc}
+                        end
+                    end,
+                    {[], []},
+                    validator_list(KeyValidator)
+                ),
+            MapValidatorAcc1 = put_validator(Key, KeyMapValidators, MapValidatorAcc),
+            DefaultValidatorAcc1 = put_validator(Key, KeyDefaultValidators, DefaultValidatorAcc),
+            {MapValidatorAcc1, DefaultValidatorAcc1}
+        end,
+        {maps:new(), maps:new()},
+        Validator
+    ).
 
 match_default_validator({default, _}) ->
     true;
@@ -699,15 +858,16 @@ put_validator(Key, Validators, Map) ->
 %% @end
 validate(Validator, Options) ->
     astranaut_return:bind(
-      option_map(Options),
-      fun(OptionMap) ->
-              validate_option_map(Validator, OptionMap)
-      end).
+        option_map(Options),
+        fun(OptionMap) ->
+            validate_option_map(Validator, OptionMap)
+        end
+    ).
 
 validate_option_map(ValidatorMap, OptionMap) ->
     astranaut_return:bind(
-      astranaut_return:foldl_m(
-        fun({Key, Validator}, {RestMapAcc, ValidatedAcc}) ->
+        astranaut_return:foldl_m(
+            fun({Key, Validator}, {RestMapAcc, ValidatedAcc}) ->
                 {Value, IsKey} =
                     case maps:find(Key, OptionMap) of
                         {ok, Val} ->
@@ -716,16 +876,27 @@ validate_option_map(ValidatorMap, OptionMap) ->
                             {undefined, false}
                     end,
                 AccM = validate_map_value(Validator, Key, Value, OptionMap, ValidatedAcc, IsKey),
-                astranaut_return:lift_m(fun(ValidatedAcc1) -> {remove_keys(Key, Validator, RestMapAcc), ValidatedAcc1} end, AccM)
-        end, {OptionMap, maps:new()}, validators_to_list(ValidatorMap)),
-      fun({RestOptionMap, ValidatedOptionMap}) ->
-              case maps:keys(RestOptionMap) of
-                  [] ->
-                      astranaut_return:return(ValidatedOptionMap);
-                  RestKeys ->
-                      astranaut_return:warning_ok({unexpected_option_keys, RestKeys}, ValidatedOptionMap)
-              end
-      end).
+                astranaut_return:lift_m(
+                    fun(ValidatedAcc1) ->
+                        {remove_keys(Key, Validator, RestMapAcc), ValidatedAcc1}
+                    end,
+                    AccM
+                )
+            end,
+            {OptionMap, maps:new()},
+            validators_to_list(ValidatorMap)
+        ),
+        fun({RestOptionMap, ValidatedOptionMap}) ->
+            case maps:keys(RestOptionMap) of
+                [] ->
+                    astranaut_return:return(ValidatedOptionMap);
+                RestKeys ->
+                    astranaut_return:warning_ok(
+                        {unexpected_option_keys, RestKeys}, ValidatedOptionMap
+                    )
+            end
+        end
+    ).
 
 remove_keys(Key, Validator, RestMapAcc) when is_list(Validator) ->
     case proplists:get_value(paired, Validator) of
@@ -746,28 +917,35 @@ validators_to_list(ValidatorMap) when is_map(ValidatorMap) ->
     OrderedDeps = order_deps(Deps),
     FirstValidatorList =
         lists:foldl(
-          fun(Key, Acc) ->
-                  Validator = maps:get(Key, ValidatorMap),
-                  [{Key, Validator}|Acc]
-          end, [], lists:reverse(OrderedDeps)),
+            fun(Key, Acc) ->
+                Validator = maps:get(Key, ValidatorMap),
+                [{Key, Validator} | Acc]
+            end,
+            [],
+            lists:reverse(OrderedDeps)
+        ),
     FirstValidatorList ++ maps:to_list(maps:without(OrderedDeps, ValidatorMap)).
 
 search_deps(ValidatorMap) ->
     search_deps(maps:to_list(ValidatorMap), ValidatorMap, #{}).
 
-search_deps([{Key, Validators}|T], ValidatorMap, Acc) ->
+search_deps([{Key, Validators} | T], ValidatorMap, Acc) ->
     Acc1 =
         lists:foldl(
-          fun({default_key, DefaultKey}, DefaultKeyAcc) ->
-                  case maps:is_key(DefaultKey, ValidatorMap) of
-                      true ->
-                          maps:put(Key, DefaultKey, DefaultKeyAcc);
-                      false ->
-                          exit({deps_key_not_exists, DefaultKey})
-                  end;
-             (_Validator, DefaultKeyAcc) ->
-                  DefaultKeyAcc
-          end, Acc, validator_list(Validators)),
+            fun
+                ({default_key, DefaultKey}, DefaultKeyAcc) ->
+                    case maps:is_key(DefaultKey, ValidatorMap) of
+                        true ->
+                            maps:put(Key, DefaultKey, DefaultKeyAcc);
+                        false ->
+                            exit({deps_key_not_exists, DefaultKey})
+                    end;
+                (_Validator, DefaultKeyAcc) ->
+                    DefaultKeyAcc
+            end,
+            Acc,
+            validator_list(Validators)
+        ),
     search_deps(T, ValidatorMap, Acc1);
 search_deps([], _ValidatorMap, Acc) ->
     Acc.
@@ -780,7 +958,7 @@ validator_list(Validator) ->
 order_deps(Deps) ->
     order_deps(maps:keys(Deps), Deps, []).
 
-order_deps([Key|T], RestDeps, Acc) ->
+order_deps([Key | T], RestDeps, Acc) ->
     {RestDeps1, KeyDeps} = follow_deps(Key, RestDeps, [], Acc),
     T1 = T -- KeyDeps,
     Acc1 = Acc ++ KeyDeps,
@@ -792,19 +970,20 @@ follow_deps(Key, RestDeps, Acc, TotalAcc) ->
     RestDeps1 = maps:remove(Key, RestDeps),
     case maps:find(Key, RestDeps) of
         {ok, DepKey} ->
-            case lists:member(DepKey, [Key|Acc]) of
+            case lists:member(DepKey, [Key | Acc]) of
                 false ->
-                    follow_deps(DepKey, RestDeps1, [Key|Acc], TotalAcc);
+                    follow_deps(DepKey, RestDeps1, [Key | Acc], TotalAcc);
                 true ->
-                    exit({cycle_deps_detected, [DepKey,Key|Acc]})
+                    exit({cycle_deps_detected, [DepKey, Key | Acc]})
             end;
         error ->
-            Acc1 = case lists:member(Key, TotalAcc) of
-                       true ->
-                           Acc;
-                       false ->
-                           [Key|Acc]
-                   end,
+            Acc1 =
+                case lists:member(Key, TotalAcc) of
+                    true ->
+                        Acc;
+                    false ->
+                        [Key | Acc]
+                end,
             {RestDeps1, Acc1}
     end.
 validate_map_value(Validator, Key, Value, ToValidate, ValidatedData, IsKey) ->
@@ -812,34 +991,39 @@ validate_map_value(Validator, Key, Value, ToValidate, ValidatedData, IsKey) ->
     Return = validate_value(Validator, Value, Attrs),
     FormatReason =
         fun(Reason) ->
-                {validate_key_failure, Reason, Key, Value}
+            {validate_key_failure, Reason, Key, Value}
         end,
     Return1 =
         astranaut_return:with_error(
-          fun(ErrorState) ->
-                  astranaut_error:with_failure(
-                    FormatReason, ErrorState)
-          end, Return),
+            fun(ErrorState) ->
+                astranaut_error:with_failure(
+                    FormatReason, ErrorState
+                )
+            end,
+            Return
+        ),
     case astranaut_return:has_error(Return1) of
         true ->
             astranaut_return:lift_m(fun(_) -> ValidatedData end, Return1);
         false ->
             astranaut_return:lift_m(
-              fun(Value1) ->
-                      case (not IsKey) and (Value1 =:= undefined) of
-                          true ->
-                              ValidatedData;
-                          false ->
-                              maps:put(Key, Value1, ValidatedData)
-                      end
-              end, Return1)
+                fun(Value1) ->
+                    case (not IsKey) and (Value1 =:= undefined) of
+                        true ->
+                            ValidatedData;
+                        false ->
+                            maps:put(Key, Value1, ValidatedData)
+                    end
+                end,
+                Return1
+            )
     end.
 
 to_abs_return(_Validator, _Value, #{?STRUCT_KEY := ?RETURN_OK} = Struct) ->
     Struct;
 to_abs_return(_Validator, _Value, #{?STRUCT_KEY := ?RETURN_FAIL} = Struct) ->
     Struct;
-to_abs_return(_Validator, Value, ok) -> 
+to_abs_return(_Validator, Value, ok) ->
     astranaut_return:return(Value);
 to_abs_return(_Validator, Value, true) ->
     astranaut_return:return(Value);
@@ -847,7 +1031,7 @@ to_abs_return(Validator, _Value, error) ->
     astranaut_return:error({invalid_value, Validator});
 to_abs_return(Validator, _Value, false) ->
     astranaut_return:error({invalid_value, Validator});
-to_abs_return(_Validator, _Value, {ok, Value1}) -> 
+to_abs_return(_Validator, _Value, {ok, Value1}) ->
     astranaut_return:return(Value1);
 to_abs_return(Validator, Value, {warning, Reason}) ->
     Reason1 = format_validator_reason(Validator, Reason),
@@ -855,7 +1039,7 @@ to_abs_return(Validator, Value, {warning, Reason}) ->
 to_abs_return(Validator, _Value, {warning, Value1, Reason}) ->
     Reason1 = format_validator_reason(Validator, Reason),
     astranaut_return:warning_ok(Reason1, Value1);
-to_abs_return(Validator, _Value, {error, Reason}) -> 
+to_abs_return(Validator, _Value, {error, Reason}) ->
     Reason1 = format_validator_reason(Validator, Reason),
     astranaut_return:error(Reason1);
 to_abs_return(Validator, _Value, Other) ->
@@ -870,17 +1054,18 @@ validate_value(Validator, Value, Attrs) ->
     Return = validate_value_1(Validator, Value, Attrs),
     to_abs_return(Validator, Value, Return).
 
-validate_value_1([Validator|T], Value, Attrs) ->
+validate_value_1([Validator | T], Value, Attrs) ->
     Return = validate_value(Validator, Value, Attrs),
     case astranaut_return:has_error(Return) of
         true ->
             Return;
         false ->
             astranaut_return:bind(
-              Return,
-              fun(Value1) ->
-                      validate_value(T, Value1, Attrs)
-              end)
+                Return,
+                fun(Value1) ->
+                    validate_value(T, Value1, Attrs)
+                end
+            )
     end;
 validate_value_1([], Value, _Attrs) ->
     {ok, Value};
@@ -895,21 +1080,21 @@ validate_value_1(Validator, _Value, _Attrs) ->
 
 apply_validator_by_name(Validator, Value, Args, Attrs) ->
     Validators = #{
-                   boolean => fun is_boolean/1,
-                   atom => fun is_atom/1,
-                   number => fun is_number/1,
-                   integer => fun is_integer/1,
-                   uinteger => fun is_unsigned_integer/1,
-                   binary => fun is_binary/1,
-                   any => fun any/1,
-                   'or' => fun 'or'/4,
-                   one_of => fun one_of/2,
-                   list_of => fun list_of/3,
-                   paired => fun paired/4,
-                   required => fun required/4,
-                   default => fun default/4,
-                   default_key => fun default_key/4
-                  },
+        boolean => fun is_boolean/1,
+        atom => fun is_atom/1,
+        number => fun is_number/1,
+        integer => fun is_integer/1,
+        uinteger => fun is_unsigned_integer/1,
+        binary => fun is_binary/1,
+        any => fun any/1,
+        'or' => fun 'or'/4,
+        one_of => fun one_of/2,
+        list_of => fun list_of/3,
+        paired => fun paired/4,
+        required => fun required/4,
+        default => fun default/4,
+        default_key => fun default_key/4
+    },
     case maps:find(Validator, Validators) of
         {ok, InternalFun} ->
             ValidatorFun = internal_to_validator_fun(InternalFun, Args),
@@ -927,7 +1112,9 @@ internal_to_validator_fun(InternalFun, Args) when is_function(InternalFun, 3) ->
 internal_to_validator_fun(InternalFun, Args) when is_function(InternalFun, 4) ->
     fun(Value, IsEmpty, Attrs) -> InternalFun(Value, Args, IsEmpty, Attrs) end.
 
-apply_validator_fun(ValidatorFun, Value, #{is_key := IsKey} = Attrs) when is_function(ValidatorFun, 3) ->
+apply_validator_fun(ValidatorFun, Value, #{is_key := IsKey} = Attrs) when
+    is_function(ValidatorFun, 3)
+->
     IsEmpty = (not IsKey) and (Value =:= undefined),
     ValidatorFun(Value, IsEmpty, Attrs);
 apply_validator_fun(_ValidatorFun, undefined = Value, #{is_key := false}) ->
@@ -950,21 +1137,23 @@ one_of(Value, List) when is_list(List) ->
 one_of(_Value, _NotList) ->
     {error, invalid_validator_arg}.
 
-list_of([H|T], Validator, Attrs) ->
+list_of([H | T], Validator, Attrs) ->
     BaseM = validate_value(Validator, H, Attrs),
     case astranaut_return:has_error(BaseM) of
         true ->
             astranaut_return:then(BaseM, astranaut_return:return([]));
         false ->
             astranaut_return:bind(
-              BaseM, 
-              fun(H1) -> 
-                      astranaut_return:bind(
+                BaseM,
+                fun(H1) ->
+                    astranaut_return:bind(
                         list_of(T, Validator, Attrs),
                         fun(T1) ->
-                                astranaut_return:return([H1|T1])
-                        end)
-              end)
+                            astranaut_return:return([H1 | T1])
+                        end
+                    )
+                end
+            )
     end;
 list_of([], _Validator, _Attrs) ->
     astranaut_return:return([]);
@@ -1010,7 +1199,7 @@ required(Value, _Args, false, #{}) ->
 'or'(Value, Validators, IsKey, Attr) ->
     'or'(Value, Validators, IsKey, Attr, Validators).
 
-'or'(Value, [Validator|T], IsKey, Attr, Validators) ->
+'or'(Value, [Validator | T], IsKey, Attr, Validators) ->
     Return = validate_value(Validator, Value, Attr),
     case astranaut_return:has_error(Return) of
         false ->

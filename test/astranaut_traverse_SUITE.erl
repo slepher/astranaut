@@ -21,7 +21,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -108,11 +108,23 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() -> 
-    [test_return, test_bind, test_error_0, test_with_all_error, test_state,
-     test_pos, test_pos_2, test_file_pos, test_fail,
-     test_map_m_root_attr, test_map_m_explicit_role_overrides_attr,
-     test_scoped_state, test_scoped_state_fail, test_scoped_state_run].
+all() ->
+    [
+        test_return,
+        test_bind,
+        test_error_0,
+        test_with_all_error,
+        test_state,
+        test_pos,
+        test_pos_2,
+        test_file_pos,
+        test_fail,
+        test_map_m_root_attr,
+        test_map_m_explicit_role_overrides_attr,
+        test_scoped_state,
+        test_scoped_state_fail,
+        test_scoped_state_run
+    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -131,30 +143,33 @@ test_return() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_return(_Config) -> 
+test_return(_Config) ->
     MA = astranaut_traverse:return(10),
     Result = astranaut_return:ok({10, ok}),
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
 test_bind(_Config) ->
-    MA = 
-        do([ traverse ||
-               A <- astranaut_traverse:return(10),
-               return(A + 10)
-           ]),
+    MA =
+        do([
+            traverse
+         || A <- astranaut_traverse:return(10),
+            return(A + 10)
+        ]),
     Result = astranaut_return:ok({20, ok}),
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
 test_error_0(_Config) ->
-    MA = 
-        do([ traverse ||
-               A <- astranaut_traverse:return(10),
-               astranaut_traverse:update_pos(
-                 10, astranaut_traverse:error(error_0)),
-               return(A + 10)
-           ]),
+    MA =
+        do([
+            traverse
+         || A <- astranaut_traverse:return(10),
+            astranaut_traverse:update_pos(
+                10, astranaut_traverse:error(error_0)
+            ),
+            return(A + 10)
+        ]),
     ErrorState = astranaut_error:new(),
     ErrorState1 = astranaut_error:append_formatted_errors([{10, formatter_0, error_0}], ErrorState),
     ErrorState2 = astranaut_error:printable(ErrorState1),
@@ -166,85 +181,99 @@ test_error_0(_Config) ->
 test_with_all_error(_Config) ->
     MA =
         astranaut_traverse:with_all_error(
-          fun(Error) -> {mapped, Error} end,
-          do([ traverse ||
-                 astranaut_traverse:error(raw_error),
-                 astranaut_traverse:formatted_errors(
-                   [{10, formatter_0, formatted_error}]),
-                 astranaut_traverse:warning(unchanged_warning),
-                 return(ok)
-             ])),
+            fun(Error) -> {mapped, Error} end,
+            do([
+                traverse
+             || astranaut_traverse:error(raw_error),
+                astranaut_traverse:formatted_errors(
+                    [{10, formatter_0, formatted_error}]
+                ),
+                astranaut_traverse:warning(unchanged_warning),
+                return(ok)
+            ])
+        ),
     #{error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, state),
     ?assertEqual([{mapped, raw_error}], astranaut_error:errors(Error)),
     ?assertEqual(
-       [{10, formatter_0, {mapped, formatted_error}}],
-       astranaut_error:formatted_errors(Error)),
+        [{10, formatter_0, {mapped, formatted_error}}],
+        astranaut_error:formatted_errors(Error)
+    ),
     ?assertEqual([unchanged_warning], astranaut_error:warnings(Error)),
     ok.
 
 test_state(_Config) ->
-    MA = 
-        do([ traverse ||
-               astranaut_traverse:put(10),
-               astranaut_traverse:state(
-                 fun(A) ->
-                         {A + 10, A + 20}
-                 end)
-           ]),
+    MA =
+        do([
+            traverse
+         || astranaut_traverse:put(10),
+            astranaut_traverse:state(
+                fun(A) ->
+                    {A + 10, A + 20}
+                end
+            )
+        ]),
     Result = astranaut_return:ok({20, 30}),
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
 test_pos(_Config) ->
-    MA = 
-        do([ traverse ||
-               astranaut_traverse:put(10),
-               astranaut_traverse:update_pos(
-                 20, astranaut_traverse:error(error_0)),
-               astranaut_traverse:state(
-                 fun(A) ->
-                         {A + 10, A + 20}
-                 end)
-           ]),
-    Errors = [{20, formatter_0, error_0}], 
+    MA =
+        do([
+            traverse
+         || astranaut_traverse:put(10),
+            astranaut_traverse:update_pos(
+                20, astranaut_traverse:error(error_0)
+            ),
+            astranaut_traverse:state(
+                fun(A) ->
+                    {A + 10, A + 20}
+                end
+            )
+        ]),
+    Errors = [{20, formatter_0, error_0}],
     #{return := Return, error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, ok),
     ?assertEqual({{20, 30}, Errors}, {Return, astranaut_error:formatted_errors(Error)}),
     ok.
 
-
 test_pos_2(_Config) ->
-    MA = 
-        do([ traverse ||
-               astranaut_traverse:update_pos(
-                 20, astranaut_traverse:error(error_0)),
-               return(10)
-           ]),
+    MA =
+        do([
+            traverse
+         || astranaut_traverse:update_pos(
+                20, astranaut_traverse:error(error_0)
+            ),
+            return(10)
+        ]),
     Errors = [{20, formatter_0, error_0}],
     #{return := Return, error := Error} = astranaut_traverse:run(MA, formatter_0, #{}, ok),
     ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error:formatted_errors(Error)}),
     ok.
 
 test_file_pos(_Config) ->
-    MA = 
-        do([ traverse ||
-               astranaut_traverse:update_file(?FILE),
-               astranaut_traverse:put(10),
-               astranaut_traverse:with_formatter(
-                 astranaut_traverse,
-                 astranaut_traverse:update_pos(
-                   20,
-                 astranaut_traverse:error(error_0)
-                )),
-               astranaut_traverse:update_pos(
-                 25, astranaut_traverse:warning(warning_0)),
-               B <- astranaut_traverse:get(),
-               astranaut_traverse:modify(
-                 fun(A) ->
-                         A + 20
-                 end),
-               astranaut_traverse:eof(),
-               return(B + 10)
-           ]),
+    MA =
+        do([
+            traverse
+         || astranaut_traverse:update_file(?FILE),
+            astranaut_traverse:put(10),
+            astranaut_traverse:with_formatter(
+                astranaut_traverse,
+                astranaut_traverse:update_pos(
+                    20,
+                    astranaut_traverse:error(error_0)
+                )
+            ),
+            astranaut_traverse:update_pos(
+                25, astranaut_traverse:warning(warning_0)
+            ),
+            B <- astranaut_traverse:get(),
+            astranaut_traverse:modify(
+                fun(A) ->
+                    A + 20
+                end
+            ),
+            astranaut_traverse:eof(),
+            return(B + 10)
+        ]),
     FileErrors = [{?FILE, [{20, astranaut_traverse, error_0}]}],
     FileWarnings = [{?FILE, [{25, ?MODULE, warning_0}]}],
     #{return := Result, error := Error} = astranaut_traverse:run(MA, ?MODULE, #{}, ok),
@@ -253,56 +282,68 @@ test_file_pos(_Config) ->
 
 test_fail(_Config) ->
     MA =
-        do([ traverse ||
-               astranaut_traverse:put(10),
-               astranaut_traverse:with_formatter(
-                 astranaut_traverse,
-                 astranaut_traverse:update_pos(
-                   20,
-                   astranaut_traverse:error(error_0))
-                ),
-               astranaut_traverse:update_pos(
-                 25, astranaut_traverse:warning(warning_0)),
-               B <- astranaut_traverse:get(),
-               astranaut_traverse:modify(
-                 fun(A) ->
-                         A + 20
-                 end),
-               return(B)
-           ]),
-    MB = do([ traverse ||
-                astranaut_traverse:fail_on_error(MA),
-                astranaut_traverse:put(30),
+        do([
+            traverse
+         || astranaut_traverse:put(10),
+            astranaut_traverse:with_formatter(
+                astranaut_traverse,
                 astranaut_traverse:update_pos(
-                  30, astranaut_traverse:error(error_1))
-            ]),
+                    20,
+                    astranaut_traverse:error(error_0)
+                )
+            ),
+            astranaut_traverse:update_pos(
+                25, astranaut_traverse:warning(warning_0)
+            ),
+            B <- astranaut_traverse:get(),
+            astranaut_traverse:modify(
+                fun(A) ->
+                    A + 20
+                end
+            ),
+            return(B)
+        ]),
+    MB = do([
+        traverse
+     || astranaut_traverse:fail_on_error(MA),
+        astranaut_traverse:put(30),
+        astranaut_traverse:update_pos(
+            30, astranaut_traverse:error(error_1)
+        )
+    ]),
     Errors = [{20, astranaut_traverse, error_0}],
     Warnings = [{25, ?MODULE, warning_0}],
     #{error := Error} = astranaut_traverse:run(MB, ?MODULE, #{}, ok),
-    ?assertEqual({Errors, Warnings}, {astranaut_error:formatted_errors(Error),
-                                      astranaut_error:formatted_warnings(Error)}),
+    ?assertEqual({Errors, Warnings}, {
+        astranaut_error:formatted_errors(Error), astranaut_error:formatted_warnings(Error)
+    }),
     ok.
 
 test_scoped_state(_Config) ->
     MA = astranaut_traverse:local(
-           fun(_) -> #{macro_context => inherited} end,
-           do([ traverse ||
-                  astranaut_traverse:put(outer_value),
-                  Value <- astranaut_traverse:scoped_state(
-                             inner_initial,
-                             do([ traverse ||
-                                    Attr <- astranaut_traverse:ask(),
-                                    astranaut_traverse:put(inner_modified),
-                                    return({inner_result, Attr})
-                                ])),
-                  OuterState <- astranaut_traverse:get(),
-                  return({Value, OuterState})
-              ])),
+        fun(_) -> #{macro_context => inherited} end,
+        do([
+            traverse
+         || astranaut_traverse:put(outer_value),
+            Value <- astranaut_traverse:scoped_state(
+                inner_initial,
+                do([
+                    traverse
+                 || Attr <- astranaut_traverse:ask(),
+                    astranaut_traverse:put(inner_modified),
+                    return({inner_result, Attr})
+                ])
+            ),
+            OuterState <- astranaut_traverse:get(),
+            return({Value, OuterState})
+        ])
+    ),
     #{return := Return, error := Error} =
         astranaut_traverse:run(MA, undefined, #{}, ok),
     ?assertEqual(
-       {{{inner_result, #{macro_context => inherited}}, outer_value}, outer_value},
-       Return),
+        {{{inner_result, #{macro_context => inherited}}, outer_value}, outer_value},
+        Return
+    ),
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
@@ -310,21 +351,30 @@ test_map_m_root_attr(_Config) ->
     Node = {atom, 1, ok},
     Monad =
         astranaut:map_m(
-          fun(CurrentNode) ->
-                  astranaut_traverse:bind(
+            fun(CurrentNode) ->
+                astranaut_traverse:bind(
                     astranaut_traverse:ask(),
                     fun(Attr) ->
-                            astranaut_traverse:then(
-                              astranaut_traverse:put(Attr),
-                              astranaut_traverse:return(CurrentNode))
-                    end)
-          end, Node,
-          #{traverse => none,
-            attr => #{explicit => new_value}}),
+                        astranaut_traverse:then(
+                            astranaut_traverse:put(Attr),
+                            astranaut_traverse:return(CurrentNode)
+                        )
+                    end
+                )
+            end,
+            Node,
+            #{
+                traverse => none,
+                attr => #{explicit => new_value}
+            }
+        ),
     #{return := Return, error := Error} =
         astranaut_traverse:run(
-          Monad, undefined,
-          #{outer => inherited, explicit => old_value}, initial_state),
+            Monad,
+            undefined,
+            #{outer => inherited, explicit => old_value},
+            initial_state
+        ),
     ExpectedAttr = #{outer => inherited, explicit => new_value},
     ?assertEqual({Node, ExpectedAttr}, Return),
     ?assert(astranaut_error:is_empty_error(Error)),
@@ -334,67 +384,83 @@ test_map_m_explicit_role_overrides_attr(_Config) ->
     Node = {atom, 1, ok},
     Monad =
         astranaut:map_m(
-          fun(CurrentNode) ->
-                  astranaut_traverse:bind(
+            fun(CurrentNode) ->
+                astranaut_traverse:bind(
                     astranaut_traverse:ask(),
                     fun(Attr) ->
-                            astranaut_traverse:then(
-                              astranaut_traverse:put(Attr),
-                              astranaut_traverse:return(CurrentNode))
-                    end)
-          end, Node,
-          #{traverse => none,
-            role => expression,
-            attr => #{node => pattern, custom => preserved}}),
+                        astranaut_traverse:then(
+                            astranaut_traverse:put(Attr),
+                            astranaut_traverse:return(CurrentNode)
+                        )
+                    end
+                )
+            end,
+            Node,
+            #{
+                traverse => none,
+                role => expression,
+                attr => #{node => pattern, custom => preserved}
+            }
+        ),
     #{return := Return, error := Error} =
         astranaut_traverse:run(Monad, undefined, #{}, initial_state),
     ExpectedAttr =
-        #{node => expression,
-          validator => {role, expression},
-          custom => preserved},
+        #{
+            node => expression,
+            validator => {role, expression},
+            custom => preserved
+        },
     ?assertEqual({Node, ExpectedAttr}, Return),
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
 test_scoped_state_fail(_Config) ->
     MA =
-        do([ traverse ||
-               astranaut_traverse:put(outer_value),
-               _Value <- astranaut_traverse:scoped_state(
-                          inner_initial,
-                          do([ traverse ||
-                                 astranaut_traverse:put(inner_modified),
-                                 astranaut_traverse:fail_on_error(
-                                   astranaut_traverse:update_pos(
-                                     10, astranaut_traverse:error(error_inner)))
-                             ])),
-               OuterState <- astranaut_traverse:get(),
-               return(OuterState)
-           ]),
+        do([
+            traverse
+         || astranaut_traverse:put(outer_value),
+            _Value <- astranaut_traverse:scoped_state(
+                inner_initial,
+                do([
+                    traverse
+                 || astranaut_traverse:put(inner_modified),
+                    astranaut_traverse:fail_on_error(
+                        astranaut_traverse:update_pos(
+                            10, astranaut_traverse:error(error_inner)
+                        )
+                    )
+                ])
+            ),
+            OuterState <- astranaut_traverse:get(),
+            return(OuterState)
+        ]),
     #{error := Error} = astranaut_traverse:run(MA, ?MODULE, #{}, ok),
     ?assertNot(astranaut_error:is_empty_error(Error)),
     ok.
 
 test_scoped_state_run(_Config) ->
     MA =
-        do([ traverse ||
-               astranaut_traverse:put(outer_value),
-               {Value, InnerState} <- astranaut_traverse:scoped_state_run(
-                                        0,
-                                        do([ traverse ||
-                                               astranaut_traverse:modify(
-                                                 fun(S) -> S + 1 end),
-                                               return(result)
-                                           ])),
-               OuterState <- astranaut_traverse:get(),
-               return({Value, InnerState, OuterState})
-           ]),
+        do([
+            traverse
+         || astranaut_traverse:put(outer_value),
+            {Value, InnerState} <- astranaut_traverse:scoped_state_run(
+                0,
+                do([
+                    traverse
+                 || astranaut_traverse:modify(
+                        fun(S) -> S + 1 end
+                    ),
+                    return(result)
+                ])
+            ),
+            OuterState <- astranaut_traverse:get(),
+            return({Value, InnerState, OuterState})
+        ]),
     #{return := Return, error := Error} =
         astranaut_traverse:run(MA, undefined, #{}, ok),
     ?assertEqual({{result, 1, outer_value}, outer_value}, Return),
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
-
 
 %% test_bind_node(_Config) -> 
 %%     NodeA = {atom, 10, 'A'},

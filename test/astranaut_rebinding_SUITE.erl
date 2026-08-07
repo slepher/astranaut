@@ -20,7 +20,7 @@
 %% @end
 %%--------------------------------------------------------------------
 suite() ->
-    [{timetrap,{seconds,30}}].
+    [{timetrap, {seconds, 30}}].
 
 %%--------------------------------------------------------------------
 %% @spec init_per_suite(Config0) ->
@@ -37,13 +37,17 @@ init_per_suite(Config) ->
     Forms1 = astranaut_rebinding:parse_transform(Forms, astranaut_test_lib:compile_opts()),
     Functions =
         lists:foldl(
-            fun({function, _Pos, Name, _Arity, Clauses}, Acc) ->
+            fun
+                ({function, _Pos, Name, _Arity, Clauses}, Acc) ->
                     Clauses1 = astranaut_lib:replace_pos(Clauses, 0),
                     maps:put(Name, Clauses1, Acc);
-               (_Form, Acc) ->
-                   Acc
-            end, #{}, Forms1),
-    [{functions, Functions}|Config].
+                (_Form, Acc) ->
+                    Acc
+            end,
+            #{},
+            Forms1
+        ),
+    [{functions, Functions} | Config].
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -120,18 +124,29 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() -> 
-    [test_lc, test_lc_zip,
-     test_bc, test_mc,
-     test_function,
-     test_case, test_if, test_maybe,
-     test_map, test_map_update,
-     test_rec, test_rec_update,
-     test_operator, test_list, test_tuple,
-     test_pattern_save_var, test_pattern_save_var_in_fun, test_pattern_save_var_in_case,
-     test_format_error_contract,
-     test_invalid_rebinding_fun_warning,
-     test_invalid_rebinding_option_error
+all() ->
+    [
+        test_lc,
+        test_lc_zip,
+        test_bc,
+        test_mc,
+        test_function,
+        test_case,
+        test_if,
+        test_maybe,
+        test_map,
+        test_map_update,
+        test_rec,
+        test_rec_update,
+        test_operator,
+        test_list,
+        test_tuple,
+        test_pattern_save_var,
+        test_pattern_save_var_in_fun,
+        test_pattern_save_var_in_case,
+        test_format_error_contract,
+        test_invalid_rebinding_fun_warning,
+        test_invalid_rebinding_option_error
     ].
 
 %%--------------------------------------------------------------------
@@ -139,7 +154,7 @@ all() ->
 %% Info = [tuple()]
 %% @end
 %%--------------------------------------------------------------------
-test_rebinding_lc() -> 
+test_rebinding_lc() ->
     [].
 
 %%--------------------------------------------------------------------
@@ -167,8 +182,8 @@ test_lc_zip(Config) ->
 
 test_bc(Config) ->
     equal_functions(test_bc, test_bc_origin, Config),
-    B = rebinding_test:test_bc_origin(10, <<1,2,3,4,5>>),
-    A = rebinding_test:test_bc(10, <<1,2,3,4,5>>),
+    B = rebinding_test:test_bc_origin(10, <<1, 2, 3, 4, 5>>),
+    A = rebinding_test:test_bc(10, <<1, 2, 3, 4, 5>>),
     ?assertEqual(A, B),
     ok.
 
@@ -285,54 +300,66 @@ test_format_error_contract(_Config) ->
     Expected = io_lib:format("invalid rebinding function: ~p", [42]),
     ?assertEqual(Expected, astranaut_rebinding:format_error(Error)),
     Generic =
-        {validate_key_failure,
-         {invalid_value, boolean},
-         strict, invalid},
+        {validate_key_failure, {invalid_value, boolean}, strict, invalid},
     ?assertEqual(
-       astranaut:format_error(Generic),
-       astranaut_rebinding:format_error(Generic)),
+        astranaut:format_error(Generic),
+        astranaut_rebinding:format_error(Generic)
+    ),
     Unknown = {unknown_rebinding_error, value},
-    ?assertEqual(io_lib:write(Unknown),
-                 astranaut_lib:format_error(
-                   Unknown, fun astranaut_rebinding:format_error/1)),
+    ?assertEqual(
+        io_lib:write(Unknown),
+        astranaut_lib:format_error(
+            Unknown, fun astranaut_rebinding:format_error/1
+        )
+    ),
     Text = "already formatted",
-    ?assertEqual(Text,
-                 astranaut_lib:format_error(
-                   Text, fun astranaut_rebinding:format_error/1)),
-    ?assertEqual(io_lib:write(unknown),
-                 astranaut_lib:format_error(
-                   unknown, fun astranaut_rebinding:format_error/1)),
+    ?assertEqual(
+        Text,
+        astranaut_lib:format_error(
+            Text, fun astranaut_rebinding:format_error/1
+        )
+    ),
+    ?assertEqual(
+        io_lib:write(unknown),
+        astranaut_lib:format_error(
+            unknown, fun astranaut_rebinding:format_error/1
+        )
+    ),
     ok.
 
 test_invalid_rebinding_fun_warning(Config) ->
     Forms = astranaut_test_lib:test_module_forms(rebinding_invalid_fun_test, Config),
     ErrorStruct = astranaut_return:run_error(
-                    astranaut_test_lib:compile_test_forms(Forms)),
+        astranaut_test_lib:compile_test_forms(Forms)
+    ),
     {[], [{File, Warnings}]} =
         astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
     ?assertEqual("rebinding_invalid_fun_test.erl", filename:basename(File)),
     [_] =
-        [Warning0 ||
-            {_Line, astranaut_rebinding,
-             {invalid_rebinding_fun, 42}} = Warning0 <- Warnings],
+        [
+            Warning0
+         || {_Line, astranaut_rebinding, {invalid_rebinding_fun, 42}} = Warning0 <- Warnings
+        ],
     astranaut_test_lib:assert_formatted_messages(Warnings),
     ok.
 
 test_invalid_rebinding_option_error(Config) ->
     Forms = astranaut_test_lib:test_module_forms(rebinding_invalid_option_test, Config),
     ErrorStruct = astranaut_return:run_error(
-                    astranaut_test_lib:compile_test_forms(Forms)),
+        astranaut_test_lib:compile_test_forms(Forms)
+    ),
     {[{File, Errors}], []} =
         astranaut_test_lib:realize_with_baseline(0, ErrorStruct),
     ?assertEqual("rebinding_invalid_option_test.erl", filename:basename(File)),
     [_] =
-        [Error0 ||
-            {_Line, astranaut_rebinding,
-             {validate_key_failure,
-              {invalid_value, boolean}, strict, invalid}} = Error0 <- Errors],
+        [
+            Error0
+         || {_Line, astranaut_rebinding,
+                {validate_key_failure, {invalid_value, boolean}, strict, invalid}} = Error0 <-
+                Errors
+        ],
     astranaut_test_lib:assert_formatted_messages(Errors),
     ok.
-
 
 equal_functions(F1, F2, Config) ->
     Functions = proplists:get_value(functions, Config),

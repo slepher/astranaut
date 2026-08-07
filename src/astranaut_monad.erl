@@ -15,7 +15,9 @@
 -export([identity_bind/0, identity_return/0]).
 -export([maybe_bind/0, maybe_return/0]).
 -export([either_bind/0, either_return/0]).
--export([reader_bind/1, reader_return/1, reader_lift/0, reader_ask/1, reader_local/0, reader_state/1]).
+-export([
+    reader_bind/1, reader_return/1, reader_lift/0, reader_ask/1, reader_local/0, reader_state/1
+]).
 -export([state_bind/1, state_return/1, state_lift/2, state_ask/2, state_local/1, state_state/1]).
 -export([writer_bind/3, writer_return/2, writer_lift/3]).
 -export([writer_ask/2, writer_local/1, writer_state/2]).
@@ -28,7 +30,9 @@
 
 -export_type([monad_maybe/1, either/2, state/2]).
 -export_type([monad/2, monad_bind/1, monad_return/1]).
--export_type([monad_ask/1, monad_local/1, monad_state/1, monad_writer/1, monad_listen/1, monad_lift/1]).
+-export_type([
+    monad_ask/1, monad_local/1, monad_state/1, monad_writer/1, monad_listen/1, monad_lift/1
+]).
 
 -type monad_maybe(A) :: {just, A} | nothing.
 -type either(E, A) :: {left, E} | {right, A}.
@@ -69,27 +73,30 @@ map_m(F, As, Monad) ->
     map_m(F, As, monad_bind(Monad), monad_return(Monad)).
 
 map_m(F, As, Bind, Return) ->
-    map_m_fold(F, As, fun(A1, As1) -> [A1|As1] end, Bind, Return).
+    map_m_fold(F, As, fun(A1, As1) -> [A1 | As1] end, Bind, Return).
 
 -spec map_m_flatten(fun((A) -> monad(M, B)), [A], monad_bind(M), monad_return(M)) -> monad(M, [B]).
 map_m_flatten(F, As, Bind, Return) ->
-    Fold = fun(AHs1, As1) when is_list(AHs1) ->
-                   AHs1 ++ As1;
-              (A1, As1) ->
-                   [A1|As1]
-           end,
+    Fold = fun
+        (AHs1, As1) when is_list(AHs1) ->
+            AHs1 ++ As1;
+        (A1, As1) ->
+            [A1 | As1]
+    end,
     map_m_fold(F, As, Fold, Bind, Return).
 
-map_m_fold(F, [A|As], Fold, Bind, Return) ->
+map_m_fold(F, [A | As], Fold, Bind, Return) ->
     Bind(
-      F(A),
-      fun(A1) ->
-              Bind(
+        F(A),
+        fun(A1) ->
+            Bind(
                 map_m_fold(F, As, Fold, Bind, Return),
                 fun(As1) ->
-                        Return(Fold(A1, As1))
-                end)
-      end);
+                    Return(Fold(A1, As1))
+                end
+            )
+        end
+    );
 map_m_fold(_F, [], __Fold, _Bind, Return) ->
     Return([]).
 
@@ -104,116 +111,119 @@ sequence_m(MAs, Bind, Return) ->
 -spec identity_bind() -> fun((A, fun((A) -> B)) -> B).
 identity_bind() ->
     fun(A, KIB) ->
-            KIB(A)
+        KIB(A)
     end.
 
 -spec identity_return() -> fun((A) -> A).
 identity_return() ->
     fun(A) -> A end.
 
- -spec maybe_bind() -> fun((monad_maybe(A), fun((A) -> monad_maybe(B))) -> monad_maybe(B)).
+-spec maybe_bind() -> fun((monad_maybe(A), fun((A) -> monad_maybe(B))) -> monad_maybe(B)).
 maybe_bind() ->
     fun(MA, AFB) ->
-            case MA of
-                {just, A} ->
-                    AFB(A);
-                nothing ->
-                    nothing
-            end
+        case MA of
+            {just, A} ->
+                AFB(A);
+            nothing ->
+                nothing
+        end
     end.
 
- -spec maybe_return() -> fun((A) -> monad_maybe(A)).
+-spec maybe_return() -> fun((A) -> monad_maybe(A)).
 maybe_return() ->
     fun(A) ->
-            {just, A}
+        {just, A}
     end.
 
 -spec either_bind() -> fun((either(E, A), fun((A) -> either(E, B))) -> either(E, B)).
 either_bind() ->
-  fun({left, E}, _AFB) ->
-          {left, E};
-     ({right, A}, AFB) ->
-          AFB(A)
-  end.
+    fun
+        ({left, E}, _AFB) ->
+            {left, E};
+        ({right, A}, AFB) ->
+            AFB(A)
+    end.
 
 -spec either_return() -> fun((A) -> either(_E, A)).
 either_return() ->
     fun(A) ->
-            {right, A}
+        {right, A}
     end.
 
 reader_bind(Bind) ->
     fun(RA, KRB) ->
-            fun(R) ->
-                    Bind(
-                      RA(R),
-                      fun(A) ->
-                              (KRB(A))(R)
-                      end)
-            end
+        fun(R) ->
+            Bind(
+                RA(R),
+                fun(A) ->
+                    (KRB(A))(R)
+                end
+            )
+        end
     end.
 
 reader_return(Return) ->
     fun(A) ->
-            fun(_R) ->
-                    Return(A)
-            end
+        fun(_R) ->
+            Return(A)
+        end
     end.
 
 reader_lift() ->
     fun(MA) ->
-            fun(_R) ->
-                    MA
-            end
+        fun(_R) ->
+            MA
+        end
     end.
 
 reader_ask(Return) ->
     fun() ->
-            fun(R) ->
-                    Return(R)
-            end
+        fun(R) ->
+            Return(R)
+        end
     end.
 
 reader_local() ->
     fun(F, RA) ->
-            fun(R) ->
-                    RA(F(R))
-            end
+        fun(R) ->
+            RA(F(R))
+        end
     end.
 
 reader_state(State) ->
     Lift = reader_lift(),
     fun(F) ->
-            Lift(State(F))
+        Lift(State(F))
     end.
 
 state_bind(Bind) ->
     fun(SA, KSB) ->
-            fun(S) ->
-                    Bind(
-                      SA(S),
-                      fun({A, S1}) ->
-                              SB = KSB(A),
-                              SB(S1)
-                      end)
-            end
+        fun(S) ->
+            Bind(
+                SA(S),
+                fun({A, S1}) ->
+                    SB = KSB(A),
+                    SB(S1)
+                end
+            )
+        end
     end.
 
 state_return(Return) ->
     fun(A) ->
-            fun(S) -> Return({A, S}) end
+        fun(S) -> Return({A, S}) end
     end.
 
 state_lift(Bind, Return) ->
     fun(MA) ->
-            fun(S) -> lift_m(fun(A) -> {A, S} end, MA, Bind, Return) end
+        fun(S) -> lift_m(fun(A) -> {A, S} end, MA, Bind, Return) end
     end.
 
 state_state(Return) ->
     fun(F) ->
-            fun(S) ->
-                    Return(F(S))
-            end
+        fun(S) ->
+            Return(F(S))
+        end
     end.
 
 state_ask(Lift, Ask) ->
@@ -221,58 +231,60 @@ state_ask(Lift, Ask) ->
 
 state_local(Local) ->
     fun(F, SA) ->
-            fun(S) ->
-                    Local(F, SA(S))
-            end
+        fun(S) ->
+            Local(F, SA(S))
+        end
     end.
 
 writer_bind(Bind, Return, Mappend) ->
     fun(WA, KWB) ->
-            Bind(
-              WA,
-              fun({A, W1}) ->
-                      Bind(
-                        KWB(A),
-                        fun({B, W2}) ->
-                                W3 = Mappend(W1, W2),
-                                Return({B, W3})
-                        end)
-              end)
+        Bind(
+            WA,
+            fun({A, W1}) ->
+                Bind(
+                    KWB(A),
+                    fun({B, W2}) ->
+                        W3 = Mappend(W1, W2),
+                        Return({B, W3})
+                    end
+                )
+            end
+        )
     end.
 
 writer_return(Return, Mempty) ->
     fun(A) ->
-            Return({A, Mempty()})
+        Return({A, Mempty()})
     end.
 
 writer_lift(Bind, Return, Mempty) ->
     fun(MA) ->
-            lift_m(fun(A) -> {A, Mempty()} end, MA, Bind, Return)
+        lift_m(fun(A) -> {A, Mempty()} end, MA, Bind, Return)
     end.
 
 writer_ask(Lift, Ask) ->
     fun() ->
-            Lift(Ask())
+        Lift(Ask())
     end.
 
 writer_local(Local) ->
     fun(F, WA) ->
-            Local(F, WA)
+        Local(F, WA)
     end.
 
 writer_state(Lift, State) ->
     fun(F) ->
-            Lift(State(F))
+        Lift(State(F))
     end.
 
 writer_writer(Return) ->
     fun({A, W}) ->
-            Return({A, W})
+        Return({A, W})
     end.
 
 writer_listen(Bind, Return) ->
     fun(WA) ->
-            lift_m(fun({A, Ws}) -> {{A, Ws}, Ws} end, WA, Bind, Return)
+        lift_m(fun({A, Ws}) -> {{A, Ws}, Ws} end, WA, Bind, Return)
     end.
 
 -spec monad_bind(M) -> monad_bind(M).
