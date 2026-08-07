@@ -1,5 +1,12 @@
 # Agent Notes
 
+## Erlang Formatting
+
+In Erlang projects (rebar3), after modifying any Erlang source file
+(`*.erl`, `*.hrl`, `*.app.src`) or `rebar.config`, run `rebar3 fmt -w` to
+format the code with erlfmt before finishing the task. Use `rebar3 fmt --check`
+to verify formatting without modifying files.
+
 ## Lessons
 
 `lessons.md` records recurring error patterns and their fixes observed during development of this project. Read it before working on monad bridging, traverse state management, or scan-and-splice processing in `astranaut_macro.erl` and `astranaut.erl`.
