@@ -19,7 +19,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check formatting
-        if: contains(fromJSON('["26", "27", "28", "29"]'), matrix.otp)
         run: rebar3 fmt --check
 
       - name: Compile
