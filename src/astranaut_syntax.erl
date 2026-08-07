@@ -239,25 +239,12 @@ otp_tree(Node) ->
 revert(Node) ->
     case erl_syntax:is_tree(Node) of
         false ->
-            case Node of
-                {record_field, _Pos, _Name} = RecordField ->
-                    %% ASTRANAUT OTP ADAPTER
-                    %% OTP 27's erl_syntax:revert/1 cannot classify the raw
-                    %% abstract-format record_field forms (is_leaf/1 fails
-                    %% with badarg); OTP 26 and OTP 28+ pass them through.
-                    revert_raw_record_field(RecordField);
-                {record_field, _Pos, _Name, _Value} = RecordField ->
-                    revert_raw_record_field(RecordField);
-                {typed_record_field, _Field, _Type} = TypedRecordField ->
-                    revert_raw_typed_record_field(TypedRecordField);
-                _ ->
-                    %% ASTRANAUT OTP ADAPTER
-                    %% Raw abstract-format nodes pass through unchanged, like
-                    %% OTP 26/28+. OTP 27's erl_syntax:revert/1 recurses into
-                    %% raw subtree lists and fails with badarg on node shapes
-                    %% it cannot classify (e.g. multi-template comprehensions).
-                    Node
-            end;
+            %% ASTRANAUT OTP ADAPTER
+            %% Raw abstract-format nodes pass through unchanged, like
+            %% OTP 26/28+. OTP 27's erl_syntax:revert/1 recurses into raw
+            %% subtree lists and fails with badarg on node shapes it cannot
+            %% classify (e.g. record fields, multi-template comprehensions).
+            Node;
         true ->
             case erl_syntax:type(Node) of
                 attribute ->
@@ -284,14 +271,6 @@ revert(Node) ->
                     erl_syntax:revert(Node)
             end
     end.
-
-revert_raw_record_field({record_field, Pos, Name, Value}) ->
-    {record_field, Pos, revert(Name), revert(Value)};
-revert_raw_record_field({record_field, Pos, Name}) ->
-    {record_field, Pos, revert(Name)}.
-
-revert_raw_typed_record_field({typed_record_field, Field, Type}) ->
-    {typed_record_field, revert(Field), revert(Type)}.
 
 revert_record_field(Node) ->
     Pos = erl_syntax:get_pos(Node),
