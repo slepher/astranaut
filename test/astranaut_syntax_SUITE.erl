@@ -9,10 +9,6 @@
 
 -include("otp_vsn.hrl").
 
--if(?ASTRANAUT_OTP_VSN_GE(25)).
--feature(maybe_expr, enable).
--endif.
-
 -compile(export_all).
 -compile(nowarn_export_all).
 
@@ -1779,16 +1775,34 @@ function_form() ->
     {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]}.
 
 parse_form(Code) ->
-    {ok, Tokens, _EndLine} = erl_scan:string(Code),
+    {ok, Tokens, _EndLine} = scan_string(Code),
     {ok, Form} = erl_parse:parse_form(Tokens),
     Form.
 
 parse_form_result(Code) ->
-    case erl_scan:string(Code) of
+    case scan_string(Code) of
         {ok, Tokens, _EndLine} ->
             erl_parse:parse_form(Tokens);
         {error, ErrorInfo, _EndLine} ->
             {error, ErrorInfo}
+    end.
+
+scan_string(Code) ->
+    case current_otp_at_least(27) of
+        true ->
+            erl_scan:string(Code);
+        false ->
+            case current_otp_at_least(25) of
+                true ->
+                    {ok, {_EnabledFeatures, RWFun}} =
+                        erl_features:keyword_fun(
+                            [{feature, maybe_expr, enable}],
+                            fun erl_scan:reserved_word/1
+                        ),
+                    erl_scan:string(Code, 1, [{reserved_word_fun, RWFun}]);
+                false ->
+                    erl_scan:string(Code)
+            end
     end.
 
 assert_parser_or_constructed_ast_rejected(Code, ConstructedAst, Role) ->
