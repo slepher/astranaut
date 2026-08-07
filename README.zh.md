@@ -1,4 +1,4 @@
-[![Build Status](https://api.cirrus-ci.com/github/slepher/astranaut.svg)](https://cirrus-ci.com/github/slepher/astranaut)
+[![CI](https://github.com/slepher/astranaut/actions/workflows/ci.yml/badge.svg)](https://github.com/slepher/astranaut/actions/workflows/ci.yml)
 
 # requirements
 
