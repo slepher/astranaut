@@ -18,6 +18,30 @@
   `no_context` 必须是 boolean,低层 `quoted/1,2` 对非法 option 报告明确错误,
   不再泄漏 badmatch。
 
+### 诊断与 formatter 协议
+
+- 新增 `astranaut_lib:format_error/1,2` 和 `format_default_error/1`,作为统一的
+  compiler diagnostic adapter。Astranaut formatter 现在共用严格的 dispatch
+  路径:formatter clause 不匹配时回退到 deep character list 或
+  `io_lib:write/1`,其他 formatter 异常则继续显式暴露。
+- 明确 macro 诊断归属:macro provider 负责格式化其返回的 domain error 和
+  warning;framework failure 仍归 `astranaut_macro` 所有,struct transform failure
+  归 `astranaut_struct_transformer` 所有。未导出 `format_error/1` 的 provider
+  会产生 `missing_macro_formatter` warning。
+- macro 执行中意外抛出的 `error`、`throw` 和 `exit` 会被隔离为
+  `macro_exception` 诊断,并保留 class、reason、stacktrace、MFA、arguments 和
+  源码位置。
+
+### Macro 隔离与 OTP 维护
+
+- 将 local-macro 支持改为按需注册的可选 capability。没有 `-local_macro`
+  declaration 的模块不再加载或初始化 `astranaut_macro_local`;构建中不包含
+  local provider 时,普通 imported/exported macro 仍可正常工作。
+- 新增覆盖 Erlang/OTP 21～29 的 GitHub Actions CI,并让本地 Docker CI matrix
+  与相同的支持版本保持一致。
+- 修复 OTP 27 `syntax_tools` crash:`astranaut_syntax:revert/1` 现在原样传递 raw
+  abstract-format node,包括 record field 与 multi-template comprehension。
+
 ### 兼容性
 
 - **破坏性变更**:quote 变量编码已变更。升级后需要 clean rebuild 所有定义或使用

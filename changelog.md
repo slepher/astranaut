@@ -20,6 +20,33 @@
   `{invalid_quote_context, _}`), `no_context` must be a boolean, and the low
   level `quoted/1,2` reports invalid options instead of raising a badmatch.
 
+### Diagnostics and formatter protocol
+
+- Added `astranaut_lib:format_error/1,2` and `format_default_error/1` as the
+  shared compiler-diagnostic adapter. Astranaut formatters now use one strict
+  dispatch path: an unmatched formatter clause falls back to a deep character
+  list or `io_lib:write/1`, while other formatter failures remain visible.
+- Macro diagnostics now have explicit ownership. A macro provider formats its
+  returned domain errors and warnings, while framework failures remain owned
+  by `astranaut_macro` and struct-transform failures by
+  `astranaut_struct_transformer`. Providers without `format_error/1` emit a
+  `missing_macro_formatter` warning.
+- Unexpected `error`, `throw`, and `exit` exceptions from macro execution are
+  contained as `macro_exception` diagnostics and preserve the class, reason,
+  stacktrace, MFA, arguments, and source position.
+
+### Macro isolation and OTP maintenance
+
+- Made local-macro support an optional, lazily registered capability. Modules
+  without a `-local_macro` declaration no longer load or initialize
+  `astranaut_macro_local`, and ordinary imported or exported macros continue to
+  work when the local provider is omitted from a build.
+- Added GitHub Actions coverage for Erlang/OTP 21 through 29 and aligned the
+  local Docker CI matrix with the same supported releases.
+- Fixed OTP 27 `syntax_tools` crashes by passing raw abstract-format nodes
+  through `astranaut_syntax:revert/1` unchanged, including record fields and
+  multi-template comprehensions.
+
 ### Compatibility
 
 - **Breaking change**: quote variable encoding changed. Clean rebuild all
