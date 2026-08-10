@@ -16,7 +16,7 @@ jobs:
         otp: ['29', '28', '27', '26', '25', '24', '23', '22', '21']
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compile
         run: rebar3 compile
