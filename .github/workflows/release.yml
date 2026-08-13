@@ -1,9 +1,8 @@
-name: master
+name: release-0.13.6
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
+    tags: [ '*' ]
 
 jobs:
   test:
