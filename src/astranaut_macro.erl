@@ -26,6 +26,10 @@
 parse_transform(Forms, Options) ->
     Module = astranaut_lib:analyze_forms_module(Forms),
     File = astranaut_lib:analyze_forms_file(Forms),
+    case os:getenv("ASTRANAUT_TRACE") of
+        false -> ok;
+        _ -> io:format(standard_error, "astranaut_macro: parse start ~s~n", [File])
+    end,
     astranaut_return:to_compiler(
         do([
             return
