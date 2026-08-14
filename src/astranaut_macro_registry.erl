@@ -537,8 +537,32 @@ maybe_missing_formatter_warning(missing, Module, MissingFormatters) ->
     end.
 
 is_loaded(Module) ->
-    code:ensure_loaded(Module),
-    code:is_loaded(Module).
+    is_loaded(Module, 10).
+
+is_loaded(Module, 0) ->
+    log_macro_load(Module, failed),
+    false;
+is_loaded(Module, Attempt) ->
+    case code:ensure_loaded(Module) of
+        {module, Module} ->
+            code:is_loaded(Module);
+        {error, Reason} ->
+            log_macro_load(Module, {retry, Attempt, Reason}),
+            timer:sleep(25),
+            is_loaded(Module, Attempt - 1)
+    end.
+
+log_macro_load(Module, What) ->
+    io:format(
+        standard_error,
+        "astranaut_macro: load ~p ~p where_is_file=~p~npaths=~p~n",
+        [
+            Module,
+            What,
+            code:where_is_file(atom_to_list(Module) ++ ".beam"),
+            [P || P <- code:get_path(), string:find(P, "erlando") =/= nomatch]
+        ]
+    ).
 
 update_module_macros(File, Module, ModuleMacros) ->
     maps:fold(
