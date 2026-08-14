@@ -19,8 +19,9 @@
 -mode(compile).
 
 -define(BASE_URL,
-        "https://raw.githubusercontent.com/erlang/otp/maint-~B/"
-        "lib/syntax_tools/src/erl_syntax.erl").
+    "https://raw.githubusercontent.com/erlang/otp/maint-~B/"
+    "lib/syntax_tools/src/erl_syntax.erl"
+).
 
 main(Args) ->
     try
@@ -43,8 +44,11 @@ main(Args) ->
             io:format(standard_error, "~s~n", [Message]),
             halt(2);
         Class:Reason:Stacktrace ->
-            io:format(standard_error, "syntax schema audit crashed: ~p:~tp~n~tp~n",
-                      [Class, Reason, Stacktrace]),
+            io:format(
+                standard_error,
+                "syntax schema audit crashed: ~p:~tp~n~tp~n",
+                [Class, Reason, Stacktrace]
+            ),
             halt(2)
     end.
 
@@ -70,8 +74,9 @@ read_schema(File) ->
         {error, Reason} -> fail("cannot read ~s: ~tp", [File, Reason])
     end.
 
-schema_versions(#{otp_versions := #{min := Min, max := Max}})
-  when is_integer(Min), is_integer(Max), Min =< Max ->
+schema_versions(#{otp_versions := #{min := Min, max := Max}}) when
+    is_integer(Min), is_integer(Max), Min =< Max
+->
     lists:seq(Min, Max);
 schema_versions(_) ->
     fail("syntax.term has no valid otp_versions range", []).
@@ -85,9 +90,16 @@ audit_version(Vsn, Schema, CacheDir, Opts) ->
     try
         Errors0 = audit_nodes(Vsn, Schema, Supported, Mod),
         Errors = [{Vsn, Detail} || Detail <- Errors0],
-        io:format("~s (~B supported node types)~n",
-                  [case Errors of [] -> "ok"; _ -> "FAILED" end,
-                   sets:size(Supported)]),
+        io:format(
+            "~s (~B supported node types)~n",
+            [
+                case Errors of
+                    [] -> "ok";
+                    _ -> "FAILED"
+                end,
+                sets:size(Supported)
+            ]
+        ),
         {Vsn, Errors}
     after
         code:purge(Mod),
@@ -95,10 +107,13 @@ audit_version(Vsn, Schema, CacheDir, Opts) ->
     end.
 
 ensure_source(Vsn, CacheDir, Opts) ->
-    File = filename:join(CacheDir,
-                         lists:flatten(io_lib:format("erl_syntax_R~B.erl", [Vsn]))),
+    File = filename:join(
+        CacheDir,
+        lists:flatten(io_lib:format("erl_syntax_R~B.erl", [Vsn]))
+    ),
     case {maps:get(refresh, Opts, false), filelib:is_regular(File)} of
-        {false, true} -> File;
+        {false, true} ->
+            File;
         _ ->
             case maps:get(offline, Opts, false) of
                 true -> fail("OTP ~B cache is missing in offline mode: ~s", [Vsn, File]);
@@ -122,16 +137,32 @@ download_source(Vsn, File) ->
     File.
 
 download_with_curl(Curl, URL, Tmp) ->
-    Args = ["-fL", "--connect-timeout", "10", "--max-time", "60",
-            "--retry", "2", "--user-agent", "astranaut-syntax-schema-audit",
-            "-o", Tmp, URL],
-    Port = open_port({spawn_executable, Curl},
-                     [binary, exit_status, stderr_to_stdout, {args, Args}]),
+    Args = [
+        "-fL",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "60",
+        "--retry",
+        "2",
+        "--user-agent",
+        "astranaut-syntax-schema-audit",
+        "-o",
+        Tmp,
+        URL
+    ],
+    Port = open_port(
+        {spawn_executable, Curl},
+        [binary, exit_status, stderr_to_stdout, {args, Args}]
+    ),
     case collect_port(Port, <<>>) of
-        {0, _Output} -> ok;
+        {0, _Output} ->
+            ok;
         {Status, Output} ->
-            fail("curl download ~s failed with status ~B: ~ts",
-                 [URL, Status, Output])
+            fail(
+                "curl download ~s failed with status ~B: ~ts",
+                [URL, Status, Output]
+            )
     end.
 
 collect_port(Port, Output) ->
@@ -145,7 +176,7 @@ collect_port(Port, Output) ->
 
 download_with_httpc(URL, Tmp) ->
     ok = ensure_http_started(),
-    HTTPOpts = [{timeout, 60000}, {connect_timeout, 10000}|ssl_options()],
+    HTTPOpts = [{timeout, 60000}, {connect_timeout, 10000} | ssl_options()],
     Request = {URL, [{"user-agent", "astranaut-syntax-schema-audit"}]},
     case httpc:request(get, Request, HTTPOpts, [{body_format, binary}]) of
         {ok, {{_Version, 200, _Reason}, _Headers, Body}} ->
@@ -153,8 +184,10 @@ download_with_httpc(URL, Tmp) ->
             ok = write_file(Tmp, Body),
             ok;
         {ok, {{_Version, Status, Reason}, _Headers, Body}} ->
-            fail("download ~s failed: HTTP ~B ~s (~tp)",
-                 [URL, Status, Reason, Body]);
+            fail(
+                "download ~s failed: HTTP ~B ~s (~tp)",
+                [URL, Status, Reason, Body]
+            );
         {error, Reason} ->
             fail("download ~s failed: ~tp", [URL, Reason])
     end.
@@ -172,10 +205,15 @@ ensure_http_started() ->
 ssl_options() ->
     case erlang:function_exported(public_key, cacerts_get, 0) of
         true ->
-            [{ssl, [{verify, verify_peer},
+            [
+                {ssl, [
+                    {verify, verify_peer},
                     {cacerts, public_key:cacerts_get()},
-                    {customize_hostname_check,
-                     [{match_fun, public_key:pkix_verify_hostname_match_fun(https)}]}]}];
+                    {customize_hostname_check, [
+                        {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
+                    ]}
+                ]}
+            ];
         false ->
             %% Old OTP releases do not expose the OS CA store through
             %% public_key. Keep the downloader usable there; cached audits do
@@ -211,13 +249,23 @@ parse_source(File) ->
 load_version_module(Vsn, Source, Forms0) ->
     Mod = list_to_atom("astranaut_erl_syntax_r" ++ integer_to_list(Vsn)),
     Forms = [rename_module(Form, Mod) || Form <- Forms0],
-    case compile:forms(Forms, [binary, return_errors, return_warnings,
-                               nowarn_deprecated_catch]) of
-        {ok, Mod, Beam} -> load_binary(Mod, Source, Beam);
-        {ok, Mod, Beam, _Warnings} -> load_binary(Mod, Source, Beam);
+    case
+        compile:forms(Forms, [
+            binary,
+            return_errors,
+            return_warnings,
+            nowarn_deprecated_catch
+        ])
+    of
+        {ok, Mod, Beam} ->
+            load_binary(Mod, Source, Beam);
+        {ok, Mod, Beam, _Warnings} ->
+            load_binary(Mod, Source, Beam);
         {error, Errors, Warnings} ->
-            fail("cannot compile cached OTP ~B erl_syntax:~n~tp~n~tp",
-                 [Vsn, Errors, Warnings])
+            fail(
+                "cannot compile cached OTP ~B erl_syntax:~n~tp~n~tp",
+                [Vsn, Errors, Warnings]
+            )
     end.
 
 rename_module({attribute, Anno, module, erl_syntax}, Mod) ->
@@ -232,10 +280,15 @@ load_binary(Mod, Source, Beam) ->
     end.
 
 supported_types(Forms) ->
-    MakeTree = [Type || {function, _, make_tree, 2, Clauses} <- Forms,
-                        {clause, _, [{atom, _, Type}, _], _, _} <- Clauses],
-    Leaf = lists:append([leaf_types(Clauses)
-                         || {function, _, is_leaf, 1, Clauses} <- Forms]),
+    MakeTree = [
+        Type
+     || {function, _, make_tree, 2, Clauses} <- Forms,
+        {clause, _, [{atom, _, Type}, _], _, _} <- Clauses
+    ],
+    Leaf = lists:append([
+        leaf_types(Clauses)
+     || {function, _, is_leaf, 1, Clauses} <- Forms
+    ]),
     sets:from_list(MakeTree ++ Leaf).
 
 leaf_types(Term) when is_tuple(Term) ->
@@ -243,27 +296,41 @@ leaf_types(Term) when is_tuple(Term) ->
         {clause, _, [{atom, _, Type}], _, [{atom, _, true}]} -> [Type];
         _ -> lists:append([leaf_types(E) || E <- tuple_to_list(Term)])
     end;
-leaf_types([H|T]) -> leaf_types(H) ++ leaf_types(T);
-leaf_types([]) -> [];
-leaf_types(_) -> [].
+leaf_types([H | T]) ->
+    leaf_types(H) ++ leaf_types(T);
+leaf_types([]) ->
+    [];
+leaf_types(_) ->
+    [].
 
 audit_nodes(Vsn, Schema, Supported, Mod) ->
     Nodes = maps:get(nodes, Schema, []),
-    Active = maps:from_list([{maps:get(type, N), N}
-                            || N <- Nodes, active(Vsn, N)]),
+    Active = maps:from_list([
+        {maps:get(type, N), N}
+     || N <- Nodes, active(Vsn, N)
+    ]),
     CompletenessErrors = audit_completeness(Vsn, Schema, Active, Supported),
     CompletenessErrors ++
-        lists:append([audit_node(Vsn, Node, Active, Supported, Schema, Mod)
-                      || Node <- maps:values(Active)]).
+        lists:append([
+            audit_node(Vsn, Node, Active, Supported, Schema, Mod)
+         || Node <- maps:values(Active)
+        ]).
 
 audit_completeness(Vsn, Schema, Active, Supported) ->
     Modeled = sets:from_list(
-                [Type || {Type, Node} <- maps:to_list(Active),
-                         not maps:is_key(alias_of, Node)]),
+        [
+            Type
+         || {Type, Node} <- maps:to_list(Active),
+            not maps:is_key(alias_of, Node)
+        ]
+    ),
     Excluded = sets:from_list(
-                 [maps:get(type, Entry)
-                  || Entry <- maps:get(excluded_nodes, Schema, []),
-                     active(Vsn, Entry)]),
+        [
+            maps:get(type, Entry)
+         || Entry <- maps:get(excluded_nodes, Schema, []),
+            active(Vsn, Entry)
+        ]
+    ),
     Missing = sets:subtract(sets:subtract(Supported, Modeled), Excluded),
     Conflicts = sets:intersection(Modeled, Excluded),
     Stale = sets:subtract(Excluded, Supported),
@@ -287,8 +354,11 @@ audit_node(Vsn, #{type := Type} = Node, Active, Supported, Schema, Mod) ->
         end,
     Formats = [F || F <- maps:get(formats, Node, []), active(Vsn, F)],
     FormatErrors = lists:append(
-                     [audit_format(Type, Format, Node, Schema, Mod)
-                      || Format <- Formats]),
+        [
+            audit_format(Type, Format, Node, Schema, Mod)
+         || Format <- Formats
+        ]
+    ),
     LayoutBranchErrors =
         case maps:is_key(alias_of, Node) of
             false -> audit_layout_branches(Vsn, Type, Node, Schema, Mod);
@@ -313,8 +383,9 @@ audit_format(Type, #{shape := Shape} = Format, Node, Schema, Mod) ->
 %% three-element form has no standalone erl_syntax:type/1 branch.  Validate
 %% them through the public record_expr/subtrees projection that disambiguates
 %% them.  This does not inspect or depend on erl_syntax's private #tree form.
-public_node(Type, Sample, Mod)
-  when Type =:= record_field; Type =:= typed_record_field ->
+public_node(Type, Sample, Mod) when
+    Type =:= record_field; Type =:= typed_record_field
+->
     Parent = {record, 1, sample_record, [Sample]},
     case safe_apply(Mod, subtrees, [Parent]) of
         {ok, [_RecordType, [PublicNode]]} ->
@@ -323,8 +394,10 @@ public_node(Type, Sample, Mod)
                 {ok, Actual} -> {ok, Actual, PublicNode};
                 {error, Reason} -> {error, {contextual_type_rejected, Reason}}
             end;
-        {ok, Other} -> {error, {invalid_record_projection, Other}};
-        {error, Reason} -> {error, {record_projection_rejected, Reason}}
+        {ok, Other} ->
+            {error, {invalid_record_projection, Other}};
+        {error, Reason} ->
+            {error, {record_projection_rejected, Reason}}
     end;
 public_node(Type, Sample, Mod) ->
     case safe_apply(Mod, type, [Sample]) of
@@ -340,9 +413,11 @@ audit_layout_branches(_Vsn, _Type, #{layout := attribute}, _Schema, _Mod) ->
     [];
 audit_layout_branches(Vsn, Type, Node, Schema, Mod) ->
     Layouts = [L || L <- resolve_layouts(Node, Schema), active(Vsn, L)],
-    lists:append([audit_layout_branch(Type, Index, Layout, Mod)
-                  || {Index, Layout0} <- lists:zip(lists:seq(1, length(Layouts)), Layouts),
-                     Layout <- expand_layout_context(Layout0)]).
+    lists:append([
+        audit_layout_branch(Type, Index, Layout, Mod)
+     || {Index, Layout0} <- lists:zip(lists:seq(1, length(Layouts)), Layouts),
+        Layout <- expand_layout_context(Layout0)
+    ]).
 
 audit_layout_branch(Type, Index, Layout, Mod) ->
     case groups_for_layout(Layout) of
@@ -362,10 +437,14 @@ audit_any_layout(Type, Index, Layout, SeedGroups, Mod) ->
     case first_constructible_layout(Type, Counts, SeedGroups, Mod) of
         {ok, _Groups, Sample, ActualGroups} ->
             case layout_matches(ActualGroups, Layout) of
-                true -> check_update(Type, {layout, Index}, Sample, ActualGroups, Mod);
+                true ->
+                    check_update(Type, {layout, Index}, Sample, ActualGroups, Mod);
                 false ->
-                    [{Type, {layout_projection_mismatch, Index,
-                             group_lengths(ActualGroups), Layout}}]
+                    [
+                        {Type,
+                            {layout_projection_mismatch, Index, group_lengths(ActualGroups),
+                                Layout}}
+                    ]
             end;
         {error, Reason} ->
             [{Type, {layout_make_tree_rejected, Index, any, Reason}}]
@@ -374,7 +453,7 @@ audit_any_layout(Type, Index, Layout, SeedGroups, Mod) ->
 first_constructible_layout(Type, Counts, SeedGroups, Mod) ->
     first_constructible_layout(Type, Counts, SeedGroups, Mod, no_candidate).
 
-first_constructible_layout(Type, [Count|Rest], SeedGroups, Mod, _LastReason) ->
+first_constructible_layout(Type, [Count | Rest], SeedGroups, Mod, _LastReason) ->
     Groups = repeated_groups(Count, SeedGroups),
     case safe_apply(Mod, make_tree, [Type, Groups]) of
         {ok, Sample} ->
@@ -384,18 +463,38 @@ first_constructible_layout(Type, [Count|Rest], SeedGroups, Mod, _LastReason) ->
                         {ok, ActualGroups} when is_list(ActualGroups) ->
                             {ok, Groups, Sample, ActualGroups};
                         {ok, Other} ->
-                            first_constructible_layout(Type, Rest, SeedGroups, Mod,
-                                                       {subtrees, Other});
+                            first_constructible_layout(
+                                Type,
+                                Rest,
+                                SeedGroups,
+                                Mod,
+                                {subtrees, Other}
+                            );
                         {error, Reason} ->
-                            first_constructible_layout(Type, Rest, SeedGroups, Mod,
-                                                       {subtrees, Reason})
+                            first_constructible_layout(
+                                Type,
+                                Rest,
+                                SeedGroups,
+                                Mod,
+                                {subtrees, Reason}
+                            )
                     end;
                 {ok, Actual} ->
-                    first_constructible_layout(Type, Rest, SeedGroups, Mod,
-                                               {type, Actual});
+                    first_constructible_layout(
+                        Type,
+                        Rest,
+                        SeedGroups,
+                        Mod,
+                        {type, Actual}
+                    );
                 {error, Reason} ->
-                    first_constructible_layout(Type, Rest, SeedGroups, Mod,
-                                               {type, Reason})
+                    first_constructible_layout(
+                        Type,
+                        Rest,
+                        SeedGroups,
+                        Mod,
+                        {type, Reason}
+                    )
             end;
         {error, Reason} ->
             first_constructible_layout(Type, Rest, SeedGroups, Mod, Reason)
@@ -403,7 +502,7 @@ first_constructible_layout(Type, [Count|Rest], SeedGroups, Mod, _LastReason) ->
 first_constructible_layout(_Type, [], _SeedGroups, _Mod, LastReason) ->
     {error, LastReason}.
 
-repeated_groups(Count, [Seed|_]) -> lists:duplicate(Count, Seed);
+repeated_groups(Count, [Seed | _]) -> lists:duplicate(Count, Seed);
 repeated_groups(Count, []) -> lists:duplicate(Count, [sample_node(inherit)]).
 
 audit_constructed_layout(Type, Index, Layout, Groups, Mod) ->
@@ -415,29 +514,36 @@ audit_constructed_layout(Type, Index, Layout, Groups, Mod) ->
                         {ok, ActualGroups} when is_list(ActualGroups) ->
                             BranchErrors =
                                 case layout_matches(ActualGroups, Layout) of
-                                    true -> [];
+                                    true ->
+                                        [];
                                     false ->
-                                        [{Type,
-                                          {layout_projection_mismatch,
-                                           Index, group_lengths(ActualGroups),
-                                           Layout}}]
+                                        [
+                                            {Type,
+                                                {layout_projection_mismatch, Index,
+                                                    group_lengths(ActualGroups), Layout}}
+                                        ]
                                 end,
                             BranchErrors ++
-                                check_update(Type, {layout, Index}, Sample,
-                                             ActualGroups, Mod);
+                                check_update(
+                                    Type,
+                                    {layout, Index},
+                                    Sample,
+                                    ActualGroups,
+                                    Mod
+                                );
                         {ok, Other} ->
-                            [{Type, {layout_subtrees_rejected, Index,
-                                     Groups, {invalid_result, Other}}}];
+                            [
+                                {Type,
+                                    {layout_subtrees_rejected, Index, Groups,
+                                        {invalid_result, Other}}}
+                            ];
                         {error, Reason} ->
-                            [{Type, {layout_subtrees_rejected, Index,
-                                     Groups, Reason}}]
+                            [{Type, {layout_subtrees_rejected, Index, Groups, Reason}}]
                     end;
                 {ok, Actual} ->
-                    [{Type, {layout_constructor_type_mismatch, Index,
-                             Actual, Groups}}];
+                    [{Type, {layout_constructor_type_mismatch, Index, Actual, Groups}}];
                 {error, Reason} ->
-                    [{Type, {layout_constructed_tree_rejected, Index,
-                             Groups, Reason}}]
+                    [{Type, {layout_constructed_tree_rejected, Index, Groups, Reason}}]
             end;
         {error, Reason} ->
             [{Type, {layout_make_tree_rejected, Index, Groups, Reason}}]
@@ -452,8 +558,10 @@ group_for_child(#{role := Role, cardinality := one}, _Layout) ->
     [sample_layout_child(Role)];
 group_for_child(#{role := Role, cardinality := one_or_many}, _Layout) ->
     [sample_layout_child(Role)];
-group_for_child(#{role := Role, cardinality := many},
-                #{when_format := multiple_templates}) ->
+group_for_child(
+    #{role := Role, cardinality := many},
+    #{when_format := multiple_templates}
+) ->
     [sample_layout_child(Role), sample_layout_child(Role)];
 group_for_child(#{role := Role, cardinality := many}, _Layout) ->
     [sample_layout_child(Role)];
@@ -464,10 +572,8 @@ sample_layout_child(clause) -> sample_clause();
 sample_layout_child(pattern) -> {var, 1, 'X'};
 sample_layout_child(type) -> {type, 1, integer, []};
 sample_layout_child(type_param) -> {var, 1, 'T'};
-sample_layout_child(binary_field) ->
-    {bin_element, 1, {integer, 1, 0}, default, default};
-sample_layout_child(map_field) ->
-    {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
+sample_layout_child(binary_field) -> {bin_element, 1, {integer, 1, 0}, default, default};
+sample_layout_child(map_field) -> {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
 sample_layout_child(_Role) -> {atom, 1, sample}.
 
 audit_subtrees(Type, Id, Sample, Node, Schema, Mod) ->
@@ -476,8 +582,10 @@ audit_subtrees(Type, Id, Sample, Node, Schema, Mod) ->
             LayoutErrors = check_layout(Type, Id, Groups, Node, Schema),
             UpdateErrors = check_update(Type, Id, Sample, Groups, Mod),
             LayoutErrors ++ UpdateErrors;
-        {ok, Other} -> [{Type, {invalid_subtrees_result, Id, Other}}];
-        {error, Reason} -> [{Type, {subtrees_rejected, Id, Reason}}]
+        {ok, Other} ->
+            [{Type, {invalid_subtrees_result, Id, Other}}];
+        {error, Reason} ->
+            [{Type, {subtrees_rejected, Id, Reason}}]
     end.
 
 check_layout(_Type, _Id, _Groups, #{layout := attribute}, _Schema) ->
@@ -487,28 +595,33 @@ check_layout(_Type, _Id, _Groups, #{layout := attribute}, _Schema) ->
 check_layout(Type, Id, Groups, Node, Schema) ->
     Layouts = resolve_layouts(Node, Schema),
     case Layouts of
-        [] -> [];
+        [] ->
+            [];
         _ ->
-            Candidates = lists:append([expand_layout_context(L)
-                                       || L <- Layouts, layout_applies(Id, L)]),
+            Candidates = lists:append([
+                expand_layout_context(L)
+             || L <- Layouts, layout_applies(Id, L)
+            ]),
             case lists:any(fun(L) -> layout_matches(Groups, L) end, Candidates) of
                 true -> [];
-                false ->
-                    [{Type, {no_matching_layout, Id, group_lengths(Groups),
-                             Candidates}}]
+                false -> [{Type, {no_matching_layout, Id, group_lengths(Groups), Candidates}}]
             end
     end.
 
-resolve_layouts(#{layouts := Layouts}, _Schema) -> Layouts;
+resolve_layouts(#{layouts := Layouts}, _Schema) ->
+    Layouts;
 resolve_layouts(#{layout := Name}, #{layouts := Named}) when is_atom(Name) ->
     maps:get(Name, Named, []);
 resolve_layouts(_Node, _Schema) ->
     [].
 
 expand_layout_context(#{context := Context} = Layout) ->
-    [(maps:remove(context, Layout))#{children => maps:get(children, Variant)}
-     || Variant <- Context];
-expand_layout_context(Layout) -> [Layout].
+    [
+        (maps:remove(context, Layout))#{children => maps:get(children, Variant)}
+     || Variant <- Context
+    ];
+expand_layout_context(Layout) ->
+    [Layout].
 
 layout_applies(Id, Layout) ->
     case maps:find(when_format, Layout) of
@@ -520,17 +633,22 @@ layout_applies(Id, Layout) ->
 
 layout_matches(Groups, #{groups := any}) ->
     is_list(Groups);
-layout_matches(Groups, #{groups := Count, children := Children})
-  when is_integer(Count), length(Groups) =:= Count ->
+layout_matches(Groups, #{groups := Count, children := Children}) when
+    is_integer(Count), length(Groups) =:= Count
+->
     cardinalities_match(Groups, layout_children(Children));
-layout_matches(_Groups, _Layout) -> false.
+layout_matches(_Groups, _Layout) ->
+    false.
 
 layout_children(Children) -> Children.
 
 cardinalities_match(Groups, Children) when length(Groups) =:= length(Children) ->
-    lists:all(fun({Group, Child}) -> cardinality_matches(Group, maps:get(cardinality, Child)) end,
-              lists:zip(Groups, Children));
-cardinalities_match(_Groups, _Children) -> false.
+    lists:all(
+        fun({Group, Child}) -> cardinality_matches(Group, maps:get(cardinality, Child)) end,
+        lists:zip(Groups, Children)
+    );
+cardinalities_match(_Groups, _Children) ->
+    false.
 
 cardinality_matches(Group, one) -> is_list(Group) andalso length(Group) =:= 1;
 cardinality_matches(Group, one_or_many) -> is_list(Group) andalso Group =/= [];
@@ -556,7 +674,8 @@ check_nonleaf_update(Type, Id, Sample, Groups, Mod) ->
                 {ok, Actual} -> [{Type, {update_type_mismatch, Id, Actual}}];
                 {error, Reason} -> [{Type, {updated_tree_rejected, Id, Reason}}]
             end;
-        {error, Reason} -> [{Type, {update_tree_rejected, Id, Reason}}]
+        {error, Reason} ->
+            [{Type, {update_tree_rejected, Id, Reason}}]
     end.
 
 %% Layout probes deliberately use the smallest public syntax tree that
@@ -566,13 +685,11 @@ check_nonleaf_update(Type, Id, Sample, Groups, Mod) ->
 check_roundtrip(_Type, {layout, _Index}, _Sample, _Updated, _Mod) ->
     [];
 check_roundtrip(Type, Id, Sample, Updated, Mod) ->
-    case {safe_apply(Mod, revert, [Sample]),
-          safe_apply(Mod, revert, [Updated])} of
+    case {safe_apply(Mod, revert, [Sample]), safe_apply(Mod, revert, [Updated])} of
         {{ok, OriginalForm}, {ok, OriginalForm}} ->
             [];
         {{ok, OriginalForm}, {ok, UpdatedForm}} ->
-            [{Type, {update_roundtrip_mismatch, Id,
-                     OriginalForm, UpdatedForm}}];
+            [{Type, {update_roundtrip_mismatch, Id, OriginalForm, UpdatedForm}}];
         {{error, Reason}, _} ->
             [{Type, {original_revert_rejected, Id, Reason}}];
         {_, {error, Reason}} ->
@@ -593,20 +710,28 @@ active(Vsn, Map) ->
 
 sample(Type, Shape) -> sample_shape(Type, Shape).
 
-sample_shape(_Type, anno) -> 1;
-sample_shape(_Type, {value, Name}) -> sample_value(Name);
-sample_shape(_Type, {values, Name}) -> sample_values(Name);
-sample_shape(Type, {node, Name}) -> sample_node(Type, Name);
-sample_shape(Type, {nodes, Name}) -> sample_nodes(Type, Name);
-sample_shape(Type, {optional, Shape}) -> sample_shape(Type, Shape);
+sample_shape(_Type, anno) ->
+    1;
+sample_shape(_Type, {value, Name}) ->
+    sample_value(Name);
+sample_shape(_Type, {values, Name}) ->
+    sample_values(Name);
+sample_shape(Type, {node, Name}) ->
+    sample_node(Type, Name);
+sample_shape(Type, {nodes, Name}) ->
+    sample_nodes(Type, Name);
+sample_shape(Type, {optional, Shape}) ->
+    sample_shape(Type, Shape);
 sample_shape(Type, Map) when is_map(Map) ->
     maps:map(fun(_K, V) -> sample_shape(Type, V) end, Map);
-sample_shape(Type, [H|T]) ->
-    [sample_shape(Type, H)|sample_shape(Type, T)];
-sample_shape(_Type, []) -> [];
+sample_shape(Type, [H | T]) ->
+    [sample_shape(Type, H) | sample_shape(Type, T)];
+sample_shape(_Type, []) ->
+    [];
 sample_shape(Type, Tuple) when is_tuple(Tuple) ->
     list_to_tuple([sample_shape(Type, E) || E <- tuple_to_list(Tuple)]);
-sample_shape(_Type, Value) -> Value.
+sample_shape(_Type, Value) ->
+    Value.
 
 sample_value(arity) -> 0;
 sample_value(characters) -> "sample";
@@ -624,14 +749,19 @@ sample_values(type_specifiers) -> [integer];
 sample_values(record_names) -> [sample];
 sample_values(_Name) -> [sample].
 
-sample_nodes(clause, guards) -> [[{atom, 1, sample_guard}]];
+sample_nodes(clause, guards) ->
+    [[{atom, 1, sample_guard}]];
 sample_nodes(list_comp, templates) ->
     [{atom, 1, template1}, {atom, 1, template2}];
 sample_nodes(map_comp, templates) ->
-    [{map_field_assoc, 1, {atom, 1, key1}, {atom, 1, value1}},
-     {map_field_assoc, 1, {atom, 1, key2}, {atom, 1, value2}}];
-sample_nodes(try_expr, handlers) -> [sample_try_clause()];
-sample_nodes(Type, Name) -> [sample_node(Type, Name)].
+    [
+        {map_field_assoc, 1, {atom, 1, key1}, {atom, 1, value1}},
+        {map_field_assoc, 1, {atom, 1, key2}, {atom, 1, value2}}
+    ];
+sample_nodes(try_expr, handlers) ->
+    [sample_try_clause()];
+sample_nodes(Type, Name) ->
+    [sample_node(Type, Name)].
 
 sample_node(record_expr, fields) ->
     {record_field, 1, {atom, 1, field}, {atom, 1, value}};
@@ -640,40 +770,55 @@ sample_node(record_type, fields) ->
 sample_node(map_expr, fields) ->
     {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
 sample_node(map_type, fields) ->
-    {type, 1, map_field_assoc,
-     [{type, 1, atom, []}, {type, 1, integer, []}]};
+    {type, 1, map_field_assoc, [{type, 1, atom, []}, {type, 1, integer, []}]};
 sample_node(typed_record_field, field) ->
     {record_field, 1, {atom, 1, field}};
-sample_node(_Type, patterns) -> {var, 1, 'X'};
-sample_node(_Type, pattern) -> {var, 1, 'X'};
-sample_node(_Type, clauses) -> sample_clause();
-sample_node(_Type, clause) -> sample_clause();
-sample_node(_Type, handlers) -> sample_try_clause();
-sample_node(_Type, else_clauses) -> sample_clause();
+sample_node(_Type, patterns) ->
+    {var, 1, 'X'};
+sample_node(_Type, pattern) ->
+    {var, 1, 'X'};
+sample_node(_Type, clauses) ->
+    sample_clause();
+sample_node(_Type, clause) ->
+    sample_clause();
+sample_node(_Type, handlers) ->
+    sample_try_clause();
+sample_node(_Type, else_clauses) ->
+    sample_clause();
 sample_node(map_comp, template) ->
     {map_field_assoc, 1, {atom, 1, key}, {atom, 1, value}};
-sample_node(_Type, template) -> {atom, 1, template};
-sample_node(_Type, templates) -> {atom, 1, template};
-sample_node(_Type, size) -> {integer, 1, 8};
-sample_node(_Type, _Name) -> {atom, 1, sample}.
+sample_node(_Type, template) ->
+    {atom, 1, template};
+sample_node(_Type, templates) ->
+    {atom, 1, template};
+sample_node(_Type, size) ->
+    {integer, 1, 8};
+sample_node(_Type, _Name) ->
+    {atom, 1, sample}.
 
 sample_node(Name) -> sample_node(undefined, Name).
 
 sample_clause() -> {clause, 1, [], [], [{atom, 1, ok}]}.
 
 sample_try_clause() ->
-    {clause, 1,
-     [{tuple, 1, [{atom, 1, error}, {var, 1, 'Reason'}, {var, 1, '_'}]}],
-     [], [{atom, 1, handled}]}.
+    {clause, 1, [{tuple, 1, [{atom, 1, error}, {var, 1, 'Reason'}, {var, 1, '_'}]}], [], [
+        {atom, 1, handled}
+    ]}.
 
 report(Results, []) ->
     io:format("syntax schema audit passed for ~B OTP releases.~n", [length(Results)]);
 report(_Results, Errors) ->
     io:format(standard_error, "~nsyntax schema audit found ~B error(s):~n", [length(Errors)]),
-    lists:foreach(fun({Vsn, {Type, Detail}}) ->
-                          io:format(standard_error, "  OTP ~B ~p: ~tp~n",
-                                    [Vsn, Type, Detail])
-                  end, Errors).
+    lists:foreach(
+        fun({Vsn, {Type, Detail}}) ->
+            io:format(
+                standard_error,
+                "  OTP ~B ~p: ~tp~n",
+                [Vsn, Type, Detail]
+            )
+        end,
+        Errors
+    ).
 
 fail(Format, Args) ->
     throw({usage, lists:flatten(io_lib:format(Format, Args))}).

@@ -1,3 +1,7 @@
+[![CI](https://github.com/slepher/astranaut/actions/workflows/ci.yml/badge.svg?branch=master&event=push)](https://github.com/slepher/astranaut/actions/workflows/ci.yml?query=branch%3Amaster)
+
+[![CI](https://github.com/slepher/astranaut/actions/workflows/release.yml/badge.svg?branch=0.13.7&event=push)](https://github.com/slepher/astranaut/actions/workflows/release.yml?query=branch%3A0.13.7)
+
 [![CI](https://github.com/slepher/astranaut/actions/workflows/ci.yml/badge.svg)](https://github.com/slepher/astranaut/actions/workflows/ci.yml)
 
 # requirements
