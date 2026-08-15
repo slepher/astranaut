@@ -38,6 +38,7 @@ all() ->
         test_quote_code_case,
         test_other_case,
         test_macro_order,
+        test_import_macro_during_code_server_registration_lag,
         test_macro_with_vars,
         test_merge_rename_function,
         test_nested_macro,
@@ -114,6 +115,29 @@ test_other_case(_Config) ->
 test_macro_order(_Config) ->
     ?assertEqual({fail, ok}, macro_test:test_macro_order()),
     ok.
+
+test_import_macro_during_code_server_registration_lag(_Config) ->
+    Module = macro_example,
+    {Module, Binary, File} = code:get_object_code(Module),
+    unload_module(Module),
+    ok = sys:suspend(code_server),
+    try
+        Prepared = erlang:prepare_loading(Module, Binary),
+        ok = erlang:finish_loading([Prepared]),
+        ?assert(erlang:module_loaded(Module)),
+        ?assertEqual(false, code:is_loaded(Module)),
+        State = astranaut_macro_registry:new(
+            macro_code_server_registration_lag_test, "nofile", #{}
+        ),
+        Result = astranaut_macro_registry:apply_directive(
+            {attribute, 1, import_macro, Module}, State
+        ),
+        ?assertMatch({just, {consume, _}}, astranaut_return:run(Result))
+    after
+        ok = sys:resume(code_server),
+        unload_module(Module),
+        {module, Module} = code:load_binary(Module, File, Binary)
+    end.
 
 test_macro_with_vars(_Config) ->
     ?assertEqual(112, macro_test:test_macro_with_vars(13)).
@@ -267,6 +291,11 @@ collect_var_names(Nodes) ->
         ),
     {just, Names} = astranaut_return:run(Collected),
     lists:usort(Names).
+
+unload_module(Module) ->
+    code:purge(Module),
+    code:delete(Module),
+    code:purge(Module).
 
 has_expanded_counter(Name) ->
     case astranaut_quote:decode_quote_variable(Name) of

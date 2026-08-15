@@ -478,8 +478,8 @@ import_macro_form(
     GlobalMacroOpts,
     {attribute, _Pos, import_macro, Module}
 ) when is_atom(Module) ->
-    case is_loaded(Module) of
-        {file, _} ->
+    case ensure_loaded(Module) of
+        true ->
             Macros = analyze_module_macros(Module),
             Exports = Module:module_info(exports),
             {GlobalMacroOpts1, FormatterProtocol} = formatter_opts(
@@ -536,10 +536,10 @@ maybe_missing_formatter_warning(missing, Module, MissingFormatters) ->
         false -> astranaut_return:warning({missing_macro_formatter, Module})
     end.
 
-is_loaded(Module) ->
+ensure_loaded(Module) ->
     case code:ensure_loaded(Module) of
         {module, Module} ->
-            code:is_loaded(Module);
+            true;
         {error, Reason} ->
             log_macro_load(Module, Reason),
             false
