@@ -117,26 +117,31 @@ test_macro_order(_Config) ->
     ok.
 
 test_import_macro_during_code_server_registration_lag(_Config) ->
-    Module = macro_example,
-    {Module, Binary, File} = code:get_object_code(Module),
-    unload_module(Module),
-    ok = sys:suspend(code_server),
-    try
-        Prepared = erlang:prepare_loading(Module, Binary),
-        ok = erlang:finish_loading([Prepared]),
-        ?assert(erlang:module_loaded(Module)),
-        ?assertEqual(false, code:is_loaded(Module)),
-        State = astranaut_macro_registry:new(
-            macro_code_server_registration_lag_test, "nofile", #{}
-        ),
-        Result = astranaut_macro_registry:apply_directive(
-            {attribute, 1, import_macro, Module}, State
-        ),
-        ?assertMatch({just, {consume, _}}, astranaut_return:run(Result))
-    after
-        ok = sys:resume(code_server),
-        unload_module(Module),
-        {module, Module} = code:load_binary(Module, File, Binary)
+    case list_to_integer(erlang:system_info(otp_release)) >= 26 of
+        false ->
+            {skip, "code:is_loaded/1 blocks on a suspended code_server before OTP 26"};
+        true ->
+            Module = macro_example,
+            {Module, Binary, File} = code:get_object_code(Module),
+            unload_module(Module),
+            ok = sys:suspend(code_server),
+            try
+                Prepared = erlang:prepare_loading(Module, Binary),
+                ok = erlang:finish_loading([Prepared]),
+                ?assert(erlang:module_loaded(Module)),
+                ?assertEqual(false, code:is_loaded(Module)),
+                State = astranaut_macro_registry:new(
+                    macro_code_server_registration_lag_test, "nofile", #{}
+                ),
+                Result = astranaut_macro_registry:apply_directive(
+                    {attribute, 1, import_macro, Module}, State
+                ),
+                ?assertMatch({just, {consume, _}}, astranaut_return:run(Result))
+            after
+                ok = sys:resume(code_server),
+                unload_module(Module),
+                {module, Module} = code:load_binary(Module, File, Binary)
+            end
     end.
 
 test_macro_with_vars(_Config) ->
