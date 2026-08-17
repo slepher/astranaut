@@ -6,13 +6,12 @@
 %%% @end
 %%% Created :  9 Apr 2021 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_uniplate_SUITE).
+-module(astranaut_uniplate_tests).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
--include_lib("common_test/include/ct.hrl").
 
 -record(uniplate_node_context, {
     node,
@@ -43,6 +42,12 @@ init_per_suite(Config) ->
     erlang:system_flag(backtrace_depth, 20),
     Forms = astranaut_test_lib:test_module_forms(sample_plus, Config),
     [{forms, Forms} | Config].
+
+forms() ->
+    DataDir = filename:join([
+        filename:dirname(?FILE), "..", "test_data", "astranaut_uniplate_tests_data"
+    ]),
+    astranaut_test_lib:test_module_forms(sample_plus, [{fixture_data_dir, DataDir}]).
 
 %%--------------------------------------------------------------------
 %% @spec end_per_suite(Config0) -> term() | {save_config,Config1}
@@ -119,29 +124,6 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() ->
-    [
-        test_writer_or,
-        test_map,
-        test_map_attr,
-        test_reduce,
-        test_reduce_attr,
-        test_reduce_traverse_all,
-        test_mapfold_attr,
-        test_f_return_list,
-        test_all_return_list,
-        test_with_subtrees,
-        test_af_with,
-        test_invalid_pre_transform_exception,
-        test_invalid_post_transform_exception,
-        test_invalid_post_transform_context_exception,
-        test_invalid_post_transform_context_before_validation,
-        test_invalid_transform_maketree_exception,
-        test_invalid_node_exception,
-        test_invalid_uniplate_subnode_exception,
-        test_invalid_transform_exception,
-        test_invalid_subtree_transform_exception
-    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -160,7 +142,7 @@ my_test_case() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_writer_or(_Config) ->
+test_writer_or_test() ->
     Monad = identity,
     Mempty = astranaut_monad:mempty('or'),
     Mappend = astranaut_monad:mappend('or'),
@@ -200,7 +182,7 @@ test_writer_or(_Config) ->
     ?assertEqual({4, true}, WA1(3)),
     ok.
 
-test_map(_Config) ->
+test_map_test() ->
     Ast = merl:quote("A + (B + C)"),
     Ast1 =
         astranaut:smap(
@@ -217,7 +199,7 @@ test_map(_Config) ->
     ?assertEqual(Ast2, Ast1),
     ok.
 
-test_map_attr(_Config) ->
+test_map_attr_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Ast1 =
         astranaut:smap(
@@ -248,7 +230,7 @@ test_map_attr(_Config) ->
     ?assertEqual(Ast2, Ast1),
     ok.
 
-test_reduce(_Config) ->
+test_reduce_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
@@ -265,7 +247,7 @@ test_reduce(_Config) ->
     ?assertEqual(['E', 'A', 'D', 'B', 'C'], lists:reverse(Acc1)),
     ok.
 
-test_reduce_attr(_Config) ->
+test_reduce_attr_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
@@ -300,7 +282,7 @@ uniplate_node_attr(Node) ->
             astranaut:uniplate(Node)
     end.
 
-test_reduce_traverse_all(_Config) ->
+test_reduce_traverse_all_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     Acc1 =
         astranaut:sreduce(
@@ -320,7 +302,7 @@ test_reduce_traverse_all(_Config) ->
     ?assertEqual([{pre, 'E'}, {pre, 'D'}, {post, 'D'}, {post, 'E'}], lists:reverse(Acc1)),
     ok.
 
-test_mapfold(_Config) ->
+test_mapfold_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
         astranaut:smapfold(
@@ -345,7 +327,7 @@ test_mapfold(_Config) ->
     ?assertEqual(['D_1', 'E_1'], lists:reverse(Acc1)),
     ok.
 
-test_mapfold_attr(_Config) ->
+test_mapfold_attr_test() ->
     Ast = merl:quote("E = A + (D = B + C)"),
     {Ast1, Acc1} =
         astranaut:smapfold(
@@ -372,7 +354,7 @@ test_mapfold_attr(_Config) ->
     ?assertEqual([{pre, 'E'}, {pre, 'D'}, {post, 'D_1'}, {post, 'E_1'}], lists:reverse(Acc1)),
     ok.
 
-test_f_return_list(_Config) ->
+test_f_return_list_test() ->
     Ast = merl:quote("hello(A, B, world(C))"),
     Ast1 =
         astranaut:smap(
@@ -392,7 +374,7 @@ test_f_return_list(_Config) ->
     ?assertEqual(Ast2, Ast1),
     ok.
 
-test_all_return_list(_Config) ->
+test_all_return_list_test() ->
     Ast = merl:quote("hello(A, B, world(C))"),
     Ast1 =
         astranaut:smap(
@@ -414,7 +396,7 @@ test_all_return_list(_Config) ->
     ?assertEqual(Ast2, Ast1),
     ok.
 
-test_with_subtrees(_Config) ->
+test_with_subtrees_test() ->
     TopNode = merl:quote("case A of 10 -> B = A + 1, B; C -> D = C + 2, B end"),
     F =
         fun
@@ -473,7 +455,7 @@ test_with_subtrees(_Config) ->
     ?assertEqual(TopNode, TopNode1),
     ok.
 
-test_af_with(_Config) ->
+test_af_with_test() ->
     Datas1 = [[], [a, b], [c, d], []],
     Datas2 = astranaut_uniplate:with(g, h, Datas1),
     ?assertEqual(
@@ -516,8 +498,8 @@ test_af_with(_Config) ->
     ),
     ok.
 
-test_invalid_pre_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_pre_transform_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_pre_transform, {var, _, _}, invalid_node, _OriginalException},
@@ -534,8 +516,8 @@ test_invalid_pre_transform_exception(Config) ->
     ),
     ok.
 
-test_invalid_post_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_post_transform_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_transform_normalization, _},
@@ -552,8 +534,8 @@ test_invalid_post_transform_exception(Config) ->
     ),
     ok.
 
-test_invalid_post_transform_context_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_post_transform_context_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_post_transform_with_context, {var, _, _}, _},
@@ -570,8 +552,8 @@ test_invalid_post_transform_context_exception(Config) ->
     ),
     ok.
 
-test_invalid_post_transform_context_before_validation(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_post_transform_context_before_validation_test() ->
+    Forms = forms(),
     InvalidRoleNode = {function, 1, foo, 0, [{clause, 1, [], [], [{atom, 1, ok}]}]},
     ?assertException(
         error,
@@ -591,8 +573,8 @@ test_invalid_post_transform_context_before_validation(Config) ->
     ),
     ok.
 
-test_invalid_transform_maketree_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_transform_maketree_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_transform_maketree, {op, _, _, _, _}, _, _, _},
@@ -609,7 +591,7 @@ test_invalid_transform_maketree_exception(Config) ->
     ),
     ok.
 
-test_invalid_node_exception(_Config) ->
+test_invalid_node_exception_test() ->
     ?assertException(
         error,
         {invalid_node, undefined, _},
@@ -626,8 +608,8 @@ test_invalid_node_exception(_Config) ->
     ),
     ok.
 
-test_invalid_uniplate_subnode_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_uniplate_subnode_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_uniplate_subnode, {var, _Pos, _Value}, invalid_subnode_a, _},
@@ -641,8 +623,8 @@ test_invalid_uniplate_subnode_exception(Config) ->
     ),
     ok.
 
-test_invalid_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_transform_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_transform_normalization, _},
@@ -659,8 +641,8 @@ test_invalid_transform_exception(Config) ->
     ),
     ok.
 
-test_invalid_subtree_transform_exception(Config) ->
-    Forms = proplists:get_value(forms, Config),
+test_invalid_subtree_transform_exception_test() ->
+    Forms = forms(),
     ?assertException(
         error,
         {invalid_transform_normalization, _},

@@ -309,6 +309,11 @@ parse_transform(Forms, CompileOpts)
 
 > 以下内容存在于调研时的工作区，但不属于基准 revision `78683bf`，因此没有进入上文事实统计。
 
-- `.codex/skills/local-workflow/SKILL.md`（`M`）：工作流规则的未提交修改，不属于本次产品提交。
-- `.codex/skills/local-workflow/agents/openai.yaml`（`M`）：工作流 agent 配置的未提交修改，不属于本次产品提交。
-- `openspec/changes/transform-error/design.md`、`proposal.md`、`specs/transform-error-formatting/spec.md`、`tasks.md`（`M`）：OpenSpec 工作区修改，未纳入已提交 product snapshot。
+- `codebase-map.md`（`M`）：补记本次测试目录与执行边界的未提交变化。
+- `rebar.config`（`M`）：指定 Common Test 使用 `common_tests/` 套件目录；EUnit 模块遵循 `test/*_tests.erl` 默认发现规则。
+- `test/*_SUITE.erl` 与对应 `test/*_SUITE_data/`（`D`）：原 Common Test 文件已迁出 `test/`，避免 EUnit 扫描整合测试 fixture。
+- `test/*_tests.erl`（`??`）：迁移后的 EUnit 单元测试模块，覆盖 forms、error、traverse、uniplate、syntax、macro scan 和 macro local。
+- `common_tests/`（`??`）：Common Test 套件及其 fixture，保留需要 suite 生命周期、动态编译和跨模块协作的整合测试。
+- `test_data/`（`??`）：EUnit 使用的 AST fixture。
+- `.github/workflows/ci.yml`、`.github/workflows/release.yml`（`M`）：测试矩阵同时执行 EUnit 与 Common Test，覆盖迁移后的全部 449 条测试。
+- `scripts/cover_report.escript`（`M`）：合并导入 `eunit.coverdata` 与 `ct.coverdata`，避免遗漏 EUnit 覆盖率。

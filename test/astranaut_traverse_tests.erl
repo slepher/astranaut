@@ -6,14 +6,13 @@
 %%% @end
 %%% Created :  6 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_traverse_SUITE).
+-module(astranaut_traverse_tests).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
 -include("do.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("common_test/include/ct.hrl").
 
 %%--------------------------------------------------------------------
 %% @spec suite() -> Info
@@ -108,23 +107,6 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() ->
-    [
-        test_return,
-        test_bind,
-        test_error_0,
-        test_with_all_error,
-        test_state,
-        test_pos,
-        test_pos_2,
-        test_file_pos,
-        test_fail,
-        test_map_m_root_attr,
-        test_map_m_explicit_role_overrides_attr,
-        test_scoped_state,
-        test_scoped_state_fail,
-        test_scoped_state_run
-    ].
 
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
@@ -143,13 +125,13 @@ test_return() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_return(_Config) ->
+test_return_test() ->
     MA = astranaut_traverse:return(10),
     Result = astranaut_return:ok({10, ok}),
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
-test_bind(_Config) ->
+test_bind_test() ->
     MA =
         do([
             traverse
@@ -160,7 +142,7 @@ test_bind(_Config) ->
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
-test_error_0(_Config) ->
+test_error_0_test() ->
     MA =
         do([
             traverse
@@ -178,7 +160,7 @@ test_error_0(_Config) ->
     ?assertEqual(ErrorState2, ErrorStateM1),
     ok.
 
-test_with_all_error(_Config) ->
+test_with_all_error_test() ->
     MA =
         astranaut_traverse:with_all_error(
             fun(Error) -> {mapped, Error} end,
@@ -201,7 +183,7 @@ test_with_all_error(_Config) ->
     ?assertEqual([unchanged_warning], astranaut_error:warnings(Error)),
     ok.
 
-test_state(_Config) ->
+test_state_test() ->
     MA =
         do([
             traverse
@@ -216,7 +198,7 @@ test_state(_Config) ->
     ?assertEqual(Result, astranaut_traverse:run(MA, undefined, #{}, ok)),
     ok.
 
-test_pos(_Config) ->
+test_pos_test() ->
     MA =
         do([
             traverse
@@ -235,7 +217,7 @@ test_pos(_Config) ->
     ?assertEqual({{20, 30}, Errors}, {Return, astranaut_error:formatted_errors(Error)}),
     ok.
 
-test_pos_2(_Config) ->
+test_pos_2_test() ->
     MA =
         do([
             traverse
@@ -249,7 +231,7 @@ test_pos_2(_Config) ->
     ?assertEqual({{10, ok}, Errors}, {Return, astranaut_error:formatted_errors(Error)}),
     ok.
 
-test_file_pos(_Config) ->
+test_file_pos_test() ->
     MA =
         do([
             traverse
@@ -280,7 +262,7 @@ test_file_pos(_Config) ->
     ?assertEqual({{20, 30}, {FileErrors, FileWarnings}}, {Result, astranaut_error:realize(Error)}),
     ok.
 
-test_fail(_Config) ->
+test_fail_test() ->
     MA =
         do([
             traverse
@@ -319,7 +301,7 @@ test_fail(_Config) ->
     }),
     ok.
 
-test_scoped_state(_Config) ->
+test_scoped_state_test() ->
     MA = astranaut_traverse:local(
         fun(_) -> #{macro_context => inherited} end,
         do([
@@ -347,7 +329,7 @@ test_scoped_state(_Config) ->
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
-test_map_m_root_attr(_Config) ->
+test_map_m_root_attr_test() ->
     Node = {atom, 1, ok},
     Monad =
         astranaut:map_m(
@@ -380,7 +362,7 @@ test_map_m_root_attr(_Config) ->
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
-test_map_m_explicit_role_overrides_attr(_Config) ->
+test_map_m_explicit_role_overrides_attr_test() ->
     Node = {atom, 1, ok},
     Monad =
         astranaut:map_m(
@@ -414,7 +396,7 @@ test_map_m_explicit_role_overrides_attr(_Config) ->
     ?assert(astranaut_error:is_empty_error(Error)),
     ok.
 
-test_scoped_state_fail(_Config) ->
+test_scoped_state_fail_test() ->
     MA =
         do([
             traverse
@@ -438,7 +420,7 @@ test_scoped_state_fail(_Config) ->
     ?assertNot(astranaut_error:is_empty_error(Error)),
     ok.
 
-test_scoped_state_run(_Config) ->
+test_scoped_state_run_test() ->
     MA =
         do([
             traverse

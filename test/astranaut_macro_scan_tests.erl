@@ -1,45 +1,13 @@
 %%%-------------------------------------------------------------------
 %%% Source-ordered scan-and-splice primitives.
 %%%-------------------------------------------------------------------
--module(astranaut_macro_scan_SUITE).
+-module(astranaut_macro_scan_tests).
 
--include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -compile({parse_transform, astranaut_do}).
 
--export([all/0]).
--export([
-    basic/1,
-    splice/1,
-    splice_empty/1,
-    expand/1,
-    expand_with_state/1,
-    run_without_local_capability/1,
-    preserve_generated_function_position/1,
-    generated_function_original_merge/1,
-    generated_merge_preserves_original_spec/1,
-    generated_merge_prefers_generated_spec/1,
-    generated_merge_keeps_generated_spec_without_original/1,
-    lift_m_bridge/1
-]).
-
-all() ->
-    [
-        basic,
-        splice,
-        splice_empty,
-        expand,
-        expand_with_state,
-        run_without_local_capability,
-        preserve_generated_function_position,
-        generated_function_original_merge,
-        generated_merge_preserves_original_spec,
-        generated_merge_prefers_generated_spec,
-        generated_merge_keeps_generated_spec_without_original,
-        lift_m_bridge
-    ].
-
-run_without_local_capability(_Config) ->
+run_without_local_capability_test() ->
     Forms = [
         {attribute, 1, module, ordinary_macro_scan_test},
         {function, 2, value, 0, [{clause, 2, [], [], [{atom, 2, ok}]}]}
@@ -61,14 +29,14 @@ run_without_local_capability(_Config) ->
     false = maps:is_key(local_macro_module, Registry),
     ok.
 
-lift_m_bridge(_Config) ->
+lift_m_bridge_test() ->
     TraverseMA = astranaut_traverse:return(42),
     EvalResult = astranaut_traverse:eval(TraverseMA, ?MODULE, #{}, ok),
     {just, V} = astranaut_return:run(EvalResult),
     42 = V,
     ok.
 
-basic(_Config) ->
+basic_test() ->
     Forms = [
         {attribute, {1, 1}, module, test_module},
         {function, {2, 1}, foo, 0, [{clause, {2, 1}, [], [], [{atom, {2, 5}, ok}]}]}
@@ -78,7 +46,7 @@ basic(_Config) ->
     [_, _] = Result,
     ok.
 
-splice(_Config) ->
+splice_test() ->
     Forms = [
         {attribute, {1, 1}, x, ok},
         {attribute, {2, 1}, keep, ok}
@@ -125,7 +93,7 @@ splice(_Config) ->
     ),
     ok.
 
-splice_empty(_Config) ->
+splice_empty_test() ->
     Forms = [
         {attribute, {1, 1}, import_macro, foo},
         {attribute, {2, 1}, keep, ok}
@@ -158,7 +126,7 @@ splice_empty(_Config) ->
     ),
     ok.
 
-expand(_Config) ->
+expand_test() ->
     Forms = [
         {attribute, {1, 1}, module, test},
         {attribute, {2, 1}, my_macro, ok}
@@ -204,7 +172,7 @@ expand(_Config) ->
     ),
     ok.
 
-expand_with_state(_Config) ->
+expand_with_state_test() ->
     Forms = [{attribute, {1, 1}, my_macro, ok}],
     Handler = fun
         ({attribute, _Pos, my_macro, _}) ->
@@ -235,7 +203,7 @@ expand_with_state(_Config) ->
     ),
     ok.
 
-preserve_generated_function_position(_Config) ->
+preserve_generated_function_position_test() ->
     Before = {function, {2, 1}, before, 0, [{clause, {2, 1}, [], [], [{atom, {2, 5}, ok}]}]},
     After = {function, {4, 1}, 'after', 0, [{clause, {4, 1}, [], [], [{atom, {4, 5}, ok}]}]},
     Generated =
@@ -257,7 +225,7 @@ preserve_generated_function_position(_Config) ->
     [before, generated, 'after'] = FunctionNames,
     ok.
 
-generated_function_original_merge(_Config) ->
+generated_function_original_merge_test() ->
     Original = {function, {2, 1}, foo, 0, [{clause, {2, 1}, [], [], [{atom, {2, 5}, original}]}]},
     Generated =
         {function, {10, 1}, foo, 0, [
@@ -295,14 +263,14 @@ generated_function_original_merge(_Config) ->
     ),
     ok.
 
-generated_merge_preserves_original_spec(_Config) ->
+generated_merge_preserves_original_spec_test() ->
     OriginalSpec = spec_form({2, 1}, foo),
     {Original, Generated} = original_and_wrapper(),
     Result = run_original_merge([OriginalSpec, Original], [Generated]),
     [OriginalSpec] = [Spec || Spec = {attribute, _, spec, _} <- Result],
     ok.
 
-generated_merge_prefers_generated_spec(_Config) ->
+generated_merge_prefers_generated_spec_test() ->
     OriginalSpec = spec_form({2, 1}, foo),
     GeneratedSpec = spec_form({10, 1}, foo),
     {Original, Generated} = original_and_wrapper(),
@@ -310,7 +278,7 @@ generated_merge_prefers_generated_spec(_Config) ->
     [GeneratedSpec] = [Spec || Spec = {attribute, _, spec, _} <- Result],
     ok.
 
-generated_merge_keeps_generated_spec_without_original(_Config) ->
+generated_merge_keeps_generated_spec_without_original_test() ->
     GeneratedSpec = spec_form({10, 1}, foo),
     {Original, Generated} = original_and_wrapper(),
     Result = run_original_merge([Original], [GeneratedSpec, Generated]),

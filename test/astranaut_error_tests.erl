@@ -6,14 +6,13 @@
 %%% @end
 %%% Created :  6 Jul 2020 by Chen Slepher <slepheric@gmail.com>
 %%%-------------------------------------------------------------------
--module(astranaut_error_SUITE).
+-module(astranaut_error_tests).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
 -include("rebinding.hrl").
 -include_lib("stdlib/include/assert.hrl").
--include_lib("common_test/include/ct.hrl").
 
 -rebinding_all([{clause_pinned, true}]).
 
@@ -110,9 +109,6 @@ groups() ->
 %% Reason = term()
 %% @end
 %%--------------------------------------------------------------------
-all() ->
-    [test_state_1, test_state_2, test_state_3, test_state_4, test_state_5, test_state_6].
-
 %%--------------------------------------------------------------------
 %% @spec TestCase() -> Info
 %% Info = [tuple()]
@@ -130,7 +126,7 @@ test_merge_1() ->
 %% Comment = term()
 %% @end
 %%--------------------------------------------------------------------
-test_state_1(_Config) ->
+test_state_1_test() ->
     Init = astranaut_error:new(),
     Errors = [error_0],
     Warnings = [],
@@ -140,7 +136,7 @@ test_state_1(_Config) ->
     }),
     ok.
 
-test_state_2(_Config) ->
+test_state_2_test() ->
     Init = astranaut_error:new(),
     Errors = [error_0, error_1],
     State = astranaut_error:append_error(error_0, Init),
@@ -148,7 +144,7 @@ test_state_2(_Config) ->
     ?assertEqual(Errors, astranaut_error:errors(State)),
     ok.
 
-test_state_3(_Config) ->
+test_state_3_test() ->
     Init = astranaut_error:new(),
     Errors = [error_0, error_1],
     Warnings = [warning_0, warning_1, warning_2],
@@ -161,7 +157,7 @@ test_state_3(_Config) ->
     }),
     ok.
 
-test_state_4(_Config) ->
+test_state_4_test() ->
     State = astranaut_error:new(),
     Errors = [{10, ?MODULE, error_0}, {20, ?MODULE, error_1}],
     Warnings = [{5, ?MODULE, warning_0}, {15, ?MODULE, warning_1}, {25, ?MODULE, warning_2}],
@@ -180,7 +176,7 @@ test_state_4(_Config) ->
     }),
     ok.
 
-test_state_5(_Config) ->
+test_state_5_test() ->
     State = astranaut_error:new(),
     Errors = [{?FILE, [{10, ?MODULE, error_0}, {20, ?MODULE, error_1}]}],
     Warnings = [
@@ -201,7 +197,7 @@ test_state_5(_Config) ->
     ?assertEqual({Errors, Warnings}, astranaut_error:realize(State)),
     ok.
 
-test_state_6(_Config) ->
+test_state_6_test() ->
     State = astranaut_error:new(),
     File2 = ?FILE ++ "_2",
     Errors = maps:to_list(#{

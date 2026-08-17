@@ -2,21 +2,24 @@
 %% -*- erlang -*-
 
 %% cover_report.escript -- generates agent-friendly JSON coverage report
-%% from rebar3 ct output.
+%% from rebar3 eunit and rebar3 ct output.
 %%
-%% Usage (from project root, after `rebar3 ct`):
+%% Usage (from project root, after `rebar3 eunit && rebar3 ct`):
 %%   escript scripts/cover_report.escript
 %% Output: _build/test/cover/cover_report.json
 
 main(_Args) ->
     BaseDir = "_build/test",
     EbinDir = filename:join([BaseDir, "lib", "astranaut", "ebin"]),
-    CoverData = filename:join([BaseDir, "cover", "ct.coverdata"]),
+    CoverData = [
+        filename:join([BaseDir, "cover", "eunit.coverdata"]),
+        filename:join([BaseDir, "cover", "ct.coverdata"])
+    ],
     OutFile = filename:join([BaseDir, "cover", "cover_report.json"]),
 
     {ok, _} = cover:start(),
     ok = cover:reset(),
-    ok = cover:import(CoverData),
+    lists:foreach(fun(File) -> ok = cover:import(File) end, CoverData),
     code:add_patha(EbinDir),
     code:add_patha(filename:join([BaseDir, "lib", "astranaut", "test"])),
 

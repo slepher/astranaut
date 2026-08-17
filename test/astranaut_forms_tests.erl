@@ -1,17 +1,11 @@
--module(astranaut_forms_SUITE).
+-module(astranaut_forms_tests).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() ->
-    [
-        test_sort_forms,
-        test_insert_forms_original
-    ].
-
-test_sort_forms(_Config) ->
+test_sort_forms_test() ->
     Function = function(foo, {atom, 1, ok}),
     Forms = [Function, module_form(), eof_form()],
     ?assertEqual(
@@ -19,7 +13,7 @@ test_sort_forms(_Config) ->
         astranaut_forms:sort_forms(Forms)
     ).
 
-test_insert_forms_original(_Config) ->
+test_insert_forms_original_test() ->
     Original = function(foo, {atom, 1, original}),
     Replacement = function(foo, {call, 1, {atom, 1, '__original__'}, []}),
     Forms = astranaut_forms:insert_forms(

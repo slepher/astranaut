@@ -2,56 +2,11 @@
 %%% Focused tests for the local-macro state machine.  These intentionally do
 %%% not invoke the parse transform: the scanner integration has separate tests.
 %%%-------------------------------------------------------------------
--module(astranaut_macro_local_SUITE).
+-module(astranaut_macro_local_tests).
 -compile(export_all).
 -include_lib("eunit/include/eunit.hrl").
 
-all() ->
-    [
-        module_name_is_unique_per_allocation,
-        register_freezes_static_closure,
-        duplicate_declaration_fails_atomically,
-        cache_rejects_conflicting_environments,
-        cache_rejects_conflicting_whitelists,
-        cache_reuses_environment_after_intervening_context,
-        cache_hits_same_fingerprint,
-        final_retained_function_rejects_changed_real_expansion,
-        retain_controls_final_skip_ids,
-        source_view_only_contains_materialised_forms,
-        declaration_environment_snapshot_is_resolved,
-        fingerprint_includes_resolved_attributes,
-        frozen_splice_is_rejected,
-        frozen_splice_reports_generated_form_position,
-        later_declaration_remains_helper_in_earlier_closure,
-        declaration_snapshot_and_actual_local_references,
-        closure_roots_and_self_recursion,
-        minimal_cumulative_compile_boundaries,
-        shared_declaration_stays_in_one_boundary,
-        same_declaration_members_share_order_and_context,
-        function_call_analysis_combines_closure_and_macro_presence,
-        shared_expander_uses_each_task_environment_in_one_pass,
-        shared_expander_follows_external_replacement_presence,
-        shared_expander_collects_recursive_replacement_whitelist,
-        shared_expander_rejects_unexpected_whitelist_immediately,
-        shared_expander_batches_return_whitelist_conflicts,
-        shared_expander_expands_expected_after_unexpected,
-        shared_expander_rejects_missing_whitelist_after_completion,
-        shared_expander_requests_uncallable_local_macro,
-        shared_expander_disables_whitelist_for_ordinary_function,
-        declaration_preexpands_without_compiling,
-        independent_declaration_does_not_compile,
-        dependency_preexpansion_compiles_only_needed_boundary,
-        compiler_reuses_canonical_forms,
-        independent_macros_share_one_boundary,
-        attribute_between_independent_macros_shares_one_boundary,
-        non_frozen_retain_root_has_no_effect,
-        formatter_protocol_none,
-        formatter_protocol_v1_only,
-        formatter_protocol_v1_is_present,
-        formatter_closure_is_private_and_identity_free
-    ].
-
-module_name_is_unique_per_allocation(_Config) ->
+module_name_is_unique_per_allocation_test() ->
     Module = local_macro_unique_name_test,
     First = astranaut_macro_local:module_name(Module),
     Second = astranaut_macro_local:module_name(Module),
@@ -61,7 +16,7 @@ module_name_is_unique_per_allocation(_Config) ->
     ?assert(lists:prefix(Prefix, atom_to_list(Second))),
     ok.
 
-register_freezes_static_closure(_Config) ->
+register_freezes_static_closure_test() ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register(
         [{foo, 0}],
@@ -81,7 +36,7 @@ register_freezes_static_closure(_Config) ->
     ),
     ok.
 
-duplicate_declaration_fails_atomically(_Config) ->
+duplicate_declaration_fails_atomically_test() ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register(
         [{foo, 0}],
@@ -97,7 +52,7 @@ duplicate_declaration_fails_atomically(_Config) ->
     ?assertEqual(1, map_size(astranaut_macro_local:local_macros(State))),
     ok.
 
-cache_rejects_conflicting_environments(_Config) ->
+cache_rejects_conflicting_environments_test() ->
     State0 = astranaut_macro_local:new(),
     {ok, State1} = astranaut_macro_local:cache_expanded(
         {function, helper, 0}, env_a, [], helper_form(a), State0
@@ -113,7 +68,7 @@ cache_rejects_conflicting_environments(_Config) ->
     ),
     ok.
 
-cache_rejects_conflicting_whitelists(_Config) ->
+cache_rejects_conflicting_whitelists_test() ->
     FormId = {function, helper, 0},
     Form = helper_form(a),
     {ok, State1} = astranaut_macro_local:cache_expanded(
@@ -137,7 +92,7 @@ cache_rejects_conflicting_whitelists(_Config) ->
     ),
     ok.
 
-cache_hits_same_fingerprint(_Config) ->
+cache_hits_same_fingerprint_test() ->
     State0 = astranaut_macro_local:new(),
     {ok, State1} = astranaut_macro_local:cache_expanded(
         {function, helper, 0}, env_a, [], helper_form(a), State0
@@ -147,7 +102,7 @@ cache_hits_same_fingerprint(_Config) ->
     ),
     ok.
 
-cache_reuses_environment_after_intervening_context(_Config) ->
+cache_reuses_environment_after_intervening_context_test() ->
     FormId = {function, helper, 0},
     Form = helper_form(a),
     {ok, State1} = astranaut_macro_local:cache_expanded(
@@ -165,7 +120,7 @@ cache_reuses_environment_after_intervening_context(_Config) ->
     ?assertEqual(Form, maps:get(canonical_result, Record)),
     ok.
 
-final_retained_function_rejects_changed_real_expansion(_Config) ->
+final_retained_function_rejects_changed_real_expansion_test() ->
     SourceForm = task_macro_form(foo, retained_conflict_macro),
     FormId = {function, foo, 0},
     {ok, State0} = astranaut_macro_local:register(
@@ -202,7 +157,7 @@ final_retained_function_rejects_changed_real_expansion(_Config) ->
     ),
     ok.
 
-retain_controls_final_skip_ids(_Config) ->
+retain_controls_final_skip_ids_test() ->
     [Foo, Helper, Spec] = forms(),
     {ok, State0} = register(
         [{foo, 0}],
@@ -221,11 +176,11 @@ retain_controls_final_skip_ids(_Config) ->
     ?assertEqual([], Skip1),
     ok.
 
-source_view_only_contains_materialised_forms(_Config) ->
+source_view_only_contains_materialised_forms_test() ->
     ?assertEqual([passed, queued], astranaut_macro_local:source_view([passed], [queued])),
     ok.
 
-frozen_splice_reports_generated_form_position(_Config) ->
+frozen_splice_reports_generated_form_position_test() ->
     Frozen = {function, {7, 1}, foo, 0, [{clause, {7, 1}, [], [], [{atom, {7, 5}, original}]}]},
     Generated =
         {function, {42, 3}, foo, 0, [{clause, {42, 3}, [], [], [{atom, {42, 7}, replacement}]}]},
@@ -250,7 +205,7 @@ frozen_splice_reports_generated_form_position(_Config) ->
     ),
     ok.
 
-declaration_environment_snapshot_is_resolved(_Config) ->
+declaration_environment_snapshot_is_resolved_test() ->
     [Foo, Helper, Spec] = forms(),
     Source = [Foo, Helper, Spec],
     MacroMap = #{
@@ -294,7 +249,7 @@ declaration_environment_snapshot_is_resolved(_Config) ->
     ?assertEqual(Snapshot, maps:get(macro_environment_snapshot, Request)),
     ok.
 
-fingerprint_includes_resolved_attributes(_Config) ->
+fingerprint_includes_resolved_attributes_test() ->
     A = astranaut_macro_local:env_fingerprint(
         #{macro => #{attributes => #{seen => [early]}}},
         #{foo => 1},
@@ -308,7 +263,7 @@ fingerprint_includes_resolved_attributes(_Config) ->
     ?assertNotEqual(A, B),
     ok.
 
-frozen_splice_is_rejected(_Config) ->
+frozen_splice_is_rejected_test() ->
     [Foo, Helper, Spec] = forms(),
     {ok, State} = register(
         [{foo, 0}],
@@ -329,7 +284,7 @@ frozen_splice_is_rejected(_Config) ->
     ),
     ok.
 
-later_declaration_remains_helper_in_earlier_closure(_Config) ->
+later_declaration_remains_helper_in_earlier_closure_test() ->
     Source = [a_calls_b(), b_form_independent()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
@@ -339,7 +294,7 @@ later_declaration_remains_helper_in_earlier_closure(_Config) ->
     ?assert(lists:member({function, b, 0}, maps:get(closure_ids, B))),
     ok.
 
-declaration_snapshot_and_actual_local_references(_Config) ->
+declaration_snapshot_and_actual_local_references_test() ->
     Source = [a_form(), b_form_calls_a(), unused_form()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{imports => [early]}, astranaut_macro_local:new()),
     {ok, S2} = register([{unused, 0}], #{}, Source, #{imports => [middle]}, S1),
@@ -366,7 +321,7 @@ declaration_snapshot_and_actual_local_references(_Config) ->
     ),
     ok.
 
-closure_roots_and_self_recursion(_Config) ->
+closure_roots_and_self_recursion_test() ->
     Source = [recursive_form(), helper_form(ok)],
     {ok, State} = register(
         [{recursive, 0}],
@@ -390,7 +345,7 @@ closure_roots_and_self_recursion(_Config) ->
     ),
     ok.
 
-minimal_cumulative_compile_boundaries(_Config) ->
+minimal_cumulative_compile_boundaries_test() ->
     Source = [a_form(), b_form_calls_a()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
@@ -404,7 +359,7 @@ minimal_cumulative_compile_boundaries(_Config) ->
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Final)),
     ok.
 
-independent_macros_share_one_boundary(_Config) ->
+independent_macros_share_one_boundary_test() ->
     Source = [a_form(), b_form_independent()],
     {ok, S1} = register([{a, 0}], #{}, Source, #{}, astranaut_macro_local:new()),
     {ok, S2} = register([{b, 0}], #{}, Source, #{}, S1),
@@ -412,7 +367,7 @@ independent_macros_share_one_boundary(_Config) ->
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     ok.
 
-attribute_between_independent_macros_shares_one_boundary(_Config) ->
+attribute_between_independent_macros_shares_one_boundary_test() ->
     Source = [a_form(), {attribute, 1, attr_a, a}, b_form_independent()],
     {ok, S1} = register(
         [{a, 0}],
@@ -426,7 +381,7 @@ attribute_between_independent_macros_shares_one_boundary(_Config) ->
     ?assertEqual([{a, 0}, {b, 0}], maps:get(members, Plan)),
     ok.
 
-shared_declaration_stays_in_one_boundary(_Config) ->
+shared_declaration_stays_in_one_boundary_test() ->
     Source = [a_form(), b_form_independent(), c_form_calls_a()],
     {ok, S1} = register(
         [{a, 0}, {b, 0}], #{}, Source, #{}, astranaut_macro_local:new()
@@ -437,7 +392,7 @@ shared_declaration_stays_in_one_boundary(_Config) ->
     ?assertEqual([{a, 0}, {b, 0}, {c, 0}], maps:get(members, Final)),
     ok.
 
-same_declaration_members_share_order_and_context(_Config) ->
+same_declaration_members_share_order_and_context_test() ->
     Source = [a_form(), b_form_independent()],
     {ok, State} = register(
         [{a, 0}, {b, 0}],
@@ -457,7 +412,7 @@ same_declaration_members_share_order_and_context(_Config) ->
     ?assertEqual(2, length(maps:get(requests, Plan))),
     ok.
 
-function_call_analysis_combines_closure_and_macro_presence(_Config) ->
+function_call_analysis_combines_closure_and_macro_presence_test() ->
     Form = function_call_analysis_form(),
     MacroMap =
         #{
@@ -509,7 +464,7 @@ function_call_analysis_combines_closure_and_macro_presence(_Config) ->
     ),
     ok.
 
-shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
+shared_expander_uses_each_task_environment_in_one_pass_test() ->
     FormA = task_macro_form(task_a, whitelist_chain_a),
     FormB = task_macro_form(task_b, whitelist_chain_b),
     MacroMap = whitelist_macro_map(),
@@ -565,7 +520,7 @@ shared_expander_uses_each_task_environment_in_one_pass(_Config) ->
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_follows_external_replacement_presence(_Config) ->
+shared_expander_follows_external_replacement_presence_test() ->
     MacroMap = maps:map(
         fun(_Key, Macro) ->
             maps:remove(
@@ -593,7 +548,7 @@ shared_expander_follows_external_replacement_presence(_Config) ->
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_collects_recursive_replacement_whitelist(_Config) ->
+shared_expander_collects_recursive_replacement_whitelist_test() ->
     FormId = {function, whitelist_target, 0},
     Control = #{
         mode => collect,
@@ -622,7 +577,7 @@ shared_expander_collects_recursive_replacement_whitelist(_Config) ->
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_rejects_unexpected_whitelist_immediately(_Config) ->
+shared_expander_rejects_unexpected_whitelist_immediately_test() ->
     FormId = {function, whitelist_target, 0},
     Expected = [{whitelist_chain_a, 0}],
     reset_whitelist_macro_counts(),
@@ -675,7 +630,7 @@ shared_expander_rejects_unexpected_whitelist_immediately(_Config) ->
     ?assertEqual(undefined, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_batches_return_whitelist_conflicts(_Config) ->
+shared_expander_batches_return_whitelist_conflicts_test() ->
     FormId = {function, whitelist_target, 0},
     Expected = [{whitelist_return_batch, 0}],
     reset_whitelist_macro_counts(),
@@ -722,7 +677,7 @@ shared_expander_batches_return_whitelist_conflicts(_Config) ->
     ?assertEqual(undefined, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_expands_expected_after_unexpected(_Config) ->
+shared_expander_expands_expected_after_unexpected_test() ->
     FormId = {function, whitelist_target, 0},
     Expected = [{whitelist_chain_a, 0}, {whitelist_chain_b, 0}],
     reset_whitelist_macro_counts(),
@@ -754,7 +709,7 @@ shared_expander_expands_expected_after_unexpected(_Config) ->
     ?assertEqual(1, erlang:erase(whitelist_chain_b_count)),
     ok.
 
-shared_expander_rejects_missing_whitelist_after_completion(_Config) ->
+shared_expander_rejects_missing_whitelist_after_completion_test() ->
     FormId = {function, whitelist_target, 0},
     Expected = [
         {whitelist_chain_a, 0},
@@ -791,7 +746,7 @@ shared_expander_rejects_missing_whitelist_after_completion(_Config) ->
     ),
     ok.
 
-shared_expander_requests_uncallable_local_macro(_Config) ->
+shared_expander_requests_uncallable_local_macro_test() ->
     FormId = {function, whitelist_target, 0},
     MacroMap0 = whitelist_macro_map(),
     Macro = maps:get({whitelist_chain_a, 0}, MacroMap0),
@@ -820,7 +775,7 @@ shared_expander_requests_uncallable_local_macro(_Config) ->
     ?assertEqual(undefined, erlang:erase(whitelist_chain_a_count)),
     ok.
 
-shared_expander_disables_whitelist_for_ordinary_function(_Config) ->
+shared_expander_disables_whitelist_for_ordinary_function_test() ->
     {just, #{forms := _Forms, observed_macro_ids := disabled}} =
         astranaut_return:run(
             expand_single_function(
@@ -832,7 +787,7 @@ shared_expander_disables_whitelist_for_ordinary_function(_Config) ->
         ),
     ok.
 
-declaration_preexpands_without_compiling(_Config) ->
+declaration_preexpands_without_compiling_test() ->
     Source = [a_form()],
     {ok, State0} = astranaut_macro_local:register(
         [{a, 0}],
@@ -858,7 +813,7 @@ declaration_preexpands_without_compiling(_Config) ->
     ),
     ok.
 
-independent_declaration_does_not_compile(_Config) ->
+independent_declaration_does_not_compile_test() ->
     Module = local_macro_independent_declaration_test,
     Source = [{attribute, 1, module, Module}, a_form(), b_form_independent()],
     Context = #{source_view => Source, compile_opts => []},
@@ -897,7 +852,7 @@ independent_declaration_does_not_compile(_Config) ->
     ?assertEqual(1, maps:get(generation, S4)),
     ok.
 
-dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
+dependency_preexpansion_compiles_only_needed_boundary_test() ->
     Module = local_macro_dependency_preexpand_test,
     LocalModule = astranaut_macro_local:module_name(Module),
     Source = [{attribute, 1, module, Module}, macro_a_form(), b_form_calls_a()],
@@ -952,7 +907,7 @@ dependency_preexpansion_compiles_only_needed_boundary(_Config) ->
     ?assertEqual(1, maps:get(generation, S3)),
     ok.
 
-compiler_reuses_canonical_forms(_Config) ->
+compiler_reuses_canonical_forms_test() ->
     Module = local_macro_canonical_compile_test,
     Source = [{attribute, 1, module, Module}, a_form()],
     {ok, S0} = astranaut_macro_local:register(
@@ -987,7 +942,7 @@ compiler_reuses_canonical_forms(_Config) ->
     ?assertEqual(Generation, maps:get(generation, S3)),
     ok.
 
-non_frozen_retain_root_has_no_effect(_Config) ->
+non_frozen_retain_root_has_no_effect_test() ->
     [Foo, Helper, Spec] = forms(),
     {ok, S0} = register([{foo, 0}], #{}, [Foo, Helper, Spec], #{}, astranaut_macro_local:new()),
     ?assertEqual(
@@ -1001,7 +956,7 @@ non_frozen_retain_root_has_no_effect(_Config) ->
     ?assertEqual([{function, foo, 0}], Skip),
     ok.
 
-formatter_protocol_none(_Config) ->
+formatter_protocol_none_test() ->
     Definition = formatter_definition(
         local_macro_formatter_none,
         [macro_member_form()]
@@ -1012,7 +967,7 @@ formatter_protocol_none(_Config) ->
     ),
     ok.
 
-formatter_protocol_v1_only(_Config) ->
+formatter_protocol_v1_only_test() ->
     LocalModule = local_macro_formatter_v1_only,
     Definition = formatter_definition(
         LocalModule,
@@ -1024,7 +979,7 @@ formatter_protocol_v1_only(_Config) ->
     ),
     ok.
 
-formatter_protocol_v1_is_present(_Config) ->
+formatter_protocol_v1_is_present_test() ->
     LocalModule = local_macro_formatter_v1,
     Definition = formatter_definition(
         LocalModule,
@@ -1036,7 +991,7 @@ formatter_protocol_v1_is_present(_Config) ->
     ),
     ok.
 
-formatter_closure_is_private_and_identity_free(_Config) ->
+formatter_closure_is_private_and_identity_free_test() ->
     Module = local_macro_formatter_closure_test,
     LocalModule = astranaut_macro_local:module_name(Module),
     Source = [

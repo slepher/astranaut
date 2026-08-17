@@ -20,5 +20,5 @@ jobs:
       - name: Compile
         run: rebar3 compile
 
-      - name: Common Test
-        run: rebar3 as test clean -a && rebar3 ct
+      - name: EUnit and Common Test
+        run: rebar3 as test clean -a && rebar3 eunit && rebar3 ct
