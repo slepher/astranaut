@@ -170,6 +170,8 @@ register_return(FAs, Options, SourceView, MacroEnvironment, State) ->
         {error, Error} -> astranaut_return:error_fail(Error)
     end.
 
+%% The scanner supplies context lazily: external and already-callable targets
+%% do not need a source snapshot or declaration environment.
 prepare_target(
     #{
         macro := #{
@@ -178,18 +180,18 @@ prepare_target(
             arity := Arity
         }
     },
-    WorkflowContext,
+    GetWorkflowContext,
     State
 ) ->
     case maps:find({Function, Arity}, local_macros(State)) of
         {ok, #{status := compiled}} ->
             astranaut_return:return(State);
         {ok, _} ->
-            need_callable({Function, Arity}, WorkflowContext, State);
+            need_callable({Function, Arity}, GetWorkflowContext(), State);
         error ->
             astranaut_return:return(State)
     end;
-prepare_target(_ExternalTarget, _WorkflowContext, State) ->
+prepare_target(_ExternalTarget, _GetWorkflowContext, State) ->
     astranaut_return:return(State).
 
 validate_generated(Forms, State) ->

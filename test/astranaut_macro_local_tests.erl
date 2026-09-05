@@ -6,6 +6,27 @@
 -compile(export_all).
 -include_lib("eunit/include/eunit.hrl").
 
+prepare_target_only_requests_context_when_compilation_is_needed_test() ->
+    State = (astranaut_macro_local:new(test_lazy_context))#{
+        local_macros => #{{ready, 0} => #{status => compiled}}
+    },
+    UnusedContext = fun() -> error(unexpected_context_request) end,
+    Targets = [
+        #{macro => #{macro_source => imported_macro}},
+        #{macro => #{macro_source => local_macro, function => ready, arity => 0}}
+    ],
+    lists:foreach(
+        fun(Target) ->
+            ?assertEqual(
+                {just, State},
+                astranaut_return:run(
+                    astranaut_macro_local:prepare_target(Target, UnusedContext, State)
+                )
+            )
+        end,
+        Targets
+    ).
+
 module_name_is_unique_per_allocation_test() ->
     Module = local_macro_unique_name_test,
     First = astranaut_macro_local:module_name(Module),

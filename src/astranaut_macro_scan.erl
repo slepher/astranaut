@@ -4,7 +4,7 @@
 %%% This module owns the scan queue, passed/remaining source views and the
 %%% traverse state used while attributes are processed. Generic macro
 %%% environments are delegated to astranaut_macro_registry; optional
-%%% declarations are dispatched to their registered capability provider.
+%%% declarations are dispatched to the built-in optional capability provider.
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -30,7 +30,7 @@
                 max_depth := non_neg_integer(),
                 origin := map()
             },
-        remaining_forms => [term()]
+        remaining_queue => {term(), [term()], [term()]}
     }.
 
 %%%===================================================================
@@ -95,11 +95,7 @@ map_forms_splice_loop(_F, [], [], Acc, _Opts) ->
     ).
 
 map_forms_splice_form(F, {Tag, Form}, Rest, Buffer, Acc, Location, Opts) ->
-    Queue = [
-        Form
-        | map_forms_splice_untag(Buffer) ++
-            map_forms_splice_untag(Rest)
-    ],
+    Queue = {Form, Buffer, Rest},
     astranaut_traverse:bind(
         map_forms_splice_note_queue(Opts, Queue),
         fun(_) ->
@@ -185,7 +181,7 @@ clear_map_forms_splice_buffer() ->
 
 map_forms_splice_note_queue(#{queue_state := true}, Queue) ->
     astranaut_traverse:modify(
-        fun(State) -> State#{remaining_forms => Queue} end
+        fun(State) -> State#{remaining_queue => Queue} end
     );
 map_forms_splice_note_queue(_Opts, _Queue) ->
     astranaut_traverse:return(ok).
@@ -250,7 +246,7 @@ map_forms_splice_merge_fas(TaggedForms) ->
         [
             {Name, Arity}
          || {generated_insert, {function, _Pos, Name, Arity, _Clauses} = Form} <- TaggedForms,
-            map_forms_splice_is_renamed(Arity, Form),
+            astranaut_forms:is_renamed(Arity, Form),
             length([
                 ok
              || FA <- FunctionFAs,
@@ -275,18 +271,20 @@ map_forms_splice_reorder(
                 lists:reverse(Acc) ++
                     [Form | map_forms_splice_untag(T)]
             ),
-            NewName = map_forms_splice_new_function_name(
+            NewName = astranaut_forms:new_function_name(
                 Name, Arity, Functions
             ),
-            Form1 = map_forms_splice_update_call_name(
+            Form1 = astranaut_forms:update_call_name(
                 '__original__', NewName, Arity, Form
             ),
-            Acc1 = map_forms_splice_update_function_name(
-                Name, Arity, NewName, Acc
-            ),
-            T1 = map_forms_splice_update_tagged_function_name(
-                Name, Arity, NewName, T
-            ),
+            Acc1 = [
+                astranaut_forms:rename_function(Name, Arity, NewName, Previous)
+             || Previous <- Acc
+            ],
+            T1 = [
+                {Tag, astranaut_forms:rename_function(Name, Arity, NewName, Next)}
+             || {Tag, Next} <- T
+            ],
             map_forms_splice_reorder(T1, [Form1 | Acc1]);
         false ->
             map_forms_splice_reorder(T, [Form | Acc])
@@ -297,7 +295,7 @@ map_forms_splice_reorder([], Acc) ->
     lists:reverse(Acc).
 
 map_forms_splice_needs_merge(Name, Arity, Form, Acc, T) ->
-    map_forms_splice_is_renamed(Arity, Form) andalso
+    astranaut_forms:is_renamed(Arity, Form) andalso
         ordsets:is_element(
             {Name, Arity},
             map_forms_splice_forms_functions(
@@ -318,86 +316,6 @@ map_forms_splice_forms_functions(Forms) ->
         end,
         ordsets:new(),
         Forms
-    ).
-
-map_forms_splice_is_renamed(Arity, Form) ->
-    astranaut:search(
-        fun
-            ({call, _Pos1, {atom, _Pos2, '__original__'}, Arguments}) ->
-                length(Arguments) =:= Arity;
-            (_Node) ->
-                false
-        end,
-        Form,
-        #{traverse => pre}
-    ).
-
-map_forms_splice_new_function_name(FName, Arity, Functions) ->
-    map_forms_splice_new_function_name(FName, Arity, Functions, 1).
-
-map_forms_splice_new_function_name(FName, Arity, Functions, Counter) ->
-    FName1 = list_to_atom(
-        atom_to_list(FName) ++ "_" ++ integer_to_list(Counter)
-    ),
-    case ordsets:is_element({FName1, Arity}, Functions) of
-        true ->
-            map_forms_splice_new_function_name(
-                FName, Arity, Functions, Counter + 1
-            );
-        false ->
-            FName1
-    end.
-
-map_forms_splice_update_tagged_function_name(
-    Name, Arity, NewName, TaggedForms
-) ->
-    [
-        {Tag,
-            map_forms_splice_update_function_name_1(
-                Name, Arity, NewName, Form
-            )}
-     || {Tag, Form} <- TaggedForms
-    ].
-
-map_forms_splice_update_function_name(Name, Arity, NewName, Forms) ->
-    [
-        map_forms_splice_update_function_name_1(
-            Name, Arity, NewName, Form
-        )
-     || Form <- Forms
-    ].
-
-map_forms_splice_update_function_name_1(
-    Name,
-    Arity,
-    NewName,
-    {function, Pos, FName, FArity, Clauses}
-) when
-    FName =:= Name, FArity =:= Arity
-->
-    Clauses1 = map_forms_splice_update_call_name(
-        Name, NewName, Arity, Clauses
-    ),
-    {function, Pos, NewName, Arity, Clauses1};
-map_forms_splice_update_function_name_1(
-    _Name, _Arity, _NewName, Form
-) ->
-    Form.
-
-map_forms_splice_update_call_name(
-    OriginalName, NewName, Arity, Function
-) ->
-    astranaut:smap(
-        fun
-            ({call, Pos, {atom, Pos2, Name}, Arguments}) when
-                Name =:= OriginalName, length(Arguments) =:= Arity
-            ->
-                {call, Pos, {atom, Pos2, NewName}, Arguments};
-            (Node) ->
-                Node
-        end,
-        Function,
-        #{traverse => pre}
     ).
 
 %%%===================================================================
@@ -662,7 +580,12 @@ ensure_attribute_target_callable(
                 prepare_target,
                 [
                     Target,
-                    capability_context(State),
+                    fun() ->
+                        #{
+                            source_view => source_view(State),
+                            compile_opts => maps:get(compile_opts, State)
+                        }
+                    end,
                     ProviderState
                 ]
             )
@@ -723,18 +646,20 @@ note_passed_form(
         )
     }.
 
-passed_forms(#{passed_forms := PassedForms}) ->
-    lists:reverse(PassedForms).
-
-remaining_source_forms(State) ->
-    maps:get(remaining_forms, State, []).
+%% Keep the scanner's queue tails shared; materialize only at provider demand.
+source_view(#{
+    passed_forms := PassedForms,
+    remaining_queue := {Form, Buffer, Rest}
+}) ->
+    lists:reverse(PassedForms, [
+        Form | map_forms_splice_untag(Buffer) ++ map_forms_splice_untag(Rest)
+    ]).
 
 capability_context(State) ->
     Registry = maps:get(registry, State),
     RegistryContext = astranaut_macro_registry:context(Registry),
     RegistryContext#{
-        source_view =>
-            passed_forms(State) ++ remaining_source_forms(State),
+        source_view => source_view(State),
         compile_opts => maps:get(compile_opts, State),
         macro_environment =>
             astranaut_macro_registry:declaration_macro_environment(

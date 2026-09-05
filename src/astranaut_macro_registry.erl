@@ -49,7 +49,6 @@
         file := file:filename(),
         global_macro_opts := map(),
         missing_formatters := ordsets:ordset(module()),
-        module_macro_maps := map(),
         macro_map := macro_map(),
         effective_macro_map := macro_map(),
         attribute_macro_index := map(),
@@ -69,7 +68,6 @@ new(Module, File, GlobalMacroOpts) ->
         file => File,
         global_macro_opts => GlobalMacroOpts,
         missing_formatters => ordsets:new(),
-        module_macro_maps => #{},
         macro_map => #{},
         effective_macro_map => #{},
         attribute_macro_index => #{},
@@ -119,10 +117,6 @@ apply_directive(
                 EffectiveMerged <- merge_macro_maps(
                     EffectiveMacroMap, NewMap
                 ),
-                ModuleMacroMaps = maps:merge(
-                    maps:get(module_macro_maps, State),
-                    Effective
-                ),
                 MissingFormatters1 = note_missing_formatter(
                     FormatterProtocol,
                     ProviderModule,
@@ -131,7 +125,6 @@ apply_directive(
                 State1 = set_effective_macro_map(
                     EffectiveMerged,
                     State#{
-                        module_macro_maps => ModuleMacroMaps,
                         macro_map => Merged,
                         missing_formatters =>
                             MissingFormatters1
@@ -163,23 +156,11 @@ apply_directive(
         NewMap = uniform_imported_macro_map(UsedMacros),
         Merged <- merge_macro_maps(MacroMap, NewMap),
         EffectiveMerged <- merge_macro_maps(EffectiveMacroMap, NewMap),
-        ModuleMacroMaps0 = maps:get(module_macro_maps, State),
-        ModuleMacroMaps1 = maps:fold(
-            fun(M, Macros, Acc) ->
-                M1 = maps:get(M, Acc, #{}),
-                maps:put(
-                    M, maps:merge(M1, Macros), Acc
-                )
-            end,
-            ModuleMacroMaps0,
-            UsedMacros
-        ),
         return(
             {consume,
                 set_effective_macro_map(
                     EffectiveMerged,
                     State#{
-                        module_macro_maps => ModuleMacroMaps1,
                         macro_map => Merged
                     }
                 )}

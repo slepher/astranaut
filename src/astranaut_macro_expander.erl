@@ -206,7 +206,7 @@ resolve_attribute_target(_Node, _MacroMap, _AttributeIndex) ->
 -spec expand_attribute_target(map()) ->
     astranaut_traverse:struct(term(), term()).
 expand_attribute_target(Target) ->
-    Invocation = build_attribute_macro_invocation(Target),
+    Invocation = build_macro_invocation(Target),
     expand_macro(Invocation, #{expected_role => form}).
 
 -spec function_macro_callers([term()], macro_map()) ->
@@ -293,7 +293,6 @@ transform_task_function_if_needed(
             astranaut:map_m(
                 fun(Clause) ->
                     transform_clause(
-                        uniform,
                         MacroMap,
                         Clause,
                         RecordForms,
@@ -328,7 +327,6 @@ function_clauses_uniplate() ->
     end.
 
 transform_clause(
-    Module,
     MacroMap,
     {clause, Pos, Patterns, Guards, Exprs},
     RecordForms,
@@ -338,7 +336,6 @@ transform_clause(
         traverse
      || reset_macro_return_counter(),
         Guards1 <- transform_guard_sequences(
-            Module,
             MacroMap,
             Guards,
             #{
@@ -349,7 +346,6 @@ transform_clause(
             }
         ),
         Exprs1 <- transform_exprs(
-            Module,
             MacroMap,
             Exprs,
             #{
@@ -362,14 +358,14 @@ transform_clause(
         return({clause, Pos, Patterns, Guards1, Exprs1})
     ]).
 
-transform_guard_sequences(Module, MacroMap, Guards, DepthOpts) ->
+transform_guard_sequences(MacroMap, Guards, DepthOpts) ->
     %% Erlang clauses store guards as a list of guard sequences.  Transform
     %% each sequence independently so conjunctions and disjunctions retain
     %% their original nesting and every element is visited as an AST node.
     astranaut_traverse:map_m(
         fun(GuardSequence) ->
             transform_exprs(
-                Module, MacroMap, GuardSequence, DepthOpts
+                MacroMap, GuardSequence, DepthOpts
             )
         end,
         Guards
@@ -460,7 +456,7 @@ finish_function_expansion(
 record_forms(Forms) ->
     [Form || {attribute, _Anno, record, {_Name, _Fields}} = Form <- Forms].
 
-transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
+transform_exprs(MacroMap, Exprs, DepthOpts) ->
     ExpectedRole = maps:get(expected_role, DepthOpts, expression),
     InitAttr = #{
         node => ExpectedRole,
@@ -484,12 +480,11 @@ transform_exprs(Module, MacroMap, Exprs, DepthOpts) ->
                                 },
                             case
                                 match_macro_call(
-                                    Module, Node, MacroMap, Step
+                                    Node, MacroMap, Step
                                 )
                             of
                                 {ok, Macro} ->
                                     expand_observed_macro(
-                                        Module,
                                         MacroMap,
                                         Macro,
                                         Node,
@@ -519,14 +514,14 @@ expand_without_pending_dependency(Node, Expand) ->
         end
     ]).
 
-expand_observed_macro(Module, MacroMap, Macro, Node, DepthOpts) ->
+expand_observed_macro(MacroMap, Macro, Node, DepthOpts) ->
     do([
         traverse
      || Decision <- observe_macro(Macro, DepthOpts),
         case Decision of
             expand ->
                 expand_or_request_macro(
-                    Module, MacroMap, Macro, Node, DepthOpts
+                    MacroMap, Macro, Node, DepthOpts
                 );
             skip ->
                 return(Node)
@@ -534,7 +529,6 @@ expand_observed_macro(Module, MacroMap, Macro, Node, DepthOpts) ->
     ]).
 
 expand_or_request_macro(
-    _Module,
     _MacroMap,
     #{
         observation_id := ObservationId,
@@ -556,8 +550,8 @@ expand_or_request_macro(
         ),
         return(Node)
     ]);
-expand_or_request_macro(Module, MacroMap, Macro, _Node, DepthOpts) ->
-    expand_macro_recursive(Module, MacroMap, Macro, DepthOpts).
+expand_or_request_macro(MacroMap, Macro, _Node, DepthOpts) ->
+    expand_macro_recursive(MacroMap, Macro, DepthOpts).
 
 observe_macro(
     #{observation_id := ObservationId},
@@ -695,8 +689,8 @@ observation_conflict(
 %%% Macro matching, invocation, and returned AST processing
 %%%===================================================================
 
-match_macro_call(Module, Node, Macros, Step) ->
-    case call_find_macro(Module, Node, Macros) of
+match_macro_call(Node, Macros, Step) ->
+    case call_find_macro(Node, Macros) of
         {ok, Macro} ->
             case match_macro_order(Macro, Step) of
                 true -> {ok, Macro};
@@ -707,13 +701,11 @@ match_macro_call(Module, Node, Macros, Step) ->
     end.
 
 call_find_macro(
-    _Module,
     {call, Pos1, {atom, _Pos2, Function}, Arguments} = Node,
     Macros
 ) ->
     find_macro_with_arguments(Function, Arguments, Pos1, Macros, Node);
 call_find_macro(
-    _Module,
     {call, Pos1, {remote, _Pos2, {atom, _Pos3, RemoteModule}, {atom, _Pos4, Function}}, Arguments} =
         Node,
     Macros
@@ -721,7 +713,7 @@ call_find_macro(
     find_macro_with_arguments(
         {RemoteModule, Function}, Arguments, Pos1, Macros, Node
     );
-call_find_macro(_Module, _Node, _Macros) ->
+call_find_macro(_Node, _Macros) ->
     error.
 
 match_macro_order(Macro, Step) ->
@@ -730,7 +722,6 @@ match_macro_order(Macro, Step) ->
         ((Order =:= outer) and (Step =:= pre)).
 
 expand_macro_recursive(
-    _Module,
     _MacroMap,
     #{max_depth := MaxDepth} = Macro,
     #{depth := Depth} = DepthOpts
@@ -746,7 +737,6 @@ expand_macro_recursive(
         )
     );
 expand_macro_recursive(
-    Module,
     MacroMap,
     Macro,
     #{step := post} = DepthOpts
@@ -754,20 +744,19 @@ expand_macro_recursive(
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     expand_macro_with(
         Macro,
-        DepthOpts1#{module => Module, macro_map => MacroMap},
+        DepthOpts1#{macro_map => MacroMap},
         fun(Node1) ->
-            transform_exprs(Module, MacroMap, Node1, DepthOpts1)
+            transform_exprs(MacroMap, Node1, DepthOpts1)
         end
     );
 expand_macro_recursive(
-    Module,
     MacroMap,
     Macro,
     #{step := pre} = DepthOpts
 ) ->
     DepthOpts1 = update_depth_opts(Macro, DepthOpts),
     expand_macro(
-        Macro, DepthOpts1#{module => Module, macro_map => MacroMap}
+        Macro, DepthOpts1#{macro_map => MacroMap}
     ).
 
 update_depth_opts(Macro, #{depth := Depth} = Opts) ->
@@ -854,7 +843,6 @@ process_macro_return(Return, Macro, Opts) ->
         #{record_defs => maps:get(forms, Opts, []), fail => collect},
     CollectObservedMacros =
         maps:get(observation_control, Opts, disabled) =/= disabled,
-    Module = maps:get(module, Opts, uniform),
     MacroMap = maps:get(macro_map, Opts, #{}),
     do([
         traverse
@@ -876,7 +864,6 @@ process_macro_return(Return, Macro, Opts) ->
                             maps:get(pos, Macro)
                         ),
                         collect_return_macro_calls(
-                            Module,
                             Node1,
                             MacroMap,
                             CollectObservedMacros
@@ -903,8 +890,8 @@ process_macro_return(Return, Macro, Opts) ->
         return({Return1, ReturnAnalysis})
     ]).
 
-collect_return_macro_calls(Module, Node, MacroMap, CollectObservedMacros) ->
-    case call_find_macro(Module, Node, MacroMap) of
+collect_return_macro_calls(Node, MacroMap, CollectObservedMacros) ->
+    case call_find_macro(Node, MacroMap) of
         {ok, #{observation_id := ObservationId}} ->
             do([
                 traverse
@@ -1045,7 +1032,7 @@ resolve_attribute_target_by_name(
         {ok, AttributeMacros} ->
             RawArguments = to_list(Arguments),
             case
-                find_attribute_macro(
+                find_macro(
                     Attribute, length(RawArguments), AttributeMacros
                 )
             of
@@ -1056,21 +1043,6 @@ resolve_attribute_target_by_name(
                         pos => Pos,
                         call_ast => CallAst
                     }};
-                error ->
-                    error
-            end
-    end.
-
-find_attribute_macro(Attribute, Arity, AttributeIndex) ->
-    case maps:find({Attribute, Arity}, AttributeIndex) of
-        {ok, Macro} ->
-            {ok, Macro};
-        error ->
-            case maps:find({Attribute, 1}, AttributeIndex) of
-                {ok, #{group_args := true} = Macro} ->
-                    {ok, Macro};
-                {ok, _Macro} ->
-                    error;
                 error ->
                     error
             end
@@ -1090,7 +1062,7 @@ resolve_macro_target(MacroName, Arguments, Pos, Macros, CallAst) ->
             error
     end.
 
-build_attribute_macro_invocation(
+build_macro_invocation(
     #{
         macro := Macro0,
         raw_arguments := RawArguments,
@@ -1104,16 +1076,9 @@ build_attribute_macro_invocation(
     Macro#{arguments => Arguments}.
 
 find_macro_with_arguments(MacroName, Arguments, Pos, Macros, CallAst) ->
-    Arguments1 = to_list(Arguments),
-    Arity = length(Arguments1),
-    case find_macro(MacroName, Arity, Macros) of
-        {ok, Macro} ->
-            Macro1 = Macro#{pos => Pos, call_ast => CallAst},
-            Arguments2 = group_arguments(Arguments1, Macro1),
-            Arguments3 = append_attrs(Arguments2, Macro1),
-            {ok, Macro1#{arguments => Arguments3}};
-        error ->
-            error
+    case resolve_macro_target(MacroName, Arguments, Pos, Macros, CallAst) of
+        {ok, Target} -> {ok, build_macro_invocation(Target)};
+        error -> error
     end.
 
 find_macro(MacroName, Arity, Macros) ->
@@ -1192,7 +1157,7 @@ analyze_function_calls(Clauses, MacroMap, closure) ->
     ).
 
 analyze_macro_call(Node, MacroMap, Analysis) ->
-    case call_find_macro(uniform, Node, MacroMap) of
+    case call_find_macro(Node, MacroMap) of
         {ok, #{observation_id := ObservationId}} ->
             Analysis#{
                 observed_macro_calls :=
@@ -1208,18 +1173,16 @@ analyze_macro_call(Node, MacroMap, Analysis) ->
             Analysis
     end.
 
+has_macro_call(_Nodes, MacroMap) when map_size(MacroMap) =:= 0 ->
+    false;
 has_macro_call(Nodes, MacroMap) ->
-    astranaut:sreduce(
-        fun
-            (_Node, true) ->
-                true;
-            (Node, false) ->
-                case call_find_macro(uniform, Node, MacroMap) of
-                    {ok, _Macro} -> true;
-                    error -> false
-                end
+    astranaut:search(
+        fun(Node) ->
+            case call_find_macro(Node, MacroMap) of
+                {ok, _Macro} -> true;
+                error -> false
+            end
         end,
-        false,
         Nodes,
         #{traverse => pre}
     ).

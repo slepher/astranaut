@@ -15,6 +15,7 @@
 }).
 
 -export([reorder_updated_forms/1, sort_forms/1, insert_forms/2]).
+-export([is_renamed/2, new_function_name/3, rename_function/4, update_call_name/4]).
 
 -spec reorder_updated_forms([updated_form()]) -> [form()].
 reorder_updated_forms(Forms) ->
@@ -328,18 +329,13 @@ new_function_name(Name, Arity, Functions, Counter) ->
     end.
 
 update_function_name(Name, Arity, NewName, Forms) ->
-    lists:map(
-        fun
-            ({function, Pos, FunctionName, FunctionArity, Clauses}) when
-                FunctionName =:= Name, FunctionArity =:= Arity
-            ->
-                Clauses1 = update_call_name(Name, NewName, Arity, Clauses),
-                {function, Pos, NewName, Arity, Clauses1};
-            (Form) ->
-                Form
-        end,
-        Forms
-    ).
+    [rename_function(Name, Arity, NewName, Form) || Form <- Forms].
+
+%% Shared by insertion and the macro scanner's source-ordered merge.
+rename_function(Name, Arity, NewName, {function, Pos, Name, Arity, Clauses}) ->
+    {function, Pos, NewName, Arity, update_call_name(Name, NewName, Arity, Clauses)};
+rename_function(_Name, _Arity, _NewName, Form) ->
+    Form.
 
 update_call_name(OriginalName, NewName, Arity, Tree) ->
     astranaut:smap(
