@@ -164,12 +164,19 @@ final_retained_function_rejects_changed_real_expansion_test() ->
         {retained_conflict_macro, 0} =>
             external_macro(retained_conflict_macro)
     },
+    OrdinaryTask = #{form => foo_form(ordinary), observation_control => disabled},
+    {Tasks, Completion} = astranaut_macro_local:prepare_function_pass(
+        #{FormId => #{form => SourceForm}, {function, ordinary, 0} => OrdinaryTask},
+        #{macro_environment => macro_environment(MacroMap), function_call_analysis => #{}},
+        State2
+    ),
+    ?assertEqual([FormId], maps:keys(Tasks)),
     Error = astranaut_return:run_error(
-        astranaut_macro_local:expand_final_functions(
-            [SourceForm],
-            [{foo, 0}],
-            macro_environment(MacroMap),
-            State2
+        astranaut_return:bind(
+            astranaut_macro_expander:expand_functions([SourceForm], Tasks),
+            fun(#{task_results := Results}) ->
+                astranaut_macro_local:finish_function_pass(Results, Completion, State2)
+            end
         )
     ),
     ?assertEqual(
@@ -177,6 +184,50 @@ final_retained_function_rejects_changed_real_expansion_test() ->
         astranaut_error:errors(Error)
     ),
     ok.
+
+cached_final_task_is_materialized_without_reexpansion_test() ->
+    FormId = {function, foo, 0},
+    Source = foo_form(original),
+    Cached = foo_form(cached),
+    Environment = macro_environment(#{}),
+    {ok, State0} = astranaut_macro_local:register(
+        [{foo, 0}],
+        #{},
+        [Source],
+        Environment,
+        astranaut_macro_local:new(test_cached_final_task)
+    ),
+    Tasks = #{FormId => #{form => Source}},
+    Context = #{macro_environment => Environment, function_call_analysis => #{}},
+    {_, {_, Metadata}} = astranaut_macro_local:prepare_function_pass(Tasks, Context, State0),
+    Fingerprint = maps:get(fingerprint, maps:get(FormId, Metadata)),
+    {ok, State1} = astranaut_macro_local:cache_expanded(FormId, Fingerprint, [], Cached, State0),
+    {Overrides, Completion} = astranaut_macro_local:prepare_function_pass(Tasks, Context, State1),
+    ?assertMatch(
+        #{FormId := #{form := Cached, macro_map := #{}, has_macro_call := false}}, Overrides
+    ),
+    {just, #{forms := [Cached], task_results := Results}} = astranaut_return:run(
+        astranaut_macro_expander:expand_functions([Source], Overrides)
+    ),
+    ?assertEqual(
+        {just, ok},
+        astranaut_return:run(
+            astranaut_macro_local:finish_function_pass(Results, Completion, State1)
+        )
+    ).
+
+ordinary_function_tasks_do_not_enter_local_preparation_test() ->
+    Task = #{form => foo_form(ordinary), observation_control => disabled},
+    %% No macro options are supplied: preparing a local fingerprint here would
+    %% fail. An ordinary task must not need any local expansion context.
+    ?assertEqual(
+        {#{}, {[], #{}}},
+        astranaut_macro_local:prepare_function_pass(
+            #{{function, foo, 0} => Task},
+            #{macro_environment => #{}, function_call_analysis => #{}},
+            astranaut_macro_local:new(test_ordinary_task)
+        )
+    ).
 
 retain_controls_final_skip_ids_test() ->
     [Foo, Helper, Spec] = forms(),

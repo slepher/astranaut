@@ -318,39 +318,39 @@ run_function_macro_pass(
         macro_environment := MacroEnvironment,
         function_call_analysis := FunctionCallAnalysis,
         callers := Callers,
-        capability := disabled
-    }
-) ->
-    do([
-        return
-     || Tasks = function_expansion_tasks(
-            Callers,
-            MacroEnvironment,
-            FunctionCallAnalysis
-        ),
-        #{forms := ExpandedForms} <-
-            astranaut_macro_expander:expand_functions(Forms, Tasks),
-        return(ExpandedForms)
-    ]);
-run_function_macro_pass(
-    Forms,
-    #{
-        capability := #{
-            provider := Provider,
-            state := ProviderState
-        }
+        capability := Capability
     } = FunctionEnv
 ) ->
     do([
         return
-     || {ExpandedForms, _ProviderState1} <-
-            apply(
-                Provider,
-                run_function_pass,
-                [Forms, FunctionEnv, ProviderState]
-            ),
+     || Tasks0 = function_expansion_tasks(
+            Callers, MacroEnvironment, FunctionCallAnalysis
+        ),
+        {Tasks, Completion} = prepare_function_capability(Tasks0, FunctionEnv, Capability),
+        #{forms := ExpandedForms, task_results := Results} <-
+            astranaut_macro_expander:expand_functions(Forms, Tasks),
+        finish_function_capability(Results, Completion),
         return(ExpandedForms)
     ]).
+
+prepare_function_capability(Tasks, _FunctionEnv, disabled) ->
+    {Tasks, disabled};
+prepare_function_capability(
+    Tasks, FunctionEnv, #{provider := Provider, state := State} = Capability
+) ->
+    {Overrides, Completion} = Provider:prepare_function_pass(Tasks, FunctionEnv, State),
+    {maps:merge(Tasks, Overrides), Capability#{
+        task_ids => maps:keys(Overrides),
+        completion => Completion
+    }}.
+
+finish_function_capability(_Results, disabled) ->
+    astranaut_return:return(ok);
+finish_function_capability(
+    Results,
+    #{provider := Provider, state := State, task_ids := Ids, completion := Completion}
+) ->
+    Provider:finish_function_pass(maps:with(Ids, Results), Completion, State).
 
 function_expansion_tasks(
     Callers,

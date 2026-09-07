@@ -16,7 +16,8 @@
     validate_generated/2,
     remove_declarations/2,
     finish_attribute_pass/3,
-    run_function_pass/3,
+    prepare_function_pass/3,
+    finish_function_pass/3,
     new/0, new/1,
     register/5,
     prepare_declaration/3,
@@ -30,7 +31,6 @@
     local_macros/1,
     retained_form_ids/1,
     nonclosure_retain_roots/2,
-    expand_final_functions/4,
     source_view/2,
     env_fingerprint/3,
     reject_locked_mutation/2,
@@ -341,28 +341,6 @@ finish_attribute_pass(Forms, CompileOpts, State) ->
         ),
         return({Forms1, RetainedFunctionIds, State1, RetainWarnings})
     ]).
-
-run_function_pass(
-    Forms,
-    #{
-        macro_environment := MacroEnvironment,
-        function_call_analysis := FunctionCallAnalysis,
-        callers := Callers
-    },
-    State
-) ->
-    expand_final_functions(
-        Forms,
-        [
-            {Name, Arity}
-         || {function, Name, Arity} <- Callers
-        ],
-        MacroEnvironment#{
-            function_call_analysis =>
-                FunctionCallAnalysis
-        },
-        State
-    ).
 
 remove_final_skip_forms(Forms, FinalSkipIds) ->
     Skip = ordsets:from_list(FinalSkipIds),
@@ -889,66 +867,44 @@ nonclosure_retain_roots(Roots, #{local_macros := Macros}) ->
     ),
     ordsets:subtract(ordsets:from_list(Roots), ClosureFAs).
 
-%% Retain and ordinary Step-2 functions share one source-ordered Forms pass.
-%% Every target carries its own frozen source, macro environment and whitelist
-%% control, so differing local environments do not require repeated scans.
--spec expand_final_functions(
-    [term()],
-    [fa()],
-    macro_environment(),
-    state()
+%% Only frozen targets need provider policy. Ordinary tasks remain core-owned.
+prepare_function_pass(
+    Tasks,
+    #{macro_environment := MacroEnvironment, function_call_analysis := Analysis},
+    State
 ) ->
-    astranaut_return:struct({[term()], state()}).
-expand_final_functions(
-    Forms, TargetFAs, MacroEnvironment, State
-) ->
-    OriginalMap = maps:merge(forms_id_map(Forms), maps:get(frozen_forms, State)),
-    PreparationContext =
-        #{
-            original_forms => OriginalMap,
-            macro_environment => MacroEnvironment
-        },
-    {Tasks, CompiledForms, TaskMetadata} =
-        lists:foldl(
-            fun(TargetFA, Acc) ->
-                prepare_final_function_task(
-                    TargetFA, PreparationContext, State, Acc
-                )
-            end,
-            {#{}, #{}, #{}},
-            TargetFAs
-        ),
-    case map_size(Tasks) of
-        0 ->
-            astranaut_return:return(
-                {materialize_forms(Forms, CompiledForms), State}
-            );
-        _ ->
-            do([
-                return
-             || #{
-                    forms := ExpandedForms,
-                    task_results := TaskResults
-                } <-
-                    astranaut_macro_expander:expand_functions(
-                        Forms, Tasks
-                    ),
-                {CompiledForms1, State1} <-
-                    cache_final_function_tasks(
-                        TargetFAs,
-                        TaskResults,
-                        TaskMetadata,
-                        CompiledForms,
-                        State
-                    ),
-                return({
-                    materialize_forms(
-                        ExpandedForms, CompiledForms1
-                    ),
-                    State1
-                })
-            ])
-    end.
+    Frozen = maps:get(frozen_forms, State),
+    TargetFAs = lists:sort([
+        {Name, Arity}
+     || {function, Name, Arity} <- maps:keys(maps:with(maps:keys(Frozen), Tasks))
+    ]),
+    Context = #{
+        original_forms => Frozen,
+        macro_environment => MacroEnvironment#{function_call_analysis => Analysis}
+    },
+    {SpecialTasks, CachedForms, Metadata} = lists:foldl(
+        fun(FA, Acc) -> prepare_final_function_task(FA, Context, State, Acc) end,
+        {#{}, #{}, #{}},
+        TargetFAs
+    ),
+    CachedTasks = maps:map(
+        fun(_Id, Form) ->
+            #{
+                form => Form,
+                macro_map => #{},
+                observation_control => disabled,
+                has_macro_call => false
+            }
+        end,
+        CachedForms
+    ),
+    {maps:merge(SpecialTasks, CachedTasks), {TargetFAs, Metadata}}.
+
+finish_function_pass(Results, {TargetFAs, Metadata}, State) ->
+    astranaut_return:lift_m(
+        fun({_Forms, _State1}) -> ok end,
+        cache_final_function_tasks(TargetFAs, Results, Metadata, #{}, State)
+    ).
 
 prepare_final_function_task(
     {Name, Arity},
