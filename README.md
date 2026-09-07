@@ -633,7 +633,11 @@ Internally, `astranaut_macro` orchestrates the attribute and function passes,
 `astranaut_macro_registry` owns macro declarations and point-in-time macro
 environments, `astranaut_macro_expander` owns shared attribute/function macro
 matching and recursive expansion, and `astranaut_macro_local` owns local
-closure and generation lifecycle. All expansion paths use the same expander.
+declarations, closure analysis and expansion scheduling.
+`astranaut_macro_local_compile` owns temporary module names, compilation input
+assembly, BEAM loading and generation state, including callable versions and
+cleanup of compilation attributes for removed functions.
+All expansion paths use the same expander.
 
 Local-macro support is an optional, lazily registered capability. The scanner
 registers `astranaut_macro_local` when it encounters the first

@@ -94,7 +94,7 @@
 ### 上下文接口收敛
 
 - [x] Entry 和 ExpansionRequest 只保存一份完整的 `macro_environment_snapshot`；删除 `declaration_groups`、`group_id` 和 `group_members` 双重状态。
-- [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options` 及重复 snapshot 字段，仅保留 closure、analysis、environment、source 和 frozen forms 所需的 9 个字段。
+- [x] 删除 ExpansionRequest 中未消费的 `fa`、`already_compiled`、`options`、`referenced_local_macros` 及重复 snapshot 字段，仅保留 closure、analysis、environment、source 和 frozen forms 所需字段；依赖规划直接读取 FA entry 的引用信息。
 - [x] 用命名 map type 约束 workflow context、MacroEnvironment、ExpansionRequest 和 CompilationBoundary。
 
 ### 简洁性复核收口
@@ -138,3 +138,10 @@
 - [x] 编译计划一次建立 FA entry/order/prefix 索引，并 memoize 递归依赖边界；同 order declaration members 仍进入同一累计 prefix。
 - [x] final function 准备直接复用 closure whitelist，不维护调用改写反向索引。
 - [x] 用专项与全量 Common Test、OpenSpec strict validation 验证行为不变。
+
+## BEAM 编译职责迁移
+
+- [x] 按 `design.md` 与 `../macro-passes/Hierarchy_final.md` 的当前职责约定，将临时模块命名、编译输入组装、BEAM 加载和编译属性清理迁入 `astranaut_macro_local_compile`。
+- [x] compiler 独立持有累计 compiled forms、boundary cache、generation 与 callable versions；只接收编译快照，不接收宏环境或展开回调。
+- [x] 删除 local entry 中重复的 callable 状态与独立 compiled IDs 集合；加载成功后由 compiler 提交版本，失败保留旧模块。
+- [x] 覆盖已提交边界复用、编译失败后旧代码可用及后续成功推进版本；48 个专项 EUnit、102 个宏相关 Common Test 用例与 `rebar3 fmt --check` 通过。

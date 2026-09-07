@@ -39,13 +39,29 @@ GenerationCompiler
 `astranaut_macro_registry` 拥有宏声明、环境更新和阶段化 context 解析；
 `astranaut_macro_expander` 拥有 attribute/function 共用的目标解析、宏调用、返回 AST
 规范化、递归展开和展开期 traversal state；`astranaut_macro_local` 拥有声明、闭包、
-一致性记录、调度及 generation 生命周期。expander 不反向调用扫描器或 local-macro
+一致性记录和调度；`astranaut_macro_local_compile` 独占临时模块命名、编译输入准备、
+BEAM 加载及 generation 状态。expander 不反向调用扫描器或 local-macro
 工作流。local-macro 直接调用 `astranaut_macro_expander:expand_functions/2`；每个
 目标任务携带自己的 form、已解析 macro map 与 whitelist control，不存在回调操作表
 或单函数兼容门面。scanner 以不可变 declaration context 调用 local capability，
 并由 scanner 把返回的 definitions delta 提交给 registry；capability 不持有 registry
 state。最终 MacroEnvironment、caller analysis、warning 格式化和 forms 排序仍由
 `astranaut_macro` 编排。
+
+### BEAM 编译职责的当前归属
+
+`astranaut_macro_local` 的 ExpansionValidator 与 DependencyScheduler 保留声明、闭包、
+环境键、whitelist 校验和 NeedCallable 重试。`astranaut_macro_local_compile` 实现
+GenerationCompiler，独占 module name、compiled forms、已提交 boundary、generation
+和逐 FA callable versions；local entries 不再镜像 status/compiled_generation。
+
+local 先准备 canonical forms，再将只含 closure IDs/FAs/source view 的编译 snapshots
+传给 `ensure/5`。compiler 负责来源选择、累计源码组装、formatter/exports、编译加载
+和成功后的状态提交；失败不产生新 CompilerState。local 持有 compiler 子状态但只通过
+查询接口读取编译事实。最终函数删除后的编译属性清理由 compiler 的 `remove_forms/2` 执行。
+
+此归属取代下面历史实现定位中将 compile_boundary/commit_compiled 放在 local 的描述；
+语义顺序、依赖规则和失败边界不变。详见 [Local Macro 设计](../local-macro/design.md)。
 
 ## 2. 与当前实现对照
 
