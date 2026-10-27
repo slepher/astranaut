@@ -1,5 +1,7 @@
 # Macro Passes 设计
 
+> 后续审查：[2026-10-27 宏子系统复杂度与 local_macro 插件边界审查](complexity-review.md)。该文记录待评估的简化方案；本文现行语义不因此变更。
+
 ## 设计目标
 
 1. 外部与本地属性宏在同一次 scan-and-splice 中按源码顺序处理。

@@ -1,5 +1,7 @@
 # Local Macro 设计
 
+> 后续审查：[2026-10-27 宏子系统复杂度与 local_macro 插件边界审查](../macro-passes/complexity-review.md)。首次声明环境绑定、复用 canonical form 和前缀编译均为候选方案，尚未替代本文的一致性校验与按需调度设计。
+
 ## 术语：本地宏闭包
 
 本文的“闭包”不是函数式语言中捕获词法环境的 closure。它是一个静态函数集合：以 local macro 宏头函数为根，包含该函数及通过静态本地调用、`closure_roots` 等规则递归引用到的函数；这些函数对应的 `-spec` forms 也属于该闭包。
