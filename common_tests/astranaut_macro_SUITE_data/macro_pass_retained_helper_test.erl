@@ -14,8 +14,7 @@ value() ->
 entry(Ast) ->
     helper(Ast).
 
-%% Exporting this frozen helper retains the complete closure. It must compare
-%% equal under the declaration and final environments, then remain available
-%% to the final function-body pass.
+%% Exporting this frozen helper retains the complete canonical closure.
+%% The final pass must reuse it without interpreting its calls a second time.
 helper(Ast) ->
     quote(macro_uniform_a:to_a(unquote(Ast))).

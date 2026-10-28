@@ -2,169 +2,37 @@
 
 ## ADDED Requirements
 
-### Requirement: local 与普通 function 使用同构展开
+### Requirement: 通用展开器只执行已可调用宏
 
-`astranaut_macro` MUST 编排 `astranaut_macro_registry` 构造的同一 `MacroRuntimeContext`，并以统一展开验证实现处理 local declaration 预展开、retain 与最终普通 function pass。
+属性与函数 MUST 复用匹配、调用与返回 AST 规范化。展开器 MUST NOT 接收 observation control、whitelist、callable=false、needed_macro_ids 或编译回调。local provider MUST 在调用展开器前完成所需前序编译。
 
-#### Scenario: 展开器不解释 local 专属策略
+#### Scenario: replacement 动态生成前序本地宏调用
 
-- **给定** local-macro 工作流已经构造最终 MacroEnv
-- **当** 调用统一 function 展开操作
-- **那么** 展开器只按 MacroEnv 匹配和递归展开宏调用
-- **并且** 不读取 generation、retain 或 declaration order
+- **给定** frozen function 的外部宏返回对快照中本地宏 A 的调用
+- **当** 展开 replacement
+- **那么** A 已可调用，沿原递归路径执行；原宏不因依赖发现而重复执行
 
-#### Scenario: local 引用复用统一调用匹配
+#### Scenario: 返回树不含宏
 
-- **给定** local-macro 工作流提供候选 local 宏环境和闭包 functions
-- **当** 展开器在原始 function 或递归 replacement AST 中实际匹配 local macro
-- **那么** 使用与普通 function 展开相同的调用匹配语义，并在调用前观察该 FA
+- **给定** 返回 AST 经单次规范化和 presence 检查后不含宏
+- **当** 返回调用方
+- **那么** 直接使用结果，保留变量卫生、位置与校验，不增加第二次扫描
 
-#### Scenario: 同一 declaration 成员保持普通调用
+#### Scenario: 同声明及后声明隔离
 
-- **给定** `-local_macro([foo/1, bar/1])` 在同一 declaration 中注册
-- **当** 工作流预展开 foo/1 或 bar/1
-- **那么** 二者使用相同 declaration MacroRuntimeContext
-- **并且** declaration-time MacroEnv 按构造时点自然不包含 foo/1 与 bar/1
-- **并且** 它们之间的调用保持普通 Erlang 本地调用
-- **并且** 首次完整递归展开收集 canonical whitelist，final LocalEnv 按该名单过滤，无需最终排除二者
+- **给定** 同一声明包含 foo、bar，后声明包含 baz
+- **当** 准备首次绑定的 foo、bar 闭包
+- **那么** 使用声明前快照，同声明和后声明成员不会以新增本地宏身份进入快照
 
-### Requirement: 白名单检查必须显式启用
+### Requirement: 单次展开与最终跳过
 
-通用 function 展开接口 MUST 接收显式 `LocalMacroWhitelistControl`。控制值 MUST 区分 `disabled`、首次 `collect` 和后续 `verify(Expected)`；系统 MUST NOT 根据 MacroEnv 或 function 名称隐式启用白名单。
+provider MUST 在 attribute pass 收尾物化 retained canonical forms，并提供 ExpansionSkipIds。普通 final caller analysis MUST 排除这些 ID。function pass MUST NOT 调用 provider preparation/completion 钩子。
 
-#### Scenario: 普通 function 禁用白名单
+#### Scenario: final caller 看到了 canonical form 内的普通调用
 
-- **给定** 普通 Step 2 function 调用一个或多个 local macros
-- **当** 通用 function 展开器处理该 form
-- **那么** 调用方传入 `disabled`
-- **并且** 系统不创建 observed whitelist、不比较 canonical whitelist，也不产生 whitelist conflict
-- **并且** 返回的 local whitelist 为 `disabled`，callable 调度请求为空
-- **并且** function 仍按完整 FinalMacroEnv 的普通规则展开
-
-#### Scenario: local frozen function 启用收集
-
-- **给定** frozen FormId 首次作为 local-macro closure function 展开
-- **当** `astranaut_macro_local` 调用通用 function 展开器
-- **那么** 调用方传入 `collect` 和该 FormId
-- **并且** 成功结果返回本次实际匹配的 local macro FA ordset
-
-#### Scenario: local frozen function 后续处理启用校验
-
-- **给定** frozen FormId 已有 canonical whitelist
-- **当** 它在另一个 declaration context 或 final context 下再次处理
-- **那么** 调用方传入 `verify(Expected)`
-- **并且** retained local-macro head 与 frozen helper 使用相同校验规则
-
-#### Scenario: final retained 环境按 canonical whitelist 过滤
-
-- **给定** retained frozen FormId 已有 canonical whitelist
-- **并且** FinalEnv 包含其他同声明或后声明 local macros
-- **当** 系统构造该 FormId 的 final expansion env
-- **那么** 只有 canonical whitelist 中的 local entries 进入有效 MacroEnv
-- **并且** 名单外调用保持普通 Erlang 调用，不产生 unexpected whitelist 错误
-
-### Requirement: 宏返回 AST 在 process_macro_return 中批量收集
-
-启用白名单时，原始 function 的 local macro FA MUST 在 `match_macro_call` 成功后观察。每个 macro 返回 AST 的 local macro FAs 与任意 macro presence MUST 由 `process_macro_return` 在既有规范化 traversal 中一次性收集；该函数 MUST 返回 `{ProcessedNode, ReturnAnalysis}`，且收集过程中 MUST NOT 校验 whitelist 或执行 replacement 中的 macro。调用方 MUST 在函数返回后合并并校验 local FA 批次；accepted replacement 只有在 `has_macro_call` 为 true 时才进入递归 macro traversal。系统 MUST NOT 为白名单或 presence 增加第二次 return-tree traversal、完整 function 重扫或 expanded/original AST diff。
-
-#### Scenario: 宏返回值生成新的 local macro 调用
-
-- **给定** local frozen function 首先调用 external macro A
-- **并且** A 的 replacement AST 包含 local macro B 调用
-- **当** `process_macro_return` 规范化 A 的完整返回 AST
-- **那么** B 被加入该次 `ReturnObserved`
-- **并且** `process_macro_return` 返回后，调用方将该批结果合并到当前 FormId 的 observed whitelist
-- **并且** 批量校验通过后 B 才由原有递归路径展开
-- **并且** original function 的其他节点和已处理 siblings 不被重扫
-
-#### Scenario: 无宏 replacement 跳过递归预检查
-
-- **给定** macro A 的 replacement AST 不包含当前 MacroEnv 可匹配的宏调用
-- **当** `process_macro_return` 完成规范化与 presence 收集
-- **那么** `has_macro_call` 为 false
-- **并且** accepted replacement 直接返回，不再执行一次 `transform_exprs` 预检查 traversal
-
-#### Scenario: 多层 replacement 继承同一控制参数
-
-- **给定** A 的 replacement 调用 B，B 的 replacement 又调用 C
-- **当** local frozen function 以 `collect` 或 `verify` 展开
-- **那么** A 与 B 的每次返回 AST 分别产生自己的 `ReturnObserved`
-- **并且** 调用方依次合并这些批次到同一 function-level accumulator
-- **并且** `process_macro_return` 不校验或执行 B、C，也不启动额外 scan pass
-
-#### Scenario: replacement 首次发现尚未 callable 的 local macro
-
-- **给定** external macro replacement 首次生成候选 local macro B 调用
-- **并且** B 尚未进入 callable generation
-- **当** 展开器匹配到 B
-- **那么** 展开器返回 B 的 callable 调度请求且不调用 B
-- **并且** local-macro workflow 通过 `need_callable` 编译所需 boundary
-- **并且** 系统从 frozen form 重试并在成功后才提交 whitelist 与 expanded form
-
-### Requirement: function 闭包分析复用宏 presence
-
-系统 MUST 在构造 function 调用闭包的同一次 per-function traversal 中，同时收集普通本地调用边、local macro FAs 与任意 macro presence。同一 declaration 的多个 closure roots MUST 复用已分析 function 的结果。final function caller 筛选 MUST 使用不构造调用边集合的 presence-only analysis，并将该结果传入 expansion task；可信 presence 存在时 MUST NOT 再调用独立的 `has_macro_call` 预检查。宏 presence MUST 按对应的有效 MacroEnv 判断；form 或环境不满足安全复用条件时 MUST 回退到现场检查。
-
-#### Scenario: closure walk 同时分析 function calls
-
-- **给定** 两个 local macro roots 的调用闭包共享 helper function H
-- **当** declaration 使用对应 MacroEnv 构造两个 closures
-- **那么** H 的 AST 只分析一次
-- **并且** 该结果同时提供本地调用边、local macro FAs 与 `has_macro_call`
-
-#### Scenario: final caller analysis 直接供 expansion task 使用
-
-- **给定** final function caller 筛选已用 FinalMacroEnv 分析全部 functions
-- **当** 系统为未变化的原始 function 建立 expansion task
-- **那么** task 复用该 function 的 `has_macro_call`
-- **并且** final analysis 不构造 `local_calls`，且不启用 `observed_macro_calls` 收集
-- **并且** expander 不再运行独立的 `has_macro_call` traversal
-
-### Requirement: 白名单不匹配必须独立报告
-
-首次成功的 `collect` 结果 MUST 成为该 FormId 的 canonical whitelist。后续 `verify` MUST 在每个 Return AST 完成收集后，对整批 `ReturnObserved` 一次性检查 expected 之外的 local FAs；若存在 unexpected，该批 MUST 只产生一个汇总错误且不得进入 replacement 展开。系统 MUST 在完整 function expansion 结束后检查缺失 FA。
-
-#### Scenario: 同一返回 AST 的多个 unexpected FA 一次报告
-
-- **给定** canonical whitelist 是 `[a/1]`
-- **并且** 某次 macro 返回 AST 同时包含 `b/1` 与 `c/1`
-- **当** `process_macro_return` 完成该返回 AST 的收集
-- **那么** 收集过程不校验也不中断
-- **并且** 调用方随后只报告一个 `conflicting_local_macro_whitelist`
-- **并且** `unexpected` 同时包含 `b/1` 与 `c/1`
-- **并且** 该返回 AST 不进入递归宏展开
-- **并且** 本场景适用于 declaration/非-final verify；final retained 已先过滤环境
-
-#### Scenario: 缺失 FA 只在完成后失败
-
-- **给定** canonical whitelist 是 `[a/1, b/1]`
-- **并且** 当前 traversal 暂时只观察到 `a/1`
-- **当** traversal 尚未完成
-- **那么** 系统不得提前报告缺失 `b/1`
-- **当** 完整 function expansion 结束仍未观察到 `b/1`
-- **那么** 系统报告 `conflicting_local_macro_whitelist`
-
-#### Scenario: 白名单不同但 AST 相同仍冲突
-
-- **给定** 两个环境的最终 expanded form 相同
-- **但是** observed local macro whitelist 不同
-- **那么** 系统报告 `conflicting_local_macro_whitelist`
-
-### Requirement: 展开结果一致性检查必须保留
-
-白名单一致只证明 local macro 调用集合一致。系统 MUST 继续比较不同 external/options/inject contexts 下的最终 expanded form。
-
-#### Scenario: 白名单相同但 AST 不同
-
-- **给定** 两个环境具有相同 canonical whitelist
-- **并且** 不同 `inject_attrs` 值产生不同 expanded form
-- **那么** 系统报告 `conflicting_local_macro_closure_environment`
-
-#### Scenario: 普通 function 不参与两类白名单比较
-
-- **给定** 普通 function 以 `disabled` 展开
-- **当** 其匹配或递归生成 local macro 调用
-- **那么** 系统不读取或更新 local-macro whitelist ExpansionRecord
+- **给定** canonical form 保留了当前最终环境可匹配的普通本地调用
+- **当** 筛选最终 callers
+- **那么** frozen FormId 被跳过，该普通调用不被二次解释为宏
 
 ### Requirement: 属性宏统一参与 scan-and-splice
 
@@ -190,12 +58,12 @@
 - **那么** function form 保留在 forms 流中
 - **并且** 不在属性扫描阶段递归展开其函数体
 
-#### Scenario: 尚不可调用的本地属性宏产生通用 NeedCallable
+#### Scenario: 尚不可调用的本地属性宏在执行前准备
 
 - **给定** `-local_macro([foo/1])` 已注册但尚不可调用
 - **并且** 扫描遇到 `-foo(...)`
 - **当** 处理该属性时
-- **那么** 扫描向通用 dependency scheduler 提交 `NeedCallable(foo/1)`
+- **那么** 扫描通过 provider 的 `prepare_target` 确保 foo 所属累计 prefix 可调用
 - **并且** compiler 只消费已经确认的 canonical expanded forms
 - **并且** 随后在当前位置展开 `-foo(...)`
 
@@ -363,15 +231,15 @@ attribute 宏的运行期注入环境 MUST 只由调用位置之前已经通过�
 - **那么** 二者都使用各自调用点前已生效的 MacroEnv 与 passed forms
 - **并且** local macro 不具有独立的运行期上下文规则
 
-### Requirement: local macro 预展开使用声明位点运行时上下文
+### Requirement: local macro 延迟展开使用声明位点运行时上下文
 
-local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declaration 前 passed forms 所确定的 `MacroRuntimeContext`，包括已生效的宏名称、调用参数、options 与可注入 attribute。完整 remaining source view MUST 只用于闭包发现，不能作为 context 或 `inject_attrs` 输入。GenerationCompiler MUST 只消费 canonical expanded forms，不得载入每个 declaration context 后重新展开。
+local macro frozen function forms 的延迟展开 MUST 使用 `-local_macro` declaration 前 passed forms 所确定的 `MacroRuntimeContext`，包括已生效的宏名称、调用参数、options 与可注入 attribute。完整 remaining source view MUST 只用于闭包发现，不能作为 context 或 `inject_attrs` 输入。GenerationCompiler MUST 只消费 canonical expanded forms，不得载入每个 declaration context 后重新展开。
 
-#### Scenario: NeedCallable 不改变 declaration-time 预展开上下文
+#### Scenario: 属性调用不改变首次绑定的延迟展开上下文
 
 - **给定** `-local_macro([foo/1])` 前存在 attribute `early`
 - **并且** declaration 后存在 `use_macro` 配置变化和 attribute `late`
-- **并且** 更晚的 `-foo(...)` 产生 `NeedCallable(foo/1)`
+- **并且** 更晚的 `-foo(...)` 需要 provider 准备可调用代码
 - **当** 准备 canonical forms、完成必要编译并随后展开 `-foo(...)`
 - **那么** frozen forms 使用 declaration 时的宏名称、调用参数和 `inject_attrs` 配置
 - **并且** frozen forms 的注入值只来自 declaration 前 passed forms，因此可见 `early` 而不可见 `late`
@@ -380,7 +248,7 @@ local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declar
 #### Scenario: remaining queue 只参与闭包发现
 
 - **给定** local declaration 后方的 helper function 与 attribute 尚在 remaining queue
-- **当** 注册、预展开并最终编译该 local macro
+- **当** 注册、延迟展开并最终编译该 local macro
 - **那么** helper function 可以进入 closure source view
 - **并且** 尚未 pass 的 attribute 不能进入 local macro forms 的 `inject_attrs`
 
@@ -427,53 +295,18 @@ local macro frozen function forms 的预展开 MUST 使用 `-local_macro` declar
 - **那么** 每次宏执行的私有 state 不泄漏到调用方或兄弟调用
 - **并且** formatter、位置和错误仍沿外层遍历传播
 
-### Requirement: 最终 function 使用统一 FinalMacroRuntimeContext
+### Requirement: 普通最终 function 使用统一 FinalMacroEnvironment
 
-retain 与最终普通 function pass MUST 使用 attribute scan 完成后的同一个
-`FinalMacroRuntimeContext` 和同一个 ExpansionValidator。local closure target 的
-LocalEnv MUST 由首次完整递归展开收集的 canonical whitelist 过滤；非 local-closure
-ordinary target MUST 保留完整 FinalLocalEnv，并以 `disabled` 展开。
+orchestrator MUST 在 attribute pass 收尾完成后构造最终环境。provider 已编译全部本地成员、删除 local-only forms 并物化 retained canonical forms。最终展开 MUST 只处理未在 ExpansionSkipIds 中的 callers，保留原 outer/inner 递归语义。
 
-#### Scenario: 最终展开跳过工作流指定的 forms
+#### Scenario: 普通函数调用最终本地宏
 
-- **给定** local-macro 收尾返回 `FinalLocalEnv` 和 `FinalSkipIds`
-- **当** 最终函数体展开执行时
-- **那么** 使用包含 FinalLocalEnv、最终 options 与最终 injection forms 的 `FinalMacroRuntimeContext`
-- **并且** 不展开 `FinalSkipIds` 中的 forms
+- **给定** 普通函数不属于 frozen closure
+- **当** function pass 展开
+- **那么** 它可调用最终环境中的全部已注册本地宏
 
-#### Scenario: 最终映射不包含未编译 local macro
+#### Scenario: retain/export 直接保留首次结果
 
-- **给定** local-macro 收尾返回的 FinalLocalEnv 只包含最终可调用 FA
-- **当** 构造 function pass 的宏映射
-- **那么** local macro 映射按 FinalLocalEnv 过滤
-- **并且** 未编译或不可用的 FA 不参与最终匹配
-
-#### Scenario: 最终环境与最后一次 local 展开结果比对
-
-- **给定** function form 曾在 declaration MacroRuntimeContext 下作为 local closure 展开
-- **并且** 该 form 被 retain 或被 Step 2 caller detection 选中
-- **当** FinalMacroRuntimeContext fingerprint 与最后一次 local expansion 不同
-- **那么** 从原始 form 在 FinalMacroRuntimeContext 下重新展开
-- **并且** 过滤后的 MacroEnv 与 macro options 属于该次 input fingerprint
-- **并且** 与最后一次已接受的 local expansion result 比较
-- **并且** 结果不同时报告 `conflicting_local_macro_closure_environment`
-
-#### Scenario: retained local macro 宏头不跳过最终比对
-
-- **给定** retained function 是 local macro 宏头
-- **当** 它进入最终 function 展开
-- **那么** 使用与 helper 和普通 function 相同的 ExpansionValidator
-- **并且** 不存在宏头专用的跳过比对规则
-
-## MODIFIED Requirements
-
-### Requirement: local-macro ExpansionRecord
-
-local-macro ExpansionRecord MUST 同时保存 canonical whitelist 与 canonical expanded form。cache input key MUST 基于展开前可知的运行环境；白名单作为展开结果保存，不得作为首次 lookup 的唯一 key。
-
-#### Scenario: 同一输入复用完整 expansion 结果
-
-- **给定** 某个 FormId 和 input fingerprint 已缓存 whitelist 与 expanded form
-- **当** 相同 input fingerprint 再次请求该 local-macro function expansion
-- **那么** 系统复用缓存的 whitelist 和 expanded form
-- **并且** 不为 cache lookup 预先执行白名单扫描
+- **给定** frozen helper 或宏头被保留且最终环境不同
+- **当** function pass 执行
+- **那么** 直接使用 canonical form，不进行 whitelist 或 AST 一致性比较

@@ -2,22 +2,16 @@
 
 ## 摘要
 
-为 `-local_macro(...)` 建立独立工作流：以逐 FA 条目记录共享的 declaration order/context，基于声明位点 `MacroRuntimeContext` 冻结并预展开闭包，通过 last/canonical expansion record 验证多环境一致性，以通用 `NeedCallable` 调度最小累计编译，并最终提供本地宏环境及函数体生命周期集合。GenerationCompiler 只消费 canonical expanded forms；完整 remaining source view 只用于闭包发现，不用于 `inject_attrs`。
-
-该工作流实现为独立的 `astranaut_macro_local` 模块，而不是继续扩展 `astranaut_macro`。前者拥有 local macro 的状态与生命周期；`astranaut_macro_scan` 拥有统一属性扫描和 forms 队列，通用宏展开由 `astranaut_macro_expander` 提供。
-
-两者通过同构的 function 展开接口协作：`astranaut_macro_local` 为每个目标
-function 构造最终宏环境，`astranaut_macro` 只按该环境执行与普通 function
-相同的引用匹配和递归展开。local macro 实际引用的识别继续复用
-`astranaut_macro` 的统一宏匹配语义；声明快照以及目标 FA 不进入自身宏环境等
-local 专属规则由 `astranaut_macro_local` 负责。
+2026-10-28 采用“首次声明前环境绑定 + 延迟单次 canonical 展开 + 策略 A 前序就绪”。本地宏闭包函数的原始 AST、已解析注入值与宏映射在首次进入闭包时永久绑定；共享、retain 和 export 直接复用 canonical form。
 
 ## 范围
 
-- local macro 注册、重复声明检查与声明顺序。
-- 静态函数闭包、原始 form 冻结与多环境冲突检测。
-- 按需及 scan 收尾的累计编译、同模块安全覆盖加载。
-- `local_macro_retain`、`export`、`export_macro` 的统一 retain 规则。
-- 最终本地宏环境和跳过集合。
+- declaration 只校验与登记闭包，零展开、零编译。
+- 属性目标需要可调用或 scan 收尾时，按声明顺序准备累计 prefix。
+- 无宏闭包直接复用原始 form；含宏闭包在展开前确保前序本地候选全部可调用。
+- 删除多环境指纹、whitelist、重放与挂起重试；将闭包分析和本地诊断留在 provider。
+- 保留冻结保护、closure_roots、完整闭包 retain、唯一临时模块、安全加载和 generation 原子提交。
 
-统一属性扫描如何调度该工作流见 [macro-passes](../macro-passes/proposal.md)。
+## 取舍
+
+含外部宏的闭包也可能提前编译未实际调用的前序本地宏，以覆盖动态 replacement。独立无宏调用的声明合并编译一次。最终环境差异不再导致闭包冲突；详细契约见 [设计](design.md) 和 [规范](specs/macro-expansion/spec.md)。

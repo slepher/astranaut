@@ -465,9 +465,10 @@ roots。若 `local_macro_retain` 命中的是不属于任何本地宏闭包的�
 额外效果，并产生 `ineffective_local_macro_retain` warning；如果 FA 在模块中根本没有
 定义，则改为产生 `undefined_local_macro_retain`。
 
-保留的冻结函数既属于 local macro 定义，也属于最终模块中的 function。因此它会从
-原始 form 在最终 function context 下重新展开，并与声明位点建立的 canonical 结果
-比较；若结果不一致，应报告冲突，而不是任意选择其中一个 context。
+冻结函数永久绑定首次进入闭包时的声明前环境，只在需要编译时展开一次。共享 helper
+以及 retain/export 保留的函数直接复用 canonical form。注册本身不展开、不编译；
+独立无宏调用的声明合并编译一次，含宏闭包则先确保前序本地宏就绪，以支持 replacement
+动态生成的本地宏调用。
 
 ```erlang
 -local_macro_retain([Macro/A, Helper/B]).
@@ -637,8 +638,8 @@ unexpected option 报告并忽略。
    重新定义 local macro；多个 attribute 调用复用同一定义和 callable generation。
 4. attribute pass 和 local macro 收尾完成后，普通函数体使用完整宏环境递归展开。
    因此普通函数可以使用最终全部可调用的 local macros，而冻结的 local macro 闭包
-   forms 保留声明位点发现的本地宏依赖。被 retain 的冻结函数也通过该最终 context，
-   并且必须重现 declaration context 下的 canonical 结果。
+   forms 保留首次声明位点的环境。被 retain 的冻结函数直接复用 canonical form，
+   跳过最终函数展开。
 
 这种源码顺序与 `order` 选项是两个概念：源码顺序决定声明和宏环境更新何时可见，
 `inner` 或 `outer` 则决定单个宏调用中的嵌套展开顺序。
@@ -654,8 +655,6 @@ unexpected option 报告并忽略。
 | `import_macro_failed` | 导入的宏模块无法加载 |
 | `invalid_closure_roots` | `closure_roots` 中存在模块未定义的函数 |
 | `duplicate_local_macro_declaration` | local macro FA 被重复声明，包括同一 declaration 内的重复项 |
-| `conflicting_local_macro_closure_environment` | 被保留或复用的 local macro 闭包在另一个必要环境中产生不同展开结果 |
-| `conflicting_local_macro_whitelist` | 冻结闭包再次展开时观察到的 local macro 依赖集合不同 |
 | `illegal_locked_form_mutation` | attribute 展开尝试替换已冻结的 local macro 闭包 form |
 | `illegal_macro_environment_mutation` | local macro 展开在不允许修改环境的位置生成了宏环境 form |
 | `illegal_local_macro_definition_mutation` | local macro 展开尝试修改已锁定的 local macro 定义 |

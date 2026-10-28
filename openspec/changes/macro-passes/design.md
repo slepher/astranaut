@@ -1,6 +1,6 @@
 # Macro Passes 设计
 
-> 后续审查：[2026-10-27 宏子系统复杂度与 local_macro 插件边界审查](complexity-review.md)。该文记录待评估的简化方案；本文现行语义不因此变更。
+> 2026-10-28 已采用首次绑定与延迟展开（策略 A）。审查背景：[2026-10-27 宏子系统复杂度与 local_macro 职责边界审查](complexity-review.md)。该文保留历史建议；现行契约以本文与 local-macro 设计为准。
 
 ## 设计目标
 
@@ -10,158 +10,17 @@
 4. 最终函数体展开继续保留现有递归及 `outer` / `inner` 语义。
 5. scan 的局部顺序、诊断信息和 traverse state 不因宏执行或 forms 整理被破坏。
 
+provider 用于隔离本地宏内部策略。主流程显式识别本地宏声明、初始化其处理模块并调用生命周期接口，属于正常编排职责；无需通用插件注册入口。`capability` 是内部启用状态，不是用户可配置的插件机制。
+
 ## 统一 function 展开能力
 
-`astranaut_macro_expander` 只维护一套 function-body 宏匹配和递归展开实现；
-`astranaut_macro` 负责 attribute/function pass 编排，`astranaut_macro_scan` 负责
-source-ordered scan-and-splice 与扫描期 traverse state，`astranaut_macro_registry`
-负责环境更新和阶段化 macro environment 解析。
-observation 是 function expansion 的可选通用观察/校验策略；local provider 把
-`Function/Arity` 写入 descriptor 的 `observation_id`，并显式传入控制值。展开器不识别
-`macro_source := local_macro`，也不得根据 MacroEnv、FormId 或阶段隐式推断：
+`astranaut_macro_expander:expand_functions/2` 接收 Forms 与 `#{FormId => #{form, macro_map, has_macro_call => boolean()}}` 任务表，返回 `#{forms => ExpandedForms, task_results => #{FormId => ExpandedForm}}` 的 return monad。属性与函数共用目标解析、调用参数构造和返回 AST 处理。每个函数隔离整数重命名计数器；用户宏私有 state 不覆盖外层 state。
 
-```text
-ObservationControl =
-    disabled
-  | #{mode := collect, form_id := FormId, conflict_tag := atom()}
-  | #{mode := verify,
-      form_id := FormId,
-      conflict_tag := atom(),
-      expected := ordsets:ordset(FA)}
+展开器只消费已可调用的 descriptors，不维护 observation、whitelist、needed_macro_ids 或编译回调。返回 AST 的单次规范化 traversal 同时检测宏 presence；有宏时继续既有 outer/inner 递归，无宏时直接返回。保留位置、变量卫生、record 校验和诊断恢复。
 
-ExpandFunctions(Forms, #{FormId => #{
-  form := OriginalOrFrozenForm,
-  macro_map := ResolvedMacroMap,
-  observation_control := ObservationControl
-}})
-  -> #{forms := ExpandedForms,
-       task_results := #{FormId => #{
-         form := ExpandedTargetForm,
-         observed_macro_ids := disabled | ordsets:ordset(term()),
-         needed_macro_ids := ordsets:ordset(term())
-       }}}
-  | Error
-```
+local provider 在首次冻结时绑定声明前环境，延迟展开一次 canonical form。含宏闭包采用策略 A，在展开前确保快照中的前序本地候选全部可调用。闭包分析由 provider 负责，复用展开器的宏匹配接口。最终 retained forms 直接物化 canonical，普通函数使用最终环境；详见 [local-macro](../local-macro/design.md)。
 
-- `disabled` 不分配 accumulator、不观察 descriptor、不做完成检查，结果 observation 固定为 `disabled` 且 `needed_macro_ids` 为空。
-- `collect` 累计原始 function 中实际发现的 local FAs，以及每个 macro 返回 AST 在 `process_macro_return` 中一次性收集的 local FAs；成功后返回 canonical whitelist。
-- `verify` 使用相同来源累计 FAs；每个返回 AST 收集完成后由调用方批量拒绝 expected 之外的集合，完整展开后检查缺失项。final retained context 先用 expected 过滤 LocalEnv，使名单外调用保持普通调用。
-
-local declaration 预展开、retain 和最终 function pass 都调用该实现。首次 local frozen FormId 使用 `collect`，已有 canonical whitelist 后使用 `verify`；普通 Step 2 function、普通 retained function 与 attribute invocation 使用 `disabled`。每次从 original/frozen form 开始；环境相同直接复用完整结果，环境不同则先校验 whitelist、再与上一次已接受 AST 比较。local-macro generation 编译不调用展开器，只消费已经确认的 canonical expanded forms。
-
-attribute 目标解析、调用参数构造和 function caller 检测也由同一 expander 提供，因此
-attribute 与 function 路径不会各自维护一份 `find_macro` 或返回 AST 规范化实现。
-`inject_attrs` 由扫描器的 `AttributeEnv` 在 declaration/call/final 边界预解析；expander
-只读取 descriptor 中的 `attributes`。expander 不拥有扫描队列、宏环境更新或 local
-generation 生命周期，也不存在单函数兼容门面。
-
-function 调用闭包构造与宏 caller 检测共享 `FunctionCallAnalysis`。closure walk 在首次
-访问某个可达 function 时，用对应 declaration MacroEnv 的同一次 AST traversal 同时
-收集普通本地调用边、匹配到的 local macro FAs 和任意宏 presence；同一 declaration
-的多个 roots 复用该结果。final caller 筛选只消费宏 presence，因此使用 FinalMacroEnv
-生成一次 presence-only analysis，不构造未消费的本地调用集合。两种 mode 都携带原始
-form；只有 form 一致且分析环境是实际展开环境的相同或安全超集时，expansion task 才能
-把 presence 当作可信提示，否则回退到现场检查。
-
-普通 attribute 使用随 `EffectiveMacroMap` 增量重建的 `AttributeMacroIndex`，先按
-attribute name/arity 直接定位 descriptor，再只为该 descriptor 解析 `inject_attrs`。
-declaration 与 final function 是批量展开边界，可能命中 macro map 中的任意 descriptor，
-因此只在这两个边界统一解析完整 map；扫描普通 form 不遍历或解析 macro map。
-
-原始 function 的白名单观察位于统一发现—执行路径；macro 返回 AST 则复用 `process_macro_return` 已有的完整返回树 traversal，一次性收集后再交回调用方：
-
-```text
-Original function match
-  -> observe matched local FA
-  -> unavailable: add needed_macro_ids and do not invoke
-  -> callable: invoke macro
-
-process_macro_return(Return)
-  -> normalize/update every returned node
-  -> collect all local macro FAs in this Return AST
-  -> record whether any macro call exists in this Return AST
-  -> return {ProcessedNode, ReturnAnalysis}
-
-expand_macro_with
-  -> merge ReturnObserved into function-level Observed
-  -> verify the completed ReturnObserved batch
-  -> unexpected batch: emit one conflict and do not expand this replacement
-  -> accepted batch with macro presence: continue replacement expansion
-  -> accepted batch without macro presence: return the processed AST directly
-```
-
-`process_macro_return` 只收集，不校验也不调用 replacement 中的宏。它以
-`scoped_state_run` 使用局部 analysis map state，同时携带 `observed_macro_calls` 与
-`has_macro_call`；调用方合并 local FAs 并执行批量校验。只有被接受且确实含宏的返回
-AST 才沿既有 pre/post 路径进入 `transform_exprs`。不得增加第二次 return-tree scanner、
-whole-form rescan 或 expanded/original AST diff。宏私有 State 与返回树分析 State 均不得
-覆盖 function expansion 的外层 State。
-
-展开操作返回 `astranaut_return` 结果。whitelist/result 必须通过该单一返回形状交回调用方，不得使用 callback、process dictionary 或另一份隐式 traverse state。统一扫描只在调用 local-macro 的注册、按需可调用和收尾接口时桥接 traverse/return monad，不在扫描器内执行或解释 local-macro 编译计划。
-
-### 候选环境与启用边界
-
-必须区分候选能力与真实观察结果：
-
-```text
-CandidateLocalEnv
-  = declaration 时冻结、可能被该 local frozen function 匹配的 local entries
-
-ObservedLocalFAs
-  = 原始 function 的真实 local match
-    ∪ 每个未被 traversal skip 的 macro 返回 AST 中一次性收集的 local macro presence
-```
-
-declaration `collect` 使用冻结的 CandidateLocalEnv；declaration/非-final `verify` 使用当前 CandidateLocalEnv，并在每个返回 AST 完成收集后批量拒绝 whitelist 外 presence；final retained `verify` 使用 `FinalEnv + canonical whitelist` 构造有效 local env。通用展开器不解释 declaration order、self、retain 或 generation。
-
-同一 declaration 的 members 因 declaration 前 CandidateLocalEnv 尚不包含本次新增 entries 而保持普通调用。白名单上线后不再并存 final order/self/member 排除链、owner union 或共享 helper 的运行时猜测。普通 function 的 `disabled` 模式使用完整 FinalMacroEnv。
-
-### 白名单与展开结果冲突
-
-首次成功的 `collect` 原子建立：
-
-```text
-CanonicalWhitelist(FormId) = ObservedLocalFAs
-```
-
-非-final `verify` 采用非对称检查：`process_macro_return` 先完整收集当前 Return AST，再由调用方计算 `ReturnObserved - Expected`。非空时只报告一个包含该批全部 unexpected FAs 的 `conflicting_local_macro_whitelist`，并且不进入该 replacement 的递归展开。收集过程中不得校验或提前中断。原始 function 中直接发现的 unexpected match 仍在调用前拒绝。缺失项只能在完整递归展开结束后以 `Expected - Observed` 检查，因为后续 replacement AST 仍可能生成该调用。final retained 已先过滤环境，不产生 unexpected whitelist 错误。
-
-错误携带：
-
-```text
-{conflicting_local_macro_whitelist,
- FormId,
- #{expected => Expected,
-   observed => Observed,
-   unexpected => Unexpected,
-   missing => Missing}}
-```
-
-白名单相同后仍执行最终 AST 一致性比较：whitelist 不同即使 AST 相同也报告 `conflicting_local_macro_whitelist`；whitelist 相同但 AST 不同报告 `conflicting_local_macro_closure_environment`。任何冲突或宏执行失败都不得提交部分 ExpansionRecord、canonical form 或 generation。
-
-### ExpansionRecord 与 fingerprint
-
-```text
-ExpansionRecord = #{
-  canonical_whitelist := ordsets:ordset(FA),
-  canonical_result := Form,
-  results_by_input := #{InputFingerprint => #{
-    whitelist := ordsets:ordset(FA),
-    result := Form
-  }}
-}
-```
-
-InputFingerprint 覆盖展开前可知的 external macro map、候选 local
-descriptors/versions、macro options 和 inject forms。whitelist 是展开输出，不能作为
-首次 cache lookup 的唯一输入 key。final retained 已有 canonical whitelist 时，
-fingerprint 使用过滤后的有效 MacroEnv；名单外 local descriptor/generation 不进入该
-form 的 input key。普通 function 为 `disabled`，继续使用普通 function
-fingerprint/展开规则。
-
-### replacement 驱动 callable 调度
-
-`collect` 或非-final `verify` 可能在 external/local replacement AST 中首次匹配尚不可调用的候选 local macro。该情况不是 whitelist 冲突：展开器返回 `needed_macro_ids`，不调用该宏，也不提交部分 expansion；`astranaut_macro_local` 通过 `NeedCallable` 编译所需累计 boundary，再从 frozen form 重试。这样按真实匹配驱动最小编译，无需预编译全部 candidates。
+普通 attribute 使用增量 AttributeMacroIndex，只解析所选 descriptor 的 inject_attrs；声明冻结与最终函数环境构造仍是完整 map 的解析边界。
 
 ## 两步模型
 
@@ -173,20 +32,19 @@ fingerprint/展开规则。
    1.2 逐 form 统一 scan-and-splice
        - 外部与可调用本地属性宏按当前位置展开
        - import/use/macro_options 前向更新 ExternalEnv
-       - local_macro declaration 注册逐 FA 条目、冻结 context/CandidateLocalEnv、更新依赖并尝试预展开及收集 canonical whitelist
-       - 任意展开/调用需要未就绪 local macro 时产生通用 NeedCallable
-   1.3 收尾 local-macro 工作流，取得 FinalLocalEnv、RetainIds 与 FinalSkipIds
+       - local_macro declaration 注册逐 FA 条目、冻结首次声明前环境、登记闭包及首次绑定，不展开、不编译
+       - 本地属性调用由 provider 在执行前确保目标累计 prefix 可调用
+   1.3 收尾 local-macro 工作流，编译最终累计 generation、删除 local-only forms、物化 retained canonical forms，并返回 ExpansionSkipIds
    1.4 从完整 AttributeEnv 解析 FinalMacroEnvironment
 
 2. Function pass
-   - retain 与普通目标 function 使用相同 FinalMacroEnvironment
-   - 通过共享 ExpansionValidator 展开或比较最后一次 local 结果
-   - 物化 accepted canonical forms，并只在既定边界排序
+   - 从 caller 集合排除 ExpansionSkipIds
+   - 其余普通目标使用 FinalMacroEnvironment 与共享 expander 展开
 ```
 
 ## 统一属性扫描
 
-扫描 state 持有当前 `EffectiveMacroMap`、已通过扫描的 `passed_forms`、增量 `AttributeEnv`，以及不透明的 `LocalMacroState`。local macro 的注册表、缓存和编译产物不在本变更中定义。扫描 local declaration 时，function forms 的预展开 `MacroEnvironment` 从 declaration 前的状态解析；另可交付 `passed_forms + 当前及剩余 queue` 作为结构性的闭包源码视图，但后者不是宏展开环境。
+扫描 state 持有当前 `EffectiveMacroMap`、已通过扫描的 `passed_forms`、增量 `AttributeEnv`，以及不透明的 `LocalMacroState`。local macro 的注册表、缓存和编译产物不在本变更中定义。扫描 local declaration 时，function forms 的延迟展开 `MacroEnvironment` 从 declaration 前的状态解析；另可交付 `passed_forms + 当前及剩余 queue` 作为结构性的闭包源码视图，但后者不是宏展开环境。
 
 ### 队列与输出模型
 
@@ -208,7 +66,7 @@ while Queue 非空:
 
 `passed_forms` 以输出顺序保存已处理 form，供 attribute injection 使用；新 splice form 在真正被处理前不属于 `passed_forms`。启用 queue state 时，扫描器可见的 remaining source view 是“当前 form + 精确剩余队列”，其中包含尚未处理的生成 forms，但这不会使它们提前成为 attribute injection 输入。
 
-遇到 `local_macro` declaration 时，扫描器冻结一份 local function-form 预展开上下文，并提供一份独立的结构源码视图：
+遇到 `local_macro` declaration 时，扫描器冻结一份 local function-form 延迟展开上下文，并提供一份独立的结构源码视图：
 
 ```text
 DeclarationMacroEnvironment = {
@@ -218,17 +76,17 @@ DeclarationMacroEnvironment = {
 ClosureSourceView = passed_forms ++ 当前及剩余 queue
 ```
 
-`ClosureSourceView` 只用于定位 function/spec 与计算静态闭包；预展开 frozen local macro forms 时，宏名称、alias、调用参数及已解析 attribute 值全部由 `DeclarationMacroEnvironment` 决定。generation 编译不读取该 environment。
+`ClosureSourceView` 只用于定位 function/spec 与计算静态闭包；延迟展开 frozen local macro forms 时，宏名称、alias、调用参数及已解析 attribute 值全部由 `DeclarationMacroEnvironment` 决定。generation 编译不读取该 environment。
 
 | 扫描到的 form | 行为 |
 |---|---|
 | `-import_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-use_macro(...)` | 更新 ExternalEnv 并消费该 form。 |
 | `-macro_options(...)` | 更新全局 options，保留该 form，并记入 `passed_forms`。 |
-| `-local_macro(...)` | 注册共享 order/context 的逐 FA 条目、更新依赖并尝试预展开。 |
+| `-local_macro(...)` | 注册共享 order/context 的逐 FA 条目、登记闭包和首次绑定。 |
 | 外部属性宏调用 | 用当前环境展开，结果 splice 回队列。 |
 | 已可调用的本地属性宏 | 用当前环境展开，结果 splice 回队列。 |
-| 已注册但尚不可调用的本地属性宏 | 产生通用 `NeedCallable`，成功后仍在原位置展开。 |
+| 已注册但尚不可调用的本地属性宏 | 调用 provider 的 `prepare_target` 确保累计 prefix 可调用，成功后仍在原位置展开。 |
 | 其他 form | 原样保留。 |
 
 属性宏可生成新的 `import_macro`、`use_macro`、`macro_options` 或 `local_macro` form；这些 form 重新进入同一扫描流。`export_macro` 单独出现时不会使宏在定义模块内变为可调用的 local macro；其专属保留语义见 local-macro 文档。
@@ -257,9 +115,9 @@ option 报告并忽略，不得让全局配置或导出声明隐式参与本地�
 
 ### 属性宏的判定、注入与展开
 
-每次处理 attribute 时，从 `ExternalEnv + 当前可调用 LocalEnv` 构造执行宏映射，用当前增量 `AttributeEnv` 把 `inject_attrs` selector 解析为 descriptor 的 `attributes`，再按既有 `as_attr`、`exec_macro` 规则匹配。所有 attribute 宏无论来自 external 还是 local，都只看当前位置之前的 attributes；最终 function 宏使用 attribute pass 完成后的完整环境。
+每次处理 attribute 时，从 `ExternalEnv + 当前可调用 LocalEnv` 构造执行宏映射，用当前增量 `AttributeEnv` 把 `inject_attrs` selector 解析为 descriptor 的 `attributes`，再按既有 `as_attr`、`exec_macro` 规则匹配。所有 attribute 宏无论来自 external 还是 local，都只看当前位置之前的 attributes；普通最终 function 宏使用 attribute pass 完成后的完整环境；retained frozen forms 复用 canonical 结果。
 
-若当前 attribute 需要尚不可调用的 local macro，只产生与其他阶段相同的 `NeedCallable`。scheduler 使用已经确认的 canonical forms 编译必要 boundary；随后 attribute 仍按调用点 `MacroEnvironment` 运行。attribute 不拥有专用编译策略。
+若当前 attribute 需要尚不可调用的 local macro，由 provider 在调用前确保目标可调用。scheduler 使用已经确认的 canonical forms 编译必要 boundary；随后 attribute 仍按调用点 `MacroEnvironment` 运行。attribute 不拥有专用编译策略。
 
 若命中外部或已就绪本地属性宏，使用当前映射展开并返回 `splice(NewForms)`。若 attribute 对应已注册但尚不可调用的 local macro，扫描器调用 local-macro 工作流的确保可调用接口；成功后仍在同一队列位置展开，不能延后到独立本地 pass。
 
@@ -288,20 +146,8 @@ attribute pass 全部收尾完成后可调用 `sort_forms/1` 生成 Erlang 编�
 
 ## Attribute pass 收尾与 function pass
 
-扫描完成后，orchestrator 先让 local capability 移除已成功注册的 declaration，再统一
-执行 export preparation。local-macro 收尾只完成其生命周期、retain、skip 和 warning
-计算，返回处理后的 forms、额外 function callers 及 provider state；具体如何冻结、
-预展开、比较和编译 canonical forms 见 [local-macro 设计](../local-macro/design.md)。
+扫描完成后，orchestrator 移除成功注册的 declarations 并统一准备 exports。provider 收尾编译全部本地宏，删除 local-only forms，将 retained frozen forms 替换为 canonical forms，返回 `{Forms, ExpansionSkipIds, ProviderState, Warnings}`。
 
-`astranaut_macro` 随后统一构造唯一 `FinalMacroEnvironment`、执行 caller analysis、
-合并 capability 提供的额外 callers、格式化 warnings 并排序 forms。function pass 从
-该最终 attribute 输出继续处理。retain 与普通目标
-functions 作为任务表交给共享 ExpansionValidator，在一次保序 Forms 遍历中分别使用
-各自环境；若某个 form 曾在 declaration environment 中展开，final environment 不同时
-必须从 original form 展开并与最后一次结果比较。属于 frozen closure 的 retained form
-按 declaration 的 canonical whitelist 过滤 FinalMacroEnvironment；该规则同样适用于
-retained local macro 宏头。
+orchestrator 构造唯一 FinalMacroEnvironment，执行普通 caller analysis，并从 caller 集合排除 ExpansionSkipIds，格式化 warnings 后排序 forms。function pass 不再携带 provider state 或调用 preparation/completion 钩子，只展开非闭包目标。
 
-扫描器不解释 local-macro 的编译计划；declaration provider 也不持有 registry state。
-scanner 只负责提交 provider 返回的 definitions delta，pass orchestrator 负责通用环境、
-分析、诊断与排序，local provider 只返回其生命周期产生的 forms/callers/warnings/state。
+scanner 仍只合并 provider 返回的 definitions delta，不解释编译计划。local 专属诊断由 provider formatter 负责，共享校验和宏执行诊断继续沿原 formatter 管线传播。

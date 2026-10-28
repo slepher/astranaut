@@ -356,16 +356,17 @@ test_macro_local_retain_warnings(Config) ->
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     MacroWarnings =
         [
-            {Line, Warning}
+            {Line, Formatter, Warning}
          || {_File, FileWarnings} <- Warnings,
-            {Line, astranaut_macro, Warning} <- FileWarnings
+            {Line, Formatter, Warning} <- FileWarnings,
+            Formatter =:= astranaut_macro orelse Formatter =:= astranaut_macro_local
         ],
     ?assertEqual(
         lists:sort(
             [
-                {3, {missing_macro_formatter, macro_local_retain_warning_test}},
-                {4, {undefined_local_macro_retain, [{missing, 0}]}},
-                {4, {ineffective_local_macro_retain, [{ordinary, 0}]}}
+                {3, astranaut_macro, {missing_macro_formatter, macro_local_retain_warning_test}},
+                {4, astranaut_macro_local, {undefined_local_macro_retain, [{missing, 0}]}},
+                {4, astranaut_macro_local, {ineffective_local_macro_retain, [{ordinary, 0}]}}
             ]
         ),
         lists:sort(MacroWarnings)
@@ -401,7 +402,7 @@ test_macro_local_declaration_preserves_prior_registration(Config) ->
     {[{_File, Errors}], Warnings} =
         astranaut_test_lib:realize_with_baseline(Baseline, ErrorStruct),
     MacroErrors =
-        [Error || {_Line, astranaut_macro, Error} <- Errors],
+        [Error || {_Line, astranaut_macro_local, Error} <- Errors],
     ?assertMatch(
         [{duplicate_local_macro_declaration, {gen, 1}}],
         MacroErrors
@@ -515,11 +516,23 @@ test_macro_format_error_predefined_errors(_Config) ->
             {macro_exception, #{module => macro_a, function => explode, arity => 1},
                 [{atom, 1, ok}], {error, bad_macro, []}},
             {invalid_macro_return, DirectInvalidReturn},
-            {invalid_macro_return, NestedInvalidReturn},
-            {undefined_local_macro_retain, [{missing, 0}]},
-            {ineffective_local_macro_retain, [{ordinary, 0}]}
+            {invalid_macro_return, NestedInvalidReturn}
         ],
     lists:foreach(fun assert_macro_format_error/1, Errors),
+    lists:foreach(
+        fun(Error) ->
+            Message = astranaut_macro_local:format_error(Error),
+            ?assert(io_lib:deep_char_list(Message)),
+            ?assertNotEqual([], lists:flatten(Message))
+        end,
+        [
+            {undefined_local_macro_retain, [{missing, 0}]},
+            {ineffective_local_macro_retain, [{ordinary, 0}]},
+            {duplicate_local_macro_declaration, {foo, 0}},
+            {invalid_closure_roots, [{missing, 0}]},
+            {illegal_locked_form_mutation, frozen}
+        ]
+    ),
     ?assertEqual(
         "macro provider missing_formatter does not export format_error/1; using astranaut_macro formatter.",
         lists:flatten(

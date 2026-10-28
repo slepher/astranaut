@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% An external macro introduces the first reference to a pending local macro.
-%%% The local dependency must be compiled on demand before expansion retries.
+%%% The preceding local prefix must be callable before expansion starts.
 %%%-------------------------------------------------------------------
 -module(macro_pass_external_replacement_local_test).
 
@@ -21,4 +21,5 @@ entry() ->
 
 leaf() ->
     astranaut_lib:abstract_form(
-      astranaut_lib:abstract_form({external_replacement_local, ok})).
+        astranaut_lib:abstract_form({external_replacement_local, ok})
+    ).

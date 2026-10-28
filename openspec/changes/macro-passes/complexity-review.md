@@ -1,6 +1,10 @@
-# 宏子系统复杂度与 local_macro 插件边界审查
+# 宏子系统复杂度与 local_macro 职责边界审查
 
 记录日期：2026-10-27。
+
+2026-10-28 更新：已选择首次绑定与延迟展开，并采用含宏闭包前序就绪的策略 A。现行契约见 [Local Macro 设计](../local-macro/design.md)；下文保留原始审查背景，registry 数据结构清理仍为独立候选。
+
+2026-10-28 目标澄清：provider 的目的是把 `local_macro` 专属逻辑从主逻辑中剥离，不以特性插件化为目标。原审查中的“纯粹插件”与插件化完成比例不作为验收标准；扫描器显式识别属性并指定处理模块符合设计，不需要通用 provider 注册入口。
 
 来源：用户提供的宏子系统代码走查记录。本次整理保存审查观点、代码定位和候选方案，不代表重新完成了代码审计，也不表示已接受或实现这些建议。现行契约仍以 [Macro Passes 设计](design.md)、[Local Macro 设计](../local-macro/design.md) 和 [处理层级](Hierarchy_final.md) 为准。
 
@@ -10,7 +14,7 @@
 
 原审查认为，外部宏的主干流程复杂度基本合理：源码序 scan-and-splice 负责生成 forms 的即时处理及环境前向生效，统一 `MacroEnvironment` 让属性宏与函数宏共享匹配和执行规则。
 
-`local_macro` 已具备按需加载和独立生命周期，但核心模块仍承担只被本地宏使用的观察、调度、闭包分析和诊断逻辑。因此，“可选 capability provider”与“核心完全不感知本地宏策略的插件”应分别评价。原审查将多环境重放、canonical whitelist 和挂起重试列为主要维护成本，并建议通过更简单的语义降低复杂度。这是设计取舍建议；相关场景是否低频、成本是否超过收益，仍需用实际用例与测试验证。
+原审查时，`local_macro` 已具备按需加载和独立生命周期，但核心模块仍承担只被本地宏使用的观察、调度、闭包分析和诊断逻辑。应以这些专属策略是否归属 local 模块来评价职责隔离；主流程识别本地宏声明并委托处理是正常编排。原审查将多环境重放、canonical whitelist 和挂起重试列为主要维护成本，并建议通过更简单的语义降低复杂度；这些机制已由首次绑定与延迟展开方案替代。
 
 ## 已形成的模块边界
 
@@ -28,7 +32,7 @@
 | `expand_without_pending_dependency/2`、`expand_or_request_macro/4` | `callable => false`、`needed_macro_ids` 与短路遍历将本地宏的可调用调度需求带入展开器。 |
 | `function_call_analysis/3`、`analyze_function_calls/3` | closure 模式收集本地调用边与宏依赖；外部宏 caller 筛选仅消费 presence。 |
 | `macro_mfa/1`、`macro_exception/5` | 根据执行模块和源模块的差异还原本地宏身份及异常栈。 |
-| `astranaut_macro_scan:scan_form/1`、`scan_local_macro_form/2`、`map_forms_splice_note_queue/2` | 扫描器识别 `local_macro` 并指定 provider；remaining queue 快照服务于闭包源码视图。应核实 disabled 时维护快照的必要性。 |
+| `astranaut_macro_scan:scan_form/1`、`scan_local_macro_form/2`、`map_forms_splice_note_queue/2` | 扫描器识别 `local_macro` 并指定处理模块符合职责分工，不是待修复耦合。remaining queue 快照服务于闭包源码视图；disabled 时维护快照的成本可独立评估。 |
 | `astranaut_macro:format_error/1` | 主模块持有 `invalid_closure_roots`、`conflicting_local_macro_whitelist`、`illegal_locked_form_mutation` 等本地宏专属错误文案。 |
 
 ## 候选简化一：首次声明环境绑定
@@ -54,7 +58,7 @@
 1. 将本地宏专属 `format_error/1` 子句下沉到 `astranaut_macro_local`，诊断使用对应 formatter，并保留错误位置与 monad 桥接语义。
 2. 将 closure 调用图分析内聚到 local provider，复用通用 AST traversal 和宏匹配能力；expander 保留 caller presence 检查。迁移前确认宏匹配接口边界，避免复制匹配规则或引入第二套函数展开器。
 3. 在 descriptor 中显式携带 `display_module` 等诊断身份，让通用展开器使用描述符信息。仅新增字段不足以自动解决异常栈映射，仍需明确执行模块与展示模块的映射契约。
-4. 核查 capability disabled 时的 queue snapshot 成本，再决定是否按需维护；是否进一步抽象属性到 provider 的注册入口，取决于实际扩展需求。
+4. 核查 capability disabled 时的 queue snapshot 成本，再决定是否按需维护。这是性能优化候选，不涉及 provider 插件化；通用属性注册入口不列为后续工作。
 
 ## 候选简化四：registry 数据结构与展开状态
 

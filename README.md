@@ -701,11 +701,12 @@ closure has no extra effect and produces an
 `ineffective_local_macro_retain` warning. Referring to an FA that is not defined
 in the module instead produces `undefined_local_macro_retain`.
 
-A retained frozen function is both part of its local macro definition and a
-function in the final module. It is therefore expanded again from its original
-form under the final function context and checked against the canonical result
-established from its declaration context. A mismatch is an intentional
-conflict rather than a choice of one context over the other.
+A frozen function binds permanently to the environment of the first declaration
+whose closure contains it. It is expanded once, when compilation is needed;
+shared helpers and retained/exported functions reuse that canonical form.
+Registration does not expand or compile. Independent declarations without macro
+calls share one cumulative compilation; macro-bearing closures first ensure
+preceding local macros are callable, including potential replacement calls.
 
 ```erlang
 -local_macro_retain([Macro/A, Helper/B]).
@@ -924,8 +925,8 @@ pass:
    bodies are recursively expanded with the completed macro environment. An
    ordinary function can therefore use all callable final local macros, while
    frozen local macro closure forms preserve their declaration-time local macro
-   dependencies. Retained frozen functions also run through this final context
-   and must reproduce their declaration-context canonical result.
+   dependencies. Retained frozen functions reuse their canonical forms and
+   are excluded from the final expansion pass.
 
 This source ordering is separate from the `order` option: source order controls
 when macro declarations and environment updates become visible, while `inner`
@@ -942,8 +943,6 @@ or `outer` controls nested expansion at an individual macro call.
 | `import_macro_failed` | imported macro module could not be loaded |
 | `invalid_closure_roots` | `closure_roots` names functions that are not defined in the module |
 | `duplicate_local_macro_declaration` | a local macro FA was declared more than once, including duplicates in one declaration |
-| `conflicting_local_macro_closure_environment` | a retained or reused local macro closure expands differently under another required environment |
-| `conflicting_local_macro_whitelist` | repeated expansion of a frozen closure observes a different set of local macro dependencies |
 | `illegal_locked_form_mutation` | attribute expansion attempted to replace a frozen local macro closure form |
 | `illegal_macro_environment_mutation` | local macro expansion generated a macro-environment form where environment mutation is not allowed |
 | `illegal_local_macro_definition_mutation` | local macro expansion attempted to change a locked local macro definition |

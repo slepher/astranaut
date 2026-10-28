@@ -20,27 +20,27 @@
 
 ### Requirement: 声明位点环境
 
-每个 declaration 的 function forms MUST 使用 declaration 前 passed forms 所确定的预展开 `MacroRuntimeContext`：其中包含已 pass 的有效宏环境、options，以及这些 passed forms 可提供的 `inject_attrs` 值。包含 remaining queue 的源码视图只用于发现闭包，不属于宏运行时上下文。GenerationCompiler MUST NOT 读取该 context。
+每个 declaration 的 function forms MUST 使用 declaration 前 passed forms 所确定的延迟展开 `MacroRuntimeContext`：其中包含已 pass 的有效宏环境、options，以及这些 passed forms 可提供的 `inject_attrs` 值。包含 remaining queue 的源码视图只用于发现闭包，不属于宏运行时上下文。GenerationCompiler MUST NOT 读取该 context。
 
 #### Scenario: 声明前 import 对闭包可见
 
 - **给定** `-import_macro(macro_a)` 在 `-local_macro([foo/1])` 之前已 pass
 - **并且** foo 的闭包实际调用 macro_a 中的宏
-- **当** 预展开 foo 时
+- **当** 延迟展开 foo 时
 - **那么** 其展开环境包含 macro_a
 
 #### Scenario: 声明后 import 不回溯进入闭包环境
 
 - **给定** `-local_macro([foo/1])` 已注册
 - **并且** 后续属性生成 `-import_macro(macro_b)`
-- **当** 预展开 foo 时
+- **当** 延迟展开 foo 时
 - **那么** foo 的 declaration 环境不包含 macro_b
 
 #### Scenario: 声明后 use_macro 不改变 local forms 的调用语义
 
 - **给定** `-local_macro([foo/1])` 已保存声明位点环境
 - **并且** 后续 `-use_macro(...)` 修改同一宏的 alias、调用参数或 `inject_attrs` 配置
-- **当** foo 在 declaration 点预展开，或之后因依赖就绪补充展开
+- **当** foo 在 declaration 点延迟展开，或之后因依赖就绪补充展开
 - **那么** foo 的 frozen forms 仍使用 declaration 时保存的宏名称、调用参数和 `inject_attrs` 配置
 - **并且** 后续 use_macro 只影响其声明位置之后的普通 attribute/function 展开
 
@@ -60,13 +60,11 @@
 - **那么** helper 可以通过完整 closure source view 被纳入静态闭包
 - **但是** helper 前后的尚未 pass attributes 不得通过该 source view 进入 `inject_attrs`
 
-#### Scenario: 仅实际引用的 local macro 进入环境
+#### Scenario: 快照保留全部前序候选
 
-- **给定** 多个 local macro 已注册或已编译
-- **并且** foo 的闭包仅实际使用其中 a/1
-- **当** 构造 foo 的 declaration 或 final 展开环境时
-- **那么** LocalEnv 部分仅包含 a/1
-- **并且** 后声明或未被 form 扫描识别的 local macros 不参与匹配
+- **给定** A 在 B 前声明，B 的外部宏可能生成 A 的调用
+- **当** 冻结 B 的宏环境
+- **那么** 保留声明前完整有效宏映射，后声明宏不参与匹配
 
 #### Scenario: 自身递归调用不是宏依赖
 
@@ -78,9 +76,9 @@
 #### Scenario: 同 declaration 的成员共享环境且互不作为宏
 
 - **给定** `-local_macro([foo/1, bar/1])`
-- **当** 预展开 foo/1 与 bar/1 的 frozen forms
-- **那么** 二者使用同一个 declaration MacroRuntimeContext fingerprint
-- **并且** declaration 前候选环境自然不包含 foo/1 与 bar/1，因此二者不进入扫描得到的 local-macro 白名单
+- **当** 延迟展开 foo/1 与 bar/1 的 frozen forms
+- **那么** 二者使用同一个 declaration MacroRuntimeContext
+- **并且** declaration 前候选环境自然不包含 foo/1 与 bar/1，因此二者不作为本次新增的本地宏参与匹配
 - **并且** bar/1 对 foo/1 的调用保持普通 Erlang 本地调用，反向同理
 
 #### Scenario: 实际 local 引用使用统一宏匹配语义
@@ -92,7 +90,7 @@
 
 ### Requirement: 冻结原始闭包 forms
 
-系统 MUST 在 declaration 注册时冻结闭包的原始 function/spec forms，并保证所有环境展开都从该原始输入开始。
+系统 MUST 在 declaration 注册时冻结闭包的原始 function/spec forms，并永久绑定首次声明前环境。
 
 #### Scenario: 闭包在注册时冻结
 
@@ -108,98 +106,67 @@
 - **并且** 不插入该 attribute 的 splice 结果
 - **并且** 统一扫描继续处理后续 forms
 
-### Requirement: 跨环境展开比对与缓存
+### Requirement: 首次绑定与单次 canonical 展开
 
-ExpansionValidator MUST 按环境 fingerprint 复用展开结果；同一 FormId 在不同环境下的结果 MUST 与最后一次已接受结果一致，并只产生一个 canonical expanded form。
+系统 MUST 为每个 FormId 保存首次进入闭包时的原始 form、声明前宏环境及 record 上下文。后续声明 MUST 复用该绑定。每个 form MUST 至多成功展开一次，所有编译和 retain MUST 复用 canonical form，不进行多环境重放或白名单校验。
 
-#### Scenario: 相同环境复用最后一次结果
+#### Scenario: 共享 helper 的后声明环境不同
 
-- **给定** 同一原始 form 再次以相同 EnvFingerprint 需要展开
-- **当** ExpansionValidator 处理该 form
-- **那么** 复用缓存结果，不重复展开
+- **给定** helper 首次在 A 的闭包中绑定，B 的声明环境随后改变
+- **当** B 的闭包包含该 helper
+- **那么** helper 使用 A 时点的绑定和 canonical form，不报告环境冲突
 
-#### Scenario: 不同环境结果不一致报错
+#### Scenario: 无宏闭包直接使用原始 form
 
-- **给定** helper 同时属于两个闭包
-- **并且** 两个环境下的展开结果不同
-- **当** 新结果与最后一次已接受结果比较时
-- **那么** 报 `conflicting_local_macro_closure_environment`
+- **给定** frozen function 在绑定环境下无宏调用，或 form 是 spec
+- **当** 准备 canonical forms
+- **那么** 直接复用原始 form，不调用 expander
 
-#### Scenario: 不同环境结果一致时成功
+#### Scenario: record 上下文保持首次绑定
 
-- **给定** 同一 helper 属于两个 declaration 环境不同的闭包
-- **并且** 两个环境下从原始 form 展开的结果一致
-- **当** ExpansionValidator 比较结果时
-- **那么** 接受并更新 last expansion record
-- **并且** canonical expanded form 保持唯一
+- **给定** frozen function 使用 record 且之后加入其他闭包
+- **当** 延迟展开该函数
+- **那么** 使用首次 source view 的 record forms，不遍历无关函数
 
-#### Scenario: 编译器不按环境重新展开
+### Requirement: 纯登记与延迟累计编译
 
-- **给定** 某累计 boundary 所需 FormIds 已存在 canonical expanded forms
-- **当** GenerationCompiler 编译该 boundary
-- **那么** 只读取 canonical expanded forms
-- **并且** 不接收 declaration MacroRuntimeContext
-- **并且** 不遍历 request 重新执行 function expansion
+注册 MUST 零展开、零编译。只有属性目标确保可调用和 scan 收尾触发编译。系统 MUST 按策略 A 对含宏 frozen function 预先编译其绑定 order 之前的累计本地宏前缀，使递归展开中的全部候选宏已可调用。
 
-### Requirement: request 内共享 record 上下文
+#### Scenario: 独立声明只编译一次
 
-ExpansionValidator MUST 为一个 ExpansionRequest 只提取一次 declaration source view 中的
-record forms。每个 function task MUST 从自己的 original/frozen form 展开，并且 MUST 保持
-逐 FormId 执行、`NeedCallable` 重试、错误与原子提交顺序。
+- **给定** 连续声明 A、B、C，闭包无宏调用且没有中途属性调用
+- **当** 扫描收尾
+- **那么** 编译 `{A,B,C}` 一次，注册阶段无展开或编译
 
-#### Scenario: 一个 request 包含多个 closure functions
+#### Scenario: B 直接或动态依赖 A
 
-- **给定** 一个 local macro closure 包含 root 与多个 helpers，并引用 module record
-- **当** ExpansionValidator 准备该 request
-- **那么** record forms 只从 request source view 提取一次
-- **并且** 每个 task 仍可正确展开 record AST
-- **并且** task 不遍历无关的 module functions
+- **给定** A 在 B 前声明，B 含宏调用，其快照包含 A
+- **当** 准备 B，或其宏 replacement 生成对 A 的调用
+- **那么** 先编译 `{A}`，展开 B 一次，再编译 `{A,B}`，不挂起或重试
 
-### Requirement: 按声明顺序最小累计编译
+#### Scenario: 仅调用外部宏也采用前序就绪
 
-DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖生成最小累计 boundary；GenerationCompiler MUST 只消费 canonical expanded forms。
+- **给定** B 只含外部宏调用，但快照包含未就绪的本地 A
+- **当** 准备 B
+- **那么** 仍先编译 `{A}`，以覆盖 replacement 动态引用
 
-#### Scenario: B 需要 A
+#### Scenario: 同声明成员保持完整 prefix
 
-- **给定** A 在 B 前声明，且 B 的闭包实际使用 A 作为宏
-- **当** 首次需要调用 B 时
-- **那么** 先编译 `{A}`，再编译 `{A,B}`
+- **给定** A、B 属于同一声明
+- **当** 属性调用要求 A 可调用
+- **那么** 累计 prefix 同时包含 A、B，其相互调用保持普通函数调用
 
-#### Scenario: B 不需要 A
+#### Scenario: 已有 generation 不回退或重复编译
 
-- **给定** A 在 B 前声明，且 B 的闭包不使用 A 作为宏
-- **当** 首次需要调用 B 时
-- **那么** 直接编译 `{A,B}`
+- **给定** 累计 `{A,B}` 已加载
+- **当** 再次请求 A、B 或 scan 收尾且无新增声明
+- **那么** 复用当前 generation，不重新加载较小 prefix
 
-#### Scenario: 同一 declaration 的 members 保持同一 prefix
+#### Scenario: 请求前缀的其他成员也有展开依赖
 
-- **给定** A 与 B 来自同一个 local_macro declaration 并共享 declaration order
-- **当** DependencyScheduler 为其中任一 member 构造累计 prefix
-- **那么** prefix 同时包含 A 与 B
-- **并且** 索引或 memo 优化不得把 prefix 截断到目标 member
-
-#### Scenario: 独立声明本身不产生中间编译
-
-- **给定** `-local_macro([foo/1])` 后出现 `-local_macro([bar/1])`
-- **并且** bar/1 的 function form 不实际依赖 foo/1 作为宏
-- **当** bar/1 完成注册和 declaration-time 预展开
-- **那么** 不编译 `{foo}` 或 `{foo,bar}`
-- **并且** 首次真正需要可调用或 scan 收尾时直接编译 `{foo,bar}`
-
-#### Scenario: 相同累计成员不重新编译
-
-- **给定** 累计 local macro members 已成功编译并提交
-- **并且** 此后没有引入新的 local_macro declaration
-- **当** 不同展开环境或触发阶段再次请求该累计 boundary
-- **那么** 复用已提交 generation
-- **并且** MacroRuntimeContext、注入 forms 和 compile options 不产生新 boundary identity
-
-#### Scenario: scan 收尾编译全部 local macro
-
-- **给定** 某些 local macro 已在 earlier attribute 调用时编译，另一些从未被调用
-- **当** local-macro 工作流收尾时
-- **那么** 按注册顺序构造包含全部 local macro 的最终累计模块
-- **并且** 编译输入直接取已确认的 canonical expanded forms
+- **给定** A、B、C 按顺序声明，B 含宏调用，C 不含宏调用
+- **当** 首次请求 C
+- **那么** 先确保 A 就绪，再准备 B，最终编译全部 prefix
 
 ### Requirement: closure_roots 补充静态闭包
 
@@ -209,7 +176,7 @@ DependencyScheduler MUST 依据 declaration 顺序和真实 local macro 依赖�
 
 - **给定** local macro options 包含 `{closure_roots, [helper/1]}`
 - **当** 计算闭包时
-- **那么** helper/1 进入闭包并按同一冻结、展开和比对规则处理
+- **那么** helper/1 进入闭包并按同一首次绑定和单次展开规则处理
 
 #### Scenario: 间接函数引用需要 closure_roots
 
@@ -252,24 +219,21 @@ declaration 级调用排除或 AST 改写 option。宏实现若要普通调用�
 - **那么** 传入的 MacroEnv 不包含 foo/1
 - **并且** 递归调用保持普通 Erlang 本地调用
 
-### Requirement: retain 与最终跳过集合
+### Requirement: retain 复用 canonical forms
 
-系统 MUST 从 retain roots 计算完整闭包和 `FinalSkipIds`，并让所有 retained functions 与普通 Step 2 functions 使用同一个 `FinalMacroRuntimeContext` 和 ExpansionValidator。属于 local macro 闭包的 function MUST 以注册时 form 扫描得到的 `referenced_local_macros` 过滤 FinalLocalEnv；不属于任何 local 闭包的普通 function MUST 使用完整 FinalLocalEnv。
+系统 MUST 计算 `RemovedIds = compiled_ids - retained_form_ids` 并删除 local-only forms。剩余 frozen forms MUST 物化 canonical forms，且 MUST 从最终 function caller 集合排除。普通非闭包函数 MUST 使用完整 FinalMacroEnvironment。删除集合与展开跳过集合 MUST 分开。
 
-#### Scenario: final local 环境复用声明扫描白名单
+#### Scenario: retained helper 与宏头不重新展开
 
-- **给定** B 的 declaration form 扫描只识别到先声明 local macro A
-- **并且** local macro C 在 B 之后声明
-- **当** retained B 或其闭包 helper 在 final context 展开
-- **那么** LocalEnv 包含 A，但不包含 B、C 或其他白名单外 local macros
-- **并且** 不再执行按 order、自身或同声明成员计算的 final 排除
-- **并且** 即使后声明 C 的闭包引用 B，B 宏头仍只使用 B 自身 declaration 的白名单
+- **给定** 闭包函数由 retain、export 或 export_macro 保留，之后环境发生变化
+- **当** 最终函数 pass 执行
+- **那么** 保留首次 canonical form，不在最终环境重放，不报告环境或白名单冲突
 
-#### Scenario: 普通 final function 使用完整 local 环境
+#### Scenario: 普通 final function 可调用后声明宏
 
-- **给定** ordinary function 不属于任何 local macro 闭包
-- **当** ordinary function 在 final context 展开
-- **那么** 它可以匹配 FinalLocalEnv 中全部可调用 local macros
+- **给定** function 不属于 frozen closure
+- **当** 最终展开
+- **那么** 使用完整最终环境，包括后声明本地宏
 
 #### Scenario: retain 根保留完整闭包
 
@@ -292,40 +256,6 @@ declaration 级调用排除或 AST 改写 option。宏实现若要普通调用�
 - **那么** 报告 `undefined_local_macro_retain` warning
 - **并且** 不把它合并为 `ineffective_local_macro_retain`
 - **并且** warning 使用该 `local_macro_retain` attribute 的源码位置
-
-#### Scenario: 最终跳过未 retain 的已展开 forms
-
-- **给定** local macro form 已展开且不属于 retain 闭包
-- **当** 收尾计算 FinalSkipIds 时
-- **那么** 该 form 出现在 FinalSkipIds 中
-
-#### Scenario: retain form 参与最终展开
-
-- **给定** frozen form 属于 retain 闭包
-- **并且** 最终环境比对通过
-- **当** 最终函数体展开执行时
-- **那么** 该 form 不在 FinalSkipIds 中并参与递归展开
-
-#### Scenario: retain helper 的最终环境比对不一致失败
-
-- **给定** retain 闭包中的 helper 在 declaration 环境与最终环境下展开结果不同
-- **当** 收尾执行最终环境比对时
-- **那么** 报 `conflicting_local_macro_closure_environment`
-
-#### Scenario: local macro 宏头参与最终环境比对
-
-- **给定** local macro 宏头属于 retain 闭包
-- **当** 使用 FinalMacroRuntimeContext 执行最终 function 展开时
-- **那么** 宏头使用与 helper 和普通 function 相同的 ExpansionValidator
-- **并且** final fingerprint 不同时，从原始 form 展开并与最后一次 local result 比较
-- **并且** 宏头仍不在 FinalSkipIds 中
-
-#### Scenario: 普通 Step 2 function 使用最终环境一致性逻辑
-
-- **给定** function 曾作为 local closure form 在 declaration context 下展开
-- **并且** 该 function 在 Step 2 被选为普通 macro caller
-- **当** 使用 FinalMacroRuntimeContext 展开
-- **那么** 使用与 retain function 相同的 last-env 与 last-result 比对逻辑
 
 ### Requirement: 安全覆盖加载
 

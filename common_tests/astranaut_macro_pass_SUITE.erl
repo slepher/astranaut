@@ -26,7 +26,7 @@ init_per_suite(Config0) ->
             macro_pass_no_backscan_test,
             macro_pass_local_chain_test,
             macro_pass_local_dependency_test,
-            macro_pass_local_replacement_whitelist_test,
+            macro_pass_local_replacement_chain_test,
             macro_pass_external_replacement_local_test,
             macro_pass_local_declaration_group_test,
             macro_pass_external_helper,
@@ -49,7 +49,8 @@ init_per_suite(Config0) ->
             macro_pass_scoped_attribute_state_test,
             macro_pass_scoped_function_state_test,
             macro_pass_local_compile_context_test,
-            macro_pass_local_runtime_context_test
+            macro_pass_local_runtime_context_test,
+            macro_pass_canonical_retain_test
         ],
     astranaut_test_lib:load_data_modules(Config, TestModules).
 
@@ -58,10 +59,11 @@ end_per_suite(_Config) ->
 
 all() ->
     [
+        test_macro_pass_canonical_retain,
         test_macro_pass_generated_import,
         test_macro_pass_no_backscan,
         test_macro_pass_local_attribute_chain,
-        test_macro_pass_local_replacement_whitelist,
+        test_macro_pass_local_replacement_chain,
         test_macro_pass_external_replacement_local_dependency,
         test_macro_pass_local_dependency,
         test_macro_pass_local_declaration_group,
@@ -118,10 +120,10 @@ test_macro_pass_local_attribute_chain(_Config) ->
     ),
     ok.
 
-test_macro_pass_local_replacement_whitelist(_Config) ->
+test_macro_pass_local_replacement_chain(_Config) ->
     ?assertEqual(
-        {replacement_whitelist, ok},
-        macro_pass_local_replacement_whitelist_test:value()
+        {replacement_chain, ok},
+        macro_pass_local_replacement_chain_test:value()
     ),
     ok.
 
@@ -581,10 +583,17 @@ assert_macro_pass_error(Module, Config, MatchError, ExpectedWarnings) ->
      || {_WarningFile, FileWarnings} <-
             WarningFiles
     ]),
+    ExpectedFormatter =
+        case Module of
+            macro_pass_closure_roots_missing_error_test -> astranaut_macro_local;
+            macro_pass_locked_spec_error_test -> astranaut_macro_local;
+            macro_pass_locked_helper_error_test -> astranaut_macro_local;
+            _ -> astranaut_macro
+        end,
     ?assert(
         lists:any(
             fun
-                ({_Line, astranaut_macro, Error}) ->
+                ({_Line, Formatter, Error}) when Formatter =:= ExpectedFormatter ->
                     MatchError(Error);
                 (_) ->
                     false
@@ -604,3 +613,13 @@ local_macro_lifecycle_forms(Module, Value) ->
         {function, 3, macro_value, 0, [{clause, 3, [], [], [erl_parse:abstract({atom, 3, Value})]}]},
         {function, 4, value, 0, [{clause, 4, [], [], [{call, 4, {atom, 4, macro_value}, []}]}]}
     ].
+
+test_macro_pass_canonical_retain(_Config) ->
+    ?assertEqual({injected_attrs, [early]}, macro_pass_canonical_retain_test:value()),
+    ?assertEqual({injected_attrs, [early]}, macro_pass_canonical_retain_test:second_value()),
+    ?assertEqual({injected_attrs, [early]}, macro_pass_canonical_retain_test:helper()),
+    ?assertEqual({injected_attrs, [early, late]}, macro_pass_canonical_retain_test:ordinary()),
+    ?assertEqual(
+        {injected_attrs, [early]},
+        erl_parse:normalise(macro_pass_canonical_retain_test:entry())
+    ).

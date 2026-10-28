@@ -1,5 +1,8 @@
 # Review: Macro Passes 实现与文档状态
 
+> 历史实施复核记录。2026-10-28 起，白名单、多环境重放和 function-pass provider 钩子已由首次绑定／延迟展开（策略 A）取代；现行行为见 [设计](design.md) 与 [Local Macro 设计](../local-macro/design.md)。
+
+
 ## 2026-07-13 合并结论
 
 后续调整内容已合并回本变更。旧文档中的分离式“外部属性 pass → 冻结 → 本地属性 pass”模型已删除，当前规范与实现均采用：

@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% A local macro replacement introduces another local macro call.  The
 %%% entry function's original AST mentions only bridge/0; leaf/0 must be
-%%% matched, invoked, and recorded while processing bridge/0's returned AST.
+%%% matched and invoked while processing bridge/0's returned AST.
 %%%-------------------------------------------------------------------
--module(macro_pass_local_replacement_whitelist_test).
+-module(macro_pass_local_replacement_chain_test).
 
 -include("macro.hrl").
 
@@ -27,4 +27,5 @@ leaf() ->
     %% therefore needs one quotation level for entry/0's runtime return and a
     %% second for the value inserted at its eventual call site.
     astranaut_lib:abstract_form(
-      astranaut_lib:abstract_form({replacement_whitelist, ok})).
+        astranaut_lib:abstract_form({replacement_chain, ok})
+    ).

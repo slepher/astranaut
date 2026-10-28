@@ -125,7 +125,7 @@ shared_invocation_test() ->
     ),
     Call = {call, 5, {atom, 5, capture}, Arguments},
     Function = {function, 5, value, 0, [{clause, 5, [], [], [Call]}]},
-    Task = #{form => Function, macro_map => MacroMap, observation_control => disabled},
+    Task = #{form => Function, macro_map => MacroMap},
     {just, #{forms := [{function, 5, value, 0, [{clause, 5, [], [], [Result]}]}]}} =
         astranaut_return:run(
             astranaut_macro_expander:expand_functions([Function], #{{function, value, 0} => Task})

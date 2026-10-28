@@ -129,52 +129,9 @@ format_error({invalid_macro_return, Detail}) ->
             Detail
         ]
     );
-format_error({invalid_closure_roots, Functions}) ->
-    io_lib:format(
-        "closure_roots contains undefined functions: ~p", [Functions]
-    );
 format_error({macro_capability_unavailable, Provider}) ->
     io_lib:format(
         "requested macro capability ~p is unavailable", [Provider]
-    );
-format_error({undefined_local_macro_retain, Functions}) ->
-    io_lib:format(
-        "local_macro_retain contains undefined functions: ~p", [Functions]
-    );
-format_error({ineffective_local_macro_retain, Functions}) ->
-    io_lib:format(
-        "local_macro_retain has no effect for functions outside every local macro closure: ~p",
-        [Functions]
-    );
-format_error({duplicate_local_macro_declaration, Function}) ->
-    io_lib:format(
-        "duplicate local macro declaration for ~p", [Function]
-    );
-format_error({conflicting_local_macro_closure_environment, FormId}) ->
-    io_lib:format(
-        "local macro closure has conflicting expansion environments for ~p",
-        [FormId]
-    );
-format_error({conflicting_local_macro_whitelist, FormId, Detail}) ->
-    io_lib:format(
-        "local macro closure has conflicting whitelist for ~p: ~p",
-        [FormId, Detail]
-    );
-format_error({illegal_locked_form_mutation, Form}) ->
-    io_lib:format(
-        "local macro expansion modified frozen form: ~p", [Form]
-    );
-format_error({local_macro_diagnostic, _Formatter, _Error, Message}) ->
-    Message;
-format_error({illegal_macro_environment_mutation, Form}) ->
-    io_lib:format(
-        "local macro expansion generated illegal macro environment form: ~p",
-        [Form]
-    );
-format_error({illegal_local_macro_definition_mutation, Form}) ->
-    io_lib:format(
-        "local macro expansion modified locked local macro snapshot form: ~p",
-        [Form]
     );
 format_error({invalid_attr, AttrName, Attr}) ->
     io_lib:format("invalid ~p macro attribute: ~p", [AttrName, Attr]);
@@ -236,7 +193,7 @@ finalize_attribute_macro_pass(
             prepare_function_environment(
                 PreparedForms, Registry, ordsets:new()
             ),
-        return({AttributeForms, FunctionEnv0#{capability => disabled}})
+        return({AttributeForms, FunctionEnv0})
     ]);
 finalize_attribute_macro_pass(
     File,
@@ -254,7 +211,7 @@ finalize_attribute_macro_pass(
         ),
         PreparedForms <-
             astranaut_macro_registry:prepare_exports(Forms0),
-        {FinalForms, AdditionalCallers, ProviderState1, Warnings} <-
+        {FinalForms, ExpansionSkipIds, _ProviderState1, Warnings} <-
             apply(
                 Provider,
                 finish_attribute_pass,
@@ -262,22 +219,15 @@ finalize_attribute_macro_pass(
             ),
         {AttributeForms, FunctionEnv0} =
             prepare_function_environment(
-                FinalForms, Registry, AdditionalCallers
+                FinalForms, Registry, ExpansionSkipIds
             ),
-        FunctionEnv = FunctionEnv0#{
-            capability =>
-                #{
-                    provider => Provider,
-                    state => ProviderState1
-                }
-        },
         astranaut_return:then(
             file_formatted_warnings(File, Warnings),
-            return({AttributeForms, FunctionEnv})
+            return({AttributeForms, FunctionEnv0})
         )
     ]).
 
-prepare_function_environment(Forms, Registry, AdditionalCallers) ->
+prepare_function_environment(Forms, Registry, ExpansionSkipIds) ->
     MacroEnvironment =
         astranaut_macro_registry:final_macro_environment(
             Forms, Registry
@@ -285,7 +235,7 @@ prepare_function_environment(Forms, Registry, AdditionalCallers) ->
     MacroMap = maps:get(macro_map, MacroEnvironment),
     FunctionCallAnalysis =
         astranaut_macro_expander:function_call_analysis(
-            Forms, MacroMap, presence
+            Forms, MacroMap
         ),
     DetectedCallers =
         astranaut_macro_expander:function_macro_callers(
@@ -295,8 +245,8 @@ prepare_function_environment(Forms, Registry, AdditionalCallers) ->
         #{
             macro_environment => MacroEnvironment,
             function_call_analysis => FunctionCallAnalysis,
-            callers => ordsets:union(
-                DetectedCallers, AdditionalCallers
+            callers => ordsets:subtract(
+                DetectedCallers, ExpansionSkipIds
             ),
             global_macro_opts =>
                 astranaut_macro_registry:global_macro_opts(Registry)
@@ -312,45 +262,16 @@ file_formatted_warnings(File, Warnings) ->
 %%% Function pass orchestration
 %%%===================================================================
 
-run_function_macro_pass(
-    Forms,
-    #{
-        macro_environment := MacroEnvironment,
-        function_call_analysis := FunctionCallAnalysis,
-        callers := Callers,
-        capability := Capability
-    } = FunctionEnv
-) ->
-    do([
-        return
-     || Tasks0 = function_expansion_tasks(
-            Callers, MacroEnvironment, FunctionCallAnalysis
-        ),
-        {Tasks, Completion} = prepare_function_capability(Tasks0, FunctionEnv, Capability),
-        #{forms := ExpandedForms, task_results := Results} <-
-            astranaut_macro_expander:expand_functions(Forms, Tasks),
-        finish_function_capability(Results, Completion),
-        return(ExpandedForms)
-    ]).
-
-prepare_function_capability(Tasks, _FunctionEnv, disabled) ->
-    {Tasks, disabled};
-prepare_function_capability(
-    Tasks, FunctionEnv, #{provider := Provider, state := State} = Capability
-) ->
-    {Overrides, Completion} = Provider:prepare_function_pass(Tasks, FunctionEnv, State),
-    {maps:merge(Tasks, Overrides), Capability#{
-        task_ids => maps:keys(Overrides),
-        completion => Completion
-    }}.
-
-finish_function_capability(_Results, disabled) ->
-    astranaut_return:return(ok);
-finish_function_capability(
-    Results,
-    #{provider := Provider, state := State, task_ids := Ids, completion := Completion}
-) ->
-    Provider:finish_function_pass(maps:with(Ids, Results), Completion, State).
+run_function_macro_pass(Forms, #{
+    macro_environment := Environment,
+    function_call_analysis := Analysis,
+    callers := Callers
+}) ->
+    Tasks = function_expansion_tasks(Callers, Environment, Analysis),
+    astranaut_return:lift_m(
+        fun(#{forms := Expanded}) -> Expanded end,
+        astranaut_macro_expander:expand_functions(Forms, Tasks)
+    ).
 
 function_expansion_tasks(
     Callers,
@@ -369,7 +290,6 @@ function_expansion_tasks(
                         #{
                             form => Form,
                             macro_map => MacroMap,
-                            observation_control => disabled,
                             has_macro_call => HasMacroCall
                         },
                         Acc

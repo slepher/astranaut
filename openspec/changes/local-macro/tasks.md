@@ -1,5 +1,8 @@
 # Tasks
 
+> 以下勾选项保留历史实施记录。2026-10-28 的首次绑定／延迟展开方案取代旧白名单、多环境重放和 function-pass provider 钩子；现行契约见 design.md 与 specs/macro-expansion/spec.md。
+
+
 ## 规格
 
 - [x] 记录闭包为静态函数依赖集合，而非词法 closure。
@@ -145,3 +148,15 @@
 - [x] compiler 独立持有累计 compiled forms、boundary cache、generation 与 callable versions；只接收编译快照，不接收宏环境或展开回调。
 - [x] 删除 local entry 中重复的 callable 状态与独立 compiled IDs 集合；加载成功后由 compiler 提交版本，失败保留旧模块。
 - [x] 覆盖已提交边界复用、编译失败后旧代码可用及后续成功推进版本；48 个专项 EUnit、102 个宏相关 Common Test 用例与 `rebar3 fmt --check` 通过。
+
+## 2026-10-28 首次绑定与延迟展开（策略 A）
+
+- [x] 更新 design、spec、proposal 与处理层级，取代旧白名单及重放契约。
+- [x] declaration 只登记；frozen FormId 保持首次环境与 record 上下文。
+- [x] 无宏函数/spec 直接复用；含宏函数在前序 prefix 就绪后单次展开。
+- [x] 按属性调用和 scan 收尾触发累计编译，复用已提交 generation。
+- [x] retained canonical forms 在 attribute 收尾物化，最终 caller 排除 frozen IDs。
+- [x] 删除 observation、needed_macro_ids、多环境缓存和 function-pass provider 钩子。
+- [x] 闭包分析与本地诊断归 provider；描述符显式携带诊断身份。
+- [x] 验证动态 replacement 单次执行、共享 helper 首次绑定、同声明隔离、编译次数、冻结保护及错误归属。
+- [x] 全量 EUnit、Common Test、erlfmt 与 OpenSpec strict 校验通过。
