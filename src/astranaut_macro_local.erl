@@ -846,18 +846,18 @@ analyze_closure_function(
             {function, _, _, _, Clauses} = Function,
             Analysis = astranaut:sreduce(
                 fun(Node, Acc) ->
+                    IsMacroCall =
+                        astranaut_macro_expander:match_macro_call(Node, MacroMap) =/= error,
                     Calls =
                         case Node of
-                            {call, _, {atom, _, Name}, Args} ->
+                            {call, _, {atom, _, Name}, Args} when not IsMacroCall ->
                                 ordsets:add_element(
                                     {Name, length(Args)}, maps:get(local_calls, Acc)
                                 );
                             _ ->
                                 maps:get(local_calls, Acc)
                         end,
-                    HasMacro =
-                        maps:get(has_macro_call, Acc) orelse
-                            astranaut_macro_expander:match_macro_call(Node, MacroMap) =/= error,
+                    HasMacro = maps:get(has_macro_call, Acc) orelse IsMacroCall,
                     Acc#{local_calls => Calls, has_macro_call => HasMacro}
                 end,
                 #{local_calls => [], has_macro_call => false},

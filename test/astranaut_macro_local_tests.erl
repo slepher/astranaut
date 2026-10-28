@@ -473,6 +473,21 @@ prefix_member_dependencies_are_prepared_test() ->
     ?assertEqual(ok, Module:b()),
     ?assertEqual(independent, Module:c()).
 
+macro_call_does_not_retain_runtime_closure_test() ->
+    Module = astranaut_macro_local_compile:module_name(macro_only_dependency),
+    Source = [{attribute, 1, module, macro_only_dependency}, macro_a_form(), b_form_calls_a()],
+    {ok, S1} = astranaut_macro_local:register(
+        [{a, 0}], #{}, Source, macro_environment(#{}), astranaut_macro_local:new(Module)
+    ),
+    Map = #{{a, 0} => (test_macro(Module, a))#{macro_source => local_macro}},
+    {ok, S2} = astranaut_macro_local:register([{b, 0}], #{}, Source, macro_environment(Map), S1),
+    {just, {_, SkipIds, S3}} = astranaut_return:run(
+        astranaut_macro_local:finalize([{b, 0}], context(), S2)
+    ),
+    ?assertEqual(ok, Module:b()),
+    ?assertEqual([{function, b, 0}], astranaut_macro_local:retained_form_ids(S3)),
+    ?assertEqual([{function, a, 0}], SkipIds).
+
 external_replacement_executes_once_test() ->
     erlang:erase(replacement_count),
     Module = astranaut_macro_local_compile:module_name(dynamic_prefix),

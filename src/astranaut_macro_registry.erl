@@ -681,9 +681,12 @@ update_used_macro_maps(
                             ModuleMacroMapWithoutCurrent,
                             CurrentMacroMap
                         ),
+                        WithoutDisplaced = remove_imported_entry(
+                            CurrentKey, ExistingMacroMap, Acc
+                        ),
                         return(
                             maps:put(
-                                MacroModule, ModuleMacroMap1, Acc
+                                MacroModule, ModuleMacroMap1, WithoutDisplaced
                             )
                         )
                     ]);

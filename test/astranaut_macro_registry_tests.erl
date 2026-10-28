@@ -31,6 +31,43 @@ import_use_history_test() ->
         maps:get(debug, maps:get({first, 1}, astranaut_macro_registry:effective_macro_map(S4)))
     ).
 
+cross_module_force_override_test() ->
+    Provider = a_registry_test_provider,
+    {ok, Provider, Binary} = compile:forms([
+        {attribute, 1, module, Provider},
+        {attribute, 1, exported_macro, {[{sample, 1}], #{}}}
+    ]),
+    {module, Provider} = code:load_binary(Provider, "registry_test.erl", Binary),
+    try
+        lists:foreach(
+            fun({First, Second}) ->
+                S0 = astranaut_macro_registry:new(consumer, "consumer.erl", #{}),
+                S1 = directive(import_macro, First, S0),
+                S2 = directive(import_macro, Second, S1),
+                S3 = directive(use_macro, {First, {sample, 1}, [{alias, shared}]}, S2),
+                S4 = directive(
+                    use_macro,
+                    {Second, {sample, 1}, [{alias, shared}, force_override]},
+                    S3
+                ),
+                Macro = maps:get({shared, 1}, astranaut_macro_registry:effective_macro_map(S4)),
+                ?assertEqual(Second, maps:get(macro_module, Macro)),
+                S5 = directive(
+                    use_macro,
+                    {Second, {sample, 1}, [{alias, shared}, force_override, debug]},
+                    S4
+                ),
+                Updated = maps:get({shared, 1}, astranaut_macro_registry:effective_macro_map(S5)),
+                ?assertEqual(Second, maps:get(macro_module, Updated)),
+                ?assertEqual(true, maps:get(debug, Updated))
+            end,
+            [{?MODULE, Provider}, {Provider, ?MODULE}]
+        )
+    after
+        code:purge(Provider),
+        code:delete(Provider)
+    end.
+
 local_override_then_use_test() ->
     S0 = directive(
         import_macro,
