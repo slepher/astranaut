@@ -273,3 +273,10 @@ local macro 专属任务移至 [local-macro/tasks.md](../local-macro/tasks.md)�
 - [x] 闭包分析与本地诊断归 provider；描述符显式携带诊断身份。
 - [x] 验证动态 replacement 单次执行、共享 helper 首次绑定、同声明隔离、编译次数、冻结保护及错误归属。
 - [x] 全量 EUnit、Common Test、erlfmt 与 OpenSpec strict 校验通过。
+
+## 2026-10-28 Registry 数据结构清理与队列快照评估
+
+- [x] 常驻按 provider 分组的导入表，删除 use 前的反向分组及全表重新规范化。
+- [x] 保留 alias 历史、重复指令、选项及跨来源覆盖语义，补充回归测试并完成旧实现对照。
+- [x] 提供队列快照 A/B 基准及两轮独立测量，记录保留当前扫描器实现的取舍。
+- [x] 155 项 EUnit、282 项 Common Test、erlfmt 检查通过。

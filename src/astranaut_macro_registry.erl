@@ -49,7 +49,7 @@
         file := file:filename(),
         global_macro_opts := map(),
         missing_formatters := ordsets:ordset(module()),
-        macro_map := macro_map(),
+        imported_macro_maps := #{module() => macro_map()},
         effective_macro_map := macro_map(),
         attribute_macro_index := map(),
         attribute_env := attribute_env()
@@ -68,7 +68,7 @@ new(Module, File, GlobalMacroOpts) ->
         file => File,
         global_macro_opts => GlobalMacroOpts,
         missing_formatters => ordsets:new(),
-        macro_map => #{},
+        imported_macro_maps => #{},
         effective_macro_map => #{},
         attribute_macro_index => #{},
         attribute_env => new_attribute_env(Module, File)
@@ -100,20 +100,17 @@ apply_directive(
         global_macro_opts := GlobalMacroOpts,
         module := Module,
         file := File,
-        macro_map := MacroMap,
+        imported_macro_maps := ImportedMacros,
         effective_macro_map := EffectiveMacroMap,
         missing_formatters := MissingFormatters
     } = State
 ) ->
     case import_macro_form(GlobalMacroOpts, Form) of
         {ok, ModuleMacroMap, FormatterProtocol} ->
-            Effective = effective_module_macro_maps(
-                File, Module, ModuleMacroMap
-            ),
-            NewMap = uniform_imported_macro_map(Effective),
+            NewMap = update_module_macros(File, Module, ModuleMacroMap),
             do([
                 return
-             || Merged <- merge_macro_maps(MacroMap, NewMap),
+             || Merged <- merge_imported_macro_maps(ImportedMacros, NewMap),
                 EffectiveMerged <- merge_macro_maps(
                     EffectiveMacroMap, NewMap
                 ),
@@ -125,7 +122,7 @@ apply_directive(
                 State1 = set_effective_macro_map(
                     EffectiveMerged,
                     State#{
-                        macro_map => Merged,
+                        imported_macro_maps => Merged,
                         missing_formatters =>
                             MissingFormatters1
                     }
@@ -143,25 +140,24 @@ apply_directive(
     #{
         module := Module,
         file := File,
-        macro_map := MacroMap,
+        imported_macro_maps := ImportedMacros,
         effective_macro_map := EffectiveMacroMap
     } = State
 ) ->
-    ImportedMacros = module_macro_maps_from_uniform(MacroMap),
     do([
         return
      || UsedMacros <- used_macros(
             File, Module, ImportedMacros, [Form]
         ),
         NewMap = uniform_imported_macro_map(UsedMacros),
-        Merged <- merge_macro_maps(MacroMap, NewMap),
+        Merged <- merge_imported_macro_maps(ImportedMacros, NewMap),
         EffectiveMerged <- merge_macro_maps(EffectiveMacroMap, NewMap),
         return(
             {consume,
                 set_effective_macro_map(
                     EffectiveMerged,
                     State#{
-                        macro_map => Merged
+                        imported_macro_maps => Merged
                     }
                 )}
         )
@@ -441,18 +437,49 @@ remove_undefined_macros(FAs, ClausesMap) ->
 %%% Imported and used macros
 %%%===================================================================
 
-module_macro_maps_from_uniform(MacroMap) ->
+%% Keep import provenance separate from local definitions in the effective map.
+%% A forced override must also remove the displaced provider's lookup entry.
+merge_imported_macro_maps(Imported, NewMap) ->
+    astranaut_return:foldl_m(
+        fun({Key, #{macro_module := Provider} = Macro}, Acc) ->
+            case maps:find(Key, maps:get(Provider, Acc, #{})) of
+                {ok, Macro} ->
+                    astranaut_return:return(Acc);
+                _ ->
+                    do([
+                        return
+                     || Existing = imported_macro_entry(Key, Acc),
+                        merge_macro_maps(Existing, #{Key => Macro}),
+                        WithoutPrevious = remove_imported_entry(Key, Existing, Acc),
+                        ProviderMacros = maps:get(Provider, WithoutPrevious, #{}),
+                        return(maps:put(Provider, ProviderMacros#{Key => Macro}, WithoutPrevious))
+                    ])
+            end
+        end,
+        Imported,
+        maps:to_list(NewMap)
+    ).
+
+remove_imported_entry(Key, Existing, Imported) when map_size(Existing) > 0 ->
+    #{macro_module := Provider} = maps:get(Key, Existing),
+    Macros = maps:remove(Key, maps:get(Provider, Imported)),
+    case map_size(Macros) of
+        0 -> maps:remove(Provider, Imported);
+        _ -> maps:put(Provider, Macros, Imported)
+    end;
+remove_imported_entry(_Key, _Existing, Imported) ->
+    Imported.
+
+imported_macro_entry(Key, Imported) ->
     maps:fold(
-        fun(Key, #{macro_module := MacroModule} = Macro, Acc) ->
-            ModuleMacroMap = maps:get(MacroModule, Acc, #{}),
-            maps:put(
-                MacroModule,
-                maps:put(Key, Macro, ModuleMacroMap),
-                Acc
-            )
+        fun(_Module, Macros, Acc) ->
+            case maps:find(Key, Macros) of
+                {ok, Macro} -> #{Key => Macro};
+                error -> Acc
+            end
         end,
         #{},
-        MacroMap
+        Imported
     ).
 
 import_macro_form(
@@ -488,7 +515,7 @@ import_macro_form(
                     #{},
                     Macros
                 ),
-            {ok, #{Module => Macros1}, FormatterProtocol};
+            {ok, Macros1, FormatterProtocol};
         false ->
             {error, {import_macro_failed, Module}}
     end;
@@ -555,9 +582,6 @@ update_module_macros(File, Module, ModuleMacros) ->
     ).
 
 used_macros(File, Module, ImportedMacros, Forms) ->
-    ImportedMacroMap = effective_module_macro_maps(
-        File, Module, ImportedMacros
-    ),
     astranaut_lib:with_attribute(
         fun(Attr, UsedMacroMapAcc) ->
             do([
@@ -608,18 +632,10 @@ used_macros(File, Module, ImportedMacros, Forms) ->
                 end
             ])
         end,
-        ImportedMacroMap,
+        ImportedMacros,
         Forms,
         use_macro,
         #{formatter => astranaut_macro}
-    ).
-
-effective_module_macro_maps(File, Module, ModuleMacros) ->
-    maps:map(
-        fun(_MacroModule, Macros) ->
-            update_module_macros(File, Module, Macros)
-        end,
-        ModuleMacros
     ).
 
 update_used_macro_maps(
@@ -652,8 +668,9 @@ update_used_macro_maps(
                         ModuleMacroMapWithoutCurrent,
                         Acc
                     ),
-                    ExistingMacroMap = uniform_imported_macro_map(
-                        ExistingUsedMacroMap
+                    [CurrentKey] = maps:keys(CurrentMacroMap),
+                    ExistingMacroMap = imported_macro_entry(
+                        CurrentKey, ExistingUsedMacroMap
                     ),
                     do([
                         return

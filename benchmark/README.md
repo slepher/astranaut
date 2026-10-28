@@ -58,3 +58,21 @@ Regenerate the neutral workload deterministically:
 ```shell
 escript benchmark/generate_real_benchmark.escript
 ```
+
+## Queue snapshot overhead
+
+From the repository root, run:
+
+```shell
+rebar3 compile
+escript benchmark/queue_snapshot_bench.escript 51
+```
+
+The runner compares snapshot recording with bypass in the scan loop, then
+compares complete macro transforms of the external-only `real_benchmark.erl`.
+It compiles a scanner variant in memory, restores the original BEAM afterwards,
+and checks identical output. Each sample uses a fresh process; AB/BA order
+alternates, with three warmups and one scheduler. Times exclude setup, source
+parsing, scanner compilation and code loading. This bypass is a measurement
+counterfactual for disabled capability, not a supported local-macro mode.
+See [the evaluation](queue-snapshot-results.md) for results and limitations.

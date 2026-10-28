@@ -2,7 +2,7 @@
 
 记录日期：2026-10-27。
 
-2026-10-28 更新：已选择首次绑定与延迟展开，并采用含宏闭包前序就绪的策略 A。现行契约见 [Local Macro 设计](../local-macro/design.md)；下文保留原始审查背景，registry 数据结构清理仍为独立候选。
+2026-10-28 更新：已选择首次绑定与延迟展开，并采用含宏闭包前序就绪的策略 A。现行契约见 [Local Macro 设计](../local-macro/design.md)；下文保留原始审查背景，registry 数据结构清理已于本次后续实施，见文末实施记录。
 
 2026-10-28 目标澄清：provider 的目的是把 `local_macro` 专属逻辑从主逻辑中剥离，不以特性插件化为目标。原审查中的“纯粹插件”与插件化完成比例不作为验收标准；扫描器显式识别属性并指定处理模块符合设计，不需要通用 provider 注册入口。
 
@@ -75,3 +75,15 @@
 进入实施前，应覆盖共享 helper 跨声明环境、retain/export、replacement 动态引用本地宏、同声明成员调用、源码序注入、导入冲突和诊断归属等案例。保留 scan-and-splice 的前向语义、统一递归展开及 `outer / inner` 行为、用户宏 state 隔离和 generation 提交的原子性。
 
 接受方案后同步修改 macro-passes、local-macro 的 design/spec、处理层级与相关测试，再以实际代码量和编译行为评估收益。本记录不创建已完成任务，也不授权或执行代码重构。
+
+## 2026-10-28 Registry 清理与队列快照评估
+
+Registry 已改为常驻的 `imported_macro_maps`（按 provider 分组）与独立的扁平 `effective_macro_map`。删除 `module_macro_maps_from_uniform/1`、`effective_module_macro_maps/3`，导入时直接规范化当前 provider；use 不再重新分组及规范化全表，单个 FA 的冲突检测不再展开全部导入。保留 use 提交时的一次 `uniform_imported_macro_map/1`，以保留完整导入环境重新合并的现有行为。
+
+分组表必须保留 alias 历史和 use 后的选项，且强制覆盖必须删除被替代 provider 的同名键，因此不采用不可变原始导出表直接替代的方案。新实现增加了分组表的 checked merge 与来源移除逻辑；生产模块净增 17 行，不将这次清理描述为代码量缩减。展开器的 observation 状态此前已删除，本次无需再统一整数/map 状态。
+
+新增 Registry 回归测试覆盖重复 import/use、alias 历史、option 覆盖、force_override 和本地/外部冲突。另以固定随机种子对旧实现执行 10,000 步 import/use/macro_options 对照，比较归一化后的全部 state 及诊断，结果一致。
+
+队列快照保留现状：保存 `{Form, Buffer, Rest}` 共享尾部，只有 provider 请求 source view 时才物化。disabled 情况下仍维护快照，实际工作负载的完整宏转换改善约 3.5%–4.1%，但纯扫描微基准多数更慢；本次不为该有限收益增加首个声明（含生成声明）的切换逻辑。可复现脚本、测量结果及边界见 [队列快照性能评估](../../../benchmark/queue-snapshot-results.md)。
+
+本次验证：155 项 EUnit、282 项 Common Test、`rebar3 fmt -w` 及 `rebar3 fmt --check` 通过。环境中原有 rebar3 未注册 fmt，格式化通过临时 `REBAR_CONFIG` 加载已有本地 erlfmt 源码完成，仓库配置未修改。

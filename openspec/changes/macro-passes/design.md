@@ -44,6 +44,8 @@ local provider 在首次冻结时绑定声明前环境，延迟展开一次 cano
 
 ## 统一属性扫描
 
+Registry 分别保存按 provider 分组的 `imported_macro_maps` 和扁平的 `effective_macro_map`。导入描述符只在 import 时规范化；use 直接访问已有分组，不再从扁平表重建分组或重新规范化全部描述符。分组表保留尚未被覆盖的导入调用键及 alias 历史，不能替换成永不更新的原始导出元数据，否则重复 use 的选项继承与冲突行为会变化。跨 provider 的 `force_override` 同步移除旧来源的同名键，本地 definitions 只更新 effective 表。use 提交时仍将临时分组表扁平化一次，沿用完整导入环境的 checked merge 语义；单个 FA 的冲突检查只查目标调用键。
+
 扫描 state 持有当前 `EffectiveMacroMap`、已通过扫描的 `passed_forms`、增量 `AttributeEnv`，以及不透明的 `LocalMacroState`。local macro 的注册表、缓存和编译产物不在本变更中定义。扫描 local declaration 时，function forms 的延迟展开 `MacroEnvironment` 从 declaration 前的状态解析；另可交付 `passed_forms + 当前及剩余 queue` 作为结构性的闭包源码视图，但后者不是宏展开环境。
 
 ### 队列与输出模型
