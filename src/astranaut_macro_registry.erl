@@ -548,22 +548,9 @@ ensure_loaded(Module) ->
     case code:ensure_loaded(Module) of
         {module, Module} ->
             true;
-        {error, Reason} ->
-            log_macro_load(Module, Reason),
+        {error, _Reason} ->
             false
     end.
-
-log_macro_load(Module, Reason) ->
-    io:format(
-        standard_error,
-        "astranaut_macro: load ~p failed: ~p~nwhere_is_file=~p~npaths=~p~n",
-        [
-            Module,
-            Reason,
-            code:where_is_file(atom_to_list(Module) ++ ".beam"),
-            [P || P <- code:get_path(), string:find(P, "erlando") =/= nomatch]
-        ]
-    ).
 
 update_module_macros(File, Module, ModuleMacros) ->
     maps:fold(

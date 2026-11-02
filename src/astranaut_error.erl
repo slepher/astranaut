@@ -351,7 +351,7 @@ with_key(Fun, Key, With, #{?STRUCT_KEY := ?MODULE} = Struct) ->
     Struct#{Key => Errors1}.
 
 new_error(Error) ->
-    new_error([Error]).
+    new_errors([Error]).
 
 new_errors(Errors) ->
     append_errors(Errors, new()).
@@ -437,7 +437,7 @@ realize_errors(FileErrors) ->
     lists:map(fun({File, Errors}) -> {File, endo_run(Errors)} end, maps:to_list(FileErrors)).
 
 update_file(undefined, eof, #{formatted_errors := Errors, formatted_warnings := Warnings} = Struct) ->
-    case is_empty(Errors) and is_empty(Warnings) of
+    case endo_is_empty(Errors) andalso endo_is_empty(Warnings) of
         true ->
             Struct;
         false ->

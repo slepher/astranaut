@@ -97,7 +97,7 @@ run_error(#{?STRUCT_KEY := StructKey, error := Error}) when
 lift_m(F, X) ->
     bind(X, fun(A) -> return(F(A)) end).
 
--spec map_m(fun((A) -> struct(B)), [struct(A)]) -> struct(B).
+-spec map_m(fun((A) -> struct(B)), [A]) -> struct([B]).
 map_m(F, [X | Xs]) ->
     bind(
         F(X),

@@ -13,12 +13,11 @@
 %% API
 -export([do/2]).
 -export([parse_transform/2, format_error/1]).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
 -spec do(astranaut:tree(), #{monad := module(), monad_fail := module()}) ->
-    astranaut_return:struct(astranaut:trees()).
+    astranaut:map_walk_return().
 do({lc, Pos, Monad, Comprehensions}, Opts) ->
     astranaut_return:lift_m(
         fun(Expressions) ->
@@ -38,10 +37,12 @@ parse_transform(Forms, _Opts) ->
     TransformOpts = #{formatter => ?MODULE, traverse => post, normalize => true},
     astranaut_return:to_compiler(astranaut:map(fun walk_node/2, Forms, TransformOpts)).
 
+format_error(expected_list_comprehension) ->
+    "A 'do' construct requires a list comprehension";
 format_error(non_empty_do) ->
     "A 'do' construct cannot be empty";
 format_error(last_generate_expression) ->
-    "The last expression in a 'do' construct count not be a generate expression: A <- B";
+    "The last expression in a 'do' construct cannot be a generator expression: A <- B";
 format_error({validate_key_failure, _Failure, _Key, _Value} = GenericError) ->
     astranaut:format_error(GenericError);
 format_error({invalid_option_value, _Value} = GenericError) ->

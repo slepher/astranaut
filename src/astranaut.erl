@@ -29,6 +29,14 @@
     traverse_style/0,
     traverse_step/0,
     walk_return/2,
+    rtrees/0,
+    common_walk_return/2,
+    map_walk/0,
+    map_walk_return/0,
+    reduce_walk/1,
+    reduce_walk_return/1,
+    mapfold_walk/1,
+    mapfold_walk_return/1,
     parse_transform_return/0
 ]).
 

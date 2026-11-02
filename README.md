@@ -12,17 +12,17 @@
 ### traverse functions:
 
 ```erlang
-  astranaut_traverse:map(map_fun(), form(), Opts :: opts()) -> 
-    traverse_return(node()) | parse_transform_return(node()).
-    
-  astranaut_traverse:reduce(reduce_fun(), state(), form(), Opts :: opts()) -> 
-    traverse_return(state()).
-    
-  astranaut_traverse:map_with_state(map_state_fun(), state(), form(), Opts :: opts()) -> 
-    traverse_return(node()) | parse_transform_return(node()).
-    
-  astranaut_traverse:mapfold(mapfold_fun(), state(), form(), Opts :: opts()) -> 
-    traverse_return({form(), state()}).
+  astranaut:map(astranaut:map_walk(), astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(astranaut:trees()).
+
+  astranaut:reduce(astranaut:reduce_walk(State), State, astranaut:trees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(State).
+
+  astranaut:map_with_state(astranaut:mapfold_walk(State), State, astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(astranaut:trees()).
+
+  astranaut:mapfold(astranaut:mapfold_walk(State), State, astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct({astranaut:trees(), State}).
 ```
 
 *arguments*
@@ -253,7 +253,7 @@ the child projection itself, rather than one selected node, must change.
 &emsp;&emsp;powerful map\_m function if you famillar with monad.
 
 ```erlang
-  astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A). 
+  astranaut:map_m(F, Node, Opts) -> astranaut_traverse:struct(State, astranaut:trees()).
 ```
 
 # astranaut_syntax
@@ -1009,7 +1009,7 @@ macro_2(Name) ->
     Name,
     quote(
       fun() ->
-          unquote_atom(Name)
+          _A@Name
       end)).
 ```
 
@@ -1036,7 +1036,7 @@ macro_2(Name) ->
     Name,
     quote(
       fun() ->
-          unquote_atom(Name)
+          _A@Name
       end)).
 ```
 
@@ -1112,7 +1112,7 @@ A1 + A2 + A3 + A4.
 # Rebinding 
 
 ```erlang
--include_lib("erlando/include/rebinding.hrl").
+-include_lib("astranaut/include/rebinding.hrl").
 
 -rebinding_all(Opts).
 -rebinding_fun(FAs).
@@ -1246,7 +1246,7 @@ hello_f(A) ->
 *Usage*
 
 ```erlang
--include_lib("erlando/include/struct.hrl").
+-include_lib("astranaut/include/struct.hrl").
 -record(test, {name = hello, value}).
 -astranaut_struct([test]).
 
@@ -1265,7 +1265,7 @@ update_name(Name, #test{} = Test) ->
 &emsp;&emsp; code above is converted to code below  
 
 ```erlang
--include_lib("erlando/include/struct.hrl").
+-include_lib("astranaut/include/struct.hrl").
 -record(test, {name = hello, value}).
 -astranaut_struct([test]).
 

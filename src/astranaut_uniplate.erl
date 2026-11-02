@@ -748,7 +748,7 @@ apply_modifies([], S) ->
     S;
 apply_modifies([Modify | T], S) when is_function(Modify, 1) ->
     apply_modifies(T, Modify(S));
-apply_modifies([S1 | T], S) when not is_function(S) ->
+apply_modifies([S1 | T], _S) when not is_function(S1, 1) ->
     apply_modifies(T, S1).
 
 apply_functions([], Value) ->

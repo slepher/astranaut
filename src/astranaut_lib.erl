@@ -554,19 +554,18 @@ gen_exported_function(Name, Fun) ->
 %% @doc generate function by name and `erl_parse' node of anonymous function or clauses or expressions.
 gen_function(Name, {'fun', Pos, {clauses, Clauses}}) ->
     gen_function(Name, Pos, Clauses);
-gen_function(Name, {named_fun, Pos, {var, _, FunName1}, Clauses}) ->
-    Clauses1 =
-        astranaut:smap(
-            fun
-                ({var, FunNamePos, FunName2}, #{type := expression}) when FunName1 =:= FunName2 ->
-                    {atom, FunNamePos, FunName2};
-                (Node, _Attr) ->
-                    Node
-            end,
-            Clauses,
-            #{traverse => post}
-        ),
-    gen_function(Name, Pos, Clauses1);
+gen_function(Name, {named_fun, Pos, FunName, Clauses} = Fun) when is_atom(FunName) ->
+    %% Keep the named fun's lexical scope, including self references as values
+    %% and shadowing in nested funs, intact.
+    Arity = clause_arity(Clauses),
+    Used = erl_syntax_lib:variables(Fun),
+    Names = [
+        list_to_atom("AstranautArg" ++ integer_to_list(I))
+     || I <- lists:seq(1, Arity + sets:size(Used))
+    ],
+    Fresh = [Var || Var <- Names, not sets:is_element(Var, Used)],
+    Args = [{var, Pos, Var} || Var <- lists:sublist(Fresh, Arity)],
+    gen_function(Name, Pos, [{clause, Pos, Args, [], [{call, Pos, Fun, Args}]}]);
 gen_function(Name, [Clause | _T] = Forms) ->
     case erl_syntax:type(Clause) of
         clause ->
@@ -610,35 +609,17 @@ merge_clauses([{'fun', Pos, {clauses, _}} | _T] = Nodes) ->
 gen_exports(Exports, Pos) when is_list(Exports) ->
     gen_attribute_node(export, Pos, Exports).
 
--spec with_attribute
-    (
-        fun((term(), State) -> astranaut_return:struct(State) | State),
-        State,
-        astranaut:forms(),
-        atom(),
-        #{
-            simplify_return := false,
-            formatter => module(),
-            term() => term()
-        }
-    ) ->
-        astranaut_return:struct(State);
-    (
-        fun((term(), State) -> astranaut_return:struct(State) | State),
-        State,
-        astranaut:forms(),
-        atom(),
-        #{
-            simplify_return => true,
-            formatter => module(),
-            term() => term()
-        }
-    ) ->
-        State | no_return().
-%% @doc visit every attribute which names Attr and accum result to Init<br/>
-%% returns astranaut_return:struct(State) if simplify_return is false<br/>
-%% returns State if simplify_return is not provided or true
-%% @end
+-spec with_attribute(
+    fun((term(), State) -> astranaut_return:struct(State) | State)
+    | fun((term(), State, #{pos := erl_anno:location()}) -> astranaut_return:struct(State) | State),
+    State,
+    astranaut:forms(),
+    atom(),
+    #{formatter => module(), term() => term()}
+) -> astranaut_return:struct(State).
+%% @doc Visit attributes named Attr and accumulate their values from Init.
+%% Always returns a result struct, like reduce/4 and forms_with_attribute/5.
+%% Use astranaut_return:run/1 or simplify/1 explicitly to extract the value.
 with_attribute(F, Init, Forms, Attr, Opts) ->
     astranaut:reduce(
         fun

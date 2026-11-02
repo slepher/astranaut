@@ -11,17 +11,17 @@
 ### traverse functions:
 
 ```erlang
-  astranaut_traverse:map(map_fun(), form(), Opts :: opts()) ->
-    traverse_return(node()) | parse_transform_return(node()).
+  astranaut:map(astranaut:map_walk(), astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(astranaut:trees()).
 
-  astranaut_traverse:reduce(reduce_fun(), state(), form(), Opts :: opts()) ->
-    traverse_return(state()).
+  astranaut:reduce(astranaut:reduce_walk(State), State, astranaut:trees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(State).
 
-  astranaut_traverse:map_with_state(map_state_fun(), state(), form(), Opts :: opts()) ->
-    traverse_return(node()) | parse_transform_return(node()).
+  astranaut:map_with_state(astranaut:mapfold_walk(State), State, astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct(astranaut:trees()).
 
-  astranaut_traverse:mapfold(mapfold_fun(), state(), form(), Opts :: opts()) ->
-    traverse_return({form(), state()}).
+  astranaut:mapfold(astranaut:mapfold_walk(State), State, astranaut:rtrees(), astranaut:traverse_opts()) ->
+    astranaut_return:struct({astranaut:trees(), State}).
 ```
 
 *arguments*
@@ -202,7 +202,7 @@ astranaut:map_m(Walker, Ast, #{traverse => pre, role => expression}).
 &emsp;&emsp;熟悉 monad 时可以直接使用更底层的 `map_m`。
 
 ```erlang
-  astranaut_traverse:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A).
+  astranaut:map_m((A, attr()) => monad(A), map_m_opts()) -> monad(A).
 ```
 
 # astranaut_syntax
@@ -671,7 +671,7 @@ unexpected option 报告并忽略。
 # Rebinding
 
 ```erlang
--include_lib("erlando/include/rebinding.hrl").
+-include_lib("astranaut/include/rebinding.hrl").
 
 -rebinding_all(Opts).
 -rebinding_fun(FAs).
@@ -689,7 +689,7 @@ unexpected option 报告并忽略。
 *Usage*
 
 ```erlang
--include_lib("erlando/include/struct.hrl").
+-include_lib("astranaut/include/struct.hrl").
 -record(test, {name = hello, value}).
 -astranaut_struct([test]).
 ```

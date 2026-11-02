@@ -158,7 +158,9 @@ format_macro_ref(Macro) ->
 invalid_macro_return_mfa(#{macro := #{mfa := MFA}}) ->
     MFA;
 invalid_macro_return_mfa(#{current_macro := #{mfa := MFA}}) ->
-    MFA.
+    MFA;
+invalid_macro_return_mfa(_) ->
+    #{module => unknown, function => unknown, arity => 0}.
 
 %%%===================================================================
 %%% Attribute pass orchestration
