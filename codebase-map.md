@@ -1,12 +1,12 @@
 # Astranaut 全仓地图
 
-> 调研日期：2026-08-06
-> 基准版本：`78683bf` / `78683bfe75d27f3e0ade55810c5487fdb2915788`
-> 提交主题：`Warn on missing macro formatters`
-> 发布版本：`0.13.0` · Erlang/OTP 21+ · MIT
+> 调研日期：2026-11-02
+> 基准版本：`ba34758` / `ba34758b062017787c7f583c98343de07bd2ae76`
+> 提交主题：`Fix macro closure analysis and displaced import cleanup`
+> 发布版本：`0.13.11` · Erlang/OTP 21+ · MIT
 > 调研边界：正文只描述上述已提交快照；工作区差异单列于文末「未提交增补」。
 
-这是一份面向维护者和后续 agent 的导航文档：先说明系统为什么存在，再给出模块职责、调用方向、关键状态与不变量、测试落点、生成物边界和已知文档漂移。历史版原样保存在 [`codebase-map.2026-08-05.3b7d405.md`](codebase-map.2026-08-05.3b7d405.md)。
+这是一份面向维护者和后续 agent 的导航文档：先说明系统为什么存在，再给出模块职责、调用方向、关键状态与不变量、测试落点、生成物边界和已知文档漂移。本轮以旧基准 `78683bf` 到 `ba34758` 的已提交差异增量更新。
 
 ## 一页结论
 
@@ -30,17 +30,15 @@ Astranaut 是一个无第三方依赖的 Erlang 元编程库。它以 Erlang abs
 
 | 指标 | 已提交快照 |
 | --- | ---: |
-| tracked files | 277 |
-| `src/*.erl` | 25 个，13,531 行 |
+| tracked files | 291 |
+| `src/*.erl` | 26 个，15,077 行 |
 | `include/*.hrl` | 11 个 |
-| Common Test suite | 17 个 |
-| suite `all/0` 声明用例 | 445 个 |
-| 测试 Erlang 文件 | 127 个（17 suite + 110 helper/fixture） |
-| 测试 Erlang 代码 | 13,305 行 |
-| OpenSpec 文件 | 29 个，6 组 change |
-| README | 英文 1,276 行；中文 727 行 |
+| EUnit | 9 个模块，157 个不同测试入口 |
+| Common Test | 10 个 suite，`all/0` 声明 282 个用例 |
+| OpenSpec 文件 | 30 个，6 组 change |
+| README | 英文 1,320 行；中文 728 行 |
 
-统计由 `git ls-tree`、`git show HEAD:<path>` 和 suite `all/0` 得出，不包含工作区未提交文件。
+统计由 `git ls-tree`、`git show HEAD:<path>` 、EUnit `_test/0` / `_test_/0` 入口与 suite `all/0` 得出（同名 OTP 条件编译分支只计一次），不包含工作区未提交文件。
 
 ## 系统边界与执行时机
 
@@ -83,7 +81,8 @@ Astranaut 是一个无第三方依赖的 Erlang 元编程库。它以 Erlang abs
 │  ├─ astranaut_macro_scan           源码序 attribute queue
 │  ├─ astranaut_macro_registry       声明、选项、时点环境
 │  ├─ astranaut_macro_expander       统一匹配、递归展开、观察协议
-│  └─ astranaut_macro_local          可选 local capability 生命周期
+│  └─ astranaut_macro_local          首次绑定、闭包与展开调度
+│     └─ astranaut_macro_local_compile 唯一临时模块、BEAM 与 generation
 └─ 其他 transforms
    ├─ astranaut_rebinding            自定义子树访问顺序 + 变量状态
    ├─ astranaut_struct_transformer   record 定义/表达式改写
@@ -130,7 +129,7 @@ map/reduce/mapfold
 | `src/syntax.term` | schema 的项目内事实源 |
 | `absforms/absform-21..29` | 各 OTP abstract format 参考输入；21–26 为 XML，27–29 为 Markdown |
 | `scripts/generate_syntax_schema.escript` | 从事实源生成 schema 模块 |
-| `scripts/check_syntax_schema.escript` | 对照当前 OTP 检查 schema；`syn.md` 记录审计背景 |
+| `scripts/check_syntax_schema.escript` | 对照当前 OTP 检查 schema |
 
 validator 是 `{role, Role}` 或 `{slot, ParentType, Slot, Role}` 的位置契约，对普通 walker 应视为不透明 token。`validate_node` 只检查当前位置；`normalize` 会递归规范化子树。
 
@@ -152,21 +151,21 @@ validator 是 `{role, Role}` 或 `{slot, ParentType, Slot, Role}` 的位置契�
 | `astranaut_macro.erl` | parse transform 入口、默认选项、attribute pass 与 function pass 编排、最终 compiler 结果 | 不保存扫描队列或 local closure 细节 |
 | `astranaut_macro_scan.erl` | `Queue/Output/PassedForms/Registry/Capability`；源码序 scan-and-splice；生成 forms 回插当前位置 | 不解释宏声明语义或递归展开 |
 | `astranaut_macro_registry.erl` | external/export/use/import/options 校验；macro descriptor；冲突/override；AttributeEnv；时点/最终 MacroEnvironment；按 source compilation 去重缺失 formatter warning | 不执行宏，不含 local 专属分支 |
-| `astranaut_macro_expander.erl` | attribute/function 统一匹配与调用；inner/outer 递归；depth；AST role 校验；call analysis；observation protocol | 不拥有 source queue 或 local generation |
-| `astranaut_macro_local.erl` | local declaration 校验、closure 冻结、canonical expansion、依赖调度、临时模块编译、retain、finalize；首次缺失 `/1` formatter warning 使用 source identity | 不改变通用 external expansion 规则 |
+| `astranaut_macro_expander.erl` | attribute/function 统一匹配与调用；inner/outer 递归；depth；AST role 校验；call analysis | 不拥有 source queue 或 local generation |
+| `astranaut_macro_local.erl` | local declaration 校验、closure 冻结、首次环境绑定、canonical expansion、依赖调度、retain、finalize | 不改变通用 external expansion 规则 |
+| `astranaut_macro_local_compile.erl` | 唯一临时模块名、编译输入组装、BEAM 编译加载、callable version 与 generation 提交、被移除函数的编译属性清理 | 不拥有声明快照和展开调度 |
 | `astranaut_macros.erl` | 项目内部导出的 `literal/1` macro provider | 不是框架编排模块 |
 
 宏主流程：
 
 ```text
 parse_transform(Forms, CompileOpts)
-→ 分配 invocation-unique local module 名
 → registry 初始化 external 环境
 → attribute scan（从左到右）
    ├─ import/use/macro_options：更新其后可见环境
    ├─ 普通 attribute：记录到 AttributeEnv
    ├─ attribute macro：展开并把结果 splice 回当前 queue
-   └─ 首个 local_macro：注册 local capability，冻结声明时上下文与闭包
+   └─ 首个 local_macro：注册 local capability、分配唯一临时模块名，冻结声明时上下文与闭包（不立即编译）
 → local capability 完成 attribute pass / 生成 callable / 计算 skip 集合
 → registry 构造 final macro environment
 → expander 对最终 function tasks 做一次源码序批量展开
@@ -177,9 +176,9 @@ parse_transform(Forms, CompileOpts)
 
 - `MacroEnvironment = #{macro_map, macro_options, function_call_analysis?}`；attribute 调用、declaration snapshot 与 final function context 形状一致，只是快照时点不同。
 - local closure 只沿直接本地 call 静态发现；`fun helper/1`、动态 dispatch、`apply/3` 必须用 `closure_roots` 补充。
-- 同一 `-local_macro([FAs])` 的成员共享声明快照，但成员间调用仍是普通 Erlang call；扫描后不保留 group identity。
-- frozen form 首次完整展开建立 canonical result 与 observed local whitelist；不同环境重放必须得到相同 canonical AST 和 whitelist，否则显式报冲突。
-- `NeedCallable` 触发按 declaration 顺序的最小累计 compilation boundary；compiler 只消费 canonical forms，不在编译边界再次做 request-specific expansion。
+- 同一 `-local_macro([FAs])` 的成员共享声明快照。已匹配宏的调用不作为普通本地函数闭包边；显式 `closure_roots` 补充静态闭包。
+- frozen form 永久绑定首次包含它的声明环境，在实际需要编译时只展开一次；共享 helper、retain/export 函数复用 canonical form，不再做多环境重放或 whitelist 比较。
+- `need_callable` 按需触发最小累计编译边界；无宏调用的独立声明共享编译，带宏调用的闭包先确保前序本地宏就绪。编译失败不提交 canonical/generation。
 - local capability 状态是 `disabled | #{provider, state}`。无 local declaration 的项目即使不编译 `astranaut_macro_local.erl`，external macro 主路径仍成立。
 - 源码序控制环境何时可见；宏选项 `order = inner | outer` 只控制单次嵌套调用的递归顺序，两者不可混淆。
 
@@ -201,9 +200,11 @@ parse_transform(Forms, CompileOpts)
 
 | 路径 | 内容 | 修改注意 |
 | --- | --- | --- |
-| `src/` | 25 个生产模块、schema 输入 | `astranaut_syntax_schema.erl` 是生成物 |
+| `src/` | 26 个生产模块、schema 输入 | `astranaut_syntax_schema.erl` 是生成物 |
 | `include/` | 用户启用入口与内部宏 | `struct.hrl` 会串联 macro transform |
-| `test/` | CT suites、编译夹具、测试 helper | 大量 `*_data` 是被测试动态编译的输入，不是独立 suite |
+| `test/` | EUnit 单元测试、共享 helper 和少量编译夹具 | `*_tests.erl` 由 EUnit 自动发现 |
+| `common_tests/` | 10 个 CT suites 及各自 `*_data` 集成夹具 | suite 生命周期、动态编译和跨模块行为 |
+| `test_data/` | EUnit AST 夹具 | 不计入测试入口数量 |
 | `absforms/` | OTP 21–29 参考 AST | 与 schema 脚本共同维护 |
 | `openspec/changes/` | local-macro、macro-passes、traverse-validator、uniform-macros 的提案/设计/spec/tasks | tasks 均记录历史演进，不等于新的 runtime 层 |
 | `docs/plans/` | unique local macro module 的设计与实施计划 | 当前实现已完成，属于设计记录 |
@@ -216,40 +217,37 @@ parse_transform(Forms, CompileOpts)
 
 - `rebar.config` 的 `{deps, []}` 表明无第三方 Hex/Git 依赖；OTP applications 为 `kernel, stdlib, compiler, syntax_tools`。
 - `erl_first_files` 固定核心 monad → traversal → syntax → quote → macro 的编译顺序；optional local provider 已移出该列表。
-- `rebar3 compile` 构建，`rebar3 ct` 跑 Common Test，post hook 自动执行 cover；xref 检查 undefined、deprecated 和 unused locals。
-- Cirrus CI 覆盖 OTP 21、23–29；Travis 配置覆盖 21–28（包括 22）；`docker_ci` 插件配置抽样 21/23/25/28/29 并运行 xref、不跑 dialyzer。三处矩阵不同，不应概括为同一个列表。
-- Windows Codex app sandbox 下轻量诊断可走 `scripts/rebar3_sandbox.ps1`；compile/ct 的 junction helper 需要直接在 sandbox 外运行。完整规则见 `AGENTS.md`。
+- `rebar3 compile` 构建，`rebar3 eunit` 与 `rebar3 ct` 分别运行两类测试，CT post hook 执行 cover；`scripts/cover_report.escript` 合并 EUnit 和 CT 覆盖数据。
+- GitHub Actions 的 CI 与 release workflow 使用 OTP 21–29，运行 EUnit 和 CT；`docker_ci` 同样配置 OTP 21–29 并启用 EUnit。当前快照不含旧 Cirrus/Travis 配置。
+- `scripts/rebar3_sandbox.ps1` 保留 Windows wrapper；项目操作约束以当前 `AGENTS.md` 为准。
 
 ## 测试地图
 
-下表是各 suite 的 `all/0` 精确声明数，总计 445；不把 `_data` 编译夹具误算成测试用例。
+EUnit 按不同测试入口名计数，CT 按 `all/0` 声明计数；不把 fixture 算作测试。
 
-| SUITE | 用例 | 主要覆盖 |
-| --- | ---: | --- |
-| `astranaut_syntax_SUITE` | 72 | node role/slot、validate/normalize、OTP AST 兼容、schema 对称性 |
-| `astranaut_quote_SUITE` | 73 | quote/unquote、pattern/type、binding、位置、codec/context、诊断 |
-| `astranaut_macro_pass_SUITE` | 37 | 源码序 pass、generated forms、closure、attribute buffer、final context |
-| `astranaut_macro_local_SUITE` | 41 | closure 冻结、canonical cache、dependency boundary、retain、capability callbacks |
-| `astranaut_SUITE` | 40 | 公开遍历 API、walk return、forms 顺序、validator 集成、compiler formatter adapter |
-| `astranaut_macro_SUITE` | 27 | 宏基础、递归、guard、quote hygiene |
-| `astranaut_design_SUITE` | 21 | 公开契约、模块加载/锁、compile meta/opts、monad 边界 |
-| `astranaut_uniplate_SUITE` | 20 | map/reduce/mapfold、context、非法节点/重建失败 |
-| `astranaut_macro_uniform_SUITE` | 19 | external/local 统一环境、override、递归深度、validator |
-| `astranaut_struct_SUITE` | 19 | struct API、transform、enforce/unknown/missing fields |
-| `astranaut_rebinding_SUITE` | 21 | comprehension、control flow、map/record、pin/作用域 |
-| `astranaut_traverse_SUITE` | 14 | traverse monad、位置/文件、State、scoped state |
-| `astranaut_macro_scan_SUITE` | 12 | queue/splice/state、generated merge、无 local capability 路径 |
-| `astranaut_macro_error_SUITE` | 17 | warnings/errors、错误格式、局部声明与 sibling errors、缺失 macro formatter warning |
-| `astranaut_error_SUITE` | 6 | error state 累积与读取 |
-| `disable_tco_SUITE` | 4 | TCO 变换及嵌套控制流 |
-| `astranaut_forms_SUITE` | 2 | form 排序与 `__original__` 合并 |
+| 类型 | 模块 / Suite | 用例入口 |
+| --- | --- | ---: |
+| CT | `astranaut_SUITE` | 40 |
+| CT | `astranaut_design_SUITE` | 21 |
+| CT | `astranaut_macro_SUITE` | 28 |
+| CT | `astranaut_macro_error_SUITE` | 18 |
+| CT | `astranaut_macro_pass_SUITE` | 38 |
+| CT | `astranaut_macro_uniform_SUITE` | 19 |
+| CT | `astranaut_quote_SUITE` | 73 |
+| CT | `astranaut_rebinding_SUITE` | 21 |
+| CT | `astranaut_struct_SUITE` | 20 |
+| CT | `disable_tco_SUITE` | 4 |
+| EUnit | `astranaut_error_tests` | 6 |
+| EUnit | `astranaut_forms_tests` | 2 |
+| EUnit | `astranaut_macro_expander_tests` | 2 |
+| EUnit | `astranaut_macro_local_tests` | 25 |
+| EUnit | `astranaut_macro_registry_tests` | 3 |
+| EUnit | `astranaut_macro_scan_tests` | 12 |
+| EUnit | `astranaut_syntax_tests` | 72 |
+| EUnit | `astranaut_traverse_tests` | 14 |
+| EUnit | `astranaut_uniplate_tests` | 21 |
 
-测试导航：
-
-- 改通用 traversal：先看 `astranaut_SUITE`、`astranaut_traverse_SUITE`、`astranaut_uniplate_SUITE`。
-- 改 AST schema/validator：先看 `astranaut_syntax_SUITE`，再跑 schema check。
-- 改宏：按职责选择 scan/registry/expander/local suite，并补 pass/uniform/error 集成覆盖。
-- 改 parse transform 的 compiler 返回/类型契约：同时看 `astranaut_design_SUITE`。
+测试导航：通用遍历改动看 `astranaut_SUITE` 与 error/traverse/uniplate EUnit；schema 改动看 syntax EUnit 和 schema check；宏改动按 scan/registry/expander/local EUnit 定位，再跑 pass/uniform/error CT；公共契约看 `astranaut_design_SUITE`。
 
 ## 设计文档与实现状态
 
@@ -260,8 +258,9 @@ parse_transform(Forms, CompileOpts)
 | `uniform-macros` | external/local 统一匹配环境、递归 expansion、冲突与 depth |
 | `traverse-validator` | opaque validator、slot contract、opt-in validation、macro 错误归因 |
 | `macro-passes` | 两阶段源码序扫描、统一 RuntimeContext、ExpansionValidator、canonical compiler boundary |
-| `local-macro` | declaration snapshot、closure/retain、cache/whitelist、optional capability isolation 与热路径优化 |
+| `local-macro` | 首次绑定、按需展开、canonical 复用、最小累计编译、compiler 模块隔离 |
 | `transform-error` | compiler diagnostic adapter、纯 `/1` formatter、缺失 macro formatter warning 与 source-compilation 去重 |
+| `macro-error` | 宏错误归属权、local/external formatter 与已格式化诊断保留 |
 
 `openspec/changes/macro-passes/Hierarchy_final.md` 是宏架构最完整的设计层级；`lessons.md` 是实现操作层面的反例与约束。两者与源码冲突时，以当前源码和回归测试为事实，以文档记录设计意图并标记差异。
 
@@ -271,26 +270,15 @@ parse_transform(Forms, CompileOpts)
 
 1. README 开头的 traversal 签名仍写成 `astranaut_traverse:map/reduce/...`，实际公开函数在 `astranaut`；同段旧类型名也与当前导出类型有偏差。
 2. README 的 Rebinding 与 Struct 用法仍引用 `erlando/include/...`，仓库实际头文件属于 `astranaut/include/...`。
-3. README Macro 概览中 `astranaut_macro_local` 的职责句重复了一次。
-4. 英文 README 1,276 行而中文 README 727 行，validator、local capability、quote context 等近期内容并非完全对齐。
-5. `.cirrus.yml`、`.travis.yml` 与 `docker_ci` 的 OTP 矩阵各不相同；改变“支持版本”时需要同时判断产品承诺与各 CI 层目的。
+3. 英文宏示例仍使用 `unquote_atom(Name)`，需要更新为当前 value binding。
+4. 英文 README 1,320 行而中文 README 728 行，validator、local capability、quote context 等近期内容并非完全对齐。
+5. README 的功能深度仍不完全对齐；不要把中文文档的省略当作功能缺失。
 6. `astranaut_syntax_schema.erl` 很大但不可直接优化；任何结构修改必须回到 `syntax.term`、生成脚本和 absform 审计。
-7. macro local 的正确性由声明时快照、canonical result、whitelist、compilation boundary 四组状态共同保证；绕过 provider callback 直接改 scanner/registry 很容易破坏事务边界。
+7. macro local 的正确性由首次绑定快照、canonical result、compilation boundary 与 generation 提交共同保证；绕过 provider callback 直接改 scanner/registry 很容易破坏事务边界。
 
-## 旧版与本轮调研对比
+## 本轮已提交增量
 
-| 维度 | 历史版 | 本轮改进 |
-| --- | --- | --- |
-| revision | 历史版基准为 `3b7d405`，缺少后续 compiler-adapter 与 macro-warning 变更 | 当前基准为 `78683bf`，同时记录 short/full hash 与主题 |
-| 源码规模 | 写成 27 个模块 | 从 committed tree 核验为 25 个 `.erl`、13,531 行 |
-| 测试规模 | “约 19 个、600+”，各 suite 数偏高 | 核验为 17 suite、`all/0` 445 个，并逐 suite 列数 |
-| 架构表达 | 模块职责表为主 | 增加编译期/运行期边界、依赖层级、遍历与宏数据流、状态不变量 |
-| 事实源 | 提到 schema 与设计文档 | 明确生成物、源数据、审计脚本、OpenSpec 已落地状态 |
-| 构建/CI | 把 CI 概括成一个版本列表 | 分开 Cirrus、Travis、docker_ci 三套矩阵 |
-| 可维护性 | 缺少“改哪里、测哪里” | 增加测试导航、风险区和文档漂移 |
-| 工作区隔离 | 已采用“正文/增补”结构 | 延续该结构，并确保正文统计全部来自 `HEAD` |
-
-历史版最有价值的内容——宏模块职责、源码序语义、local capability、validator 不透明性和 lessons 中的 monad 约束——均被保留；错误统计、模糊边界和缺失导航则由本轮独立核验修正。
+从 `78683bf` 到 `ba34758`：单元测试迁到 `test/*_tests.erl`，集成测试迁到 `common_tests/`；新增 registry/expander 测试；本地宏 BEAM 编译拆到 `astranaut_macro_local_compile`；多环境重放改为首次绑定与 canonical 复用；宏闭包分析区分宏调用和普通本地调用，清理被替换导入的使用状态；README/OpenSpec 同步这些语义。以上均依据已提交差异，不包含本轮工作区修复。
 
 ## 修改入口速查
 
@@ -307,13 +295,15 @@ parse_transform(Forms, CompileOpts)
 
 ## 未提交增补
 
-> 以下内容存在于调研时的工作区，但不属于基准 revision `78683bf`，因此没有进入上文事实统计。
+> 正文基于 `ba34758`；以下是本次工作区变更，不纳入正文统计。
 
-- `codebase-map.md`（`M`）：补记本次测试目录与执行边界的未提交变化。
-- `rebar.config`（`M`）：指定 Common Test 使用 `common_tests/` 套件目录；EUnit 模块遵循 `test/*_tests.erl` 默认发现规则。
-- `test/*_SUITE.erl` 与对应 `test/*_SUITE_data/`（`D`）：原 Common Test 文件已迁出 `test/`，避免 EUnit 扫描整合测试 fixture。
-- `test/*_tests.erl`（`??`）：迁移后的 EUnit 单元测试模块，覆盖 forms、error、traverse、uniplate、syntax、macro scan 和 macro local。
-- `common_tests/`（`??`）：Common Test 套件及其 fixture，保留需要 suite 生命周期、动态编译和跨模块协作的整合测试。
-- `test_data/`（`??`）：EUnit 使用的 AST fixture。
-- `.github/workflows/ci.yml`、`.github/workflows/release.yml`（`M`）：测试矩阵同时执行 EUnit 与 Common Test，覆盖迁移后的全部 449 条测试。
-- `scripts/cover_report.escript`（`M`）：合并导入 `eunit.coverdata` 与 `ct.coverdata`，避免遗漏 EUnit 覆盖率。
+- `README.md`、`README.zh.md`：修正遍历入口和结果类型、头文件应用名；英文宏示例改用 `_A@Name`。
+- `src/astranaut_error.erl`、`astranaut_lib.erl`、`astranaut_macro.erl`、`astranaut_macro_registry.erl`、`astranaut_return.erl`、`astranaut_uniplate.erl`：前轮缺陷修复；调用方 `common_tests/astranaut_SUITE.erl`、其 `sample_transformer_1.erl` 夹具和 `test/astranaut_test_lib.erl` 同步显式结构化返回选项。
+- `src/astranaut_do.erl`：保留合法的 `{error, expected_list_comprehension}` 返回形式，新增 `do_return/0` 联合类型并补错误格式化。
+- `test/astranaut_review_regression_tests.erl`（未跟踪）：10 个 P0 回归测试。
+- `test/astranaut_review_p1_tests.erl`（未跟踪）：13 个 P1 测试，覆盖文件解析、AST 格式/位置、forms 合并/诊断顺序、Monad 短路/Writer listen、TCO 与 rebinding 作用域。
+- `docs/plans/00-codebase-and-test-review.md` 及 `01`–`05` 计划（未跟踪）：原审查及后续计划；本次只补充审查实施状态，未实施功能演进。
+- `.vscode/`（未跟踪）：用户已有配置，本次未修改。
+- 空目录 `src/traverse/` 已删除；Git 不追踪空目录。
+
+本地图按 `AGENTS.md` 要求单独提交；上述源码、测试和 README 改动留在工作区。
