@@ -145,6 +145,7 @@ all() ->
         test_pattern_save_var_in_fun,
         test_pattern_save_var_in_case,
         test_format_error_contract,
+        test_fixture_warnings,
         test_invalid_rebinding_fun_warning,
         test_invalid_rebinding_option_error
     ].
@@ -326,6 +327,53 @@ test_format_error_contract(_Config) ->
         )
     ),
     ok.
+
+test_fixture_warnings(Config) ->
+    lists:foreach(
+        fun(Module) ->
+            File = filename:join(
+                proplists:get_value(data_dir, Config), atom_to_list(Module) ++ ".erl"
+            ),
+            Opts = astranaut_test_lib:compile_opts(),
+            EditorForms = astranaut_lib:parse_file(File, Opts),
+            EditorTransformed = astranaut_rebinding:parse_transform(EditorForms, Opts),
+            ?assertEqual({ok, []}, erl_lint:module(EditorTransformed, File, [])),
+            Forms = astranaut_test_lib:test_module_forms(Module, Config),
+            CompileOptions = lists:flatten([[Option] || {attribute, _, compile, Option} <- Forms]),
+            ?assertNot(lists:member(nowarn_unused_vars, CompileOptions)),
+            ?assertNot(lists:member(nowarn_export_var_subexpr, CompileOptions)),
+            ?assert(lists:member({parse_transform, astranaut_rebinding}, CompileOptions)),
+            case Module of
+                rebinding_test -> ?assert(lists:member(nowarn_export_all, CompileOptions));
+                rebinding_example -> ok
+            end,
+            Return = astranaut_test_lib:compile_test_forms(Forms),
+            {Errors, Warnings} = astranaut_error:realize(astranaut_return:run_error(Return)),
+            ?assertEqual([], Errors),
+            LintWarnings = lists:sort([
+                element(1, Reason)
+             || {_, Messages} <- Warnings,
+                {_, erl_lint, Reason} <- Messages
+            ]),
+            %% OTP 29 adds export_var_subexpr diagnostics. Keep an exact
+            %% baseline here without assuming optimizer warnings are stable.
+            case erlang:system_info(otp_release) of
+                "29" ->
+                    Expected =
+                        case Module of
+                            rebinding_example ->
+                                [unused_var, unused_var];
+                            rebinding_test ->
+                                lists:duplicate(20, export_var_subexpr) ++
+                                    lists:duplicate(16, unused_var)
+                        end,
+                    ?assertEqual(lists:sort(Expected), LintWarnings);
+                _ ->
+                    ?assert(lists:member(unused_var, LintWarnings))
+            end
+        end,
+        [rebinding_example, rebinding_test]
+    ).
 
 test_invalid_rebinding_fun_warning(Config) ->
     Forms = astranaut_test_lib:test_module_forms(rebinding_invalid_fun_test, Config),

@@ -14,14 +14,19 @@
 -include("otp_vsn.hrl").
 -include("rebinding.hrl").
 
+%% Editor-only suppression: astranaut_test_lib removes these options in tests.
+-compile(nowarn_unused_vars).
+
 -rebinding_all([debug]).
 
 -if(?ASTRANAUT_OTP_VSN_GE(29)).
 -define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
-        is_binary(list_to_binary([Var, <<"4">>]))).
+    is_binary(list_to_binary([Var, <<"4">>]))
+).
 -else.
 -define(REBINDING_EXAMPLE_BINARY_FILTER(Var),
-        Var = list_to_binary([Var, <<"4">>])).
+    Var = list_to_binary([Var, <<"4">>])
+).
 -endif.
 
 %%%===================================================================
@@ -34,8 +39,11 @@ test(ABC) ->
     {ABC, ABC} = {ABC + 1, ABC + 1},
     EFG = ABC + 1,
     +ABC = ABC + 1,
-    F = fun EFG (0, {EFG, EFG} = ABC, ABC) -> 0; EFG (N, ABC, ABC) -> EFG(N - 1) end,
-    ABC = 
+    F = fun
+        EFG(0, {EFG, EFG} = ABC, ABC) -> 0;
+        EFG(N, ABC, ABC) -> EFG(N - 1)
+    end,
+    ABC =
         case EFG of
             +ABC ->
                 ABC = ABC + 1,
@@ -44,12 +52,24 @@ test(ABC) ->
                 ABC = EFG + 2,
                 ABC
         end,
-    D = << <<ABC>> || 
-           <<ABC>> <= begin ABC = ABC + 1, <<"123">> end,
-           ?REBINDING_EXAMPLE_BINARY_FILTER(ABC)
-         >>,
-    D = [ABC || ABC <- [begin ABC = ABC + 1, ABC end]],
-    EFG = 
+    D = <<
+        <<ABC>>
+     || <<ABC>> <= begin
+            ABC = ABC + 1,
+            <<"123">>
+        end,
+        ?REBINDING_EXAMPLE_BINARY_FILTER(ABC)
+    >>,
+    D = [
+        ABC
+     || ABC <- [
+            begin
+                ABC = ABC + 1,
+                ABC
+            end
+        ]
+    ],
+    EFG =
         case EFG of
             +ABC ->
                 ABC = ABC + 1,
@@ -59,7 +79,7 @@ test(ABC) ->
                 ABC = ABC + 2,
                 ABC
         end,
-    C = 
+    C =
         try ABC of
             +EFG ->
                 ABC = ABC + 1,
@@ -72,13 +92,15 @@ test(ABC) ->
             _:ABC when (ABC =:= 3) ->
                 {ABC, ABC}
         end,
-    Zero = 
+    Zero =
         lists:map(
-          fun(Zero) ->
-                  ABC = Zero + 1,
-                  Zero = ABC + 1,
-                  Zero
-          end, lists:seq(1, 10)),
+            fun(Zero) ->
+                ABC = Zero + 1,
+                Zero = ABC + 1,
+                Zero
+            end,
+            lists:seq(1, 10)
+        ),
     io:format("Zero is ~p~n", [Zero]),
     io:format("abc is ~p~n", [ABC]),
     io:format("efg is ~p~n", [EFG]),
@@ -87,39 +109,51 @@ test(ABC) ->
     F(10).
 
 hello(A, B) ->
-  A = 
-    case A of
-        +B -> 
-          B = A + B,
-          A = A + B,
-          B = A + B,
-          B;
-        +A ->
-          B = A + B,
-          B
-    end,
-  B = 
-    case A of
-        +B -> 
-            A = 
-                begin
-                    B = A + B,
-                    A = A + B,
-                    A
-                end,
-            B = A + B,
-            B;
-        +A ->
-          B = A + B,
-          B
-    end,
-  {A, B}.
+    A =
+        case A of
+            +B ->
+                B = A + B,
+                A = A + B,
+                B = A + B,
+                B;
+            +A ->
+                B = A + B,
+                B
+        end,
+    B =
+        case A of
+            +B ->
+                A =
+                    begin
+                        B = A + B,
+                        A = A + B,
+                        A
+                    end,
+                B = A + B,
+                B;
+            +A ->
+                B = A + B,
+                B
+        end,
+    {A, B}.
 
 hello_f(A) ->
     A = A + 1,
-    F = fun F (0) -> 0; F (A) -> A = F(A - 1), A end,
+    F = fun
+        F(0) ->
+            0;
+        F(A) ->
+            A = F(A - 1),
+            A
+    end,
     A = F(A),
-    F = fun F (0) -> 0; F (A) -> A = F(A - 1), A end,
+    F = fun
+        F(0) ->
+            0;
+        F(A) ->
+            A = F(A - 1),
+            A
+    end,
     A = F(A),
     A.
 

@@ -103,11 +103,35 @@ test_module_forms(Module, DataDir, _Config) ->
                 {error, Errors, []} ->
                     exit({compile_module_failed, Errors});
                 Forms ->
-                    Forms
+                    restore_fixture_warnings(Module, Forms)
             end;
         false ->
             exit({file_not_detected, File})
     end.
+
+%% These rebinding fixtures silence intentional editor warnings only.
+%% Tests must compile their original binding boundaries with warnings enabled.
+restore_fixture_warnings(Module, Forms) when
+    Module =:= rebinding_example; Module =:= rebinding_test
+->
+    lists:filtermap(
+        fun
+            ({attribute, Pos, compile, Options}) when is_list(Options) ->
+                case Options -- [nowarn_unused_vars, nowarn_export_var_subexpr] of
+                    [] -> false;
+                    Remaining -> {true, {attribute, Pos, compile, Remaining}}
+                end;
+            ({attribute, _, compile, Option}) when
+                Option =:= nowarn_unused_vars; Option =:= nowarn_export_var_subexpr
+            ->
+                false;
+            (Form) ->
+                {true, Form}
+        end,
+        Forms
+    );
+restore_fixture_warnings(_Module, Forms) ->
+    Forms.
 
 load_data_modules(Config, TestModules) ->
     lists:foreach(

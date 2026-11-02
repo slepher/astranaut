@@ -4,6 +4,7 @@
 %%%-------------------------------------------------------------------
 -module(astranaut_macro_local_tests).
 -compile(export_all).
+-compile(nowarn_export_all).
 -include_lib("eunit/include/eunit.hrl").
 
 prepare_target_only_requests_context_when_compilation_is_needed_test() ->

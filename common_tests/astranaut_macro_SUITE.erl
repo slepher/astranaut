@@ -4,6 +4,7 @@
 -module(astranaut_macro_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("otp_vsn.hrl").
