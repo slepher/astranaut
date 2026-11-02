@@ -298,8 +298,9 @@ EUnit 按不同测试入口名计数，CT 按 `all/0` 声明计数；不把 fixt
 > 正文基于 `ba34758`；以下是本次工作区变更，不纳入正文统计。
 
 - `README.md`、`README.zh.md`：修正遍历入口和结果类型、头文件应用名；英文宏示例改用 `_A@Name`。
-- `src/astranaut_error.erl`、`astranaut_lib.erl`、`astranaut_macro.erl`、`astranaut_macro_registry.erl`、`astranaut_return.erl`、`astranaut_uniplate.erl`：前轮缺陷修复；调用方 `common_tests/astranaut_SUITE.erl`、其 `sample_transformer_1.erl` 夹具和 `test/astranaut_test_lib.erl` 同步显式结构化返回选项。
-- `src/astranaut_do.erl`：保留合法的 `{error, expected_list_comprehension}` 返回形式，新增 `do_return/0` 联合类型并补错误格式化。
+- `src/astranaut_error.erl`、`astranaut_lib.erl`、`astranaut_macro.erl`、`astranaut_macro_registry.erl`、`astranaut_return.erl`、`astranaut_uniplate.erl`：前轮实际缺陷修复。`with_attribute/5` 保留既有 result struct 行为，仅修正过期 spec/doc；此前为默认 simplify 增加的调用方适配已撤回。
+- `src/astranaut_do.erl`：保留合法的 `{error, expected_list_comprehension}` 返回形式，复用 `astranaut:map_walk_return/0` 并补错误格式化，不新增专用类型。
+- `src/astranaut.erl`：导出现有通用 callback 与返回类型；`common_tests/astranaut_design_SUITE.erl` 验证类型导出契约。
 - `test/astranaut_review_regression_tests.erl`（未跟踪）：10 个 P0 回归测试。
 - `test/astranaut_review_p1_tests.erl`（未跟踪）：13 个 P1 测试，覆盖文件解析、AST 格式/位置、forms 合并/诊断顺序、Monad 短路/Writer listen、TCO 与 rebinding 作用域。
 - `docs/plans/00-codebase-and-test-review.md` 及 `01`–`05` 计划（未跟踪）：原审查及后续计划；本次只补充审查实施状态，未实施功能演进。
