@@ -404,17 +404,13 @@ node_bounds(_Type) ->
     unknown.
 format_available(Type, Node, OtpVsn) ->
     node_available(Type, OtpVsn) andalso
-        case erl_syntax:is_tree(Node) of
-            true ->
-                true;
-            false ->
-                case format_bounds(Type, Node) of
-                    {Since, Until} ->
-                        OtpVsn >= Since andalso
-                            OtpVsn =< Until;
-                    unknown ->
-                        not format_required(Type)
-                end
+        case format_bounds(Type, Node) of
+            {Since, Until} ->
+                OtpVsn >= Since andalso
+                    OtpVsn =< Until;
+            unknown ->
+                erl_syntax:is_tree(Node) orelse
+                    not format_required(Type)
         end.
 format_bounds(annotated_type, {ann_type, _, [Node1, Node2]}) when
     not is_list(Node2), not is_list(Node1)

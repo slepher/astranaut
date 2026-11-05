@@ -279,13 +279,11 @@ remove_declarations(Forms, State) ->
     ].
 
 finish_attribute_pass(Forms, CompileOpts, State) ->
-    FormatterInfo = maps:get(formatter_info, State),
     do([
         return
      || WorkflowContext = #{
             source_view => Forms,
-            compile_opts => CompileOpts,
-            formatter_info => FormatterInfo
+            compile_opts => CompileOpts
         },
         RetainRoots = retain_roots(Forms),
         {_FinalLocalEnv, FinalSkipIds, State1} <-

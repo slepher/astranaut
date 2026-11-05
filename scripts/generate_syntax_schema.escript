@@ -264,23 +264,21 @@ format_available_clauses() ->
                 clause(
                     [literal(unknown)],
                     [],
-                    [not_expr(local_call(format_required, [Type]))]
+                    [
+                        op_expr(
+                            'orelse',
+                            remote_call(erl_syntax, is_tree, [Node]),
+                            not_expr(local_call(format_required, [Type]))
+                        )
+                    ]
                 )
-            ]
-        ),
-    TreeCase =
-        case_expr(
-            remote_call(erl_syntax, is_tree, [Node]),
-            [
-                clause([literal(true)], [], [literal(true)]),
-                clause([literal(false)], [], [BoundsCase])
             ]
         ),
     [
         clause(
             [Type, Node, OtpVsn],
             [],
-            [andalso_expr(local_call(node_available, [Type, OtpVsn]), TreeCase)]
+            [andalso_expr(local_call(node_available, [Type, OtpVsn]), BoundsCase)]
         )
     ].
 
