@@ -30,6 +30,7 @@ groups() ->
 
 all() ->
     [
+        vars_silence_contract,
         walk_return_contracts,
         public_type_exports_contract,
         lib_public_api_contracts,
@@ -142,6 +143,7 @@ lib_public_api_contracts(_Config) ->
                 {gen_exported_function, 2},
                 {gen_function, 2},
                 {merge_clauses, 1},
+                {silence_unused_vars, 1},
                 {with_attribute, 5},
                 {forms_with_attribute, 5},
                 {option_map, 1},
@@ -1188,3 +1190,21 @@ cleanup_module(Module) ->
     code:purge(Module),
     code:delete(Module),
     ok.
+
+vars_silence_contract(_Config) ->
+    {ok, Tokens, _} = erl_scan:string(
+        "f(Unused, Len, Bin, Key, Map, {X, X}, _Unused) -> "
+        "<<Payload:Len/binary>> = Bin, #{Key := Value} = Map, {Payload, Value}."
+    ),
+    {ok, Function} = erl_parse:parse_form(Tokens),
+    New = astranaut_lib:silence_unused_vars(Function),
+    ?assert(lists:member('_Unused@1', astranaut_vars:all_vars(New))),
+    Forms = [
+        {attribute, 1, module, astranaut_vars_contract},
+        {attribute, 1, export, [{f, 7}]},
+        New
+    ],
+    ?assertMatch(
+        {ok, astranaut_vars_contract, _, []},
+        compile:forms(Forms, [return_errors, return_warnings])
+    ).

@@ -21,7 +21,7 @@ parse_transform(Forms, _Opt) ->
         fun(Node, Variables, Attr) ->
             walk(Node, Variables, Attr, RecursiveGroups)
         end,
-        sets:new(),
+        [],
         Forms,
         Opts
     ).
@@ -41,8 +41,7 @@ walk(
     #{step := pre},
     _RecursiveGroups
 ) ->
-    Opts = #{traverse => pre},
-    Variables = astranaut:sreduce(fun walk_variables/3, sets:new(), Function, Opts),
+    Variables = astranaut_vars:all_vars(Function),
     {Function, Variables};
 walk(
     {function, Pos, Name, Arity, Clauses},
@@ -75,11 +74,6 @@ walk(
     {{named_fun, Pos, Name, NClauses}, NVariables};
 walk(Node, Variables, _Attr, _RecursiveGroups) ->
     {Node, Variables}.
-
-walk_variables({var, _Pos, Name}, Variables, _Attr) ->
-    sets:add_element(Name, Variables);
-walk_variables(_Node, Variables, _Attr) ->
-    Variables.
 
 walk_clauses(Clauses, Caller, Variables, RecursiveGroups) ->
     {NClauses, NVariables} =
@@ -317,22 +311,8 @@ local_calls(_, Calls) ->
     Calls.
 
 add_try_catch({call, Pos, _Fun, _Args} = Expr, Variables) ->
-    Class =
-        erl_syntax_lib:new_variable_name(
-            fun(N) -> list_to_atom("Class" ++ integer_to_list(N)) end, Variables
-        ),
-    Exception =
-        erl_syntax_lib:new_variable_name(
-            fun(N) -> list_to_atom("Exception" ++ integer_to_list(N)) end, Variables
-        ),
-    StackTrace =
-        erl_syntax_lib:new_variable_name(
-            fun(N) -> list_to_atom("StackTrace" ++ integer_to_list(N)) end, Variables
-        ),
-    NVariables = sets:union(sets:from_list([Class, Exception, StackTrace]), Variables),
-    ClassVar = {var, Pos, Class},
-    ExceptionVar = {var, Pos, Exception},
-    StackTraceVar = {var, Pos, StackTrace},
+    {[ClassVar, ExceptionVar, StackTraceVar], NVariables} =
+        astranaut_vars:alloc_var_asts(['Class', 'Exception', 'StackTrace'], Pos, Variables),
     Node = try_catch_node(Expr, Pos, ClassVar, ExceptionVar, StackTraceVar),
     {Node, NVariables}.
 

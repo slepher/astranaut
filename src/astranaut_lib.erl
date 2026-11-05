@@ -13,6 +13,7 @@
 -include("astranaut_struct_name.hrl").
 
 -export([
+    silence_unused_vars/1,
     replace_pos/2,
     replace_pos_zero/2,
     abstract_form/1, abstract_form/2,
@@ -558,13 +559,7 @@ gen_function(Name, {named_fun, Pos, FunName, Clauses} = Fun) when is_atom(FunNam
     %% Keep the named fun's lexical scope, including self references as values
     %% and shadowing in nested funs, intact.
     Arity = clause_arity(Clauses),
-    Used = erl_syntax_lib:variables(Fun),
-    Names = [
-        list_to_atom("AstranautArg" ++ integer_to_list(I))
-     || I <- lists:seq(1, Arity + sets:size(Used))
-    ],
-    Fresh = [Var || Var <- Names, not sets:is_element(Var, Used)],
-    Args = [{var, Pos, Var} || Var <- lists:sublist(Fresh, Arity)],
+    Args = astranaut_vars:fresh_var_asts('AstranautArg', Arity, Pos, Fun),
     gen_function(Name, Pos, [{clause, Pos, Args, [], [{call, Pos, Fun, Args}]}]);
 gen_function(Name, [Clause | _T] = Forms) ->
     case erl_syntax:type(Clause) of
@@ -1190,3 +1185,39 @@ required(Value, _Args, false, #{}) ->
     end;
 'or'(_Value, [], _IsKey, _Attr, Validators) ->
     {error, {all_validator_failed, Validators}}.
+
+%% Warning suppression is a transformation policy, separate from lexical analysis.
+-spec silence_unused_vars(astranaut:trees()) -> astranaut:trees().
+silence_unused_vars(Nodes) ->
+    #{bindings := Bindings, all := All} =
+        astranaut_vars:analyze(Nodes, [bindings, all]),
+    Unused = [
+        {Id, Orig}
+     || {Id, #{orig := Orig, count := 0}} <- lists:sort(maps:to_list(Bindings)),
+        hd(atom_to_list(Orig)) =/= $_
+    ],
+    case Unused of
+        [] ->
+            Nodes;
+        _ ->
+            {Pairs, _} = lists:mapfoldl(
+                fun({Id, Orig}, Allocated) ->
+                    Name = astranaut_vars:fresh_var("_" ++ atom_to_list(Orig), Allocated),
+                    {{Id, Name}, ordsets:add_element(Name, Allocated)}
+                end,
+                All,
+                Unused
+            ),
+            Names = maps:from_list(Pairs),
+            Transform = fun
+                (_, #{event := bind, binding_id := Id}) ->
+                    case maps:find(Id, Names) of
+                        {ok, Name} -> {rename, Name};
+                        error -> keep
+                    end;
+                (_, _) ->
+                    keep
+            end,
+            {New, _} = astranaut_vars:rewrite(Nodes, #{collect => [], transform => Transform}),
+            New
+    end.

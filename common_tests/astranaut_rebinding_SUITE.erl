@@ -126,6 +126,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [
+        test_branch_rebind,
+        test_binary_size,
         test_lc,
         test_lc_zip,
         test_bc,
@@ -412,3 +414,11 @@ test_invalid_rebinding_option_error(Config) ->
 equal_functions(F1, F2, Config) ->
     Functions = proplists:get_value(functions, Config),
     ?assertEqual(maps:get(F1, Functions), maps:get(F2, Functions)).
+
+test_binary_size(Config) ->
+    equal_functions(test_binary_size, test_binary_size_origin, Config),
+    ?assertEqual({258, 258}, rebinding_test:test_binary_size(<<1, 2>>)).
+
+test_branch_rebind(_Config) ->
+    ?assertEqual(1, rebinding_test:test_branch_rebind(1)),
+    ?assertEqual(2, rebinding_test:test_branch_rebind(2)).

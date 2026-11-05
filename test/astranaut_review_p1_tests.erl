@@ -174,6 +174,7 @@ rebinding_try_scope_test() ->
         end
     end).
 
+%% Receive branches, including timeout, must restore the incoming rename map.
 rebinding_receive_scope_test() ->
     Function = form(
         "value() -> X = outer, R = receive "
@@ -183,10 +184,10 @@ rebinding_receive_scope_test() ->
     ),
     run_rebinding([Function], [{value, 0}], fun(M) ->
         self() ! {first, 1},
-        ?assertEqual({first, {first, 1}}, M:value()),
+        ?assertEqual({outer, {first, 1}}, M:value()),
         self() ! {second, 2},
-        ?assertEqual({second, {second, 2}}, M:value()),
-        ?assertEqual({timeout, timeout}, M:value())
+        ?assertEqual({outer, {second, 2}}, M:value()),
+        ?assertEqual({outer, timeout}, M:value())
     end).
 
 rebinding_named_fun_scope_test() ->

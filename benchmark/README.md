@@ -76,3 +76,40 @@ alternates, with three warmups and one scheduler. Times exclude setup, source
 parsing, scanner compilation and code loading. This bypass is a measurement
 counterfactual for disabled capability, not a supported local-macro mode.
 See [the evaluation](queue-snapshot-results.md) for results and limitations.
+
+## Variable collection overhead
+
+Run from the repository root, using an uninstrumented default build:
+
+```sh
+rebar3 compile
+escript benchmark/vars_collect_bench.escript 15
+```
+
+The optional positive argument is the sample count. The runner uses one scheduler,
+three warmups, a fresh process per measured traversal, and alternating case order.
+It reports median microseconds and process reductions; fixture construction,
+compilation, process startup and result-equivalence checks are outside timing.
+
+Three fixtures each contain 200 distinct variable names and 2,000 reads:
+expression bodies (nonempty final environment), function clauses (restored final
+environment, matching rebinding's traversal boundary), and a two-branch join
+(multiple reaching definitions per read). This isolates the vars engine; it does
+not benchmark the entire rebinding pass or its naming callback.
+
+For each fixture, `[]`, `[exported]`, `[bindings]` and `all` are compared. Four
+versions are compiled from current source into temporary modules: eager
+(always construct exported and update binding-site counts), skip unrequested
+exported, skip unrequested counts, and current (both initialized from collect).
+The eager reference shares the current driver and cached keys; it reproduces the
+unnecessary work, not an exact historical implementation. Production files are never edited. All versions must return
+exactly the same AST and requested analysis before measurements begin. Exact
+source-match assertions fail if the experimental patch points become stale.
+
+`[]` versus `[exported]` alone cannot expose wasted work: the eager reference
+constructs exported in both cases. Use eager versus current to measure the
+implemented gates; intermediate variants isolate each gate. Wall-clock differences near zero can be noise; reductions provide
+supporting evidence, not a universal speedup guarantee. These are diagnostic
+benchmarks, not timing thresholds for CI.
+
+Measured results: [before optimization](vars-collect-results.md) and [initialized collect gates](vars-collect-optimized-results.md).

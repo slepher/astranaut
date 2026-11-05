@@ -915,3 +915,29 @@ bind(A_1, K) ->
 %%     begin A_1 = A + 1, A_1 end,
 %%     begin A_2 = A_1 + 1, A_2 end.
 
+test_binary_size(Bin) ->
+    Len = 8,
+    Len = Len + 8,
+    <<Payload:Len/integer>> = Bin,
+    case Bin of
+        <<Value:Len/integer>> -> {Payload, Value}
+    end.
+
+test_binary_size_origin(Bin) ->
+    Len = 8,
+    Len_1 = Len + 8,
+    <<Payload:Len_1/integer>> = Bin,
+    case Bin of
+        <<Value:Len_1/integer>> -> {Payload, Value}
+    end.
+
+test_branch_rebind(A) ->
+    case A of
+        1 ->
+            A = A + 1,
+            A;
+        2 ->
+            A = A + 2,
+            A
+    end,
+    A.
