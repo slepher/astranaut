@@ -12,7 +12,7 @@
 
 %% API
 -export([record_def/3]).
--export([fields/1, init_values/1]).
+-export([fields/1, init_values/1, field_types/1, field_type/3]).
 -export([types/1, warnings/1, enforce_keys/1]).
 -export([mandatory_field/2, auto_fill/1, set_auto_fill/2]).
 -export([filled_init_values/1, update_init_values/1, update_enforce_keys/2]).
@@ -60,6 +60,12 @@ enforce_keys(#record_def{enforce_keys = EnforceKeys}) ->
 -spec types(#record_def{}) -> types().
 types(#record_def{types = Types}) ->
     Types.
+
+field_types(RecordDef) ->
+    types(RecordDef).
+
+field_type(Field, RecordDef, DefaultType) ->
+    maps:get(Field, field_types(RecordDef), DefaultType).
 
 -spec warnings(#record_def{}) -> warnings().
 warnings(#record_def{warnings = Warnings}) ->

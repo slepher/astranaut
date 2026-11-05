@@ -1,0 +1,6 @@
+-module(astranaut_struct_fail_type_unknown_field).
+-include_lib("astranaut/include/struct.hrl").
+-record(test, {value}).
+-astranaut_struct(test).
+-type invalid() :: #test{non_existent :: atom()}.
+-export_type([invalid/0]).

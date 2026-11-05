@@ -111,6 +111,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [
+        test_struct_type_and_spec_rewrite,
+        test_compile_type_unknown_fields_fail,
         test_struct_new,
         test_struct_update,
         test_struct_test,
@@ -415,7 +417,7 @@ test_compile_unknown_fields_fail(Config) ->
         astranaut_struct_unknown_fields_fail,
         Config,
         [
-            {undefined_record_field, test, unknown},
+            {unknown_fields, test, [unknown]},
             {undefined_record_field, test, unknown},
             {undefined_record_field, test, unknown},
             {undefined_record_field, test, unknown}
@@ -488,3 +490,80 @@ normalize_line({L, _C}) when is_integer(L) ->
     L;
 normalize_line(L) ->
     L.
+
+test_struct_type_and_spec_rewrite(Config) ->
+    Forms = astranaut_test_lib:test_module_forms(astranaut_struct_types, Config),
+    Transformed = astranaut_struct_transformer:parse_transform(Forms, []),
+    Types = maps:from_list([
+        {Name, Type}
+     || {attribute, _, Kind, {Name, Type, []}} <- Transformed,
+        Kind =:= type orelse Kind =:= opaque
+    ]),
+    [{attribute, RecordLine, record, Record}] = [
+        F
+     || {attribute, _, record, {full, _}} = F <- Forms
+    ],
+    RecordDef = astranaut_struct_record:record_def(astranaut_struct_types, Record, RecordLine),
+    ?assertEqual(
+        [defaulted, optional, required],
+        lists:sort(maps:keys(astranaut_struct_record:field_types(RecordDef)))
+    ),
+    ?assertEqual(fallback, astranaut_struct_record:field_type(untyped, RecordDef, fallback)),
+    Full = maps:get(full, Types),
+    Sparse = maps:get(sparse_type, Types),
+    ?assertMatch({map_field_exact, {atom, _, full}}, type_field('__struct__', Full)),
+    ?assertMatch({map_field_exact, {type, _, any, []}}, type_field(untyped, Full)),
+    ?assertMatch(
+        {map_field_exact, {type, _, union, [{type, _, integer, []}, {atom, _, undefined}]}},
+        type_field(optional, Full)
+    ),
+    ?assertMatch({map_field_exact, {type, _, integer, []}}, type_field(required, Full)),
+    ?assertMatch({map_field_exact, {type, _, integer, []}}, type_field(defaulted, Full)),
+    ?assertMatch({map_field_assoc, {type, _, integer, []}}, type_field(optional, Sparse)),
+    ?assertMatch({map_field_exact, {type, _, integer, []}}, type_field(defaulted, Sparse)),
+    ?assertMatch({map_field_exact, {type, _, integer, []}}, type_field(required, Sparse)),
+    ?assertMatch({map_field_assoc, {type, _, any, []}}, type_field(untyped, Sparse)),
+    Override = maps:get(override, Types),
+    ?assertMatch({map_field_exact, {type, _, binary, []}}, type_field(optional, Override)),
+    ?assertMatch({map_field_exact, {type, _, map, _}}, type_field(child, maps:get(nested, Types))),
+    ?assertMatch({type, _, record, _}, maps:get(plain_type, Types)),
+    ?assertMatch({type, _, integer, []}, maps:get(existing, Types)),
+    ?assertEqual(1, length([ok || {attribute, _, type, {existing, _, []}} <- Transformed])),
+    ?assert(
+        lists:member(
+            {sparse_type, 0}, lists:append([Es || {attribute, _, export_type, Es} <- Transformed])
+        )
+    ),
+    lists:foreach(
+        fun(Type) ->
+            ?assertEqual(ok, astranaut_syntax:validate_node(Type, {role, type}))
+        end,
+        maps:values(Types)
+    ),
+    RecordNames = astranaut:sreduce(
+        fun
+            ({type, _, record, [{atom, _, Name} | _]}, Acc) -> [Name | Acc];
+            (_, Acc) -> Acc
+        end,
+        [],
+        Transformed,
+        #{}
+    ),
+    ?assertEqual([plain], lists:usort(RecordNames)),
+    Return = astranaut_test_lib:compile_test_forms(Forms),
+    ?assertEqual({[], []}, astranaut_error:realize(astranaut_return:run_error(Return))),
+    ok.
+
+type_field(Name, {type, _, map, Fields}) ->
+    [{Kind, Value}] = [
+        {Kind, Value}
+     || {type, _, Kind, [{atom, _, Key}, Value]} <- Fields, Key =:= Name
+    ],
+    {Kind, Value}.
+
+test_compile_type_unknown_fields_fail(Config) ->
+    assert_compile_reasons(
+        astranaut_struct_fail_type_unknown_field,
+        Config,
+        [{unknown_fields, test, [non_existent]}]
+    ).

@@ -32,13 +32,15 @@ parse_transform(Forms, _Options) ->
                         #{traverse => pre, formatter => ?MODULE, normalize => true}
                     ),
                     fun(Forms3) ->
-                        remove_used_struct_records(Forms, Forms3)
+                        remove_used_struct_records(Forms2, Forms3)
                     end
                 )
             end
         ),
     astranaut_return:to_compiler(Return).
 
+format_error({unknown_fields, Record, Fields}) ->
+    io_lib:format("unknown fields in struct ~p: ~p", [Record, Fields]);
 format_error({undefined_record, Record}) ->
     io_lib:format("record ~p in is not defined", [Record]);
 format_error({invalid_struct_name, Struct}) ->
@@ -232,58 +234,73 @@ append_struct_name(_RecordName, _Line, #{}) ->
     [].
 
 record_field_types(RecordName, Line, Fields, StructDef) ->
-    StructDefFields = astranaut_struct_record:fields(StructDef),
-    case
-        traverse_fields(
-            fun(FieldLine, FieldName, FieldType) ->
-                {atom, _FieldNamePos, FieldNameAtom} = FieldName,
-                IsMandatory = astranaut_struct_record:mandatory_field(FieldNameAtom, StructDef),
-                AssocType = struct_field_assoc_type(IsMandatory),
-                struct_field_type(AssocType, FieldLine, FieldName, FieldType)
-            end,
-            RecordName,
-            Fields,
-            StructDefFields
-        )
-    of
-        {ok, FieldTypeNodes, FieldNames} ->
-            {ok, InitTypeNodes} =
-                append_init_types(FieldNames, StructDef, Line),
-            {ok,
-                [
-                    {type, Line, map_field_exact, struct_name_field(RecordName, Line)}
-                    | FieldTypeNodes
-                ] ++
-                    InitTypeNodes};
-        {error, Reason} ->
-            {error, Reason}
+    Overrides = maps:from_list([
+        {Name, Type}
+     || {type, _, field_type, [{atom, _, Name}, Type]} <- Fields
+    ]),
+    Names = astranaut_struct_record:fields(StructDef),
+    case maps:keys(Overrides) -- Names of
+        [] ->
+            Inits = astranaut_struct_record:init_values(StructDef),
+            AutoFill = astranaut_struct_record:auto_fill(StructDef),
+            Enforced = astranaut_struct_record:enforce_keys(StructDef),
+            Mapped = lists:map(
+                fun(Name) ->
+                    Explicit = maps:is_key(Name, Overrides),
+                    Required = lists:member(Name, Enforced),
+                    HasDefault =
+                        case maps:find(Name, Inits) of
+                            error -> false;
+                            {ok, {atom, _, undefined}} -> false;
+                            {ok, _} -> true
+                        end,
+                    Exact =
+                        AutoFill orelse Required orelse Explicit orelse maps:is_key(Name, Inits),
+                    Base = astranaut_struct_record:field_type(
+                        Name, StructDef, {type, Line, any, []}
+                    ),
+                    Type =
+                        case maps:find(Name, Overrides) of
+                            {ok, Override} ->
+                                Override;
+                            error when AutoFill, not Required, not HasDefault ->
+                                with_undefined(Base, Line);
+                            error ->
+                                Base
+                        end,
+                    struct_field_type(
+                        struct_field_assoc_type(Exact),
+                        Line,
+                        {atom, Line, Name},
+                        astranaut_lib:replace_pos(Type, Line)
+                    )
+                end,
+                Names
+            ),
+            {ok, [{type, Line, map_field_exact, struct_name_field(RecordName, Line)} | Mapped]};
+        Unknown ->
+            {error, {unknown_fields, RecordName, Unknown}}
     end.
 
-append_init_types(FieldNames, StructDef, Line) ->
-    StructFields = astranaut_struct_record:fields(StructDef),
-    FieldInitTypes = maps:without(FieldNames, astranaut_struct_record:types(StructDef)),
-    Fields =
-        lists:reverse(
-            lists:foldl(
-                fun(FieldName, Acc) ->
-                    case maps:find(FieldName, FieldInitTypes) of
-                        {ok, FieldType} ->
-                            IsMandatory = astranaut_struct_record:mandatory_field(
-                                FieldName, StructDef
-                            ),
-                            AssocType = struct_field_assoc_type(IsMandatory),
-                            AtomFieldName = {atom, Line, FieldName},
-                            FieldType1 = astranaut_lib:replace_pos(FieldType, Line),
-                            [struct_field_type(AssocType, Line, AtomFieldName, FieldType1) | Acc];
-                        error ->
-                            Acc
-                    end
-                end,
-                [],
-                StructFields
-            )
-        ),
-    {ok, Fields}.
+with_undefined({type, _, Any, []} = Type, _) when Any =:= any; Any =:= term ->
+    Type;
+with_undefined({atom, _, undefined} = Type, _) ->
+    Type;
+with_undefined({type, Pos, union, Types}, Line) ->
+    case
+        lists:any(
+            fun
+                ({atom, _, undefined}) -> true;
+                (_) -> false
+            end,
+            Types
+        )
+    of
+        true -> {type, Pos, union, Types};
+        false -> {type, Pos, union, Types ++ [{atom, Line, undefined}]}
+    end;
+with_undefined(Type, Line) ->
+    {type, Line, union, [Type, {atom, Line, undefined}]}.
 
 struct_name_field(StructName, Line) ->
     [{atom, Line, '__struct__'}, {atom, Line, StructName}].
@@ -365,7 +382,9 @@ init_struct_defs(Forms, RecordDefMap) ->
     Validator = #{
         non_auto_fill => boolean,
         auto_fill => boolean,
-        enforce_keys => {list_of, atom}
+        enforce_keys => {list_of, atom},
+        export_type => boolean,
+        type_name => atom
     },
     astranaut_lib:forms_with_attribute(
         fun
@@ -373,11 +392,11 @@ init_struct_defs(Forms, RecordDefMap) ->
                 astranaut_return:bind(
                     astranaut_lib:validate(Validator, Opts),
                     fun(Opts1) ->
-                        add_struct(Struct, Opts1, RecordDefMap, Acc, Attr)
+                        add_struct(Struct, Opts1, RecordDefMap, Acc, Attr#{forms => Forms})
                     end
                 );
             (Struct, Acc, Attr) ->
-                add_struct(Struct, #{}, RecordDefMap, Acc, Attr)
+                add_struct(Struct, #{}, RecordDefMap, Acc, Attr#{forms => Forms})
         end,
         maps:new(),
         Forms,
@@ -385,15 +404,55 @@ init_struct_defs(Forms, RecordDefMap) ->
         TraverseOpts
     ).
 
-add_struct(Struct, Opts, RecordMap, StructDefs, #{pos := Line}) ->
+add_struct(Struct, Opts, RecordMap, StructDefs, #{pos := Line, forms := Forms}) ->
     case new_struct(Struct, Opts, RecordMap) of
         {ok, NewStruct} ->
             Node = astranaut_lib:gen_attribute_node(astranaut_struct_def, Line, NewStruct),
-            astranaut_return:return({[Node], maps:put(Struct, NewStruct, StructDefs)});
+            Generated = generated_type(Struct, Opts, Line, Forms),
+            astranaut_return:return({[Node | Generated], maps:put(Struct, NewStruct, StructDefs)});
         {errors, Reasons} ->
             astranaut_return:errors_ok(Reasons, {[], StructDefs});
         {error, Reason} ->
             astranaut_return:error_ok(Reason, {[], StructDefs})
+    end.
+
+generated_type(Struct, Opts, Line, Forms) ->
+    Export = maps:get(export_type, Opts, false),
+    Name = maps:get(type_name, Opts, Struct),
+    case Export orelse maps:is_key(type_name, Opts) of
+        false ->
+            [];
+        true ->
+            Exists = lists:any(
+                fun
+                    ({attribute, _, Kind, {N, _, []}}) when Kind =:= type; Kind =:= opaque ->
+                        N =:= Name;
+                    (_) ->
+                        false
+                end,
+                Forms
+            ),
+            Type =
+                case Exists of
+                    true ->
+                        [];
+                    false ->
+                        [
+                            {attribute, Line, type,
+                                {Name, {type, Line, record, [{atom, Line, Struct}]}, []}}
+                        ]
+                end,
+            Exported = lists:any(
+                fun
+                    ({attribute, _, export_type, Types}) -> lists:member({Name, 0}, Types);
+                    (_) -> false
+                end,
+                Forms
+            ),
+            case Export andalso not Exported of
+                true -> Type ++ [{attribute, Line, export_type, [{Name, 0}]}];
+                false -> Type
+            end
     end.
 
 new_struct(Struct, Opts, RecordMap) when is_atom(Struct) ->

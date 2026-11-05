@@ -710,6 +710,16 @@ new() ->
   #{'__struct__' => test, name => hello, value => undefined}.
 ```
 
+已注册的 Struct 在 `-type`、`-opaque`、`-spec` 和 `-callback` 中会自动改写为
+带 `__struct__` 标识的 Map 类型，支持嵌套。未声明类型的字段使用 `any()`。
+自动填充模式下所有键均为必选；无默认值且不在 `enforce_keys` 中的类型字段还允许
+`undefined`。`non_auto_fill` 模式下，无默认值的字段为可选键，除非它被强制要求
+或在类型引用处显式指定了类型。
+
+`-astranaut_struct({test, [export_type]}).` 自动生成并导出 `test/0`。
+`{type_name, test_map}` 生成 `test_map/0`，配合 `export_type` 可将其导出。
+已有同名、同元数的 type 或 opaque 定义会保留。
+
 *Struct Options*
 
 &emsp;&emsp;`-astranaut_struct` 可带额外选项：

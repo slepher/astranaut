@@ -1987,3 +1987,24 @@ invalid_ast(type_param) ->
     {atom, 1, ok};
 invalid_ast(attribute_body) ->
     none.
+
+test_typed_record_field_format_and_roles_test() ->
+    Field = {record_field, 1, {atom, 1, field}},
+    Type = {type, 1, map, []},
+    Node = {typed_record_field, Field, Type},
+    ?assert(astranaut_syntax_schema:format_available(typed_record_field, Node, 29)),
+    ?assertNot(
+        astranaut_syntax_schema:format_available(
+            typed_record_field,
+            {typed_record_field, [Field], Type},
+            29
+        )
+    ),
+    ?assertMatch({ok, _}, astranaut_syntax:normalize(Node, {role, type})),
+    ?assertMatch(
+        {error, _},
+        astranaut_syntax:normalize(
+            {typed_record_field, Field, {call, 1, {atom, 1, f}, []}}, {role, type}
+        )
+    ),
+    ?assert(astranaut_syntax_schema:format_available(atom, erl_syntax:atom(ok), 29)).

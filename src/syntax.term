@@ -595,7 +595,9 @@
          formats => [#{shape => {user_type,anno,{value,name},{nodes,arguments}}}]},
        #{type => typed_record_field,
          roles => [type],
-         layout => inherited_elements,
+         layouts => [#{groups => 2, children =>
+             [#{slot => body,role => expression,cardinality => one},
+              #{slot => type,role => type,cardinality => one}]}],
          formats => [#{shape => {typed_record_field,{node,field},{node,field_type}}}]},
        #{type => type_fun,roles => [type],alias_of => fun_type},
        #{type => type_tuple,roles => [type],alias_of => tuple_type},

@@ -1606,10 +1606,13 @@ child_layout(type_union, Subtrees, ParentRole, _OtpVsn) when
     is_list(Subtrees)
 ->
     {ok, [{elements, ParentRole, Subtrees, groups}]};
-child_layout(typed_record_field, Subtrees, ParentRole, _OtpVsn) when
-    is_list(Subtrees)
-->
-    {ok, [{elements, ParentRole, Subtrees, groups}]};
+child_layout(
+    typed_record_field,
+    [Group1 = [_], Group2 = [_]],
+    _ParentRole,
+    _OtpVsn
+) ->
+    {ok, [{body, expression, Group1, nodes}, {type, type, Group2, nodes}]};
 child_layout(underscore, [], _ParentRole, _OtpVsn) ->
     {ok, []};
 child_layout(user_type_application, Subtrees, ParentRole, _OtpVsn) when

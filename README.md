@@ -1278,6 +1278,16 @@ update_name(Name, #{'__struct__' := test} = Test) ->
   Test#{name => Name}.
 ```
 
+Registered struct references in `-type`, `-opaque`, `-spec`, and `-callback`
+are rewritten to tagged map types, including nested structs. Untyped fields use
+`any()`. Auto-filled fields are required keys; typed fields without defaults or
+`enforce_keys` also allow `undefined`. With `non_auto_fill`, fields without defaults
+are optional unless enforced or explicitly typed at the reference site.
+
+Use `-astranaut_struct({test, [export_type]}).` to generate and export `test/0`.
+`{type_name, test_map}` generates `test_map/0`; add `export_type` to export it.
+An existing type or opaque with the same name and arity is preserved.
+
 *Struct Options*
 
 &emsp;&emsp; -astranaut\_struct could have extra options:  
