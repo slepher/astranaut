@@ -45,7 +45,7 @@ named_fun_test() ->
         {"fun Self(N) -> AstranautArg1 = N + 1, AstranautArg1 end.", [4], 5},
         {"fun Self(N) -> (fun(Self) -> Self + 1 end)(N) end.", [4], 5},
         {"fun Self(N) -> (fun Self(0) -> inner; Self(X) -> Self(X - 1) end)(N) end.", [3], inner},
-        {"fun Self(0) -> done; Self(N) -> (fun() -> Self end)()(N - 1) end.", [3], done}
+        {"fun Self(0) -> done; Self(N) -> ((fun() -> Self end)())(N - 1) end.", [3], done}
     ],
     %% Compile each result to exercise real Erlang scope and call semantics.
     lists:foreach(

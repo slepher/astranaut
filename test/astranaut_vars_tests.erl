@@ -1,5 +1,6 @@
 -module(astranaut_vars_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("otp_vsn.hrl").
 
 exprs(Text) ->
     {ok, Tokens, _} = erl_scan:string(Text),
@@ -195,6 +196,7 @@ silence_branch_test() ->
         {ok, vars_branch_test, _, []}, compile:forms(Forms, [return_errors, return_warnings])
     ).
 
+-if(?ASTRANAUT_OTP_VSN_GE(26)).
 map_comprehension_test() ->
     N =
         {mc, 1, {map_field_assoc, 1, {var, 1, 'K'}, {var, 1, 'V'}}, [
@@ -204,6 +206,7 @@ map_comprehension_test() ->
     ?assertEqual(['Map'], maps:get(free, R)),
     ?assertEqual(['K', 'V'], maps:get(bound, R)),
     ?assertEqual([], maps:get(exported, R)).
+-endif.
 
 expand_match_root_test() ->
     [Expansion] = exprs("A = A + 1."),
