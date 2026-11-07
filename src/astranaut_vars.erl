@@ -56,8 +56,8 @@
 %% 回调可见的当前作用域快照
 -type scope_view() :: #{
     role := astranaut_syntax:node_role() | binary_size,
-    pattern_kind => function_clause | clause_match | match_left | comprehension_generate | none,
-    binding_id => pos_integer(),
+    pattern_kind := function_clause | clause_match | match_left | comprehension_generate | none,
+    binding_id := pos_integer(),
     event := bind | use | node,
     is_bound => boolean(),
     current_var => final_var(),
@@ -139,7 +139,11 @@
 -type var_base() :: atom() | string().
 -type var_scope() :: ordsets:ordset(var_name()) | astranaut:trees().
 -record(bind_entry, {
-    id :: bind_id(), orig :: orig_var(), final :: final_var(), count = 0 :: non_neg_integer()
+    id :: bind_id(),
+    orig :: orig_var(),
+    final :: final_var(),
+    count = 0 :: non_neg_integer(),
+    deferred = false :: boolean()
 }).
 -record(scope_frame, {kind, allocated, renames, env, pattern, pattern_vars}).
 -record(group_frame, {saved_env, allocated = [], renames = #{}, branch_envs = none}).
@@ -156,6 +160,9 @@
     frames = [],
     groups = [],
     bindings = #{},
+    events = [],
+    annotated = false,
+    annotation_prefix = [],
     next_id = 1,
     metrics = #{}
 }).
@@ -201,7 +208,7 @@ mapfold_m(Nodes, Opts) -> mapfold_m(none, Nodes, Opts).
     astranaut_traverse:struct(term(), {astranaut:trees(), analysis_result()}).
 mapfold_m(WalkFun, Nodes, Opts) ->
     astranaut_traverse:lift_m(
-        fun({New, State}) -> {New, result(State)} end,
+        fun({New, State}) -> {resolve_bindings(New, State), result(State)} end,
         mapfold_state_m(WalkFun, Nodes, Opts)
     ).
 
@@ -298,6 +305,7 @@ context(Opts) ->
     Renames = maps:get(init_renames, Opts, #{}),
     #scope_state{
         opts = Opts,
+        annotation_prefix = "$astranaut_binding:" ++ erlang:ref_to_list(make_ref()) ++ ":",
         collect_keys = Keys,
         count_bindings = lists:member(bindings, Keys),
         collect_exported = lists:member(exported, Keys),
@@ -324,11 +332,26 @@ result(#scope_state{
     opts = Opts,
     collect_keys = Keys,
     collect_exported = CollectExported,
-    metrics = Metrics,
+    metrics = EmptyMetrics,
+    events = Events,
     renames = Renames,
     env = Env,
     bindings = Bindings
 }) ->
+    Metrics0 = lists:foldl(
+        fun(Event, Acc) -> event_metrics(Event, Bindings, Opts, Acc) end,
+        EmptyMetrics,
+        lists:reverse(Events)
+    ),
+    Metrics =
+        case maps:find(rename_history, Metrics0) of
+            {ok, History} ->
+                Metrics0#{
+                    rename_history => maps:map(fun(_, Names) -> lists:reverse(Names) end, History)
+                };
+            error ->
+                Metrics0
+        end,
     Exported =
         case CollectExported of
             false ->
@@ -341,7 +364,18 @@ result(#scope_state{
                     #bind_entry{orig = Orig, final = Final} <- [maps:get(Id, Bindings)]
                 ])
         end,
-    Base = Metrics#{rename_map => Renames, exported => Exported},
+    FinalRenames = maps:fold(
+        fun(Orig, Ids, Acc) ->
+            case ordsets:from_list([(maps:get(Id, Bindings))#bind_entry.final || Id <- Ids]) of
+                [] -> Acc;
+                [Name] -> maps:put(Orig, Name, Acc);
+                _ -> maps:remove(Orig, Acc)
+            end
+        end,
+        Renames,
+        Env
+    ),
+    Base = Metrics#{rename_map => FinalRenames, exported => Exported},
     case lists:member(bindings, Keys) of
         true ->
             Sites = maps:map(
@@ -442,7 +476,18 @@ node_scope({var, _, Orig}, Context, Attr) when Orig =/= '_' ->
             bind -> Orig;
             use -> current_name(Orig, Context)
         end,
-    Base#{event => Event, is_bound => Bound, same_pattern => Same, current_var => Current};
+    Active =
+        case Event =:= use andalso Bound of
+            true -> maps:put(Orig, Current, maps:get(active_map, Base));
+            false -> maps:get(active_map, Base)
+        end,
+    Base#{
+        event => Event,
+        is_bound => Bound,
+        same_pattern => Same,
+        current_var => Current,
+        active_map => Active
+    };
 node_scope(_, Context, Attr) ->
     scope_view(Context, Attr).
 
@@ -494,7 +539,115 @@ apply_action(New, Node, Scope, Context, Attr, WalkFun) ->
 variable_result(_, {var, _, '_'} = Var, _, Context) ->
     done(Var, Context);
 variable_result(Event, {var, Pos, Orig}, Final, Context) ->
-    done({var, Pos, Final}, record_var(Event, Orig, Final, Context)).
+    Context1 = use_joined_binding(Event, Orig, Final, Context),
+    Ref = binding_ref(Event, Orig, Final, Context1),
+    Context2 = record_var(Event, Orig, Final, Ref, Context1),
+    %% Keep binding identity until branch joins can coordinate their final names.
+    case Ref of
+        {binding, Id} ->
+            case (maps:get(Id, Context2#scope_state.bindings))#bind_entry.deferred of
+                true ->
+                    Text =
+                        Context2#scope_state.annotation_prefix ++
+                            base64:encode_to_string(term_to_binary({Id, Pos})),
+                    Pos1 = erl_anno:set_text(Text, Pos),
+                    done({var, Pos1, Final}, Context2#scope_state{annotated = true});
+                false ->
+                    done({var, Pos, Final}, Context2)
+            end;
+        {name, _} ->
+            done({var, Pos, Final}, Context2)
+    end.
+
+%% Unused branch bindings may be renamed independently (for warning suppression).
+use_joined_binding(
+    use, Orig, Final, #scope_state{env = Env, bindings = Table, renames = Renames} = C
+) ->
+    case maps:is_key(Orig, Env) andalso Final =:= current_name(Orig, C) of
+        true ->
+            Table1 = lists:foldl(
+                fun(Id, T) ->
+                    Entry = maps:get(Id, T),
+                    maps:put(Id, Entry#bind_entry{final = Final}, T)
+                end,
+                Table,
+                maps:get(Orig, Env, [])
+            ),
+            C#scope_state{
+                bindings = Table1,
+                renames = maps:put(Orig, Final, Renames),
+                allocated = ordsets:add_element(Final, C#scope_state.allocated)
+            };
+        false ->
+            C
+    end;
+use_joined_binding(_, _, _, C) ->
+    C.
+
+binding_ref(bind, _, _, #scope_state{next_id = Id}) ->
+    {binding, Id};
+binding_ref(use, Orig, Final, #scope_state{env = Env, bindings = Table}) ->
+    case maps:get(Orig, Env, []) of
+        [Id | _] ->
+            case (maps:get(Id, Table))#bind_entry.final of
+                Final -> {binding, Id};
+                _ -> {name, Final}
+            end;
+        [] ->
+            {name, Final}
+    end.
+
+resolve_bindings(Nodes, #scope_state{annotated = false}) ->
+    Nodes;
+resolve_bindings(Nodes, #scope_state{bindings = Table, annotation_prefix = Prefix}) ->
+    astranaut:smap(
+        fun
+            ({var, Pos, _} = Node) ->
+                case erl_anno:text(Pos) of
+                    Text when is_list(Text) ->
+                        case lists:prefix(Prefix, Text) of
+                            true ->
+                                Encoded = lists:nthtail(length(Prefix), Text),
+                                {Id, OriginalPos} = binary_to_term(base64:decode(Encoded), [safe]),
+                                {var, OriginalPos, (maps:get(Id, Table))#bind_entry.final};
+                            false ->
+                                Node
+                        end;
+                    _ ->
+                        Node
+                end;
+            (Node) ->
+                Node
+        end,
+        Nodes,
+        #{}
+    ).
+
+event_name({binding, Id}, Table) -> (maps:get(Id, Table))#bind_entry.final;
+event_name({name, Name}, _) -> Name.
+
+event_metrics({Event, Orig, Ref, Free}, Table, Opts, M) ->
+    Final = event_name(Ref, Table),
+    M1 = metric(all, fun(V) -> ordsets:add_element(Final, V) end, M),
+    case Event of
+        bind ->
+            M2 = metric(
+                bound, fun(V) -> ordsets:add_element(collected(Orig, Final, Opts), V) end, M1
+            ),
+            M3 = metric(counts, fun(V) -> maps:put(Final, maps:get(Final, V, 0), V) end, M2),
+            metric(
+                rename_history, fun(V) -> maps:put(Orig, [Final | maps:get(Orig, V, [])], V) end, M3
+            );
+        use ->
+            M2 = metric(
+                used, fun(V) -> ordsets:add_element(collected(Orig, Final, Opts), V) end, M1
+            ),
+            M3 = metric(counts, fun(V) -> maps:put(Final, maps:get(Final, V, 0) + 1, V) end, M2),
+            case Free of
+                true -> metric(free, fun(V) -> ordsets:add_element(Orig, V) end, M3);
+                false -> M3
+            end
+    end.
 
 expand(New, Context, Attr, WalkFun) ->
     astranaut_traverse:lift_m(
@@ -536,7 +689,12 @@ walk_node(Type, Node, Context, Attr) ->
         Context
     ).
 
-current_name(Orig, #scope_state{renames = Renames, env = Env, bindings = Table}) ->
+current_name(Orig, #scope_state{
+    renames = Renames,
+    env = Env,
+    bindings = Table,
+    allocated = Allocated
+}) ->
     case maps:find(Orig, Renames) of
         {ok, Name} ->
             Name;
@@ -547,8 +705,20 @@ current_name(Orig, #scope_state{renames = Renames, env = Env, bindings = Table})
                  || Id <- maps:get(Orig, Env, [])
                 ])
             of
-                [Name] -> Name;
-                _ -> Orig
+                [] ->
+                    Orig;
+                [Name] ->
+                    Name;
+                Names ->
+                    Ids = maps:get(Orig, Env),
+                    Reserved = ordsets:from_list([
+                        Entry#bind_entry.final
+                     || {Id, Entry} <- maps:to_list(Table), not lists:member(Id, Ids)
+                    ]),
+                    case [Name || Name <- Names, not ordsets:is_element(Name, Reserved)] of
+                        [Name | _] -> Name;
+                        [] -> fresh_var(Orig, Allocated)
+                    end
             end
     end.
 
@@ -556,28 +726,28 @@ record_var(
     Event,
     Orig,
     Final,
+    Ref,
     #scope_state{
         metrics = M,
-        opts = Opts,
         env = Env,
         bindings = Table,
         next_id = Id
     } = C
 ) ->
-    M1 = metric(all, fun(V) -> ordsets:add_element(Final, V) end, M),
-    Value = collected(Orig, Final, Opts),
+    Events =
+        case map_size(M) of
+            0 -> C#scope_state.events;
+            _ -> [{Event, Orig, Ref, not maps:is_key(Orig, Env)} | C#scope_state.events]
+        end,
+    C0 = C#scope_state{events = Events},
     case Event of
         bind ->
-            M2 = metric(bound, fun(V) -> ordsets:add_element(Value, V) end, M1),
-            M3 = metric(counts, fun(V) -> maps:put(Final, maps:get(Final, V, 0), V) end, M2),
-            M4 = metric(
-                rename_history,
-                fun(V) -> maps:put(Orig, maps:get(Orig, V, []) ++ [Final], V) end,
-                M3
+            Deferred = lists:any(
+                fun(#scope_frame{kind = Kind}) -> Kind =:= nonfun_clause end,
+                C#scope_state.frames
             ),
-            Entry = #bind_entry{id = Id, orig = Orig, final = Final},
-            C#scope_state{
-                metrics = M4,
+            Entry = #bind_entry{id = Id, orig = Orig, final = Final, deferred = Deferred},
+            C0#scope_state{
                 next_id = Id + 1,
                 bindings = maps:put(Id, Entry, Table),
                 env = maps:put(Orig, [Id], Env),
@@ -586,29 +756,21 @@ record_var(
                 renames = maps:put(Orig, Final, C#scope_state.renames)
             };
         use ->
-            M2 = metric(used, fun(V) -> ordsets:add_element(Value, V) end, M1),
-            M3 = metric(counts, fun(V) -> maps:put(Final, maps:get(Final, V, 0) + 1, V) end, M2),
-            M4 =
-                case maps:is_key(Orig, Env) of
-                    true -> M3;
-                    false -> metric(free, fun(V) -> ordsets:add_element(Orig, V) end, M3)
-                end,
-            Table1 =
-                case C#scope_state.count_bindings of
-                    false ->
-                        Table;
-                    true ->
-                        lists:foldl(
-                            fun(BindId, Acc) ->
-                                E = maps:get(BindId, Acc),
-                                maps:put(BindId, E#bind_entry{count = E#bind_entry.count + 1}, Acc)
-                            end,
-                            Table,
-                            maps:get(Orig, Env, [])
-                        )
-                end,
-            C#scope_state{metrics = M4, bindings = Table1}
+            touch_bindings(maps:get(Orig, Env, []), C0)
     end.
+
+touch_bindings(_, #scope_state{count_bindings = false} = C) ->
+    C;
+touch_bindings(Ids, #scope_state{bindings = Table} = C) ->
+    Table1 = lists:foldl(
+        fun(Id, Acc) ->
+            E = maps:get(Id, Acc),
+            maps:put(Id, E#bind_entry{count = E#bind_entry.count + 1}, Acc)
+        end,
+        Table,
+        Ids
+    ),
+    C#scope_state{bindings = Table1}.
 
 metric(Key, F, Metrics) ->
     case maps:find(Key, Metrics) of
@@ -681,27 +843,41 @@ walk_node_1(case_expr, Case, #{}) ->
 walk_node_1(if_expr, If, #{}) ->
     walk_clause_parent_expression(If);
 walk_node_1(receive_expr, Receive, #{}) ->
+    ClauseCount = length(erl_syntax:receive_expr_clauses(Receive)),
     astranaut_uniplate:with_subtrees(
         fun
             ([Clauses, Timeout, Body]) ->
-                with_scope_group([Clauses, Timeout, with_scope_type(nonfun_clause, Body)]);
+                Branches = with_scope_group(Clauses ++ with_scope_type(nonfun_clause, Body)),
+                with_scope_group([with_argument(Timeout), with_argument(Branches)]);
             (Subtrees) ->
                 with_scope_group(Subtrees)
+        end,
+        fun
+            ([Timeout, Branches]) ->
+                {Clauses, Body} = lists:split(ClauseCount, Branches),
+                [Clauses, Timeout, Body];
+            (Subtrees) ->
+                Subtrees
         end,
         Receive
     );
 walk_node_1(try_expr, Try, #{}) ->
     %% Body bindings are visible in of-clauses, but not catch/after clauses.
     BodyLength = length(erl_syntax:try_expr_body(Try)),
+    ClauseCount = length(erl_syntax:try_expr_clauses(Try)),
     Sequence = fun([Body, Clauses, Handlers, After]) ->
-        with_scope_group([
-            with_shadowed_leaky(Body ++ Clauses),
-            with_shadowed_leaky(Handlers),
+        [
+            with_shadowed_leaky(
+                with_scope_group(
+                    with_shadowed_leaky(Body ++ Clauses) ++ with_shadowed_leaky(Handlers)
+                )
+            ),
             with_shadowed_leaky(After)
-        ])
+        ]
     end,
-    Reduce = fun([BodyAndClauses, Handlers, After]) ->
-        {Body, Clauses} = lists:split(BodyLength, BodyAndClauses),
+    Reduce = fun([BeforeAfter, After]) ->
+        {Body, Rest} = lists:split(BodyLength, BeforeAfter),
+        {Clauses, Handlers} = lists:split(ClauseCount, Rest),
         [Body, Clauses, Handlers, After]
     end,
     with_shadowed_leaky(astranaut_uniplate:with_subtrees(Sequence, Reduce, Try));
@@ -889,12 +1065,14 @@ exit_scope_type(scope_group, #scope_state{groups = [G | Rest]} = C) ->
         end,
     %% Branch exports cannot replace bindings already visible on entry.
     Env = maps:merge(Exports, C#scope_state.env),
-    C#scope_state{
+    C1 = C#scope_state{
         groups = Rest,
         env = maps:merge(Env, maps:with(maps:keys(G#group_frame.renames), Exports)),
         allocated = ordsets:union(C#scope_state.allocated, G#group_frame.allocated),
         renames = maps:merge(C#scope_state.renames, G#group_frame.renames)
-    };
+    },
+    New = maps:without(maps:keys(G#group_frame.saved_env), Exports),
+    join_bindings(maps:merge(New, maps:with(maps:keys(G#group_frame.renames), Exports)), C1);
 exit_scope_type(Kind, #scope_state{frames = [#scope_frame{kind = Kind} = F | Rest]} = C) ->
     C1 = C#scope_state{frames = Rest},
     case is_pattern_scope(Kind) of
@@ -925,6 +1103,26 @@ is_pattern_scope(clause_match) -> true;
 is_pattern_scope(match_left) -> true;
 is_pattern_scope(comprehension_generate) -> true;
 is_pattern_scope(_) -> false.
+
+join_bindings(Exports, C) ->
+    maps:fold(
+        fun
+            (_, [], Acc) ->
+                Acc;
+            (
+                Orig,
+                Ids,
+                #scope_state{bindings = Table, renames = Renames} = Acc
+            ) ->
+                Names = ordsets:from_list([(maps:get(Id, Table))#bind_entry.final || Id <- Ids]),
+                case Names of
+                    [Name] -> Acc#scope_state{renames = maps:put(Orig, Name, Renames)};
+                    _ -> Acc#scope_state{renames = maps:remove(Orig, Renames)}
+                end
+        end,
+        C,
+        Exports
+    ).
 
 add_branch(Env, Allocated, #scope_state{groups = [G | Rest]} = C) ->
     Common =
@@ -961,15 +1159,46 @@ add_argument(Inner, F, #scope_state{groups = [G | Rest]} = C) ->
             none -> #{};
             E -> E
         end,
-    C#scope_state{
+    {Merged, C1} = merge_arguments(Previous, AddedEnv, C),
+    C1#scope_state{
         groups = [
             G#group_frame{
                 renames = maps:merge(G#group_frame.renames, Added),
-                branch_envs = maps:merge(Previous, AddedEnv)
+                branch_envs = Merged
             }
             | Rest
         ]
     }.
+
+merge_arguments(Previous, Added, C) ->
+    maps:fold(
+        fun(Orig, Ids, {Acc, Context}) ->
+            Both = ordsets:union(maps:get(Orig, Acc, []), Ids),
+            Names = ordsets:from_list([
+                (maps:get(Id, Context#scope_state.bindings))#bind_entry.final
+             || Id <- Both
+            ]),
+            case maps:is_key(Orig, Acc) andalso length(Names) =:= 1 of
+                true ->
+                    Context1 = touch_bindings(Both, Context),
+                    Events =
+                        case map_size(Context#scope_state.metrics) of
+                            0 ->
+                                Context1#scope_state.events;
+                            _ ->
+                                [
+                                    {use, Orig, {binding, hd(Both)}, false}
+                                    | Context1#scope_state.events
+                                ]
+                        end,
+                    {maps:put(Orig, Both, Acc), Context1#scope_state{events = Events}};
+                false ->
+                    {maps:put(Orig, Ids, Acc), Context}
+            end
+        end,
+        {Previous, C},
+        Added
+    ).
 
 scope_type_pattern(shadowed) -> function_clause;
 scope_type_pattern(nonfun_clause) -> clause_match.
