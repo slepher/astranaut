@@ -238,7 +238,7 @@ disable_tco_transform_contract(_Config) ->
     ),
     {function, 7, variable_collision, 3, [{clause, 7, _, [], [TransformedCollisionCall]}]} =
         TransformedCollisionFunction,
-    CollisionVariables = variable_names(TransformedCollisionCall),
+    CollisionVariables = astranaut_vars:all_vars(TransformedCollisionCall),
     ?assert(
         lists:any(
             fun(Name) -> variable_has_prefix("Class", Name) end,
@@ -387,15 +387,6 @@ extract_stacktrace(StackTrace) ->
             StackTrace
         )
     ).
-
-variable_names({var, _Pos, Name}) ->
-    [Name];
-variable_names(Tuple) when is_tuple(Tuple) ->
-    variable_names(tuple_to_list(Tuple));
-variable_names([Head | Tail]) ->
-    variable_names(Head) ++ variable_names(Tail);
-variable_names(_) ->
-    [].
 
 variable_has_prefix(Prefix, Name) ->
     lists:prefix(Prefix, atom_to_list(Name)).

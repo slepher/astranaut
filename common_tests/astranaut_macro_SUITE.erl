@@ -226,7 +226,7 @@ test_quote_context_attribute_no_counter(_Config) ->
     Output = expand_forms(Forms),
     Function = lists:keyfind(generated_attr_fun, 3, Output),
     ?assertMatch({function, _, generated_attr_fun, 0, _}, Function),
-    Vars = collect_var_names(Function),
+    Vars = astranaut_vars:all_vars(Function),
     ?assert(
         lists:member(
             'AttrVar@astranaut_quote@macro_quote_context_example', Vars
@@ -255,7 +255,7 @@ test_quote_context_no_double_counter(_Config) ->
     %% the already-expanded variable name is preserved as-is. A double append
     %% would produce a second counter, so the only var carrying the encoded
     %% 'Already' prefix must be the original single-counter name.
-    Vars = collect_var_names(Output),
+    Vars = astranaut_vars:all_vars(Output),
     ?assertEqual(
         ['Already@astranaut_quote@macro_quote_context_example@1'],
         [
@@ -281,22 +281,6 @@ expand_forms(Forms) ->
                     )}
             )
     end.
-
-collect_var_names(Nodes) ->
-    Collected =
-        astranaut:reduce(
-            fun
-                ({var, _, Name}, Names) when is_atom(Name) ->
-                    [Name | Names];
-                (_Node, Names) ->
-                    Names
-            end,
-            [],
-            Nodes,
-            #{traverse => pre}
-        ),
-    {just, Names} = astranaut_return:run(Collected),
-    lists:usort(Names).
 
 unload_module(Module) ->
     code:purge(Module),

@@ -209,3 +209,34 @@ vars 仅导出 12 个函数接口：`analyze/1,2`、`rewrite/2`、`map_m/2,3`、
 - 性能验证使用 benchmark/vars_collect_bench.escript。eager 对照在同一实现中强制启用两项计算，current 使用初始化开关；对照不是历史版本的完整性能复现。
 
 修复前的按需统计优化历史记录：232 个 EUnit、286 个 Common Test 通过；格式检查通过，Dialyzer 无新增警告。collect=[] 的三种基准中位耗时相对 eager 对照下降 1.19%–7.23%，reductions 均下降；这不是完整 rebinding 或本次作用域修复后的性能结论。详见 [性能验证记录](../../benchmark/vars-collect-optimized-results.md)。
+
+## 6. 存量模块继续接入（2026-11-07）
+
+本轮按用户确认范围落实 do 临时变量分配与测试扫描复用。宏变量消警告入口另行设计，装饰器、管道/Lens、AST Diff 等后续 Plan 03–05 特性暂缓。
+
+### 6.1 astranaut_do
+
+非简单生成器模式的失败捕获变量原来固定来自 quote 的 `Var`，当外层存在相同名字时会产生 `shadowed_var` 警告。现通过 `astranaut_vars:all_vars/1` 收集原模块变量，并与当前 Pattern、表达式、Monad 及已生成的后续表达式中的变量合并，再由 `fresh_var/2` 分配捕获变量。
+
+原模块变量通过私有 `do/3` 参数传递，公开 `do/2` 的选项和返回契约不变。失败诊断继续保留 `{monad_badmatch, Value, Pos, PatternString}`。本轮只处理生成的捕获变量，未自动抑制用户模式中的未使用变量警告。
+
+新增 [astranaut_do_tests.erl](../../test/astranaut_do_tests.erl) 的 4 项回归：外层同名绑定、未在 do 内引用的外层同名绑定、失败诊断与成功返回、嵌套 do 与连续模式生成器。前两项在修复前能复现 shadowed_var，修复后全部通过。
+
+### 6.2 测试扫描复用
+
+- `astranaut_macro_SUITE` 的两处变量名扫描直接使用 `all_vars/1`，删除 `collect_var_names/1`。
+- `disable_tco_SUITE` 的捕获变量避让检查使用 `all_vars/1`，删除递归 `variable_names/1`。
+- 原调用仅依赖变量名前缀检查；`all_vars/1` 返回去重、有序且排除匿名 `_` 的名字集合，不改变这些断言的目的。
+
+### 6.3 验证
+
+最终代码在本地 Docker 的 OTP 21、22、23、24、25、26、27、28、29 上分别执行编译、完整 EUnit 与 Common Test，全部通过：
+
+| OTP | EUnit | Common Test |
+| --- | --- | --- |
+| 21–25（逐版本验证） | 每版 253 通过，0 失败 | 每版 287 通过，1 原有跳过 |
+| 26–29（逐版本验证） | 每版 254 通过，0 失败 | 每版 288 通过，0 跳过 |
+
+已运行 `rebar3 fmt -w`、`rebar3 fmt --check`，本机 OTP 29 的 `rebar3 dialyzer` 无警告通过。版本条件导致的数量差异及原有 code_server 测试跳过规则不变。
+
+容器使用仓库只读挂载及独立临时构建目录，断网并移除临时配置中的 project_plugins，其余测试配置与 cover hook 保留。最终日志位于本机 `/tmp/astranaut-vars-integration-final-matrix/<OTP>/`。未做新的性能测量。

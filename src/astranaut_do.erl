@@ -18,7 +18,10 @@
 %%%===================================================================
 -spec do(astranaut:tree(), #{monad := module(), monad_fail := module()}) ->
     astranaut:map_walk_return().
-do({lc, Pos, Monad, Comprehensions}, Opts) ->
+do(Ast, Opts) ->
+    do(Ast, Opts, []).
+
+do({lc, Pos, Monad, Comprehensions}, Opts, Allocated) ->
     astranaut_return:lift_m(
         fun(Expressions) ->
             quote(
@@ -28,13 +31,18 @@ do({lc, Pos, Monad, Comprehensions}, Opts) ->
                 Pos
             )
         end,
-        do_comprehensions(Comprehensions, Monad, Opts)
+        do_comprehensions(Comprehensions, Monad, Opts#{allocated => Allocated})
     );
-do(_Ast, #{}) ->
+do(_Ast, #{}, _Allocated) ->
     {error, expected_list_comprehension}.
 
 parse_transform(Forms, _Opts) ->
-    TransformOpts = #{formatter => ?MODULE, traverse => post, normalize => true},
+    TransformOpts = #{
+        formatter => ?MODULE,
+        traverse => post,
+        normalize => true,
+        attr => #{allocated => astranaut_vars:all_vars(Forms)}
+    },
     astranaut_return:to_compiler(astranaut:map(fun walk_node/2, Forms, TransformOpts)).
 
 format_error(expected_list_comprehension) ->
@@ -51,8 +59,18 @@ format_error({invalid_option_value, _Value} = GenericError) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-walk_node({call, _Pos, {atom, __Pos1, do}, [{lc, _Pos2, _Monad, _Comprehensions} = LCNode]}, #{}) ->
-    do(LCNode, #{monad => astranaut_monad, monad_fail => astranaut_monad});
+walk_node(
+    {call, _Pos, {atom, __Pos1, do}, [{lc, _Pos2, _Monad, _Comprehensions} = LCNode]},
+    #{allocated := Allocated}
+) ->
+    do(
+        LCNode,
+        #{
+            monad => astranaut_monad,
+            monad_fail => astranaut_monad
+        },
+        Allocated
+    );
 walk_node(Node, _Attrs) ->
     Node.
 
@@ -94,9 +112,16 @@ bind_expression({generate, Pos, {var, _Pos, _Var} = Pattern, Expr}, Exprs, Monad
             Pos
         )
     ];
-bind_expression({generate, Pos, Pattern, Expr}, Exprs, Monad, #{monad := MonadModule}) ->
+bind_expression({generate, Pos, Pattern, Expr}, Exprs, Monad, #{monad := MonadModule} = Opts) ->
     PosExpr = astranaut_lib:abstract_form(Pos, Pos),
     String = astranaut_lib:abstract_form(astranaut_lib:ast_to_string(Pattern), Pos),
+    Allocated = ordsets:union(
+        maps:get(allocated, Opts, []),
+        astranaut_vars:all_vars([Pattern, Expr, Monad | Exprs])
+    ),
+    BadmatchVar = astranaut_vars:fresh_var(
+        astranaut_quote:encode_quote_variable('Var', ?MODULE), Allocated
+    ),
     %% "Pattern <- Expr, Tail" where Pattern is not a simple variable
     %% is transformed to
     %% "Monad:Bind(Expr, fun (Pattern) -> Tail; (Var) -> exit({monad_badmatch, Var, Pos, PatternString}) end)"
@@ -108,8 +133,8 @@ bind_expression({generate, Pos, Pattern, Expr}, Exprs, Monad, #{monad := MonadMo
                 fun
                     (unquote = Pattern) ->
                         unquote_splicing(Exprs);
-                    (Var) ->
-                        exit({monad_badmatch, Var, unquote(PosExpr), unquote(String)})
+                    (_V@BadmatchVar) ->
+                        exit({monad_badmatch, _V@BadmatchVar, unquote(PosExpr), unquote(String)})
                 end,
                 unquote(Monad)
             ),
